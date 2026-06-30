@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ./packages/api
+      target: development
+    volumes:
+      - ./packages/api/src:/app/src
+    environment:
+      NODE_ENV: development
+    command: npm run dev
+
+  web:
+    build:
+      context: ./packages/web
+      target: development
+    volumes:
+      - ./packages/web/src:/app/src
+    environment:
+      NODE_ENV: development
+    command: npm run dev
