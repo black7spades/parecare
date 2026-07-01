@@ -4,6 +4,7 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { requireFeature } from '../middleware/subscriptionGate';
 import { sendMessage } from '../services/ai';
+import type { ChatMessage } from '../services/ai';
 import type { AiConversation, CareProfile, CareCircleMember } from '../types';
 
 export const aiRouter = Router({ mergeParams: true });
@@ -25,7 +26,7 @@ aiRouter.post(
       .insert({
         care_profile_id: req.params['id'],
         account_id: req.account!.id,
-        messages: JSON.stringify([]),
+        messages: db.raw("'[]'::jsonb"),
       })
       .returning('*');
     res.status(201).json({ conversation });
@@ -64,7 +65,7 @@ aiRouter.post(
       .where({ care_profile_id: req.params['id'], account_id: req.account!.id })
       .first();
 
-    const messages = conversation.messages as Array<{ role: string; content: string; timestamp: string }>;
+    const messages = conversation.messages as ChatMessage[];
 
     let result: { reply: string; tokensUsed: number };
     try {

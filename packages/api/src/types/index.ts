@@ -10,18 +10,18 @@ export interface Account {
   subscription_tier: SubscriptionTier;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
-  current_period_end: Date | null;
+  current_period_end: string | Date | null;
   ai_tokens_used: number;
-  ai_tokens_reset_at: Date;
-  created_at: Date;
-  updated_at: Date;
+  ai_tokens_reset_at: string | Date;
+  created_at: string | Date;
+  updated_at: string | Date;
 }
 
 export interface CareProfile {
   id: string;
   account_id: string;
   full_name: string;
-  date_of_birth: Date | null;
+  date_of_birth: string | Date | null;
   current_phase: CarePhase;
   preferred_name: string | null;
   pronouns: string | null;
@@ -54,7 +54,7 @@ export interface CareCircleMember {
   poa_document_id: string | null;
   invite_token: string | null;
   invite_accepted: boolean;
-  created_at: Date;
+  created_at: string | Date;
 }
 
 export interface CareLogEntry {
@@ -64,8 +64,8 @@ export interface CareLogEntry {
   entry_type: string;
   title: string | null;
   body: string;
-  occurred_at: Date;
-  created_at: Date;
+  occurred_at: string | Date;
+  created_at: string | Date;
 }
 
 export interface CarePlan {
@@ -83,8 +83,8 @@ export interface CarePlan {
   gp_phone: string | null;
   emergency_contacts: Record<string, unknown>[];
   updated_by: string | null;
-  updated_at: Date;
-  created_at: Date;
+  updated_at: string | Date;
+  created_at: string | Date;
 }
 
 export interface ChecklistItem {
@@ -95,10 +95,10 @@ export interface ChecklistItem {
   description: string | null;
   completed: boolean;
   completed_by: string | null;
-  completed_at: Date | null;
+  completed_at: string | Date | null;
   is_custom: boolean;
   sort_order: number;
-  created_at: Date;
+  created_at: string | Date;
 }
 
 export interface OpenQuestion {
@@ -110,8 +110,8 @@ export interface OpenQuestion {
   status: 'open' | 'resolved' | 'deferred';
   resolution: string | null;
   resolved_by: string | null;
-  resolved_at: Date | null;
-  created_at: Date;
+  resolved_at: string | Date | null;
+  created_at: string | Date;
 }
 
 export interface Document {
@@ -124,7 +124,7 @@ export interface Document {
   file_size_bytes: number | null;
   mime_type: string | null;
   visible_to_roles: string[];
-  created_at: Date;
+  created_at: string | Date;
 }
 
 export interface Provider {
@@ -138,7 +138,7 @@ export interface Provider {
   address: string | null;
   primary_contact_member_id: string | null;
   notes: string | null;
-  created_at: Date;
+  created_at: string | Date;
 }
 
 export interface Reminder {
@@ -148,20 +148,20 @@ export interface Reminder {
   title: string;
   body: string | null;
   reminder_type: 'once' | 'daily' | 'weekly' | 'monthly';
-  next_due_at: Date;
+  next_due_at: string | Date;
   rrule: string | null;
   completed: boolean;
-  created_at: Date;
+  created_at: string | Date;
 }
 
 export interface AiConversation {
   id: string;
   care_profile_id: string;
   account_id: string;
-  messages: Array<{ role: string; content: string; timestamp: string }>;
+  messages: Array<{ role: 'user' | 'assistant'; content: string; timestamp: string }>;
   tokens_used: number;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string | Date;
+  updated_at: string | Date;
 }
 
 declare global {

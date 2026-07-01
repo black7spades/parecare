@@ -39,7 +39,8 @@ authRouter.post('/register', async (req, res) => {
     .insert({ email, password_hash, display_name })
     .returning(['id', 'email', 'display_name', 'subscription_tier', 'subscription_status', 'created_at']);
 
-  const token = jwt.sign({ accountId: account.id }, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES_IN });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const token = jwt.sign({ accountId: account.id }, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES_IN } as any);
   res.status(201).json({ token, account });
 });
 
@@ -63,7 +64,8 @@ authRouter.post('/login', async (req, res) => {
     return;
   }
 
-  const token = jwt.sign({ accountId: account.id }, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES_IN });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const token = jwt.sign({ accountId: account.id }, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES_IN } as any);
   res.json({
     token,
     account: {

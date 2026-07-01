@@ -2,14 +2,14 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
-import type { ChecklistItem } from '../types';
+import type { ChecklistItem, CarePhase } from '../types';
 
 export const checklistsRouter = Router({ mergeParams: true });
 
 checklistsRouter.get('/', requireAuth, async (req, res) => {
   const query = db<ChecklistItem>('checklist_items').where({ care_profile_id: req.params['id'] });
   if (req.query['phase']) {
-    query.where({ phase: req.query['phase'] });
+    query.where('phase', String(req.query['phase']));
   }
   const items = await query.orderBy('sort_order', 'asc');
   res.json({ items });
@@ -29,7 +29,7 @@ checklistsRouter.post('/', requireAuth, async (req, res) => {
   }
 
   const [item] = await db<ChecklistItem>('checklist_items')
-    .insert({ care_profile_id: req.params['id'], is_custom: true, ...parsed.data })
+    .insert({ care_profile_id: req.params['id'], is_custom: true, ...parsed.data, phase: parsed.data.phase as CarePhase })
     .returning('*');
 
   res.status(201).json({ item });
