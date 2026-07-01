@@ -1,15 +1,15 @@
 FROM node:20-alpine AS base
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm install --omit=dev
 
 FROM base AS development
-RUN npm ci
+RUN npm install
 COPY . .
 CMD ["npm", "run", "dev"]
 
 FROM base AS builder
-RUN npm ci
+RUN npm install
 COPY . .
 RUN npm run build
 
