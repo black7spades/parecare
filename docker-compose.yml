@@ -36,6 +36,7 @@ services:
       DATABASE_URL: postgres://${DB_USER:-parecare}:${DB_PASSWORD}@db:5432/${DB_NAME:-parecare}
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET}
+      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
       STORAGE_LOCAL_PATH: /app/uploads

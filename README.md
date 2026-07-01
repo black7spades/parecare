@@ -24,6 +24,7 @@ Family coordination platform for managing the care of ageing parents.
 3. Edit `.env` and set at minimum:
    - `DB_PASSWORD` — any strong password
    - `JWT_SECRET` — generate with: `openssl rand -hex 32`
+   - `SUPER_ADMIN_EMAIL` — your email; the account registered with it becomes the super admin
 
 4. Start the stack
    ```
@@ -86,6 +87,23 @@ Required additional env vars for SaaS:
 4. Copy the webhook signing secret into `STRIPE_WEBHOOK_SECRET`
 
 ---
+
+## User roles
+
+Every account has a platform role, independent of its subscription tier:
+
+| Role | Capabilities |
+|---|---|
+| Super admin | Everything admins can do, plus promote/demote admins and manage admin accounts. Only super admins can change roles. |
+| Admin | View all accounts and platform stats; edit details, change subscription tier, and delete **regular user** accounts. Cannot touch admin or super admin accounts. |
+| User | Default role for every registered account. |
+
+The account whose email matches `SUPER_ADMIN_EMAIL` is promoted to super admin
+automatically — on registration for fresh installs, or at api startup / next
+login for existing installs after running migrations. Safety rails: the last
+super admin can't be demoted or deleted, and admins can't delete themselves
+from the admin panel. Admin tools live at `/admin` in the web app and under
+`/api/v1/admin` in the API.
 
 ## Subscription tiers
 

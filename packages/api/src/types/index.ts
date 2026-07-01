@@ -1,11 +1,13 @@
 export type SubscriptionTier = 'free' | 'family' | 'professional';
 export type SubscriptionStatus = 'active' | 'past_due' | 'canceled' | 'trialing' | 'incomplete';
+export type AccountRole = 'super_admin' | 'admin' | 'user';
 
 export interface Account {
   id: string;
   email: string;
   password_hash: string;
   display_name: string;
+  role: AccountRole;
   subscription_status: SubscriptionStatus | null;
   subscription_tier: SubscriptionTier;
   stripe_customer_id: string | null;

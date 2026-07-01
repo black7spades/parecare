@@ -35,9 +35,12 @@ authRouter.post('/register', async (req, res) => {
   }
 
   const password_hash = await bcrypt.hash(password, 12);
+  // The configured super admin email is promoted on registration so a fresh
+  // install doesn't need a manual step or restart to get its super admin.
+  const role = env.SUPER_ADMIN_EMAIL === email.toLowerCase() ? 'super_admin' : 'user';
   const [account] = await db<Account>('accounts')
-    .insert({ email, password_hash, display_name })
-    .returning(['id', 'email', 'display_name', 'subscription_tier', 'subscription_status', 'created_at']);
+    .insert({ email, password_hash, display_name, role })
+    .returning(['id', 'email', 'display_name', 'role', 'subscription_tier', 'subscription_status', 'created_at']);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const token = jwt.sign({ accountId: account.id }, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES_IN } as any);
@@ -64,6 +67,13 @@ authRouter.post('/login', async (req, res) => {
     return;
   }
 
+  // Covers installs where migrations ran after the API started (so the
+  // startup bootstrap couldn't promote the configured super admin).
+  if (env.SUPER_ADMIN_EMAIL === account.email.toLowerCase() && account.role !== 'super_admin') {
+    await db('accounts').where({ id: account.id }).update({ role: 'super_admin', updated_at: db.fn.now() });
+    account.role = 'super_admin';
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const token = jwt.sign({ accountId: account.id }, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES_IN } as any);
   res.json({
@@ -72,6 +82,7 @@ authRouter.post('/login', async (req, res) => {
       id: account.id,
       email: account.email,
       display_name: account.display_name,
+      role: account.role,
       subscription_tier: account.subscription_tier,
       subscription_status: account.subscription_status,
     },
@@ -84,6 +95,7 @@ authRouter.get('/me', requireAuth, (req, res) => {
     id: account.id,
     email: account.email,
     display_name: account.display_name,
+    role: account.role,
     subscription_tier: account.subscription_tier,
     subscription_status: account.subscription_status,
     current_period_end: account.current_period_end,
@@ -110,7 +122,14 @@ authRouter.patch('/me', requireAuth, async (req, res) => {
   const updates: Partial<Account> & { password_hash?: string } = {};
 
   if (parsed.data.display_name) updates.display_name = parsed.data.display_name;
-  if (parsed.data.email) updates.email = parsed.data.email;
+  if (parsed.data.email && parsed.data.email !== account.email) {
+    const existing = await db<Account>('accounts').where({ email: parsed.data.email }).first();
+    if (existing) {
+      res.status(409).json({ error: 'An account with this email already exists', code: 'DUPLICATE_EMAIL' });
+      return;
+    }
+    updates.email = parsed.data.email;
+  }
 
   if (parsed.data.new_password) {
     if (!parsed.data.current_password) {
