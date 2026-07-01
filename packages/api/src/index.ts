@@ -14,7 +14,9 @@ import { providersRouter } from './routes/providers';
 import { remindersRouter } from './routes/reminders';
 import { aiRouter } from './routes/ai';
 import { subscriptionsRouter } from './routes/subscriptions';
+import { adminRouter } from './routes/admin';
 import { errorHandler, notFound } from './middleware/errorHandler';
+import { ensureSuperAdmin } from './services/bootstrap';
 
 const app = express();
 
@@ -39,6 +41,7 @@ app.use((_req, res, next) => {
 const v1 = express.Router();
 
 v1.use('/auth', authRouter);
+v1.use('/admin', adminRouter);
 v1.use('/subscriptions', subscriptionsRouter);
 v1.use('/care-circle', inviteRouter);
 v1.use('/care-profiles', careProfilesRouter);
@@ -62,6 +65,7 @@ app.use(errorHandler);
 async function start(): Promise<void> {
   try {
     await connectRedis();
+    await ensureSuperAdmin();
     app.listen(env.PORT, () => {
       console.log(`PareCare API running on port ${env.PORT}`);
     });

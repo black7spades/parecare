@@ -1,7 +1,9 @@
+import { useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { useAuthStore } from '../../stores/auth';
+import { useAuthStore, type AccountRole } from '../../stores/auth';
 import { useSubscriptionStore } from '../../stores/subscription';
 import { UpgradePrompt } from '../UpgradePrompt';
+import { api } from '../../api/client';
 
 function TierBadge() {
   const tier = useSubscriptionStore((s) => s.tier);
@@ -19,8 +21,19 @@ function TierBadge() {
 }
 
 export function Shell() {
-  const { account, clearAuth } = useAuthStore();
+  const { account, clearAuth, updateAccount } = useAuthStore();
   const navigate = useNavigate();
+  const isAdmin = account?.role === 'admin' || account?.role === 'super_admin';
+
+  // Refresh account info so role/tier changes apply without re-login
+  useEffect(() => {
+    api
+      .get<{ role: AccountRole; subscription_tier: 'free' | 'family' | 'professional'; subscription_status: string | null }>('/auth/me')
+      .then((me) => updateAccount({ role: me.role, subscription_tier: me.subscription_tier, subscription_status: me.subscription_status }))
+      .catch(() => {
+        // 401 already clears auth via the api client
+      });
+  }, [updateAccount]);
 
   function handleLogout() {
     clearAuth();
@@ -44,6 +57,11 @@ export function Shell() {
           <NavLink to="/account/settings" className={({ isActive }) => `flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${isActive ? 'bg-primary-50 text-primary font-medium' : 'text-muted hover:text-ink hover:bg-surface-2'}`}>
             Settings
           </NavLink>
+          {isAdmin ? (
+            <NavLink to="/admin" className={({ isActive }) => `flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${isActive ? 'bg-primary-50 text-primary font-medium' : 'text-muted hover:text-ink hover:bg-surface-2'}`}>
+              Admin
+            </NavLink>
+          ) : null}
         </div>
 
         <div className="mt-auto space-y-2">

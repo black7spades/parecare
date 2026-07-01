@@ -7,6 +7,17 @@ const envSchema = z.object({
   REDIS_URL: z.string().url(),
   JWT_SECRET: z.string().min(16),
   JWT_EXPIRES_IN: z.string().default('7d'),
+  // Empty string means "not set" so docker-compose can pass ${SUPER_ADMIN_EMAIL:-} safely
+  SUPER_ADMIN_EMAIL: z
+    .string()
+    .optional()
+    .transform((v) => {
+      const trimmed = v?.trim().toLowerCase();
+      return trimmed ? trimmed : undefined;
+    })
+    .refine((v) => v === undefined || z.string().email().safeParse(v).success, {
+      message: 'SUPER_ADMIN_EMAIL must be a valid email address',
+    }),
   SELF_HOSTED: z
     .string()
     .transform((v) => v === 'true')
