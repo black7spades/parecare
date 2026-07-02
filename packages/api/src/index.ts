@@ -6,6 +6,7 @@ import { env } from './config/env';
 import { connectRedis } from './config/redis';
 import { webhookRouter } from './routes/webhooks';
 import { authRouter } from './routes/auth';
+import { oauthRouter } from './routes/oauth';
 import { careProfilesRouter } from './routes/careProfiles';
 import { careCircleRouter, inviteRouter } from './routes/careCircle';
 import { careLogRouter } from './routes/careLog';
@@ -58,6 +59,7 @@ app.use((_req, res, next) => {
 const v1 = express.Router();
 
 v1.use('/auth', authRouter);
+v1.use('/auth', oauthRouter);
 v1.use('/admin', adminRouter);
 v1.use('/subscriptions', subscriptionsRouter);
 v1.use('/care-circle', inviteRouter);

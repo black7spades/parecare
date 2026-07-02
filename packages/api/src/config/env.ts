@@ -1,5 +1,14 @@
 import { z } from 'zod';
 
+// docker-compose passes unset vars as "" — treat empty as absent
+const optionalStr = z
+  .string()
+  .optional()
+  .transform((v) => {
+    const trimmed = v?.trim();
+    return trimmed ? trimmed : undefined;
+  });
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.string().transform(Number).default('3001'),
@@ -41,6 +50,10 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   EMAIL_FROM: z.string().email().default('noreply@parecare.app'),
   REMINDER_CHECK_INTERVAL_MS: z.string().transform(Number).default('60000'),
+  GOOGLE_CLIENT_ID: optionalStr,
+  GOOGLE_CLIENT_SECRET: optionalStr,
+  FACEBOOK_APP_ID: optionalStr,
+  FACEBOOK_APP_SECRET: optionalStr,
   AI_TOKENS_FREE: z.string().transform(Number).default('0'),
   AI_TOKENS_FAMILY: z.string().transform(Number).default('100000'),
   AI_TOKENS_PROFESSIONAL: z.string().transform(Number).default('-1'),

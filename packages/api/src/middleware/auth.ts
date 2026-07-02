@@ -13,7 +13,12 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
   const token = authHeader.slice(7);
   try {
-    const payload = jwt.verify(token, env.JWT_SECRET) as { accountId: string };
+    const payload = jwt.verify(token, env.JWT_SECRET) as { accountId: string; purpose?: string };
+    // Special-purpose tokens (MFA challenge, OAuth state) are not sessions
+    if (payload.purpose) {
+      res.status(401).json({ error: 'Invalid or expired token', code: 'UNAUTHORIZED' });
+      return;
+    }
     const account = await db<Account>('accounts').where({ id: payload.accountId }).first();
     if (!account) {
       res.status(401).json({ error: 'Account not found', code: 'UNAUTHORIZED' });

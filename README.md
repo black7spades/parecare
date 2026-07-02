@@ -145,6 +145,24 @@ super admin can't be demoted or deleted, and admins can't delete themselves
 from the admin panel. Admin tools live at `/admin` in the web app and under
 `/api/v1/admin` in the API.
 
+## Signing in
+
+- **Email + password** always works. Email matching is case-insensitive.
+- **Google / Facebook sign-in** appears automatically once credentials are
+  configured. Register an OAuth app with the provider using the redirect
+  URI `<APP_URL>/api/v1/auth/oauth/google/callback` (or `/facebook/…`),
+  then set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` or
+  `FACEBOOK_APP_ID`/`FACEBOOK_APP_SECRET` in `.env` and restart the api.
+  Accounts are matched by verified email, so someone invited by email can
+  accept with their Google account.
+- **The super admin signs in with email + password only** — social sign-in
+  is refused for that account by design.
+- **Two-factor authentication** (authenticator app): enable it under
+  Account settings — scan the QR code or type the setup key, confirm with
+  a 6-digit code. Sign-in then requires a current code. If someone is
+  locked out, an admin can clear it in the database:
+  `UPDATE accounts SET mfa_enabled = false, mfa_secret = NULL WHERE email = '…';`
+
 ## Subscription tiers
 
 | Feature | Free (self-host) | Family | Professional |

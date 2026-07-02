@@ -3,6 +3,7 @@ import { useAuthStore } from './stores/auth';
 import { Shell } from './components/layout/Shell';
 import { Login } from './pages/auth/Login';
 import { Register } from './pages/auth/Register';
+import { OAuthCallback } from './pages/auth/OAuthCallback';
 import { Dashboard } from './pages/app/Dashboard';
 import { NewCareProfile } from './pages/app/NewCareProfile';
 import { ProfileLayout } from './pages/app/profile/ProfileLayout';
@@ -51,6 +52,7 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
 export const router = createBrowserRouter([
   { path: '/login', element: <Login /> },
   { path: '/register', element: <Register /> },
+  { path: '/auth/callback', element: <OAuthCallback /> },
   { path: '/invite/:token', element: <InvitePage /> },
   {
     path: '/',
