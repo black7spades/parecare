@@ -1,4 +1,7 @@
 import express from 'express';
+// Patches express so errors thrown in async route handlers reach the error
+// middleware instead of crashing the process (express 4 doesn't catch them).
+import 'express-async-errors';
 import { env } from './config/env';
 import { connectRedis } from './config/redis';
 import { webhookRouter } from './routes/webhooks';
@@ -16,7 +19,13 @@ import { aiRouter } from './routes/ai';
 import { subscriptionsRouter } from './routes/subscriptions';
 import { adminRouter } from './routes/admin';
 import { errorHandler, notFound } from './middleware/errorHandler';
-import { ensureSuperAdmin } from './services/bootstrap';
+import { ensureSuperAdmin, runMigrations } from './services/bootstrap';
+
+// Backstop for promise rejections outside request handling (e.g. redis,
+// timers). Log instead of taking the whole API down.
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason);
+});
 
 const app = express();
 
@@ -65,6 +74,7 @@ app.use(errorHandler);
 async function start(): Promise<void> {
   try {
     await connectRedis();
+    await runMigrations();
     await ensureSuperAdmin();
     app.listen(env.PORT, () => {
       console.log(`PareCare API running on port ${env.PORT}`);
