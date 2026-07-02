@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth';
 import { api } from '../../api/client';
 import { Input } from '../../components/ui/Input';
@@ -13,6 +13,9 @@ export function Register() {
   const [loading, setLoading] = useState(false);
   const { setAuth } = useAuthStore();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const next = params.get('next');
+  const destination = next && next.startsWith('/') && !next.startsWith('//') ? next : '/app';
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -24,7 +27,7 @@ export function Register() {
         { email, password, display_name: displayName }
       );
       setAuth(data.token, data.account);
-      navigate('/app');
+      navigate(destination);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Registration failed';
       setError(msg);
@@ -75,7 +78,7 @@ export function Register() {
           </form>
           <div className="mt-4 text-center text-sm text-muted">
             Already have an account?{' '}
-            <Link to="/login" className="text-primary hover:underline">
+            <Link to={next ? `/login?next=${encodeURIComponent(next)}` : '/login'} className="text-primary hover:underline">
               Sign in
             </Link>
           </div>

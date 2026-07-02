@@ -45,7 +45,7 @@ export function Dashboard() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {profiles.map((p) => (
-            <Link key={p.id} to={`/app/${p.id}/dashboard`} className="card hover:border-primary transition-colors">
+            <Link key={p.id} to={`/app/${p.id}`} className="card hover:border-primary transition-colors">
               <h3 className="mb-1">{p.full_name}</h3>
               {p.preferred_name ? (
                 <p className="text-xs text-muted mb-3">Known as {p.preferred_name}</p>

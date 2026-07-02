@@ -8,6 +8,17 @@ import type { CareProfile, CarePhase } from '../types';
 
 export const careProfilesRouter = Router();
 
+// Reject malformed ids up front — postgres errors on invalid uuid input,
+// which would surface as a 500 instead of a 404.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+careProfilesRouter.param('id', (_req, res, next, value) => {
+  if (!UUID_RE.test(value)) {
+    res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
+    return;
+  }
+  next();
+});
+
 const profileSchema = z.object({
   full_name: z.string().min(1).max(255),
   date_of_birth: z.string().optional().nullable(),
@@ -28,10 +39,28 @@ const profileSchema = z.object({
 });
 
 careProfilesRouter.get('/', requireAuth, async (req, res) => {
-  const profiles = await db<CareProfile>('care_profiles')
-    .where({ account_id: req.account!.id, archived: false })
-    .orderBy('created_at', 'asc');
-  res.json({ profiles });
+  // Profiles you own, plus profiles shared with you via the care circle
+  const [owned, shared] = await Promise.all([
+    db<CareProfile>('care_profiles')
+      .where({ account_id: req.account!.id, archived: false })
+      .orderBy('created_at', 'asc'),
+    db<CareProfile>('care_profiles')
+      .join('care_circle_members', 'care_profiles.id', 'care_circle_members.care_profile_id')
+      .where({
+        'care_circle_members.account_id': req.account!.id,
+        'care_circle_members.invite_accepted': true,
+        'care_profiles.archived': false,
+      })
+      .whereNot('care_profiles.account_id', req.account!.id)
+      .select('care_profiles.*')
+      .orderBy('care_profiles.created_at', 'asc'),
+  ]);
+  res.json({
+    profiles: [
+      ...owned.map((p) => ({ ...p, access: 'owner' })),
+      ...shared.map((p) => ({ ...p, access: 'member' })),
+    ],
+  });
 });
 
 careProfilesRouter.post(
@@ -75,14 +104,26 @@ careProfilesRouter.post(
 );
 
 careProfilesRouter.get('/:id', requireAuth, async (req, res) => {
+  // Owners and accepted circle members can view; mutations stay owner-only
   const profile = await db<CareProfile>('care_profiles')
-    .where({ id: req.params['id'], account_id: req.account!.id })
+    .where({ id: req.params['id'], archived: false })
     .first();
   if (!profile) {
     res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
     return;
   }
-  res.json({ profile });
+  if (profile.account_id !== req.account!.id) {
+    const membership = await db('care_circle_members')
+      .where({ care_profile_id: profile.id, account_id: req.account!.id, invite_accepted: true })
+      .first();
+    if (!membership) {
+      res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
+      return;
+    }
+    res.json({ profile, access: membership.permission === 'viewer' ? 'viewer' : 'contributor' });
+    return;
+  }
+  res.json({ profile, access: 'owner' });
 });
 
 const updateProfileSchema = profileSchema.partial();

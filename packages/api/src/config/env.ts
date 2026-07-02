@@ -40,6 +40,7 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   EMAIL_FROM: z.string().email().default('noreply@parecare.app'),
+  REMINDER_CHECK_INTERVAL_MS: z.string().transform(Number).default('60000'),
   AI_TOKENS_FREE: z.string().transform(Number).default('0'),
   AI_TOKENS_FAMILY: z.string().transform(Number).default('100000'),
   AI_TOKENS_PROFESSIONAL: z.string().transform(Number).default('-1'),

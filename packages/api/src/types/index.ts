@@ -31,8 +31,17 @@ export interface CareProfile {
   photo_url: string | null;
   notes: string | null;
   archived: boolean;
+  ics_token: string;
   created_at: Date;
   updated_at: Date;
+}
+
+export interface Message {
+  id: string;
+  care_profile_id: string;
+  author_account_id: string | null;
+  body: string;
+  created_at: string | Date;
 }
 
 export type CarePhase =
@@ -43,6 +52,8 @@ export type CarePhase =
   | 'residential_ongoing'
   | 'end_of_life';
 
+export type CirclePermission = 'viewer' | 'contributor';
+
 export interface CareCircleMember {
   id: string;
   care_profile_id: string;
@@ -50,6 +61,7 @@ export interface CareCircleMember {
   invited_email: string | null;
   display_name: string;
   role: string;
+  permission: CirclePermission;
   role_description: string | null;
   poa_type: string | null;
   poa_activated: boolean;
@@ -166,10 +178,16 @@ export interface AiConversation {
   updated_at: string | Date;
 }
 
+export interface CareAccess {
+  level: 'owner' | 'contributor' | 'viewer';
+  member: CareCircleMember | null;
+}
+
 declare global {
   namespace Express {
     interface Request {
       account?: Account;
+      careAccess?: CareAccess;
     }
   }
 }

@@ -6,7 +6,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': { target: 'http://api:3001', rewrite: (p) => p.replace(/^\/api/, '') },
+      // The API serves under /api/v1 itself — do not strip the prefix
+      // (same bug nginx had, fixed in 9e26ac3)
+      '/api': { target: 'http://api:3001' },
       '/webhooks': { target: 'http://api:3001' },
     },
   },

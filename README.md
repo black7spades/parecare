@@ -2,6 +2,46 @@
 
 Family coordination platform for managing the care of ageing parents.
 
+## Features
+
+Each person in care gets a profile with:
+
+- **Care journey pipeline** — six life phases from early concern to end of
+  life, each seeding its own checklist when entered
+- **Care circle** — invite family, friends and organisations by email;
+  members see the shared profile on their own dashboard. Each member is
+  a **contributor** (can add and edit records) or a **viewer** (read +
+  conversation only); circle management is owner-only. Power of
+  attorney is a checkbox on any member (type + activated flag) and shows
+  as a badge everywhere they appear
+- **Activity trail** — an append-only record of every change (who,
+  what, when), visible to the whole circle
+- **Document visibility** — restrict sensitive documents (wills,
+  financials) to selected circle roles; the owner always has access
+- **Care plan** — conditions, medications, dietary needs, mobility aids,
+  GP, advance care directive, emergency contacts
+- **Tasks** — one-off or recurring, assignable to circle members
+- **Calendar** — in-app month view of tasks and appointments, plus a
+  read-only ICS feed URL that Google Calendar / Outlook / Apple Calendar
+  can subscribe to
+- **Messages** — a shared conversation space per care profile
+- **Documents** — categorised repository (medical records, will, POA,
+  insurance…) stored locally or in S3
+- **Care log** — timestamped record of visits, calls and decisions
+- **Open questions with AI mediation** — track family decisions with
+  discussion threads and recorded resolutions; on disputed questions, one
+  click asks a neutral AI mediator to summarise common ground, each
+  person's view (stated fairly), options, and a suggested next step
+- **Memory Book** — stories, messages and photos for the person in care,
+  written while there's still time to share them together
+- **Emergency sheet** — a printable one-pager (conditions, medications,
+  GP, POA holders, emergency contacts) generated from the care plan
+- **Reminder emails** — due tasks are emailed to their assignee (needs
+  SMTP configured); recurring tasks roll forward automatically
+- **Providers** — directory of doctors, facilities and services
+- **Ask PareCare** — AI assistant with context on the person's situation
+  (requires `ANTHROPIC_API_KEY`)
+
 ## Running with Docker (self-hosted)
 
 ### Requirements

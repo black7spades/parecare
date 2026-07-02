@@ -4,9 +4,37 @@ import { Shell } from './components/layout/Shell';
 import { Login } from './pages/auth/Login';
 import { Register } from './pages/auth/Register';
 import { Dashboard } from './pages/app/Dashboard';
+import { NewCareProfile } from './pages/app/NewCareProfile';
+import { ProfileLayout } from './pages/app/profile/ProfileLayout';
+import { OverviewPage } from './pages/app/profile/OverviewPage';
+import { CirclePage } from './pages/app/profile/CirclePage';
+import { PlanPage } from './pages/app/profile/PlanPage';
+import { TasksPage } from './pages/app/profile/TasksPage';
+import { CalendarPage } from './pages/app/profile/CalendarPage';
+import { MessagesPage } from './pages/app/profile/MessagesPage';
+import { MemoryBookPage } from './pages/app/profile/MemoryBookPage';
+import { EmergencySheetPage } from './pages/app/profile/EmergencySheetPage';
+import { DocumentsPage } from './pages/app/profile/DocumentsPage';
+import { QuestionsPage } from './pages/app/profile/QuestionsPage';
+import { ProvidersPage } from './pages/app/profile/ProvidersPage';
+import { ActivityPage } from './pages/app/profile/ActivityPage';
+import { AiPage } from './pages/app/profile/AiPage';
+import { InvitePage } from './pages/InvitePage';
 import { SubscriptionPage } from './pages/account/Subscription';
 import { AccountSettings } from './pages/account/Settings';
 import { AdminUsers } from './pages/admin/AdminUsers';
+
+function NotFound() {
+  return (
+    <div className="card text-center py-12 max-w-md mx-auto mt-12">
+      <h1 className="text-lg font-semibold text-ink mb-2">Page not found</h1>
+      <p className="text-sm text-muted mb-4">That page doesn't exist (or hasn't been built yet).</p>
+      <a href="/app" className="text-primary text-sm hover:underline">
+        Back to dashboard
+      </a>
+    </div>
+  );
+}
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -23,6 +51,7 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
 export const router = createBrowserRouter([
   { path: '/login', element: <Login /> },
   { path: '/register', element: <Register /> },
+  { path: '/invite/:token', element: <InvitePage /> },
   {
     path: '/',
     element: (
@@ -33,6 +62,28 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <Navigate to="/app" replace /> },
       { path: 'app', element: <Dashboard /> },
+      { path: 'app/profiles/new', element: <NewCareProfile /> },
+      {
+        path: 'app/:profileId',
+        element: <ProfileLayout />,
+        children: [
+          { index: true, element: <OverviewPage /> },
+          // Legacy path from before the tabbed layout
+          { path: 'dashboard', element: <OverviewPage /> },
+          { path: 'circle', element: <CirclePage /> },
+          { path: 'plan', element: <PlanPage /> },
+          { path: 'tasks', element: <TasksPage /> },
+          { path: 'calendar', element: <CalendarPage /> },
+          { path: 'messages', element: <MessagesPage /> },
+          { path: 'memory-book', element: <MemoryBookPage /> },
+          { path: 'emergency', element: <EmergencySheetPage /> },
+          { path: 'documents', element: <DocumentsPage /> },
+          { path: 'questions', element: <QuestionsPage /> },
+          { path: 'providers', element: <ProvidersPage /> },
+          { path: 'activity', element: <ActivityPage /> },
+          { path: 'ai', element: <AiPage /> },
+        ],
+      },
       { path: 'account/subscription', element: <SubscriptionPage /> },
       { path: 'account/settings', element: <AccountSettings /> },
       {
@@ -43,6 +94,7 @@ export const router = createBrowserRouter([
           </AdminGuard>
         ),
       },
+      { path: '*', element: <NotFound /> },
     ],
   },
 ]);

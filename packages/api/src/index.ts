@@ -16,9 +16,17 @@ import { documentsRouter } from './routes/documents';
 import { providersRouter } from './routes/providers';
 import { remindersRouter } from './routes/reminders';
 import { aiRouter } from './routes/ai';
+import { messagesRouter } from './routes/messages';
+import { memoryBookRouter } from './routes/memoryBook';
+import { calendarRouter, icsRouter } from './routes/calendar';
+import { startReminderScheduler } from './services/scheduler';
 import { subscriptionsRouter } from './routes/subscriptions';
 import { adminRouter } from './routes/admin';
 import { errorHandler, notFound } from './middleware/errorHandler';
+import { requireAuth } from './middleware/auth';
+import { requireCareProfileAccess } from './middleware/subscriptionGate';
+import { auditTrail, blockViewerWrites } from './middleware/permissions';
+import { activityRouter } from './routes/activity';
 import { ensureSuperAdmin, runMigrations } from './services/bootstrap';
 
 // Backstop for promise rejections outside request handling (e.g. redis,
@@ -54,15 +62,25 @@ v1.use('/admin', adminRouter);
 v1.use('/subscriptions', subscriptionsRouter);
 v1.use('/care-circle', inviteRouter);
 v1.use('/care-profiles', careProfilesRouter);
-v1.use('/care-profiles/:id/circle', careCircleRouter);
-v1.use('/care-profiles/:id/log', careLogRouter);
-v1.use('/care-profiles/:id/plan', carePlanRouter);
-v1.use('/care-profiles/:id/checklists', checklistsRouter);
-v1.use('/care-profiles/:id/questions', questionsRouter);
-v1.use('/care-profiles/:id/documents', documentsRouter);
-v1.use('/care-profiles/:id/providers', providersRouter);
-v1.use('/care-profiles/:id/reminders', remindersRouter);
-v1.use('/care-profiles/:id/ai', aiRouter);
+// Sub-resources verify profile ownership/membership here — the routers
+// themselves only scope queries by the :id param. Viewers are read-only
+// (plus conversation), and every successful change lands in the audit log.
+const profileAccess = [requireAuth, requireCareProfileAccess, blockViewerWrites, auditTrail];
+v1.use('/care-profiles/:id/circle', ...profileAccess, careCircleRouter);
+v1.use('/care-profiles/:id/log', ...profileAccess, careLogRouter);
+v1.use('/care-profiles/:id/plan', ...profileAccess, carePlanRouter);
+v1.use('/care-profiles/:id/checklists', ...profileAccess, checklistsRouter);
+v1.use('/care-profiles/:id/questions', ...profileAccess, questionsRouter);
+v1.use('/care-profiles/:id/documents', ...profileAccess, documentsRouter);
+v1.use('/care-profiles/:id/providers', ...profileAccess, providersRouter);
+v1.use('/care-profiles/:id/reminders', ...profileAccess, remindersRouter);
+v1.use('/care-profiles/:id/ai', ...profileAccess, aiRouter);
+v1.use('/care-profiles/:id/messages', ...profileAccess, messagesRouter);
+v1.use('/care-profiles/:id/memory-book', ...profileAccess, memoryBookRouter);
+v1.use('/care-profiles/:id/activity', ...profileAccess, activityRouter);
+v1.use('/care-profiles/:id/calendar', ...profileAccess, calendarRouter);
+// Public: token-authenticated read-only calendar feed for Google/Outlook
+v1.use('/calendar', icsRouter);
 
 v1.get('/health', (_req, res) => res.json({ ok: true }));
 
@@ -76,6 +94,7 @@ async function start(): Promise<void> {
     await connectRedis();
     await runMigrations();
     await ensureSuperAdmin();
+    startReminderScheduler();
     app.listen(env.PORT, () => {
       console.log(`PareCare API running on port ${env.PORT}`);
     });

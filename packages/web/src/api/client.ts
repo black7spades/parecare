@@ -43,8 +43,34 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
+async function uploadRequest<T>(path: string, formData: FormData): Promise<T> {
+  const token = useAuthStore.getState().token;
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  const data = (await res.json()) as { error?: string; code?: string };
+  if (!res.ok) {
+    if (res.status === 401) useAuthStore.getState().clearAuth();
+    throw new ApiError(res.status, data.code ?? 'ERROR', data.error ?? 'Upload failed');
+  }
+  return data as T;
+}
+
+async function blobRequest(path: string): Promise<Blob> {
+  const token = useAuthStore.getState().token;
+  const res = await fetch(`${BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new ApiError(res.status, 'ERROR', 'Download failed');
+  return res.blob();
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
+  upload: <T>(path: string, formData: FormData) => uploadRequest<T>(path, formData),
+  blob: (path: string) => blobRequest(path),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: body !== undefined ? JSON.stringify(body) : undefined }),
   put: <T>(path: string, body?: unknown) =>

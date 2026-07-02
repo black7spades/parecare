@@ -17,6 +17,17 @@ aiRouter.get('/conversations', requireAuth, async (req, res) => {
   res.json({ conversations });
 });
 
+aiRouter.get('/conversations/:convId', requireAuth, async (req, res) => {
+  const conversation = await db<AiConversation>('ai_conversations')
+    .where({ id: req.params['convId'], account_id: req.account!.id, care_profile_id: req.params['id'] })
+    .first();
+  if (!conversation) {
+    res.status(404).json({ error: 'Conversation not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ conversation });
+});
+
 aiRouter.post(
   '/conversations',
   requireAuth,
