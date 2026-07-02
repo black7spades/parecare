@@ -63,7 +63,7 @@ export function MemoryBookPage() {
       >
         <h2 className="text-base font-semibold text-ink">Add a memory</h2>
         <p className="text-sm text-muted -mt-2">
-          Stories, photos and messages for {firstName} — written while there's still time to share them together.
+          Stories, photos and messages for {firstName}, written while there's still time to share them together.
         </p>
         <Input label="Title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. The caravan trip, 1987" />
         <Textarea
@@ -98,7 +98,7 @@ export function MemoryBookPage() {
       {isLoading ? (
         <p className="text-sm text-muted">Loading…</p>
       ) : entries.length === 0 ? (
-        <p className="text-sm text-muted">The book is empty. The first memory is the hardest to write — start small.</p>
+        <p className="text-sm text-muted">The book is empty. The first memory is the hardest to write, so start small.</p>
       ) : (
         <div className="space-y-4">
           {entries.map((entry) => (

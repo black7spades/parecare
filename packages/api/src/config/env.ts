@@ -31,7 +31,16 @@ const envSchema = z.object({
     .string()
     .transform((v) => v === 'true')
     .default('true'),
-  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: optionalStr,
+  // AI provider selection. 'ollama' and 'lmstudio' are OpenAI-compatible
+  // local servers; 'openai-compatible' works for any other such endpoint.
+  AI_PROVIDER: z
+    .enum(['anthropic', 'openai', 'google', 'ollama', 'lmstudio', 'openai-compatible'])
+    .default('anthropic'),
+  AI_API_KEY: optionalStr,
+  AI_BASE_URL: optionalStr,
+  AI_MODEL: optionalStr,
+  AI_MEDIATION_MODEL: optionalStr,
   STORAGE_PROVIDER: z.enum(['local', 's3']).default('local'),
   STORAGE_LOCAL_PATH: z.string().default('/app/uploads'),
   S3_BUCKET: z.string().optional(),

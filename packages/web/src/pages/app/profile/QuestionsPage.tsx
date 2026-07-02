@@ -54,7 +54,7 @@ export function QuestionsPage() {
       >
         <h2 className="text-base font-semibold text-ink">Raise a question</h2>
         <p className="text-sm text-muted -mt-2">
-          Open questions the family needs to settle — "Should mum still be driving?", "Who takes February visits?"
+          Open questions the family needs to settle: "Should mum still be driving?", "Who takes February visits?"
         </p>
         <Input label="Question" value={title} onChange={(e) => setTitle(e.target.value)} required />
         <Textarea label="Context (optional)" value={body} onChange={(e) => setBody(e.target.value)} rows={2} />
@@ -139,7 +139,7 @@ function QuestionCard({
     onError: (err) => {
       setMediateError(
         err instanceof Error && /api key|not configured/i.test(err.message)
-          ? 'Mediation needs the AI assistant configured — set ANTHROPIC_API_KEY on the server.'
+          ? 'Mediation needs the AI assistant configured. Ask the admin to set AI_PROVIDER on the server.'
           : err instanceof Error
             ? err.message
             : 'Mediation failed'

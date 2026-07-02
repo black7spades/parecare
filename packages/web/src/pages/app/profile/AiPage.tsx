@@ -98,7 +98,7 @@ export function AiPage() {
       <div className="card flex flex-col" style={{ minHeight: '26rem' }}>
         <h2 className="text-base font-semibold text-ink mb-1">Ask PareCare</h2>
         <p className="text-sm text-muted mb-4">
-          An assistant that knows {profile.preferred_name ?? profile.full_name}'s situation — ask about next steps,
+          An assistant that knows {profile.preferred_name ?? profile.full_name}'s situation. Ask about next steps,
           entitlements, or how to approach hard conversations.
         </p>
 
@@ -172,7 +172,7 @@ function describeAiError(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 402) return 'The AI assistant requires an upgraded plan.';
     if (err.code === 'AI_NOT_CONFIGURED' || /api key/i.test(err.message)) {
-      return 'The AI assistant is not configured on this server — set ANTHROPIC_API_KEY and restart the api container.';
+      return 'The AI assistant is not configured on this server. Ask the admin to set AI_PROVIDER (Anthropic, OpenAI, Gemini, Ollama, or LM Studio).';
     }
     return err.message;
   }

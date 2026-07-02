@@ -76,8 +76,20 @@ Each person in care gets a profile with:
 
 ### Optional: AI assistant
 
-The Ask PareCare AI assistant requires an Anthropic API key.
-Set `ANTHROPIC_API_KEY` in your `.env` file, then restart:
+Ask PareCare and question mediation work with any popular AI provider,
+or a model running on your own hardware. Set `AI_PROVIDER` in `.env`:
+
+| Provider | Set |
+|---|---|
+| `anthropic` (default) | `ANTHROPIC_API_KEY` |
+| `openai` | `AI_API_KEY` |
+| `google` (Gemini) | `AI_API_KEY` from Google AI Studio |
+| `ollama` | `AI_MODEL` (e.g. `gemma3`); base URL defaults to the host machine's port 11434 |
+| `lmstudio` | `AI_MODEL` matching the model loaded in LM Studio; port 1234 |
+| `openai-compatible` | `AI_BASE_URL` (ending in `/v1`) + `AI_MODEL`, for anything else |
+
+`AI_MEDIATION_MODEL` optionally uses a stronger model for dispute
+mediation than for everyday chat. Then restart:
 ```
 docker compose restart api
 ```

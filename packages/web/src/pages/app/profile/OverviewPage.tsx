@@ -66,9 +66,9 @@ export function OverviewPage() {
             </div>
           ) : (
             <p className="text-sm text-muted">
-              No power of attorney recorded yet —{' '}
+              No power of attorney recorded yet.{' '}
               <Link to="circle" className="text-primary hover:underline">
-                set one in the care circle
+                Set one in the care circle
               </Link>
               .
             </p>
@@ -256,7 +256,7 @@ function CareLog({ profileId }: { profileId: string }) {
         <div className="flex gap-2">
           <select
             aria-label="Entry type"
-            className="rounded-md border border-border bg-white px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            className="rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             value={entryType}
             onChange={(e) => setEntryType(e.target.value)}
           >

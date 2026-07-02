@@ -64,7 +64,7 @@ export function NewCareProfile() {
           </label>
           <select
             id="care-phase"
-            className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             value={phase}
             onChange={(e) => setPhase(e.target.value)}
           >

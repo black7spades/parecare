@@ -31,7 +31,7 @@ export function ActivityPage() {
     <div className="card max-w-3xl">
       <h2 className="text-base font-semibold text-ink mb-1">Activity</h2>
       <p className="text-sm text-muted mb-4">
-        Every change made to {profile.preferred_name ?? profile.full_name}'s records — who did what, and when.
+        Every change made to {profile.preferred_name ?? profile.full_name}'s records: who did what, and when.
         Nobody can edit or remove this list.
       </p>
 
@@ -48,7 +48,7 @@ export function ActivityPage() {
                 <p className="text-sm text-ink">
                   <span className="font-medium">{e.actor_name ?? 'A former member'}</span> {e.action} a{' '}
                   {entityLabel(e.entity_type)}
-                  {e.summary ? <span className="text-muted"> — “{e.summary}”</span> : null}
+                  {e.summary ? <span className="text-muted">: “{e.summary}”</span> : null}
                 </p>
                 <p className="text-xs text-muted">{format(new Date(e.created_at), 'EEE d MMM yyyy, HH:mm')}</p>
               </div>

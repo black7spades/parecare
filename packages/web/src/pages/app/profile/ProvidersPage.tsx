@@ -34,7 +34,7 @@ export function ProvidersPage() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-base font-semibold text-ink">Care providers</h2>
-          <p className="text-sm text-muted">Doctors, facilities and services involved in care — with contact details in one place.</p>
+          <p className="text-sm text-muted">Doctors, facilities and services involved in care, with contact details in one place.</p>
         </div>
         <Button
           onClick={() => {
@@ -197,7 +197,7 @@ function ProviderEditor({
           </label>
           <select
             id="provider-type"
-            className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             value={type}
             onChange={(e) => setType(e.target.value)}
           >

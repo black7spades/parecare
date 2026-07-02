@@ -270,7 +270,7 @@ function EditAccountModal({
           </label>
           <select
             id="edit-tier"
-            className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             value={tier}
             onChange={(e) => setTier(e.target.value as AdminAccount['subscription_tier'])}
           >
@@ -286,7 +286,7 @@ function EditAccountModal({
             </label>
             <select
               id="edit-role"
-              className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               value={role}
               onChange={(e) => setRole(e.target.value as AccountRole)}
             >

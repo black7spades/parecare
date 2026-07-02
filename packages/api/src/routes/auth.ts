@@ -92,7 +92,7 @@ authRouter.post('/login', async (req, res) => {
 
   if (!account.password_hash) {
     res.status(401).json({
-      error: `This account signs in with ${account.oauth_provider === 'facebook' ? 'Facebook' : 'Google'} — use the button above.`,
+      error: `This account signs in with ${account.oauth_provider === 'facebook' ? 'Facebook' : 'Google'}. Use the button above.`,
       code: 'OAUTH_ONLY_ACCOUNT',
     });
     return;
@@ -140,7 +140,7 @@ authRouter.post('/mfa/challenge', async (req, res) => {
 
   const account = await db<Account>('accounts').where({ id: accountId }).first();
   if (!account?.mfa_enabled || !account.mfa_secret || !verifyTotp(account.mfa_secret, parsed.data.code)) {
-    res.status(401).json({ error: "That code didn't match — check your authenticator app", code: 'MFA_INVALID_CODE' });
+    res.status(401).json({ error: "That code didn't match. Check your authenticator app.", code: 'MFA_INVALID_CODE' });
     return;
   }
 
@@ -168,7 +168,7 @@ authRouter.post('/mfa/verify', requireAuth, async (req, res) => {
     return;
   }
   if (!verifyTotp(account.mfa_secret, parsed.data.code)) {
-    res.status(401).json({ error: "That code didn't match — scan the QR code again and retry", code: 'MFA_INVALID_CODE' });
+    res.status(401).json({ error: "That code didn't match. Scan the QR code again and retry.", code: 'MFA_INVALID_CODE' });
     return;
   }
   await db('accounts').where({ id: account.id }).update({ mfa_enabled: true, updated_at: db.fn.now() });
