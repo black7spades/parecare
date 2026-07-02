@@ -113,6 +113,7 @@ function QuestionCard({
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
   const [reply, setReply] = useState('');
+  const [mediateError, setMediateError] = useState('');
 
   const { data } = useQuery({
     queryKey: ['question-responses', question.id],
@@ -126,6 +127,23 @@ function QuestionCard({
     onSuccess: () => {
       setReply('');
       void queryClient.invalidateQueries({ queryKey: ['question-responses', question.id] });
+    },
+  });
+
+  const mediateMutation = useMutation({
+    mutationFn: () => api.post(`/care-profiles/${profileId}/questions/${question.id}/mediate`),
+    onSuccess: () => {
+      setMediateError('');
+      void queryClient.invalidateQueries({ queryKey: ['question-responses', question.id] });
+    },
+    onError: (err) => {
+      setMediateError(
+        err instanceof Error && /api key|not configured/i.test(err.message)
+          ? 'Mediation needs the AI assistant configured — set ANTHROPIC_API_KEY on the server.'
+          : err instanceof Error
+            ? err.message
+            : 'Mediation failed'
+      );
     },
   });
 
@@ -172,14 +190,23 @@ function QuestionCard({
           {responses.length === 0 ? (
             <p className="text-xs text-muted">No responses yet.</p>
           ) : (
-            responses.map((r) => (
-              <div key={r.id}>
-                <p className="text-xs text-muted">
-                  {r.author_name ?? 'Someone'} · {format(new Date(r.created_at), 'd MMM, HH:mm')}
-                </p>
-                <p className="text-sm text-ink whitespace-pre-wrap">{r.body}</p>
-              </div>
-            ))
+            responses.map((r) =>
+              r.is_ai ? (
+                <div key={r.id} className="rounded-md border border-primary-100 bg-primary-50/50 px-3 py-2">
+                  <p className="text-xs font-medium text-primary mb-1">
+                    ⚖ PareCare mediator · {format(new Date(r.created_at), 'd MMM, HH:mm')}
+                  </p>
+                  <p className="text-sm text-ink whitespace-pre-wrap">{r.body}</p>
+                </div>
+              ) : (
+                <div key={r.id}>
+                  <p className="text-xs text-muted">
+                    {r.author_name ?? 'Someone'} · {format(new Date(r.created_at), 'd MMM, HH:mm')}
+                  </p>
+                  <p className="text-sm text-ink whitespace-pre-wrap">{r.body}</p>
+                </div>
+              )
+            )
           )}
           <form
             className="flex gap-2"
@@ -195,6 +222,24 @@ function QuestionCard({
               Reply
             </Button>
           </form>
+          {question.status === 'open' ? (
+            <div>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                loading={mediateMutation.isPending}
+                onClick={() => mediateMutation.mutate()}
+              >
+                ⚖ Ask PareCare to mediate
+              </Button>
+              <p className="text-xs text-muted mt-1">
+                Posts a neutral summary into the thread: what everyone agrees on, each person's view stated fairly,
+                options, and a suggested next step. It never takes sides.
+              </p>
+              {mediateError ? <p className="text-xs text-red-600 mt-1">{mediateError}</p> : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -12,6 +12,8 @@ import { PlanPage } from './pages/app/profile/PlanPage';
 import { TasksPage } from './pages/app/profile/TasksPage';
 import { CalendarPage } from './pages/app/profile/CalendarPage';
 import { MessagesPage } from './pages/app/profile/MessagesPage';
+import { MemoryBookPage } from './pages/app/profile/MemoryBookPage';
+import { EmergencySheetPage } from './pages/app/profile/EmergencySheetPage';
 import { DocumentsPage } from './pages/app/profile/DocumentsPage';
 import { QuestionsPage } from './pages/app/profile/QuestionsPage';
 import { ProvidersPage } from './pages/app/profile/ProvidersPage';
@@ -72,6 +74,8 @@ export const router = createBrowserRouter([
           { path: 'tasks', element: <TasksPage /> },
           { path: 'calendar', element: <CalendarPage /> },
           { path: 'messages', element: <MessagesPage /> },
+          { path: 'memory-book', element: <MemoryBookPage /> },
+          { path: 'emergency', element: <EmergencySheetPage /> },
           { path: 'documents', element: <DocumentsPage /> },
           { path: 'questions', element: <QuestionsPage /> },
           { path: 'providers', element: <ProvidersPage /> },

@@ -34,3 +34,20 @@
     @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
   }
 }
+
+/* Emergency sheet printing: only the sheet itself, full width */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-sheet,
+  .print-sheet * {
+    visibility: visible;
+  }
+  .print-sheet {
+    position: absolute;
+    inset: 0;
+    box-shadow: none;
+    border: none;
+  }
+}

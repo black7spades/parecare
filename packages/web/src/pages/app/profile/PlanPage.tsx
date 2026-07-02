@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
@@ -82,6 +83,11 @@ export function PlanPage() {
         </div>
         <div className="flex items-center gap-3">
           {saved ? <span className="text-sm text-primary">Saved ✓</span> : null}
+          <Link to="../emergency">
+            <Button type="button" variant="secondary">
+              Emergency sheet
+            </Button>
+          </Link>
           <Button type="submit" loading={saveMutation.isPending}>
             Save care plan
           </Button>

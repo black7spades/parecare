@@ -22,8 +22,16 @@ Each person in care gets a profile with:
 - **Documents** — categorised repository (medical records, will, POA,
   insurance…) stored locally or in S3
 - **Care log** — timestamped record of visits, calls and decisions
-- **Open questions** — track family decisions with discussion threads and
-  recorded resolutions
+- **Open questions with AI mediation** — track family decisions with
+  discussion threads and recorded resolutions; on disputed questions, one
+  click asks a neutral AI mediator to summarise common ground, each
+  person's view (stated fairly), options, and a suggested next step
+- **Memory Book** — stories, messages and photos for the person in care,
+  written while there's still time to share them together
+- **Emergency sheet** — a printable one-pager (conditions, medications,
+  GP, POA holders, emergency contacts) generated from the care plan
+- **Reminder emails** — due tasks are emailed to their assignee (needs
+  SMTP configured); recurring tasks roll forward automatically
 - **Providers** — directory of doctors, facilities and services
 - **Ask PareCare** — AI assistant with context on the person's situation
   (requires `ANTHROPIC_API_KEY`)

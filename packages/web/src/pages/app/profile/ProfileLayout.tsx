@@ -19,6 +19,7 @@ const TABS = [
   { to: 'tasks', label: 'Tasks' },
   { to: 'calendar', label: 'Calendar' },
   { to: 'messages', label: 'Messages' },
+  { to: 'memory-book', label: 'Memory book' },
   { to: 'documents', label: 'Documents' },
   { to: 'questions', label: 'Questions' },
   { to: 'providers', label: 'Providers' },

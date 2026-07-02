@@ -163,6 +163,17 @@ export interface QuestionResponse {
   id: string;
   body: string;
   created_at: string;
+  is_ai: boolean;
+  author_name: string | null;
+}
+
+export interface MemoryEntry {
+  id: string;
+  title: string | null;
+  body: string;
+  photo_url: string | null;
+  created_at: string;
+  author_account_id: string | null;
   author_name: string | null;
 }
 
