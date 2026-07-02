@@ -77,30 +77,40 @@ export function requireCountBelow(
   };
 }
 
-export function requireCareProfileAccess(req: Request, res: Response, next: NextFunction): void {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Verify the requester owns the care profile or is an accepted circle member.
+export async function requireCareProfileAccess(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (!req.account) {
     res.status(401).json({ error: 'Not authenticated', code: 'UNAUTHORIZED' });
     return;
   }
-  // Verify care profile belongs to this account
   const profileId = req.params['id'] || req.params['profileId'];
   if (!profileId) {
     next();
     return;
   }
+  if (!UUID_RE.test(profileId)) {
+    res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
+    return;
+  }
 
-  db('care_profiles')
-    .where({ id: profileId, account_id: req.account.id, archived: false })
-    .first()
-    .then((profile) => {
-      if (!profile) {
-        res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
-        return;
-      }
-      next();
-    })
-    .catch((err) => {
-      console.error(err);
-      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
-    });
+  const profile = await db('care_profiles').where({ id: profileId, archived: false }).first();
+  if (!profile) {
+    res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
+    return;
+  }
+  if (profile.account_id === req.account.id) {
+    next();
+    return;
+  }
+  const membership = await db('care_circle_members')
+    .where({ care_profile_id: profileId, account_id: req.account.id, invite_accepted: true })
+    .first();
+  if (!membership) {
+    // 404 rather than 403 so outsiders can't confirm a profile exists
+    res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
+    return;
+  }
+  next();
 }

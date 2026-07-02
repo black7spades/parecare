@@ -8,6 +8,17 @@ import type { CareProfile, CarePhase } from '../types';
 
 export const careProfilesRouter = Router();
 
+// Reject malformed ids up front — postgres errors on invalid uuid input,
+// which would surface as a 500 instead of a 404.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+careProfilesRouter.param('id', (_req, res, next, value) => {
+  if (!UUID_RE.test(value)) {
+    res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
+    return;
+  }
+  next();
+});
+
 const profileSchema = z.object({
   full_name: z.string().min(1).max(255),
   date_of_birth: z.string().optional().nullable(),
