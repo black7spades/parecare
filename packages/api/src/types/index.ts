@@ -31,8 +31,17 @@ export interface CareProfile {
   photo_url: string | null;
   notes: string | null;
   archived: boolean;
+  ics_token: string;
   created_at: Date;
   updated_at: Date;
+}
+
+export interface Message {
+  id: string;
+  care_profile_id: string;
+  author_account_id: string | null;
+  body: string;
+  created_at: string | Date;
 }
 
 export type CarePhase =

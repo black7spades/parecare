@@ -55,6 +55,20 @@ questionsRouter.patch('/:questionId', requireAuth, async (req, res) => {
   res.json({ question });
 });
 
+questionsRouter.get('/:questionId/responses', requireAuth, async (req, res) => {
+  const responses = await db('open_question_responses')
+    .leftJoin('care_circle_members', 'open_question_responses.author_member_id', 'care_circle_members.id')
+    .where({ question_id: req.params['questionId'] })
+    .orderBy('open_question_responses.created_at', 'asc')
+    .select(
+      'open_question_responses.id',
+      'open_question_responses.body',
+      'open_question_responses.created_at',
+      'care_circle_members.display_name as author_name'
+    );
+  res.json({ responses });
+});
+
 questionsRouter.post('/:questionId/responses', requireAuth, async (req, res) => {
   const schema = z.object({ body: z.string().min(1) });
   const parsed = schema.safeParse(req.body);

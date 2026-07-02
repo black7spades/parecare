@@ -97,6 +97,33 @@ documentsRouter.get('/:docId/download', requireAuth, async (req, res) => {
   res.json({ url });
 });
 
+// Streams locally stored files — nothing serves the raw /uploads path.
+// S3-stored files are redirected to a presigned URL instead.
+documentsRouter.get('/:docId/file', requireAuth, async (req, res) => {
+  const doc = await db<Document>('documents')
+    .where({ id: req.params['docId'], care_profile_id: req.params['id'] })
+    .first();
+  if (!doc) {
+    res.status(404).json({ error: 'Document not found', code: 'NOT_FOUND' });
+    return;
+  }
+
+  if (!doc.file_url.startsWith('/uploads/')) {
+    res.redirect(await getDownloadUrl(doc.file_url));
+    return;
+  }
+
+  const localPath = path.join(env.STORAGE_LOCAL_PATH, doc.file_url.slice('/uploads/'.length));
+  if (doc.mime_type) res.setHeader('Content-Type', doc.mime_type);
+  const ext = path.extname(doc.file_url);
+  res.setHeader('Content-Disposition', `attachment; filename="${doc.label.replace(/[^\w .-]/g, '_')}${ext}"`);
+  res.sendFile(localPath, (err) => {
+    if (err && !res.headersSent) {
+      res.status(404).json({ error: 'File missing from storage', code: 'NOT_FOUND' });
+    }
+  });
+});
+
 documentsRouter.delete('/:docId', requireAuth, async (req, res) => {
   const doc = await db<Document>('documents')
     .where({ id: req.params['docId'], care_profile_id: req.params['id'] })

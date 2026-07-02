@@ -1,95 +1,81 @@
 import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { api } from '../../api/client';
-import { Button } from '../../components/ui/Button';
-import { Input, Textarea } from '../../components/ui/Input';
-import { Modal } from '../../components/ui/Modal';
+import { api } from '../../../api/client';
+import { Button } from '../../../components/ui/Button';
+import { Input, Textarea } from '../../../components/ui/Input';
+import { Modal } from '../../../components/ui/Modal';
+import { PoaBadge } from '../../../components/PoaBadge';
+import { PhasePipeline } from './PhasePipeline';
+import { useProfile } from './ProfileLayout';
 import {
-  CARE_PHASES,
   LOG_ENTRY_TYPES,
   entryTypeLabel,
   type CareLogEntry,
-  type CareProfile,
   type ChecklistItem,
-} from '../../lib/care';
+  type CircleMember,
+} from '../../../lib/care';
 
-export function CareProfilePage() {
-  const { profileId } = useParams<{ profileId: string }>();
+export function OverviewPage() {
+  const { profile } = useProfile();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [archiveOpen, setArchiveOpen] = useState(false);
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['care-profile', profileId],
-    queryFn: () => api.get<{ profile: CareProfile }>(`/care-profiles/${profileId}`),
+  const { data: circleData } = useQuery({
+    queryKey: ['circle', profile.id],
+    queryFn: () => api.get<{ members: CircleMember[] }>(`/care-profiles/${profile.id}/circle`),
   });
-  const profile = data?.profile;
-
-  const phaseMutation = useMutation({
-    mutationFn: (current_phase: string) => api.patch(`/care-profiles/${profileId}/phase`, { current_phase }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['care-profile', profileId] });
-      void queryClient.invalidateQueries({ queryKey: ['checklist', profileId] });
-    },
-  });
+  const poaHolders = (circleData?.members ?? []).filter((m) => m.poa_type);
 
   const archiveMutation = useMutation({
-    mutationFn: () => api.delete(`/care-profiles/${profileId}`),
+    mutationFn: () => api.delete(`/care-profiles/${profile.id}`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['care-profiles'] });
       navigate('/app');
     },
   });
 
-  if (isLoading) return <p className="text-sm text-muted">Loading…</p>;
-  if (error || !profile) {
-    return (
-      <div className="card text-center py-12">
-        <p className="text-muted mb-4">This care profile could not be found.</p>
-        <Button onClick={() => navigate('/app')}>Back to dashboard</Button>
-      </div>
-    );
-  }
+  const detailLine = [
+    profile.pronouns,
+    profile.date_of_birth ? `Born ${format(new Date(profile.date_of_birth), 'd MMM yyyy')}` : null,
+    profile.primary_language,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-xl font-semibold text-ink">{profile.full_name}</h1>
-          <p className="text-sm text-muted">
-            {[
-              profile.preferred_name ? `Known as ${profile.preferred_name}` : null,
-              profile.pronouns,
-              profile.date_of_birth ? `Born ${format(new Date(profile.date_of_birth), 'd MMM yyyy')}` : null,
-              profile.primary_language,
-            ]
-              .filter(Boolean)
-              .join(' · ') || 'No details added yet'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <label htmlFor="phase-select" className="text-sm text-muted">
-            Phase
-          </label>
-          <select
-            id="phase-select"
-            className="rounded-md border border-border bg-white px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-            value={profile.current_phase}
-            disabled={phaseMutation.isPending}
-            onChange={(e) => phaseMutation.mutate(e.target.value)}
-          >
-            {CARE_PHASES.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+      <PhasePipeline profileId={profile.id} currentPhase={profile.current_phase} />
 
-      {profile.notes ? <div className="card text-sm whitespace-pre-wrap">{profile.notes}</div> : null}
+      {detailLine || profile.notes || poaHolders.length > 0 ? (
+        <div className="card space-y-3">
+          {detailLine ? <p className="text-sm text-muted">{detailLine}</p> : null}
+          {poaHolders.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-3">
+              {poaHolders.map((m) => (
+                <span key={m.id} className="flex items-center gap-2 text-sm text-ink">
+                  <span className="font-medium">{m.display_name}</span>
+                  <PoaBadge type={m.poa_type} activated={m.poa_activated} />
+                </span>
+              ))}
+              <Link to="circle" className="text-xs text-primary hover:underline">
+                Manage care circle →
+              </Link>
+            </div>
+          ) : (
+            <p className="text-sm text-muted">
+              No power of attorney recorded yet —{' '}
+              <Link to="circle" className="text-primary hover:underline">
+                set one in the care circle
+              </Link>
+              .
+            </p>
+          )}
+          {profile.notes ? <p className="text-sm whitespace-pre-wrap border-t border-border pt-3">{profile.notes}</p> : null}
+        </div>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-2 items-start">
         <Checklist profileId={profile.id} phase={profile.current_phase} />
@@ -124,19 +110,18 @@ function Checklist({ profileId, phase }: { profileId: string; phase: string }) {
   const queryClient = useQueryClient();
   const [newTitle, setNewTitle] = useState('');
 
+  const listKey = ['checklist', profileId, phase];
   const { data, isLoading } = useQuery({
-    queryKey: ['checklist', profileId, phase],
+    queryKey: listKey,
     queryFn: () => api.get<{ items: ChecklistItem[] }>(`/care-profiles/${profileId}/checklists?phase=${phase}`),
   });
   const items = data?.items ?? [];
 
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['checklist', profileId] });
 
-  const listKey = ['checklist', profileId, phase];
   const toggleMutation = useMutation({
     mutationFn: ({ id, completed }: { id: string; completed: boolean }) =>
       api.patch(`/care-profiles/${profileId}/checklists/${id}`, { completed }),
-    // Update the checkbox immediately; roll back if the server rejects it
     onMutate: async ({ id, completed }) => {
       await queryClient.cancelQueries({ queryKey: listKey });
       const previous = queryClient.getQueryData<{ items: ChecklistItem[] }>(listKey);

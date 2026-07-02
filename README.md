@@ -2,6 +2,32 @@
 
 Family coordination platform for managing the care of ageing parents.
 
+## Features
+
+Each person in care gets a profile with:
+
+- **Care journey pipeline** — six life phases from early concern to end of
+  life, each seeding its own checklist when entered
+- **Care circle** — invite family, friends and organisations by email;
+  members see the shared profile on their own dashboard. Power of
+  attorney is a checkbox on any member (type + activated flag) and shows
+  as a badge everywhere they appear
+- **Care plan** — conditions, medications, dietary needs, mobility aids,
+  GP, advance care directive, emergency contacts
+- **Tasks** — one-off or recurring, assignable to circle members
+- **Calendar** — in-app month view of tasks and appointments, plus a
+  read-only ICS feed URL that Google Calendar / Outlook / Apple Calendar
+  can subscribe to
+- **Messages** — a shared conversation space per care profile
+- **Documents** — categorised repository (medical records, will, POA,
+  insurance…) stored locally or in S3
+- **Care log** — timestamped record of visits, calls and decisions
+- **Open questions** — track family decisions with discussion threads and
+  recorded resolutions
+- **Providers** — directory of doctors, facilities and services
+- **Ask PareCare** — AI assistant with context on the person's situation
+  (requires `ANTHROPIC_API_KEY`)
+
 ## Running with Docker (self-hosted)
 
 ### Requirements

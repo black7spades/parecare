@@ -111,9 +111,30 @@ careCircleRouter.delete('/:memberId', requireAuth, async (req, res) => {
   res.json({ message: 'Member removed.' });
 });
 
-// Public — accept invite
 export const inviteRouter = Router();
-inviteRouter.post('/accept-invite/:token', async (req, res) => {
+
+// Public — look up an invite so the invite page can show what's being accepted
+inviteRouter.get('/invite/:token', async (req, res) => {
+  const member = await db<CareCircleMember>('care_circle_members')
+    .where({ invite_token: req.params['token'] })
+    .first();
+  if (!member) {
+    res.status(404).json({ error: 'Invite not found or already accepted', code: 'NOT_FOUND' });
+    return;
+  }
+  const profile = await db('care_profiles').where({ id: member.care_profile_id }).first();
+  res.json({
+    invite: {
+      display_name: member.display_name,
+      role: member.role,
+      profile_name: profile?.full_name ?? 'a care profile',
+    },
+  });
+});
+
+// Accepting requires being logged in — the invite is linked to the
+// accepting account, never to an id supplied by the caller.
+inviteRouter.post('/accept-invite/:token', requireAuth, async (req, res) => {
   const member = await db<CareCircleMember>('care_circle_members')
     .where({ invite_token: req.params['token'] })
     .first();
@@ -123,12 +144,11 @@ inviteRouter.post('/accept-invite/:token', async (req, res) => {
     return;
   }
 
-  const accountId = req.body?.account_id;
   await db('care_circle_members').where({ id: member.id }).update({
     invite_accepted: true,
-    account_id: accountId ?? null,
+    account_id: req.account!.id,
     invite_token: null,
   });
 
-  res.json({ message: 'Invite accepted.' });
+  res.json({ message: 'Invite accepted.', care_profile_id: member.care_profile_id });
 });

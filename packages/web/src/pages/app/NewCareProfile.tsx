@@ -34,7 +34,7 @@ export function NewCareProfile() {
         notes: notes || null,
       });
       await queryClient.invalidateQueries({ queryKey: ['care-profiles'] });
-      navigate(`/app/${data.profile.id}/dashboard`);
+      navigate(`/app/${data.profile.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create profile');
     } finally {

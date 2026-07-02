@@ -16,6 +16,8 @@ import { documentsRouter } from './routes/documents';
 import { providersRouter } from './routes/providers';
 import { remindersRouter } from './routes/reminders';
 import { aiRouter } from './routes/ai';
+import { messagesRouter } from './routes/messages';
+import { calendarRouter, icsRouter } from './routes/calendar';
 import { subscriptionsRouter } from './routes/subscriptions';
 import { adminRouter } from './routes/admin';
 import { errorHandler, notFound } from './middleware/errorHandler';
@@ -68,6 +70,10 @@ v1.use('/care-profiles/:id/documents', ...profileAccess, documentsRouter);
 v1.use('/care-profiles/:id/providers', ...profileAccess, providersRouter);
 v1.use('/care-profiles/:id/reminders', ...profileAccess, remindersRouter);
 v1.use('/care-profiles/:id/ai', ...profileAccess, aiRouter);
+v1.use('/care-profiles/:id/messages', ...profileAccess, messagesRouter);
+v1.use('/care-profiles/:id/calendar', ...profileAccess, calendarRouter);
+// Public: token-authenticated read-only calendar feed for Google/Outlook
+v1.use('/calendar', icsRouter);
 
 v1.get('/health', (_req, res) => res.json({ ok: true }));
 

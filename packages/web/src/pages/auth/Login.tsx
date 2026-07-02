@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth';
 import { api } from '../../api/client';
 import { Input } from '../../components/ui/Input';
@@ -12,6 +12,10 @@ export function Login() {
   const [loading, setLoading] = useState(false);
   const { setAuth } = useAuthStore();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const next = params.get('next');
+  // Only allow same-app destinations to avoid open-redirect abuse
+  const destination = next && next.startsWith('/') && !next.startsWith('//') ? next : '/app';
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -23,7 +27,7 @@ export function Login() {
         { email, password }
       );
       setAuth(data.token, data.account);
-      navigate('/app');
+      navigate(destination);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Sign in failed';
       setError(msg);
@@ -66,7 +70,7 @@ export function Login() {
           </form>
           <div className="mt-4 text-center text-sm text-muted">
             No account?{' '}
-            <Link to="/register" className="text-primary hover:underline">
+            <Link to={next ? `/register?next=${encodeURIComponent(next)}` : '/register'} className="text-primary hover:underline">
               Create one
             </Link>
           </div>

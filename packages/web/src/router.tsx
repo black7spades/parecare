@@ -5,7 +5,18 @@ import { Login } from './pages/auth/Login';
 import { Register } from './pages/auth/Register';
 import { Dashboard } from './pages/app/Dashboard';
 import { NewCareProfile } from './pages/app/NewCareProfile';
-import { CareProfilePage } from './pages/app/CareProfilePage';
+import { ProfileLayout } from './pages/app/profile/ProfileLayout';
+import { OverviewPage } from './pages/app/profile/OverviewPage';
+import { CirclePage } from './pages/app/profile/CirclePage';
+import { PlanPage } from './pages/app/profile/PlanPage';
+import { TasksPage } from './pages/app/profile/TasksPage';
+import { CalendarPage } from './pages/app/profile/CalendarPage';
+import { MessagesPage } from './pages/app/profile/MessagesPage';
+import { DocumentsPage } from './pages/app/profile/DocumentsPage';
+import { QuestionsPage } from './pages/app/profile/QuestionsPage';
+import { ProvidersPage } from './pages/app/profile/ProvidersPage';
+import { AiPage } from './pages/app/profile/AiPage';
+import { InvitePage } from './pages/InvitePage';
 import { SubscriptionPage } from './pages/account/Subscription';
 import { AccountSettings } from './pages/account/Settings';
 import { AdminUsers } from './pages/admin/AdminUsers';
@@ -37,6 +48,7 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
 export const router = createBrowserRouter([
   { path: '/login', element: <Login /> },
   { path: '/register', element: <Register /> },
+  { path: '/invite/:token', element: <InvitePage /> },
   {
     path: '/',
     element: (
@@ -48,7 +60,24 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/app" replace /> },
       { path: 'app', element: <Dashboard /> },
       { path: 'app/profiles/new', element: <NewCareProfile /> },
-      { path: 'app/:profileId/dashboard', element: <CareProfilePage /> },
+      {
+        path: 'app/:profileId',
+        element: <ProfileLayout />,
+        children: [
+          { index: true, element: <OverviewPage /> },
+          // Legacy path from before the tabbed layout
+          { path: 'dashboard', element: <OverviewPage /> },
+          { path: 'circle', element: <CirclePage /> },
+          { path: 'plan', element: <PlanPage /> },
+          { path: 'tasks', element: <TasksPage /> },
+          { path: 'calendar', element: <CalendarPage /> },
+          { path: 'messages', element: <MessagesPage /> },
+          { path: 'documents', element: <DocumentsPage /> },
+          { path: 'questions', element: <QuestionsPage /> },
+          { path: 'providers', element: <ProvidersPage /> },
+          { path: 'ai', element: <AiPage /> },
+        ],
+      },
       { path: 'account/subscription', element: <SubscriptionPage /> },
       { path: 'account/settings', element: <AccountSettings /> },
       {

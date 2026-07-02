@@ -54,16 +54,24 @@ carePlanRouter.put('/', requireAuth, async (req, res) => {
 
   const existing = await db('care_plans').where({ care_profile_id: req.params['id'] }).first();
 
+  // jsonb columns need explicit JSON serialisation — knex treats raw JS
+  // arrays as Postgres array literals, which corrupts the stored value.
+  const values = {
+    ...parsed.data,
+    medications: db.raw('?::jsonb', [JSON.stringify(parsed.data.medications)]),
+    emergency_contacts: db.raw('?::jsonb', [JSON.stringify(parsed.data.emergency_contacts)]),
+  };
+
   let plan: CarePlan;
   if (existing) {
     const [updated] = await db<CarePlan>('care_plans')
       .where({ id: existing.id })
-      .update({ ...parsed.data, updated_at: db.fn.now() })
+      .update({ ...values, updated_at: db.fn.now() })
       .returning('*');
     plan = updated;
   } else {
     const [created] = await db<CarePlan>('care_plans')
-      .insert({ care_profile_id: req.params['id'], ...parsed.data })
+      .insert({ care_profile_id: req.params['id'], ...values })
       .returning('*');
     plan = created;
   }
