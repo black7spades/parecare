@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore, type AccountRole } from '../../stores/auth';
 import { useSubscriptionStore } from '../../stores/subscription';
 import { UpgradePrompt } from '../UpgradePrompt';
+import { ThemeToggle } from '../ThemeToggle';
 import { api } from '../../api/client';
 
 function TierBadge() {
@@ -42,7 +43,7 @@ export function Shell() {
 
   return (
     <div className="min-h-screen flex">
-      <nav className="w-56 shrink-0 bg-white border-r border-border flex flex-col py-6 px-4">
+      <nav className="w-56 shrink-0 bg-card border-r border-border flex flex-col py-6 px-4">
         <div className="mb-8">
           <span className="text-lg font-semibold text-primary">PareCare</span>
         </div>
@@ -66,6 +67,7 @@ export function Shell() {
 
         <div className="mt-auto space-y-2">
           <TierBadge />
+          <ThemeToggle />
           <div className="text-xs text-muted truncate">{account?.email}</div>
           <button onClick={handleLogout} className="text-xs text-muted hover:text-ink transition-colors">
             Sign out

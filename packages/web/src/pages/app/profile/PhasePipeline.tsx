@@ -48,17 +48,17 @@ export function PhasePipeline({ profileId, currentPhase }: { profileId: string; 
                 <span
                   className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${
                     state === 'current'
-                      ? 'bg-white text-primary'
+                      ? 'bg-card text-primary'
                       : state === 'past'
                         ? 'bg-primary text-white'
-                        : 'bg-white text-muted border border-border'
+                        : 'bg-card text-muted border border-border'
                   }`}
                 >
                   {state === 'past' ? '✓' : i + 1}
                 </span>
                 {phase.label}
               </button>
-              {i < CARE_PHASES.length - 1 ? <span className="mx-1 text-border select-none">—</span> : null}
+              {i < CARE_PHASES.length - 1 ? <span className="mx-1 text-border select-none">›</span> : null}
             </li>
           );
         })}

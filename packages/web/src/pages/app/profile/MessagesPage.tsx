@@ -54,7 +54,7 @@ export function MessagesPage() {
         {isLoading ? (
           <p className="text-sm text-muted">Loading…</p>
         ) : messages.length === 0 ? (
-          <p className="text-sm text-muted">No messages yet — say hello.</p>
+          <p className="text-sm text-muted">No messages yet. Say hello.</p>
         ) : (
           messages.map((m) => {
             const mine = m.author_account_id === me?.id;

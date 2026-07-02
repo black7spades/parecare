@@ -84,7 +84,7 @@ export function CalendarPage() {
               <div
                 key={day.toISOString()}
                 className={`min-h-[5.5rem] border-r border-b border-border p-1.5 ${
-                  isSameMonth(day, month) ? 'bg-white' : 'bg-surface'
+                  isSameMonth(day, month) ? 'bg-card' : 'bg-surface'
                 }`}
               >
                 <span
@@ -122,7 +122,7 @@ export function CalendarPage() {
       <div className="card">
         <h3 className="text-sm font-semibold text-ink mb-1">Sync with Google Calendar or Outlook</h3>
         <p className="text-sm text-muted mb-3">
-          Subscribe your own calendar to this care calendar — new tasks and appointments show up automatically.
+          Subscribe your own calendar to this care calendar and new tasks and appointments will show up automatically.
           The link is read-only and unguessable; share it only with people who should see the schedule.
         </p>
         {feed ? (

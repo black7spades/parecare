@@ -82,7 +82,7 @@ export function TasksPage() {
           <p className="text-sm text-muted">Loading…</p>
         ) : tasks.length === 0 ? (
           <p className="text-sm text-muted">
-            Nothing outstanding. Tasks appear here and on the calendar — assign them so nothing falls on one person.
+            Nothing outstanding. Tasks appear here and on the calendar. Assign them so nothing falls on one person.
           </p>
         ) : (
           <ul className="space-y-3">
@@ -145,7 +145,7 @@ export function TasksPage() {
           </label>
           <select
             id="task-repeat"
-            className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             value={repeat}
             onChange={(e) => setRepeat(e.target.value as Task['reminder_type'])}
           >
@@ -161,7 +161,7 @@ export function TasksPage() {
           </label>
           <select
             id="task-assignee"
-            className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             value={assignee}
             onChange={(e) => setAssignee(e.target.value)}
           >

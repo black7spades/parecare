@@ -151,14 +151,14 @@ export function DocumentsPage() {
           />
           <p className="mt-1 text-xs text-muted">Up to 50 MB.</p>
         </div>
-        <Input label="Label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Medical certificate — March" />
+        <Input label="Label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Medical certificate, March" />
         <div>
           <label htmlFor="doc-category" className="block text-sm font-medium text-ink mb-1">
             Category
           </label>
           <select
             id="doc-category"
-            className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
           >

@@ -8,11 +8,11 @@ const ERROR_MESSAGES: Record<string, string> = {
   super_admin_password_only: 'The super admin account must sign in with email and password.',
   no_email: "Your social account didn't share a verified email address, which PareCare needs.",
   cancelled: 'Sign-in was cancelled.',
-  invalid_state: 'The sign-in link expired — please try again.',
-  provider_error: "Something went wrong talking to the sign-in provider — please try again.",
+  invalid_state: 'The sign-in link expired. Please try again.',
+  provider_error: 'Something went wrong talking to the sign-in provider. Please try again.',
   provider_not_configured: 'That sign-in provider is not set up on this server.',
-  linked_to_google: 'This email is already linked to Google sign-in — use the Google button.',
-  linked_to_facebook: 'This email is already linked to Facebook sign-in — use the Facebook button.',
+  linked_to_google: 'This email is already linked to Google sign-in. Use the Google button.',
+  linked_to_facebook: 'This email is already linked to Facebook sign-in. Use the Facebook button.',
 };
 
 /**
@@ -34,7 +34,7 @@ export function OAuthCallback() {
     const token = fragment.get('token');
     const errCode = fragment.get('error');
     if (errCode) {
-      setError(ERROR_MESSAGES[errCode] ?? 'Sign-in failed — please try again.');
+      setError(ERROR_MESSAGES[errCode] ?? 'Sign-in failed. Please try again.');
       return;
     }
     if (!token) return;
@@ -53,7 +53,7 @@ export function OAuthCallback() {
         setAuth(token, me);
         navigate('/app', { replace: true });
       })
-      .catch(() => setError('Signed in, but loading your account failed — try refreshing.'));
+      .catch(() => setError('Signed in, but loading your account failed. Try refreshing.'));
   }, [fragment, navigate, setAuth]);
 
   async function handleMfa(code: string) {

@@ -118,7 +118,7 @@ export function PlanPage() {
         />
         <Textarea
           label="Communication preferences"
-          placeholder="e.g. Hard of hearing on the left — speak clearly, face to face"
+          placeholder="e.g. Hard of hearing on the left. Speak clearly, face to face"
           value={plan.communication_preferences ?? ''}
           onChange={(e) => set('communication_preferences', e.target.value || null)}
           rows={2}

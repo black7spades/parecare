@@ -24,7 +24,7 @@ export function OAuthButtons() {
       {data.google ? (
         <a
           href="/api/v1/auth/oauth/google"
-          className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-white px-4 py-2 text-sm font-medium text-ink hover:bg-surface transition-colors"
+          className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm font-medium text-ink hover:bg-surface transition-colors"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
             <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.8z" />
@@ -38,7 +38,7 @@ export function OAuthButtons() {
       {data.facebook ? (
         <a
           href="/api/v1/auth/oauth/facebook"
-          className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-white px-4 py-2 text-sm font-medium text-ink hover:bg-surface transition-colors"
+          className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm font-medium text-ink hover:bg-surface transition-colors"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
             <path

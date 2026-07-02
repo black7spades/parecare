@@ -47,7 +47,7 @@ export function CirclePage() {
       ) : members.length === 0 ? (
         <div className="card text-center py-10">
           <p className="text-sm text-muted mb-4">
-            No one in the circle yet. Invite family, friends, or an organisation — anyone who should stay in the loop.
+            No one in the circle yet. Invite family, friends, or an organisation: anyone who should stay in the loop.
           </p>
           {isOwner ? <Button onClick={() => setInviteOpen(true)}>Send the first invite</Button> : null}
         </div>
@@ -138,12 +138,12 @@ function PermissionSelect({ value, onChange }: { value: string; onChange: (v: st
       </label>
       <select
         id="member-permission"
-        className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
-        <option value="contributor">Contributor — can add and edit records</option>
-        <option value="viewer">Viewer — can read and join the conversation only</option>
+        <option value="contributor">Contributor: can add and edit records</option>
+        <option value="viewer">Viewer: can read and join the conversation only</option>
       </select>
     </div>
   );
@@ -182,7 +182,7 @@ function PoaFields({
         <>
           <select
             aria-label="Power of attorney type"
-            className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             value={poaType}
             onChange={(e) => setPoaType(e.target.value)}
           >
@@ -267,7 +267,7 @@ function InviteModal({
           </label>
           <select
             id="invite-role"
-            className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             value={role}
             onChange={(e) => setRole(e.target.value)}
           >

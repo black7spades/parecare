@@ -8,7 +8,7 @@ export function PoaBadge({ type, activated }: { type: string | null; activated: 
   if (!type && !activated) return null;
   return (
     <span
-      title={`${poaLabel(type)}${activated ? ' — activated' : ' — appointed, not activated'}`}
+      title={`${poaLabel(type)}${activated ? ', activated' : ', appointed but not activated'}`}
       className={`badge text-xs font-semibold ${
         activated ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 border border-amber-300'
       }`}

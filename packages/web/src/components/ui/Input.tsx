@@ -17,7 +17,7 @@ export function Input({ label, error, hint, id, className = '', ...props }: Inpu
       ) : null}
       <input
         id={inputId}
-        className={`block w-full rounded-md border ${error ? 'border-red-400' : 'border-border'} bg-white px-3 py-2 text-sm placeholder-muted shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary ${className}`}
+        className={`block w-full rounded-md border ${error ? 'border-red-400' : 'border-border'} bg-card px-3 py-2 text-sm placeholder-muted shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary ${className}`}
         {...props}
       />
       {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
@@ -43,7 +43,7 @@ export function Textarea({ label, error, hint, id, className = '', ...props }: T
       ) : null}
       <textarea
         id={inputId}
-        className={`block w-full rounded-md border ${error ? 'border-red-400' : 'border-border'} bg-white px-3 py-2 text-sm placeholder-muted shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary ${className}`}
+        className={`block w-full rounded-md border ${error ? 'border-red-400' : 'border-border'} bg-card px-3 py-2 text-sm placeholder-muted shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary ${className}`}
         {...props}
       />
       {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
