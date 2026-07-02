@@ -30,14 +30,9 @@ Family coordination platform for managing the care of ageing parents.
    ```
    docker compose up -d
    ```
+   Database migrations run automatically when the api container starts.
 
-5. Run database migrations
-   ```
-   docker compose exec api npm run migrate
-   docker compose exec api npm run seed
-   ```
-
-6. Open http://localhost in your browser
+5. Open http://localhost in your browser
 
 ### Optional: AI assistant
 
@@ -52,7 +47,12 @@ docker compose restart api
 ```
 docker compose pull
 docker compose up -d
-docker compose exec api npm run migrate
+```
+
+Migrations apply automatically on startup. To undo the most recent
+migration batch manually:
+```
+docker compose exec api npm run migrate:rollback
 ```
 
 ---

@@ -1,6 +1,27 @@
+import path from 'path';
 import { db } from '../config/database';
 import { env } from '../config/env';
 import type { Account } from '../types';
+
+/**
+ * Apply pending database migrations at startup. Resolving the directory
+ * relative to __dirname makes this work both in development (src/…/*.ts
+ * via ts-node) and in the production image (dist/…/*.js) — the compiled
+ * image has no knexfile, so the knex CLI cannot be used there.
+ */
+export async function runMigrations(): Promise<void> {
+  const directory = path.join(__dirname, '..', 'db', 'migrations');
+  // Match this file's own extension so the compiled build only loads .js
+  // (dist also contains .d.ts declaration files, which knex must not load).
+  const loadExtensions = [path.extname(__filename)];
+  const [batch, applied] = (await db.migrate.latest({ directory, loadExtensions })) as [number, string[]];
+  if (applied.length > 0) {
+    console.log(`Applied ${applied.length} database migration(s) (batch ${batch}):`);
+    applied.forEach((m) => console.log(`  - ${m}`));
+  } else {
+    console.log('Database schema is up to date.');
+  }
+}
 
 /**
  * Promote the account matching SUPER_ADMIN_EMAIL to super_admin.
