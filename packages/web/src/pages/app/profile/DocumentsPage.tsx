@@ -21,6 +21,7 @@ export function DocumentsPage() {
   const [file, setFile] = useState<File | null>(null);
   const [label, setLabel] = useState('');
   const [category, setCategory] = useState('medical_record');
+  const [restrictedRoles, setRestrictedRoles] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState<CareDocument | null>(null);
 
@@ -37,11 +38,13 @@ export function DocumentsPage() {
       form.append('file', file!);
       form.append('category', category);
       form.append('label', label.trim() || file!.name);
+      for (const role of restrictedRoles) form.append('visible_to_roles', role);
       return api.upload(`/care-profiles/${profile.id}/documents`, form);
     },
     onSuccess: () => {
       setFile(null);
       setLabel('');
+      setRestrictedRoles([]);
       setError('');
       if (fileInput.current) fileInput.current.value = '';
       invalidate();
@@ -98,6 +101,14 @@ export function DocumentsPage() {
                   </td>
                   <td className="py-2.5">
                     <span className="badge bg-surface-2 text-muted text-xs">{documentCategoryLabel(doc.category)}</span>
+                    {(doc.visible_to_roles?.length ?? 0) > 0 ? (
+                      <span
+                        className="badge bg-amber-50 text-amber-700 text-xs ml-1"
+                        title={`Visible to the owner and: ${doc.visible_to_roles!.join(', ')}`}
+                      >
+                        Restricted
+                      </span>
+                    ) : null}
                   </td>
                   <td className="py-2.5 text-muted text-xs">{format(new Date(doc.created_at), 'd MMM yyyy')}</td>
                   <td className="py-2.5 text-right whitespace-nowrap space-x-2">
@@ -157,6 +168,40 @@ export function DocumentsPage() {
               </option>
             ))}
           </select>
+        </div>
+        <div>
+          <span className="block text-sm font-medium text-ink mb-1">Who can see it</span>
+          <label className="flex items-center gap-2 text-sm text-ink">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+              checked={restrictedRoles.length > 0}
+              onChange={(e) => setRestrictedRoles(e.target.checked ? ['family'] : [])}
+            />
+            Restrict to selected roles
+          </label>
+          {restrictedRoles.length > 0 ? (
+            <div className="mt-2 space-y-1 pl-6">
+              {['family', 'carer', 'legal', 'organisation'].map((role) => (
+                <label key={role} className="flex items-center gap-2 text-sm text-ink capitalize">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    checked={restrictedRoles.includes(role)}
+                    onChange={(e) =>
+                      setRestrictedRoles((prev) =>
+                        e.target.checked ? [...prev, role] : prev.filter((r) => r !== role)
+                      )
+                    }
+                  />
+                  {role}
+                </label>
+              ))}
+              <p className="text-xs text-muted">The profile owner always has access.</p>
+            </div>
+          ) : (
+            <p className="mt-1 text-xs text-muted pl-6">Everyone in the care circle can see it.</p>
+          )}
         </div>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <Button type="submit" className="w-full" loading={uploadMutation.isPending} disabled={!file}>

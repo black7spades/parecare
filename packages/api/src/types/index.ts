@@ -52,6 +52,8 @@ export type CarePhase =
   | 'residential_ongoing'
   | 'end_of_life';
 
+export type CirclePermission = 'viewer' | 'contributor';
+
 export interface CareCircleMember {
   id: string;
   care_profile_id: string;
@@ -59,6 +61,7 @@ export interface CareCircleMember {
   invited_email: string | null;
   display_name: string;
   role: string;
+  permission: CirclePermission;
   role_description: string | null;
   poa_type: string | null;
   poa_activated: boolean;
@@ -175,10 +178,16 @@ export interface AiConversation {
   updated_at: string | Date;
 }
 
+export interface CareAccess {
+  level: 'owner' | 'contributor' | 'viewer';
+  member: CareCircleMember | null;
+}
+
 declare global {
   namespace Express {
     interface Request {
       account?: Account;
+      careAccess?: CareAccess;
     }
   }
 }

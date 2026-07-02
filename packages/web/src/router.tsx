@@ -17,6 +17,7 @@ import { EmergencySheetPage } from './pages/app/profile/EmergencySheetPage';
 import { DocumentsPage } from './pages/app/profile/DocumentsPage';
 import { QuestionsPage } from './pages/app/profile/QuestionsPage';
 import { ProvidersPage } from './pages/app/profile/ProvidersPage';
+import { ActivityPage } from './pages/app/profile/ActivityPage';
 import { AiPage } from './pages/app/profile/AiPage';
 import { InvitePage } from './pages/InvitePage';
 import { SubscriptionPage } from './pages/account/Subscription';
@@ -79,6 +80,7 @@ export const router = createBrowserRouter([
           { path: 'documents', element: <DocumentsPage /> },
           { path: 'questions', element: <QuestionsPage /> },
           { path: 'providers', element: <ProvidersPage /> },
+          { path: 'activity', element: <ActivityPage /> },
           { path: 'ai', element: <AiPage /> },
         ],
       },

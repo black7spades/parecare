@@ -9,9 +9,15 @@ Each person in care gets a profile with:
 - **Care journey pipeline** — six life phases from early concern to end of
   life, each seeding its own checklist when entered
 - **Care circle** — invite family, friends and organisations by email;
-  members see the shared profile on their own dashboard. Power of
+  members see the shared profile on their own dashboard. Each member is
+  a **contributor** (can add and edit records) or a **viewer** (read +
+  conversation only); circle management is owner-only. Power of
   attorney is a checkbox on any member (type + activated flag) and shows
   as a badge everywhere they appear
+- **Activity trail** — an append-only record of every change (who,
+  what, when), visible to the whole circle
+- **Document visibility** — restrict sensitive documents (wills,
+  financials) to selected circle roles; the owner always has access
 - **Care plan** — conditions, medications, dietary needs, mobility aids,
   GP, advance care directive, emergency contacts
 - **Tasks** — one-off or recurring, assignable to circle members

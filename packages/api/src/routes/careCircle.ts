@@ -6,6 +6,7 @@ import { requireAuth } from '../middleware/auth';
 import { requireCountBelow } from '../middleware/subscriptionGate';
 import { sendInviteEmail } from '../services/email';
 import { env } from '../config/env';
+import { requireProfileOwner } from '../middleware/permissions';
 import type { CareCircleMember } from '../types';
 
 export const careCircleRouter = Router({ mergeParams: true });
@@ -16,6 +17,7 @@ const memberSchema = z.object({
   role: z.string().min(1).max(100),
   role_description: z.string().optional().nullable(),
   poa_type: z.string().optional().nullable(),
+  permission: z.enum(['viewer', 'contributor']).default('contributor'),
 });
 
 careCircleRouter.get('/', requireAuth, async (req, res) => {
@@ -28,6 +30,7 @@ careCircleRouter.get('/', requireAuth, async (req, res) => {
 careCircleRouter.post(
   '/',
   requireAuth,
+  requireProfileOwner,
   requireCountBelow('care_circle_members', async (req) => {
     const result = await db('care_circle_members')
       .where({ care_profile_id: req.params['id'] })
@@ -75,12 +78,13 @@ careCircleRouter.get('/:memberId', requireAuth, async (req, res) => {
   res.json({ member });
 });
 
-careCircleRouter.patch('/:memberId', requireAuth, async (req, res) => {
+careCircleRouter.patch('/:memberId', requireAuth, requireProfileOwner, async (req, res) => {
   const updateSchema = z.object({
     role: z.string().min(1).optional(),
     role_description: z.string().optional().nullable(),
     poa_type: z.string().optional().nullable(),
     poa_activated: z.boolean().optional(),
+    permission: z.enum(['viewer', 'contributor']).optional(),
   });
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -100,7 +104,7 @@ careCircleRouter.patch('/:memberId', requireAuth, async (req, res) => {
   res.json({ member: updated });
 });
 
-careCircleRouter.delete('/:memberId', requireAuth, async (req, res) => {
+careCircleRouter.delete('/:memberId', requireAuth, requireProfileOwner, async (req, res) => {
   const affected = await db('care_circle_members')
     .where({ id: req.params['memberId'], care_profile_id: req.params['id'] })
     .delete();

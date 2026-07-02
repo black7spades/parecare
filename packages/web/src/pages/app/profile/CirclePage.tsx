@@ -9,7 +9,7 @@ import { POA_TYPES, poaLabel, type CircleMember } from '../../../lib/care';
 import { useProfile } from './ProfileLayout';
 
 export function CirclePage() {
-  const { profile } = useProfile();
+  const { profile, isOwner } = useProfile();
   const queryClient = useQueryClient();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [editing, setEditing] = useState<CircleMember | null>(null);
@@ -39,7 +39,7 @@ export function CirclePage() {
             The family members, friends and organisations involved in {profile.preferred_name ?? profile.full_name}'s care.
           </p>
         </div>
-        <Button onClick={() => setInviteOpen(true)}>Invite someone</Button>
+        {isOwner ? <Button onClick={() => setInviteOpen(true)}>Invite someone</Button> : null}
       </div>
 
       {isLoading ? (
@@ -49,7 +49,7 @@ export function CirclePage() {
           <p className="text-sm text-muted mb-4">
             No one in the circle yet. Invite family, friends, or an organisation — anyone who should stay in the loop.
           </p>
-          <Button onClick={() => setInviteOpen(true)}>Send the first invite</Button>
+          {isOwner ? <Button onClick={() => setInviteOpen(true)}>Send the first invite</Button> : null}
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
@@ -61,7 +61,10 @@ export function CirclePage() {
                     <h3 className="text-sm font-semibold text-ink">{m.display_name}</h3>
                     <PoaBadge type={m.poa_type} activated={m.poa_activated} />
                   </div>
-                  <p className="text-xs text-muted capitalize">{m.role}</p>
+                  <p className="text-xs text-muted capitalize">
+                    {m.role}
+                    {m.permission === 'viewer' ? ' · view only' : ''}
+                  </p>
                 </div>
                 <span
                   className={`badge text-xs ${m.invite_accepted ? 'bg-primary-50 text-primary' : 'bg-surface-2 text-muted'}`}
@@ -72,14 +75,16 @@ export function CirclePage() {
               {m.invited_email ? <p className="text-xs text-muted mt-1">{m.invited_email}</p> : null}
               {m.poa_type ? <p className="text-xs text-amber-700 mt-1">{poaLabel(m.poa_type)}</p> : null}
               {m.role_description ? <p className="text-sm text-ink mt-2">{m.role_description}</p> : null}
-              <div className="mt-3 flex gap-2">
-                <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>
-                  Edit
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setRemoving(m)}>
-                  Remove
-                </Button>
-              </div>
+              {isOwner ? (
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>
+                    Edit
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setRemoving(m)}>
+                    Remove
+                  </Button>
+                </div>
+              ) : null}
             </div>
           ))}
         </div>
@@ -121,6 +126,25 @@ export function CirclePage() {
           </Button>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+function PermissionSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div>
+      <label htmlFor="member-permission" className="block text-sm font-medium text-ink mb-1">
+        Access level
+      </label>
+      <select
+        id="member-permission"
+        className="block w-full rounded-md border border-border bg-white px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="contributor">Contributor — can add and edit records</option>
+        <option value="viewer">Viewer — can read and join the conversation only</option>
+      </select>
     </div>
   );
 }
@@ -197,6 +221,7 @@ function InviteModal({
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState('family');
+  const [permission, setPermission] = useState('contributor');
   const [description, setDescription] = useState('');
   const [poaType, setPoaType] = useState('');
   const [poaActivated, setPoaActivated] = useState(false);
@@ -208,6 +233,7 @@ function InviteModal({
         invited_email: email,
         display_name: name,
         role,
+        permission,
         role_description: description || null,
         poa_type: poaType || null,
       }),
@@ -253,6 +279,7 @@ function InviteModal({
             <option value="other">Other</option>
           </select>
         </div>
+        <PermissionSelect value={permission} onChange={setPermission} />
         <Textarea
           label="What do they do? (optional)"
           value={description}
@@ -287,6 +314,7 @@ function EditMemberModal({
   onSaved: () => void;
 }) {
   const [role, setRole] = useState('');
+  const [permission, setPermission] = useState('contributor');
   const [description, setDescription] = useState('');
   const [poaType, setPoaType] = useState('');
   const [poaActivated, setPoaActivated] = useState(false);
@@ -295,6 +323,7 @@ function EditMemberModal({
   useEffect(() => {
     if (member) {
       setRole(member.role);
+      setPermission(member.permission ?? 'contributor');
       setDescription(member.role_description ?? '');
       setPoaType(member.poa_type ?? '');
       setPoaActivated(member.poa_activated);
@@ -306,6 +335,7 @@ function EditMemberModal({
     mutationFn: () =>
       api.patch(`/care-profiles/${profileId}/circle/${member!.id}`, {
         role,
+        permission,
         role_description: description || null,
         poa_type: poaType || null,
         poa_activated: poaType ? poaActivated : false,
@@ -325,6 +355,7 @@ function EditMemberModal({
         }}
       >
         <Input label="Role" value={role} onChange={(e) => setRole(e.target.value)} required />
+        <PermissionSelect value={permission} onChange={setPermission} />
         <Textarea
           label="What do they do?"
           value={description}

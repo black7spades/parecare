@@ -68,6 +68,9 @@ export const POA_TYPES = [
 export const poaLabel = (type: string | null) =>
   POA_TYPES.find((t) => t.value === type)?.label ?? 'Power of attorney';
 
+export type CirclePermission = 'viewer' | 'contributor';
+export type AccessLevel = 'owner' | 'contributor' | 'viewer';
+
 export interface CircleMember {
   id: string;
   account_id: string | null;
@@ -78,8 +81,35 @@ export interface CircleMember {
   poa_type: string | null;
   poa_activated: boolean;
   invite_accepted: boolean;
+  permission: CirclePermission;
   created_at: string;
 }
+
+export interface ActivityEntry {
+  id: string;
+  action: 'created' | 'updated' | 'deleted';
+  entity_type: string;
+  summary: string | null;
+  created_at: string;
+  actor_name: string | null;
+}
+
+const ENTITY_LABELS: Record<string, string> = {
+  circle: 'care circle member',
+  log: 'care log entry',
+  plan: 'care plan',
+  checklists: 'checklist item',
+  questions: 'question',
+  documents: 'document',
+  providers: 'provider',
+  reminders: 'task',
+  messages: 'message',
+  'memory-book': 'memory',
+  'care-profiles': 'profile',
+  ai: 'AI conversation',
+};
+
+export const entityLabel = (type: string) => ENTITY_LABELS[type] ?? type;
 
 export const DOCUMENT_CATEGORIES = [
   { value: 'poa', label: 'Power of attorney' },
@@ -103,6 +133,7 @@ export interface CareDocument {
   file_url: string;
   file_size_bytes: number | null;
   mime_type: string | null;
+  visible_to_roles: string[] | null;
   created_at: string;
 }
 

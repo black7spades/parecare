@@ -120,8 +120,10 @@ careProfilesRouter.get('/:id', requireAuth, async (req, res) => {
       res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
       return;
     }
+    res.json({ profile, access: membership.permission === 'viewer' ? 'viewer' : 'contributor' });
+    return;
   }
-  res.json({ profile });
+  res.json({ profile, access: 'owner' });
 });
 
 const updateProfileSchema = profileSchema.partial();

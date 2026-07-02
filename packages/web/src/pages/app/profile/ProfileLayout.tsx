@@ -2,10 +2,13 @@ import { NavLink, Outlet, useNavigate, useOutletContext, useParams } from 'react
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
-import type { CareProfile } from '../../../lib/care';
+import type { AccessLevel, CareProfile } from '../../../lib/care';
 
 export interface ProfileContext {
   profile: CareProfile;
+  access: AccessLevel;
+  isOwner: boolean;
+  canEdit: boolean;
 }
 
 export function useProfile(): ProfileContext {
@@ -23,6 +26,7 @@ const TABS = [
   { to: 'documents', label: 'Documents' },
   { to: 'questions', label: 'Questions' },
   { to: 'providers', label: 'Providers' },
+  { to: 'activity', label: 'Activity' },
   { to: 'ai', label: 'Ask PareCare' },
 ];
 
@@ -32,7 +36,7 @@ export function ProfileLayout() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['care-profile', profileId],
-    queryFn: () => api.get<{ profile: CareProfile }>(`/care-profiles/${profileId}`),
+    queryFn: () => api.get<{ profile: CareProfile; access?: AccessLevel }>(`/care-profiles/${profileId}`),
   });
 
   if (isLoading) return <p className="text-sm text-muted">Loading…</p>;
@@ -45,12 +49,26 @@ export function ProfileLayout() {
     );
   }
   const profile = data.profile;
+  const access: AccessLevel = data.access ?? 'owner';
+  const context: ProfileContext = {
+    profile,
+    access,
+    isOwner: access === 'owner',
+    canEdit: access !== 'viewer',
+  };
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold text-ink">{profile.full_name}</h1>
-        {profile.preferred_name ? <p className="text-sm text-muted">Known as {profile.preferred_name}</p> : null}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-xl font-semibold text-ink">{profile.full_name}</h1>
+          {profile.preferred_name ? <p className="text-sm text-muted">Known as {profile.preferred_name}</p> : null}
+        </div>
+        {access === 'viewer' ? (
+          <span className="badge bg-surface-2 text-muted" title="You can read everything and join the conversation, but not change records.">
+            View-only access
+          </span>
+        ) : null}
       </div>
 
       <nav className="flex gap-1 border-b border-border overflow-x-auto -mb-2 pb-0">
@@ -72,7 +90,7 @@ export function ProfileLayout() {
         ))}
       </nav>
 
-      <Outlet context={{ profile } satisfies ProfileContext} />
+      <Outlet context={context} />
     </div>
   );
 }

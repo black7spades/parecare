@@ -101,6 +101,7 @@ export async function requireCareProfileAccess(req: Request, res: Response, next
     return;
   }
   if (profile.account_id === req.account.id) {
+    req.careAccess = { level: 'owner', member: null };
     next();
     return;
   }
@@ -112,5 +113,9 @@ export async function requireCareProfileAccess(req: Request, res: Response, next
     res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
     return;
   }
+  req.careAccess = {
+    level: membership.permission === 'viewer' ? 'viewer' : 'contributor',
+    member: membership,
+  };
   next();
 }
