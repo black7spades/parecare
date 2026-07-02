@@ -4,6 +4,7 @@ import { useAuthStore } from '../../stores/auth';
 import { api } from '../../api/client';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
+import { OAuthButtons } from '../../components/OAuthButtons';
 
 export function Register() {
   const [displayName, setDisplayName] = useState('');
@@ -44,6 +45,7 @@ export function Register() {
           <p className="text-muted text-sm">Create your account</p>
         </div>
         <div className="card">
+          <OAuthButtons />
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
               label="Your name"

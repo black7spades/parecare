@@ -5,9 +5,13 @@ export type AccountRole = 'super_admin' | 'admin' | 'user';
 export interface Account {
   id: string;
   email: string;
-  password_hash: string;
+  password_hash: string | null;
   display_name: string;
   role: AccountRole;
+  oauth_provider: 'google' | 'facebook' | null;
+  oauth_subject: string | null;
+  mfa_secret: string | null;
+  mfa_enabled: boolean;
   subscription_status: SubscriptionStatus | null;
   subscription_tier: SubscriptionTier;
   stripe_customer_id: string | null;
