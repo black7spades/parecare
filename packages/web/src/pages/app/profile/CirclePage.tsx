@@ -33,14 +33,18 @@ export function CirclePage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <div>
           <h2 className="text-base font-semibold text-ink">Care circle</h2>
           <p className="text-sm text-muted">
             The family members, friends and organisations involved in {careName}'s care.
           </p>
         </div>
-        {isOwner ? <Button onClick={() => setInviteOpen(true)}>Invite someone</Button> : null}
+        {isOwner ? (
+          <Button className="self-start sm:self-auto" onClick={() => setInviteOpen(true)}>
+            Invite someone
+          </Button>
+        ) : null}
       </div>
 
       {isLoading ? (

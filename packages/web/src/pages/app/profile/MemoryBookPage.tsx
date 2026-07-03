@@ -113,7 +113,7 @@ export function MemoryBookPage() {
                 {entry.author_account_id === me?.id ? (
                   <button
                     type="button"
-                    className="text-xs text-muted hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="text-xs text-muted hover:text-red-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                     onClick={() => deleteMutation.mutate(entry.id)}
                   >
                     Remove

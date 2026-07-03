@@ -76,7 +76,7 @@ export function PlanPage() {
         saveMutation.mutate();
       }}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-ink">Care plan</h2>
           <p className="text-sm text-muted">Medical and day-to-day information everyone in the circle can rely on.</p>
@@ -239,7 +239,10 @@ function MedicationsEditor({
       <span className="block text-sm font-medium text-ink mb-1">Medications</span>
       <div className="space-y-2">
         {medications.map((m, i) => (
-          <div key={i} className="grid grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 items-center">
+          <div
+            key={i}
+            className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 sm:items-center rounded-md border border-border p-2 sm:border-0 sm:p-0"
+          >
             <Input aria-label="Medication name" placeholder="Name" value={m.name} onChange={(e) => update(i, { name: e.target.value })} />
             <Input aria-label="Dose" placeholder="Dose" value={m.dose ?? ''} onChange={(e) => update(i, { dose: e.target.value })} />
             <Input aria-label="Frequency" placeholder="Frequency" value={m.frequency ?? ''} onChange={(e) => update(i, { frequency: e.target.value })} />
@@ -247,10 +250,11 @@ function MedicationsEditor({
             <button
               type="button"
               aria-label="Remove medication"
-              className="text-muted hover:text-red-600 text-sm px-1"
+              className="col-span-2 sm:col-span-1 justify-self-end text-muted hover:text-red-600 text-sm px-2 py-1"
               onClick={() => onChange(medications.filter((_, idx) => idx !== i))}
             >
-              ✕
+              <span className="sm:hidden">Remove</span>
+              <span className="hidden sm:inline">✕</span>
             </button>
           </div>
         ))}
@@ -275,17 +279,21 @@ function ContactsEditor({
     <div>
       <div className="space-y-2">
         {contacts.map((c, i) => (
-          <div key={i} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-center">
+          <div
+            key={i}
+            className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_1fr_auto] gap-2 sm:items-center rounded-md border border-border p-2 sm:border-0 sm:p-0"
+          >
             <Input aria-label="Contact name" placeholder="Name" value={c.name} onChange={(e) => update(i, { name: e.target.value })} />
             <Input aria-label="Relationship" placeholder="Relationship" value={c.relationship ?? ''} onChange={(e) => update(i, { relationship: e.target.value })} />
             <Input aria-label="Contact phone" placeholder="Phone" value={c.phone} onChange={(e) => update(i, { phone: e.target.value })} />
             <button
               type="button"
               aria-label="Remove contact"
-              className="text-muted hover:text-red-600 text-sm px-1"
+              className="col-span-2 sm:col-span-1 justify-self-end text-muted hover:text-red-600 text-sm px-2 py-1"
               onClick={() => onChange(contacts.filter((_, idx) => idx !== i))}
             >
-              ✕
+              <span className="sm:hidden">Remove</span>
+              <span className="hidden sm:inline">✕</span>
             </button>
           </div>
         ))}
