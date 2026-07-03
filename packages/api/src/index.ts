@@ -29,6 +29,8 @@ import { requireCareProfileAccess } from './middleware/subscriptionGate';
 import { auditTrail, blockViewerWrites } from './middleware/permissions';
 import { activityRouter } from './routes/activity';
 import { ensureSuperAdmin, runMigrations } from './services/bootstrap';
+import { loadSettings, seedSettingsFromEnv, subscribeSettingsInvalidation } from './config/settings';
+import { settingsRouter } from './routes/settings';
 
 // Backstop for promise rejections outside request handling (e.g. redis,
 // timers). Log instead of taking the whole API down.
@@ -60,6 +62,9 @@ const v1 = express.Router();
 
 v1.use('/auth', authRouter);
 v1.use('/auth', oauthRouter);
+// Super-admin runtime settings. Must be registered before the admin router so
+// its requireRole('admin') guard doesn't shadow the super-admin-only routes.
+v1.use('/admin/settings', settingsRouter);
 v1.use('/admin', adminRouter);
 v1.use('/subscriptions', subscriptionsRouter);
 v1.use('/care-circle', inviteRouter);
@@ -96,6 +101,9 @@ async function start(): Promise<void> {
     await connectRedis();
     await runMigrations();
     await ensureSuperAdmin();
+    await seedSettingsFromEnv();
+    await loadSettings();
+    await subscribeSettingsInvalidation();
     startReminderScheduler();
     app.listen(env.PORT, () => {
       console.log(`PareCare API running on port ${env.PORT}`);

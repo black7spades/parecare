@@ -1,14 +1,16 @@
 import nodemailer from 'nodemailer';
 import { env } from '../config/env';
+import { getEmailConfig } from '../config/settings';
 
 function getTransport(): nodemailer.Transporter {
+  const cfg = getEmailConfig();
   return nodemailer.createTransport({
-    host: env.SMTP_HOST,
-    port: env.SMTP_PORT,
-    secure: env.SMTP_PORT === 465,
+    host: cfg.smtpHost,
+    port: cfg.smtpPort,
+    secure: cfg.smtpPort === 465,
     auth:
-      env.SMTP_USER && env.SMTP_PASS
-        ? { user: env.SMTP_USER, pass: env.SMTP_PASS }
+      cfg.smtpUser && cfg.smtpPass
+        ? { user: cfg.smtpUser, pass: cfg.smtpPass }
         : undefined,
   });
 }
@@ -19,14 +21,15 @@ export async function sendInviteEmail(
   profileName: string,
   inviteUrl: string
 ): Promise<void> {
-  if (!env.SMTP_HOST) {
+  const cfg = getEmailConfig();
+  if (!cfg.smtpHost) {
     console.warn('SMTP not configured — skipping invite email to', toEmail);
     return;
   }
 
   const transport = getTransport();
   await transport.sendMail({
-    from: env.EMAIL_FROM,
+    from: cfg.from,
     to: toEmail,
     subject: `${inviterName} has invited you to PareCare`,
     text: [
@@ -51,11 +54,12 @@ export async function sendReminderEmail(
   title: string,
   body: string | null
 ): Promise<void> {
-  if (!env.SMTP_HOST) return;
+  const cfg = getEmailConfig();
+  if (!cfg.smtpHost) return;
 
   const transport = getTransport();
   await transport.sendMail({
-    from: env.EMAIL_FROM,
+    from: cfg.from,
     to: toEmail,
     subject: `Reminder: ${title}`,
     text: [title, body ?? '', '', 'View in PareCare: ' + env.APP_URL].join('\n'),
@@ -65,5 +69,25 @@ export async function sendReminderEmail(
       ${body ? `<p>${body}</p>` : ''}
       <p><a href="${env.APP_URL}">View in PareCare</a></p>
     `,
+  });
+}
+
+/**
+ * Send a diagnostic email to verify the current SMTP settings. Unlike the
+ * fire-and-forget senders above, this throws so the settings screen can show
+ * the transport error.
+ */
+export async function sendTestEmail(toEmail: string): Promise<void> {
+  const cfg = getEmailConfig();
+  if (!cfg.smtpHost) {
+    throw Object.assign(new Error('No SMTP host is configured.'), { status: 400, code: 'EMAIL_NOT_CONFIGURED' });
+  }
+  const transport = getTransport();
+  await transport.sendMail({
+    from: cfg.from,
+    to: toEmail,
+    subject: 'PareCare test email',
+    text: 'This is a test email from PareCare. Your SMTP settings are working.',
+    html: '<p>This is a test email from PareCare. Your SMTP settings are working.</p>',
   });
 }

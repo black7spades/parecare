@@ -47,6 +47,22 @@ Each person in care gets a profile with:
 - **Ask PareCare** — AI assistant with context on the person's situation
   (requires `ANTHROPIC_API_KEY`)
 
+## System settings (no .env edits or restarts)
+
+Most runtime configuration can be edited in the app by a super admin at
+**/admin/settings** instead of through `.env`: the AI assistant (provider,
+model, keys), outgoing email (SMTP), Google/Facebook sign-in, file storage
+(local or S3), and Stripe billing. Changes apply immediately, with no
+container restart.
+
+On first start each setting is seeded from its `.env` value, so nothing
+changes until you edit it; after that the saved value wins, and blanking a
+field reverts it to the `.env` value. Secrets (API keys, SMTP password, and
+the like) are stored encrypted and never shown again, only reported as set or
+not set. A few things stay in `.env` because they bootstrap the app or decide
+who may reach the settings screen: `DATABASE_URL`, `REDIS_URL`, `PORT`,
+`JWT_SECRET`, `SUPER_ADMIN_EMAIL`, `SELF_HOSTED`, and `APP_URL`.
+
 ## Running with Docker (self-hosted)
 
 ### Requirements

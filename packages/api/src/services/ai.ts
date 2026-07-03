@@ -1,5 +1,6 @@
 import { db } from '../config/database';
 import { env } from '../config/env';
+import { getAiConfig } from '../config/settings';
 import { complete, isAiConfigured } from './aiProvider';
 import type { Account, CareProfile, CareCircleMember } from '../types';
 
@@ -8,7 +9,7 @@ function ensureConfigured(): void {
     // 503, not 402 — a missing provider is a server configuration issue,
     // and 402 makes the web app show the subscription upgrade prompt.
     throw Object.assign(
-      new Error('AI assistant is not configured. Set AI_PROVIDER and its API key (or a local model) on the server.'),
+      new Error('AI assistant is not configured. Set the AI provider and its API key (or a local model) in the settings screen.'),
       { status: 503, code: 'AI_NOT_CONFIGURED' }
     );
   }
@@ -16,10 +17,11 @@ function ensureConfigured(): void {
 
 function getTokenLimit(account: Account): number {
   if (env.SELF_HOSTED) return -1;
+  const cfg = getAiConfig();
   const tier = account.subscription_tier;
-  if (tier === 'professional') return env.AI_TOKENS_PROFESSIONAL;
-  if (tier === 'family') return env.AI_TOKENS_FAMILY;
-  return env.AI_TOKENS_FREE;
+  if (tier === 'professional') return cfg.tokensProfessional;
+  if (tier === 'family') return cfg.tokensFamily;
+  return cfg.tokensFree;
 }
 
 export async function checkTokenBudget(account: Account): Promise<void> {

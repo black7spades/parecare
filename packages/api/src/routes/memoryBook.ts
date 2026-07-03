@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import { z } from 'zod';
 import { db } from '../config/database';
-import { env } from '../config/env';
+import { getStorageConfig } from '../config/settings';
 import { requireAuth } from '../middleware/auth';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
 
@@ -78,7 +78,7 @@ memoryBookRouter.get('/:entryId/photo', requireAuth, async (req, res) => {
     res.redirect(await getDownloadUrl(entry.photo_url));
     return;
   }
-  const localPath = path.join(env.STORAGE_LOCAL_PATH, entry.photo_url.slice('/uploads/'.length));
+  const localPath = path.join(getStorageConfig().localPath, entry.photo_url.slice('/uploads/'.length));
   res.sendFile(localPath, (err) => {
     if (err && !res.headersSent) {
       res.status(404).json({ error: 'Photo missing from storage', code: 'NOT_FOUND' });

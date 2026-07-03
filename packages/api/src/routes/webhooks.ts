@@ -1,12 +1,13 @@
 import { Router, Request, Response } from 'express';
 import Stripe from 'stripe';
-import { env } from '../config/env';
+import { getStripeConfig } from '../config/settings';
 import { syncSubscriptionFromStripe, cancelSubscriptionInDb } from '../services/subscriptions';
 
 export const webhookRouter = Router();
 
 webhookRouter.post('/', async (req: Request, res: Response): Promise<void> => {
-  if (!env.STRIPE_WEBHOOK_SECRET || !env.STRIPE_SECRET_KEY) {
+  const stripeCfg = getStripeConfig();
+  if (!stripeCfg.webhookSecret || !stripeCfg.secretKey) {
     res.status(500).json({ error: 'Stripe not configured', code: 'CONFIG_ERROR' });
     return;
   }
@@ -19,9 +20,9 @@ webhookRouter.post('/', async (req: Request, res: Response): Promise<void> => {
 
   let event: Stripe.Event;
   try {
-    const stripe = new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' });
+    const stripe = new Stripe(stripeCfg.secretKey, { apiVersion: '2023-10-16' });
     // req.body is a Buffer from express.raw() — must not be parsed as JSON
-    event = stripe.webhooks.constructEvent(req.body as Buffer, sig, env.STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(req.body as Buffer, sig, stripeCfg.webhookSecret);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown';
     console.error('Stripe webhook signature verification failed:', msg);
@@ -34,7 +35,7 @@ webhookRouter.post('/', async (req: Request, res: Response): Promise<void> => {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
         if (session.mode === 'subscription' && session.subscription) {
-          const stripe = new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' });
+          const stripe = new Stripe(stripeCfg.secretKey, { apiVersion: '2023-10-16' });
           const sub = await stripe.subscriptions.retrieve(session.subscription as string);
           await syncSubscriptionFromStripe(sub);
         }

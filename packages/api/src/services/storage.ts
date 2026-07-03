@@ -2,17 +2,18 @@ import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } fro
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as fs from 'fs';
 import * as path from 'path';
-import { env } from '../config/env';
+import { getStorageConfig } from '../config/settings';
 
 function getS3Client(): S3Client {
+  const cfg = getStorageConfig();
   return new S3Client({
-    region: env.S3_REGION,
+    region: cfg.s3Region,
     credentials:
-      env.S3_ACCESS_KEY && env.S3_SECRET_KEY
-        ? { accessKeyId: env.S3_ACCESS_KEY, secretAccessKey: env.S3_SECRET_KEY }
+      cfg.s3AccessKey && cfg.s3SecretKey
+        ? { accessKeyId: cfg.s3AccessKey, secretAccessKey: cfg.s3SecretKey }
         : undefined,
-    endpoint: env.S3_ENDPOINT,
-    forcePathStyle: !!env.S3_ENDPOINT,
+    endpoint: cfg.s3Endpoint,
+    forcePathStyle: !!cfg.s3Endpoint,
   });
 }
 
@@ -21,28 +22,30 @@ export async function uploadFile(
   key: string,
   mimeType: string
 ): Promise<string> {
-  if (env.STORAGE_PROVIDER === 's3') {
-    if (!env.S3_BUCKET) throw new Error('S3_BUCKET is not configured');
+  const cfg = getStorageConfig();
+  if (cfg.provider === 's3') {
+    if (!cfg.s3Bucket) throw new Error('S3 bucket is not configured');
     const client = getS3Client();
     await client.send(
       new PutObjectCommand({
-        Bucket: env.S3_BUCKET,
+        Bucket: cfg.s3Bucket,
         Key: key,
         Body: buffer,
         ContentType: mimeType,
       })
     );
-    return `s3://${env.S3_BUCKET}/${key}`;
+    return `s3://${cfg.s3Bucket}/${key}`;
   }
 
-  const localPath = path.join(env.STORAGE_LOCAL_PATH, key);
+  const localPath = path.join(cfg.localPath, key);
   await fs.promises.mkdir(path.dirname(localPath), { recursive: true });
   await fs.promises.writeFile(localPath, buffer);
   return `/uploads/${key}`;
 }
 
 export async function deleteFile(fileUrl: string): Promise<void> {
-  if (env.STORAGE_PROVIDER === 's3' && fileUrl.startsWith('s3://')) {
+  const cfg = getStorageConfig();
+  if (cfg.provider === 's3' && fileUrl.startsWith('s3://')) {
     const withoutScheme = fileUrl.slice(5);
     const slashIndex = withoutScheme.indexOf('/');
     const bucket = withoutScheme.slice(0, slashIndex);
@@ -53,13 +56,13 @@ export async function deleteFile(fileUrl: string): Promise<void> {
   }
 
   if (fileUrl.startsWith('/uploads/')) {
-    const localPath = path.join(env.STORAGE_LOCAL_PATH, fileUrl.slice('/uploads/'.length));
+    const localPath = path.join(cfg.localPath, fileUrl.slice('/uploads/'.length));
     await fs.promises.unlink(localPath).catch(() => {});
   }
 }
 
 export async function getDownloadUrl(fileUrl: string): Promise<string> {
-  if (env.STORAGE_PROVIDER === 's3' && fileUrl.startsWith('s3://')) {
+  if (getStorageConfig().provider === 's3' && fileUrl.startsWith('s3://')) {
     const withoutScheme = fileUrl.slice(5);
     const slashIndex = withoutScheme.indexOf('/');
     const bucket = withoutScheme.slice(0, slashIndex);

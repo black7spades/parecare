@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { env } from '../config/env';
+import { getOAuthConfig } from '../config/settings';
 import { requireAuth } from '../middleware/auth';
 import { generateSecret, otpauthUrl, verifyTotp } from '../services/totp';
 import type { Account } from '../types';
@@ -32,9 +33,10 @@ export function accountSummary(account: Account) {
 
 // Which sign-in methods this server supports, so the UI can show buttons
 authRouter.get('/providers', (_req, res) => {
+  const oauth = getOAuthConfig();
   res.json({
-    google: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
-    facebook: !!(env.FACEBOOK_APP_ID && env.FACEBOOK_APP_SECRET),
+    google: !!(oauth.googleClientId && oauth.googleClientSecret),
+    facebook: !!(oauth.facebookAppId && oauth.facebookAppSecret),
   });
 });
 

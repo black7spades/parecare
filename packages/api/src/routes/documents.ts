@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import { z } from 'zod';
 import { db } from '../config/database';
-import { env } from '../config/env';
+import { getStorageConfig } from '../config/settings';
 import { requireAuth } from '../middleware/auth';
 import { requireFeature } from '../middleware/subscriptionGate';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
@@ -58,7 +58,7 @@ documentsRouter.post(
   '/',
   requireAuth,
   (req, res, next) => {
-    if (env.STORAGE_PROVIDER === 's3') {
+    if (getStorageConfig().provider === 's3') {
       return requireFeature('s3_storage')(req, res, next);
     }
     next();
@@ -127,7 +127,7 @@ documentsRouter.get('/:docId/file', requireAuth, async (req, res) => {
     return;
   }
 
-  const localPath = path.join(env.STORAGE_LOCAL_PATH, doc.file_url.slice('/uploads/'.length));
+  const localPath = path.join(getStorageConfig().localPath, doc.file_url.slice('/uploads/'.length));
   if (doc.mime_type) res.setHeader('Content-Type', doc.mime_type);
   const ext = path.extname(doc.file_url);
   res.setHeader('Content-Disposition', `attachment; filename="${doc.label.replace(/[^\w .-]/g, '_')}${ext}"`);

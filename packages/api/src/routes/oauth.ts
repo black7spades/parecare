@@ -2,6 +2,7 @@ import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import { db } from '../config/database';
 import { env } from '../config/env';
+import { getOAuthConfig } from '../config/settings';
 import { accountSummary, issueMfaToken, issueSessionToken } from './auth';
 import type { Account } from '../types';
 
@@ -28,8 +29,8 @@ const PROVIDERS: Record<string, ProviderConfig> = {
   google: {
     authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
     tokenUrl: 'https://oauth2.googleapis.com/token',
-    clientId: () => env.GOOGLE_CLIENT_ID,
-    clientSecret: () => env.GOOGLE_CLIENT_SECRET,
+    clientId: () => getOAuthConfig().googleClientId,
+    clientSecret: () => getOAuthConfig().googleClientSecret,
     scope: 'openid email profile',
     fetchProfile: async (accessToken) => {
       const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -47,8 +48,8 @@ const PROVIDERS: Record<string, ProviderConfig> = {
   facebook: {
     authUrl: 'https://www.facebook.com/v19.0/dialog/oauth',
     tokenUrl: 'https://graph.facebook.com/v19.0/oauth/access_token',
-    clientId: () => env.FACEBOOK_APP_ID,
-    clientSecret: () => env.FACEBOOK_APP_SECRET,
+    clientId: () => getOAuthConfig().facebookAppId,
+    clientSecret: () => getOAuthConfig().facebookAppSecret,
     scope: 'email public_profile',
     fetchProfile: async (accessToken) => {
       const res = await fetch(

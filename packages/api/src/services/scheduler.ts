@@ -1,5 +1,5 @@
 import { db } from '../config/database';
-import { env } from '../config/env';
+import { getSchedulerConfig, onSettingsChange } from '../config/settings';
 import { sendReminderEmail } from './email';
 import type { Reminder } from '../types';
 
@@ -67,19 +67,43 @@ async function tick(): Promise<void> {
   }
 }
 
+let timer: NodeJS.Timeout | null = null;
+
+// A self-rescheduling timeout (rather than a fixed setInterval) so a changed
+// interval from the settings screen takes effect on the next cycle, and so a
+// save can re-arm it immediately.
+function scheduleNext(): void {
+  const interval = getSchedulerConfig().reminderIntervalMs;
+  if (interval <= 0) {
+    timer = null;
+    return;
+  }
+  timer = setTimeout(() => {
+    tick()
+      .catch((err) => console.error('Reminder scheduler error:', err))
+      .finally(() => scheduleNext());
+  }, interval);
+  timer.unref();
+}
+
+/** Clear the pending cycle and reschedule with the current interval. */
+export function rearmScheduler(): void {
+  if (timer) clearTimeout(timer);
+  scheduleNext();
+}
+
 /**
  * Emails due reminders to their assignee (or the profile owner) and rolls
  * recurring reminders forward — previously recurring tasks stayed overdue
  * forever and nothing ever called sendReminderEmail.
  */
 export function startReminderScheduler(): void {
-  const interval = env.REMINDER_CHECK_INTERVAL_MS;
+  onSettingsChange(rearmScheduler);
+  const interval = getSchedulerConfig().reminderIntervalMs;
   if (interval <= 0) {
-    console.log('Reminder scheduler disabled (REMINDER_CHECK_INTERVAL_MS <= 0).');
+    console.log('Reminder scheduler disabled (interval <= 0).');
     return;
   }
-  setInterval(() => {
-    tick().catch((err) => console.error('Reminder scheduler error:', err));
-  }, interval).unref();
+  scheduleNext();
   console.log(`Reminder scheduler running (every ${Math.round(interval / 1000)}s).`);
 }

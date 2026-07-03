@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { env } from '../config/env';
+import { getAiConfig } from '../config/settings';
 
 /**
  * Provider-agnostic chat completion. Three wire protocols cover every
@@ -42,29 +42,32 @@ function notConfigured(detail: string): Error {
 }
 
 function pickModel(tier: Tier): string {
-  if (tier === 'mediation' && env.AI_MEDIATION_MODEL) return env.AI_MEDIATION_MODEL;
-  if (env.AI_MODEL) return env.AI_MODEL;
-  const defaults = DEFAULT_MODELS[env.AI_PROVIDER];
+  const cfg = getAiConfig();
+  if (tier === 'mediation' && cfg.mediationModel) return cfg.mediationModel;
+  if (cfg.model) return cfg.model;
+  const defaults = DEFAULT_MODELS[cfg.provider];
   if (defaults) return defaults[tier];
-  throw notConfigured(`set AI_MODEL for the '${env.AI_PROVIDER}' provider (e.g. the model name loaded in Ollama or LM Studio).`);
+  throw notConfigured(`set a model for the '${cfg.provider}' provider (e.g. the model name loaded in Ollama or LM Studio).`);
 }
 
 export function isAiConfigured(): boolean {
-  switch (env.AI_PROVIDER) {
+  const cfg = getAiConfig();
+  switch (cfg.provider) {
     case 'anthropic':
-      return !!(env.ANTHROPIC_API_KEY ?? env.AI_API_KEY);
+      return !!(cfg.anthropicApiKey ?? cfg.apiKey);
     case 'openai':
     case 'google':
-      return !!env.AI_API_KEY;
+      return !!cfg.apiKey;
     default:
       // Local/self-hosted servers need a model name; a key is optional
-      return !!env.AI_MODEL;
+      return !!cfg.model;
   }
 }
 
 async function completeAnthropic(system: string, turns: ChatTurn[], maxTokens: number, tier: Tier): Promise<CompletionResult> {
-  const apiKey = env.ANTHROPIC_API_KEY ?? env.AI_API_KEY;
-  if (!apiKey) throw notConfigured('set ANTHROPIC_API_KEY (or AI_API_KEY) in your environment.');
+  const cfg = getAiConfig();
+  const apiKey = cfg.anthropicApiKey ?? cfg.apiKey;
+  if (!apiKey) throw notConfigured('set the Anthropic API key in the settings screen.');
   const client = new Anthropic({ apiKey });
   const response = await client.messages.create({
     model: pickModel(tier),
@@ -79,18 +82,19 @@ async function completeAnthropic(system: string, turns: ChatTurn[], maxTokens: n
 }
 
 async function completeOpenAiCompatible(system: string, turns: ChatTurn[], maxTokens: number, tier: Tier): Promise<CompletionResult> {
-  if (env.AI_PROVIDER === 'openai' && !env.AI_API_KEY) {
-    throw notConfigured('set AI_API_KEY to your OpenAI API key.');
+  const cfg = getAiConfig();
+  if (cfg.provider === 'openai' && !cfg.apiKey) {
+    throw notConfigured('set the OpenAI API key in the settings screen.');
   }
-  const baseUrl = (env.AI_BASE_URL ?? DEFAULT_BASE_URLS[env.AI_PROVIDER] ?? '').replace(/\/$/, '');
-  if (!baseUrl) throw notConfigured("set AI_BASE_URL to your server's OpenAI-compatible endpoint (ending in /v1).");
+  const baseUrl = (cfg.baseUrl ?? DEFAULT_BASE_URLS[cfg.provider] ?? '').replace(/\/$/, '');
+  if (!baseUrl) throw notConfigured("set the base URL to your server's OpenAI-compatible endpoint (ending in /v1).");
   const model = pickModel(tier);
 
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(env.AI_API_KEY ? { Authorization: `Bearer ${env.AI_API_KEY}` } : {}),
+      ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}),
     },
     body: JSON.stringify({
       model,
@@ -119,11 +123,12 @@ async function completeOpenAiCompatible(system: string, turns: ChatTurn[], maxTo
 }
 
 async function completeGoogle(system: string, turns: ChatTurn[], maxTokens: number, tier: Tier): Promise<CompletionResult> {
-  if (!env.AI_API_KEY) throw notConfigured('set AI_API_KEY to your Google AI Studio API key.');
+  const cfg = getAiConfig();
+  if (!cfg.apiKey) throw notConfigured('set the Google AI Studio API key in the settings screen.');
   const model = pickModel(tier);
-  const baseUrl = (env.AI_BASE_URL ?? 'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/, '');
+  const baseUrl = (cfg.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/, '');
 
-  const res = await fetch(`${baseUrl}/models/${model}:generateContent?key=${encodeURIComponent(env.AI_API_KEY)}`, {
+  const res = await fetch(`${baseUrl}/models/${model}:generateContent?key=${encodeURIComponent(cfg.apiKey)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -148,7 +153,7 @@ async function completeGoogle(system: string, turns: ChatTurn[], maxTokens: numb
 }
 
 export async function complete(system: string, turns: ChatTurn[], maxTokens: number, tier: Tier): Promise<CompletionResult> {
-  switch (env.AI_PROVIDER) {
+  switch (getAiConfig().provider) {
     case 'anthropic':
       return completeAnthropic(system, turns, maxTokens, tier);
     case 'google':

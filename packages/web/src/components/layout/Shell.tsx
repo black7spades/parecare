@@ -31,6 +31,7 @@ export function Shell() {
   const navigate = useNavigate();
   const location = useLocation();
   const isAdmin = account?.role === 'admin' || account?.role === 'super_admin';
+  const isSuperAdmin = account?.role === 'super_admin';
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   // Refresh account info so role/tier changes apply without re-login
@@ -67,6 +68,11 @@ export function Shell() {
       {isAdmin ? (
         <NavLink to="/admin" className={navLinkClass}>
           Admin
+        </NavLink>
+      ) : null}
+      {isSuperAdmin ? (
+        <NavLink to="/admin/settings" className={navLinkClass}>
+          System settings
         </NavLink>
       ) : null}
     </>
