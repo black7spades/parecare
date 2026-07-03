@@ -13,7 +13,7 @@ const ACTION_STYLES: Record<ActivityEntry['action'], string> = {
 };
 
 export function ActivityPage() {
-  const { profile } = useProfile();
+  const { profile, careName } = useProfile();
   const [page, setPage] = useState(1);
   const limit = 50;
 
@@ -31,7 +31,7 @@ export function ActivityPage() {
     <div className="card max-w-3xl">
       <h2 className="text-base font-semibold text-ink mb-1">Activity</h2>
       <p className="text-sm text-muted mb-4">
-        Every change made to {profile.preferred_name ?? profile.full_name}'s records: who did what, and when.
+        Every change made to {careName}'s records: who did what, and when.
         Nobody can edit or remove this list.
       </p>
 

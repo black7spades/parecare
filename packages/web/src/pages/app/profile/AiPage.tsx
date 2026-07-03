@@ -19,7 +19,7 @@ interface ConversationDetail {
 }
 
 export function AiPage() {
-  const { profile } = useProfile();
+  const { profile, careName } = useProfile();
   const queryClient = useQueryClient();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -98,7 +98,7 @@ export function AiPage() {
       <div className="card flex flex-col" style={{ minHeight: '26rem' }}>
         <h2 className="text-base font-semibold text-ink mb-1">Ask PareCare</h2>
         <p className="text-sm text-muted mb-4">
-          An assistant that knows {profile.preferred_name ?? profile.full_name}'s situation. Ask about next steps,
+          An assistant that knows {careName}'s situation. Ask about next steps,
           entitlements, or how to approach hard conversations.
         </p>
 

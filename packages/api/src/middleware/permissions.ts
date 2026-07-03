@@ -23,7 +23,9 @@ export function blockViewerWrites(req: Request, res: Response, next: NextFunctio
   const resource = resourceOf(req);
   const conversational =
     resource === 'messages' || // post + delete own messages
-    (resource === 'questions' && req.method === 'POST' && /\/responses$/.test(req.path));
+    (resource === 'questions' && req.method === 'POST' && /\/responses$/.test(req.path)) ||
+    // Setting how you personally know the person is always self-service
+    (resource === 'circle' && req.method === 'PATCH' && req.path === '/me/relationship');
   if (conversational) {
     next();
     return;

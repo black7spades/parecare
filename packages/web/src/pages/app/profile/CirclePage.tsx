@@ -6,10 +6,11 @@ import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
 import { POA_TYPES, poaLabel, type CircleMember } from '../../../lib/care';
+import { RelationshipSelect } from '../../../components/RelationshipSelect';
 import { useProfile } from './ProfileLayout';
 
 export function CirclePage() {
-  const { profile, isOwner } = useProfile();
+  const { profile, isOwner, careName } = useProfile();
   const queryClient = useQueryClient();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [editing, setEditing] = useState<CircleMember | null>(null);
@@ -36,7 +37,7 @@ export function CirclePage() {
         <div>
           <h2 className="text-base font-semibold text-ink">Care circle</h2>
           <p className="text-sm text-muted">
-            The family members, friends and organisations involved in {profile.preferred_name ?? profile.full_name}'s care.
+            The family members, friends and organisations involved in {careName}'s care.
           </p>
         </div>
         {isOwner ? <Button onClick={() => setInviteOpen(true)}>Invite someone</Button> : null}
@@ -63,6 +64,7 @@ export function CirclePage() {
                   </div>
                   <p className="text-xs text-muted capitalize">
                     {m.role}
+                    {m.relationship ? ` · their ${m.relationship}` : ''}
                     {m.permission === 'viewer' ? ' · view only' : ''}
                   </p>
                 </div>
@@ -221,6 +223,7 @@ function InviteModal({
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState('family');
+  const [relationship, setRelationship] = useState('');
   const [permission, setPermission] = useState('contributor');
   const [description, setDescription] = useState('');
   const [poaType, setPoaType] = useState('');
@@ -234,6 +237,7 @@ function InviteModal({
         display_name: name,
         role,
         permission,
+        relationship: relationship.trim() || null,
         role_description: description || null,
         poa_type: poaType || null,
       }),
@@ -279,6 +283,7 @@ function InviteModal({
             <option value="other">Other</option>
           </select>
         </div>
+        <RelationshipSelect label="Who is the person in care to them? (optional)" value={relationship} onChange={setRelationship} />
         <PermissionSelect value={permission} onChange={setPermission} />
         <Textarea
           label="What do they do? (optional)"

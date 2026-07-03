@@ -9,6 +9,7 @@ interface CareProfile {
   full_name: string;
   current_phase: string;
   preferred_name: string | null;
+  relationship?: string | null;
 }
 
 export function Dashboard() {
@@ -47,8 +48,12 @@ export function Dashboard() {
           {profiles.map((p) => (
             <Link key={p.id} to={`/app/${p.id}`} className="card hover:border-primary transition-colors">
               <h3 className="mb-1">{p.full_name}</h3>
-              {p.preferred_name ? (
-                <p className="text-xs text-muted mb-3">Known as {p.preferred_name}</p>
+              {p.relationship || p.preferred_name ? (
+                <p className="text-xs text-muted mb-3">
+                  {[p.relationship ? `Your ${p.relationship}` : null, p.preferred_name ? `Known as ${p.preferred_name}` : null]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
               ) : null}
               <span className="badge bg-surface-2 text-muted text-xs">
                 {phaseLabel(p.current_phase)}

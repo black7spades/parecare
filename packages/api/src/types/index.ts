@@ -34,6 +34,7 @@ export interface CareProfile {
   primary_language: string | null;
   photo_url: string | null;
   notes: string | null;
+  owner_relationship: string | null;
   archived: boolean;
   ics_token: string;
   created_at: Date;
@@ -66,6 +67,7 @@ export interface CareCircleMember {
   display_name: string;
   role: string;
   permission: CirclePermission;
+  relationship: string | null;
   role_description: string | null;
   poa_type: string | null;
   poa_activated: boolean;

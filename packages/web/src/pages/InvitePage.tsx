@@ -4,6 +4,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { Button } from '../components/ui/Button';
 import { useAuthStore } from '../stores/auth';
+import { RelationshipSelect } from '../components/RelationshipSelect';
 
 interface InviteInfo {
   display_name: string;
@@ -16,6 +17,7 @@ export function InvitePage() {
   const navigate = useNavigate();
   const isAuthed = useAuthStore((s) => !!s.token);
   const [error, setError] = useState('');
+  const [relationship, setRelationship] = useState('');
 
   const { data, isLoading, error: loadError } = useQuery({
     queryKey: ['invite', token],
@@ -24,7 +26,10 @@ export function InvitePage() {
   });
 
   const acceptMutation = useMutation({
-    mutationFn: () => api.post<{ care_profile_id: string }>(`/care-circle/accept-invite/${token}`),
+    mutationFn: () =>
+      api.post<{ care_profile_id: string }>(`/care-circle/accept-invite/${token}`, {
+        relationship: relationship.trim() || undefined,
+      }),
     onSuccess: (res) => navigate(`/app/${res.care_profile_id}`),
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to accept invite'),
   });
@@ -60,6 +65,13 @@ export function InvitePage() {
               </p>
               {isAuthed ? (
                 <>
+                  <div className="text-left mb-4">
+                    <RelationshipSelect
+                      label={`Who is ${data.invite.profile_name.split(' ')[0]} to you? (optional)`}
+                      value={relationship}
+                      onChange={setRelationship}
+                    />
+                  </div>
                   <Button className="w-full" loading={acceptMutation.isPending} onClick={() => acceptMutation.mutate()}>
                     Accept invitation
                   </Button>

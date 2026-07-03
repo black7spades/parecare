@@ -5,12 +5,14 @@ import { api } from '../../api/client';
 import { Input, Textarea } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { CARE_PHASES, type CareProfile } from '../../lib/care';
+import { RelationshipSelect } from '../../components/RelationshipSelect';
 
 export function NewCareProfile() {
   const [fullName, setFullName] = useState('');
   const [preferredName, setPreferredName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [phase, setPhase] = useState('early_concern');
+  const [relationship, setRelationship] = useState('');
   const [pronouns, setPronouns] = useState('');
   const [language, setLanguage] = useState('');
   const [notes, setNotes] = useState('');
@@ -29,6 +31,7 @@ export function NewCareProfile() {
         preferred_name: preferredName || null,
         date_of_birth: dateOfBirth || null,
         current_phase: phase,
+        owner_relationship: relationship.trim() || null,
         pronouns: pronouns || null,
         primary_language: language || null,
         notes: notes || null,
@@ -58,6 +61,7 @@ export function NewCareProfile() {
           hint="What they like to be called (optional)"
         />
         <Input label="Date of birth" type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
+        <RelationshipSelect value={relationship} onChange={setRelationship} />
         <div>
           <label htmlFor="care-phase" className="block text-sm font-medium text-ink mb-1">
             Current phase of care

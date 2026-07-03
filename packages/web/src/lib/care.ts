@@ -31,6 +31,7 @@ export const entryTypeLabel = (type: string) =>
 export interface CareProfile {
   id: string;
   full_name: string;
+  owner_relationship?: string | null;
   preferred_name: string | null;
   date_of_birth: string | null;
   current_phase: CarePhase;
@@ -47,6 +48,14 @@ export interface ChecklistItem {
   completed: boolean;
   is_custom: boolean;
   sort_order: number;
+  note_count: number;
+}
+
+export interface ChecklistNote {
+  id: string;
+  body: string;
+  created_at: string;
+  author_name: string | null;
 }
 
 export interface CareLogEntry {
@@ -71,12 +80,29 @@ export const poaLabel = (type: string | null) =>
 export type CirclePermission = 'viewer' | 'contributor';
 export type AccessLevel = 'owner' | 'contributor' | 'viewer';
 
+export const RELATIONSHIPS = [
+  'Mum',
+  'Dad',
+  'Grandma',
+  'Grandpa',
+  'Mother-in-law',
+  'Father-in-law',
+  'Aunt',
+  'Uncle',
+  'Sister',
+  'Brother',
+  'Cousin',
+  'Friend',
+  'Neighbour',
+] as const;
+
 export interface CircleMember {
   id: string;
   account_id: string | null;
   invited_email: string | null;
   display_name: string;
   role: string;
+  relationship: string | null;
   role_description: string | null;
   poa_type: string | null;
   poa_activated: boolean;
