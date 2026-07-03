@@ -9,7 +9,7 @@ import { useProfile } from './ProfileLayout';
 import type { ChatMessage } from '../../../lib/care';
 
 export function MessagesPage() {
-  const { profile } = useProfile();
+  const { profile, careName } = useProfile();
   const queryClient = useQueryClient();
   const me = useAuthStore((s) => s.account);
   const [draft, setDraft] = useState('');
@@ -47,7 +47,7 @@ export function MessagesPage() {
     <div className="card flex flex-col" style={{ minHeight: '28rem' }}>
       <h2 className="text-base font-semibold text-ink mb-1">Messages</h2>
       <p className="text-sm text-muted mb-4">
-        A shared space for everyone in {profile.preferred_name ?? profile.full_name}'s circle.
+        A shared space for everyone in {careName}'s circle.
       </p>
 
       <div className="flex-1 overflow-y-auto space-y-3 mb-4 max-h-96 pr-1">

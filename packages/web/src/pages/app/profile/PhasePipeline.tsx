@@ -9,7 +9,15 @@ import { CARE_PHASES, phaseLabel } from '../../../lib/care';
  * The life-phase pipeline: every phase of the care journey in order, with
  * the current one highlighted. Moving phases re-seeds the phase checklist.
  */
-export function PhasePipeline({ profileId, currentPhase }: { profileId: string; currentPhase: string }) {
+export function PhasePipeline({
+  profileId,
+  currentPhase,
+  careName,
+}: {
+  profileId: string;
+  currentPhase: string;
+  careName?: string;
+}) {
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<string | null>(null);
   const currentIndex = CARE_PHASES.findIndex((p) => p.value === currentPhase);
@@ -26,7 +34,7 @@ export function PhasePipeline({ profileId, currentPhase }: { profileId: string; 
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-base font-semibold text-ink">Care journey</h2>
+        <h2 className="text-base font-semibold text-ink">{careName ? `${careName}'s care journey` : 'Care journey'}</h2>
         <span className="text-xs text-muted">Currently: {phaseLabel(currentPhase)}</span>
       </div>
       <ol className="flex flex-wrap items-center gap-y-3">

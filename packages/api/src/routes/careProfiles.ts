@@ -36,6 +36,7 @@ const profileSchema = z.object({
   pronouns: z.string().max(50).optional().nullable(),
   primary_language: z.string().max(100).optional().nullable(),
   notes: z.string().optional().nullable(),
+  owner_relationship: z.string().max(100).optional().nullable(),
 });
 
 careProfilesRouter.get('/', requireAuth, async (req, res) => {
@@ -52,13 +53,17 @@ careProfilesRouter.get('/', requireAuth, async (req, res) => {
         'care_profiles.archived': false,
       })
       .whereNot('care_profiles.account_id', req.account!.id)
-      .select('care_profiles.*')
+      .select('care_profiles.*', 'care_circle_members.relationship as viewer_relationship')
       .orderBy('care_profiles.created_at', 'asc'),
   ]);
   res.json({
     profiles: [
-      ...owned.map((p) => ({ ...p, access: 'owner' })),
-      ...shared.map((p) => ({ ...p, access: 'member' })),
+      ...owned.map((p) => ({ ...p, access: 'owner', relationship: p.owner_relationship })),
+      ...shared.map((p) => ({
+        ...p,
+        access: 'member',
+        relationship: (p as CareProfile & { viewer_relationship: string | null }).viewer_relationship,
+      })),
     ],
   });
 });
@@ -120,10 +125,14 @@ careProfilesRouter.get('/:id', requireAuth, async (req, res) => {
       res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
       return;
     }
-    res.json({ profile, access: membership.permission === 'viewer' ? 'viewer' : 'contributor' });
+    res.json({
+      profile,
+      access: membership.permission === 'viewer' ? 'viewer' : 'contributor',
+      relationship: membership.relationship ?? null,
+    });
     return;
   }
-  res.json({ profile, access: 'owner' });
+  res.json({ profile, access: 'owner', relationship: profile.owner_relationship ?? null });
 });
 
 const updateProfileSchema = profileSchema.partial();

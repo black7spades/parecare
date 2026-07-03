@@ -7,7 +7,12 @@ Family coordination platform for managing the care of ageing parents.
 Each person in care gets a profile with:
 
 - **Care journey pipeline** — six life phases from early concern to end of
-  life, each seeding its own checklist when entered
+  life, each seeding its own checklist when entered. Checklist items carry
+  a note thread, so a ticked box keeps its story: when it happened, who
+  was there, and where the information lives now
+- **Your relationship, your words** — everyone records who the person is
+  to them (Mum, Uncle, or a custom term like "Oma") and the whole app
+  speaks in those terms, per viewer
 - **Care circle** — invite family, friends and organisations by email;
   members see the shared profile on their own dashboard. Each member is
   a **contributor** (can add and edit records) or a **viewer** (read +

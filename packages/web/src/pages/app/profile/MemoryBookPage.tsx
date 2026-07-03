@@ -9,7 +9,7 @@ import { useProfile } from './ProfileLayout';
 import type { MemoryEntry } from '../../../lib/care';
 
 export function MemoryBookPage() {
-  const { profile } = useProfile();
+  const { profile, careName } = useProfile();
   const queryClient = useQueryClient();
   const me = useAuthStore((s) => s.account);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -50,7 +50,7 @@ export function MemoryBookPage() {
     onSuccess: invalidate,
   });
 
-  const firstName = profile.preferred_name ?? profile.full_name.split(' ')[0];
+  const firstName = careName;
 
   return (
     <div className="space-y-6 max-w-3xl">

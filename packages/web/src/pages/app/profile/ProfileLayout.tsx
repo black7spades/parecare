@@ -9,6 +9,9 @@ export interface ProfileContext {
   access: AccessLevel;
   isOwner: boolean;
   canEdit: boolean;
+  /** What THIS viewer calls the person: "Mum", "Oma", else preferred/first name */
+  relationship: string | null;
+  careName: string;
 }
 
 export function useProfile(): ProfileContext {
@@ -36,7 +39,10 @@ export function ProfileLayout() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['care-profile', profileId],
-    queryFn: () => api.get<{ profile: CareProfile; access?: AccessLevel }>(`/care-profiles/${profileId}`),
+    queryFn: () =>
+      api.get<{ profile: CareProfile; access?: AccessLevel; relationship?: string | null }>(
+        `/care-profiles/${profileId}`
+      ),
   });
 
   if (isLoading) return <p className="text-sm text-muted">Loading…</p>;
@@ -50,11 +56,15 @@ export function ProfileLayout() {
   }
   const profile = data.profile;
   const access: AccessLevel = data.access ?? 'owner';
+  const relationship = data.relationship?.trim() || null;
+  const careName = relationship ?? profile.preferred_name ?? profile.full_name.split(' ')[0];
   const context: ProfileContext = {
     profile,
     access,
     isOwner: access === 'owner',
     canEdit: access !== 'viewer',
+    relationship,
+    careName,
   };
 
   return (
@@ -62,7 +72,11 @@ export function ProfileLayout() {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-xl font-semibold text-ink">{profile.full_name}</h1>
-          {profile.preferred_name ? <p className="text-sm text-muted">Known as {profile.preferred_name}</p> : null}
+          <p className="text-sm text-muted">
+            {[relationship ? `Your ${relationship}` : null, profile.preferred_name ? `Known as ${profile.preferred_name}` : null]
+              .filter(Boolean)
+              .join(' · ')}
+          </p>
         </div>
         {access === 'viewer' ? (
           <span className="badge bg-surface-2 text-muted" title="You can read everything and join the conversation, but not change records.">

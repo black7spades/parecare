@@ -77,7 +77,7 @@ function buildSystemPrompt(
 Current context:
 - Person being cared for: ${firstName}
 - Current care phase: ${profile.current_phase.replace(/_/g, ' ')}
-- Asking member's role: ${member?.role ?? 'family member'}
+- Asking member's role: ${member?.role ?? 'family member'}${member?.relationship ? `\n- The person is the asking member's ${member.relationship}` : ''}
 - Jurisdiction: Australia
 
 Speak plainly. Never use medical abbreviations without explaining them. Never use legal jargon without defining it. When you don't know something specific to the person's situation, say so and suggest who to contact. Keep answers practical and focused on what the person can actually do next. Do not give formal legal or medical advice; frame guidance as information to take to the relevant professional. Never use em dashes in your replies.

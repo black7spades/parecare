@@ -18,6 +18,7 @@ const memberSchema = z.object({
   role_description: z.string().optional().nullable(),
   poa_type: z.string().optional().nullable(),
   permission: z.enum(['viewer', 'contributor']).default('contributor'),
+  relationship: z.string().max(100).optional().nullable(),
 });
 
 careCircleRouter.get('/', requireAuth, async (req, res) => {
@@ -67,6 +68,24 @@ careCircleRouter.post(
   }
 );
 
+// Members describe their own relationship to the person ("Mum", "Oma"…);
+// this is self-service and allowed even for viewers.
+careCircleRouter.patch('/me/relationship', requireAuth, async (req, res) => {
+  const parsed = z.object({ relationship: z.string().max(100).nullable() }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const updated = await db('care_circle_members')
+    .where({ care_profile_id: req.params['id'], account_id: req.account!.id, invite_accepted: true })
+    .update({ relationship: parsed.data.relationship });
+  if (!updated) {
+    res.status(404).json({ error: 'You are not a member of this care circle', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ relationship: parsed.data.relationship });
+});
+
 careCircleRouter.get('/:memberId', requireAuth, async (req, res) => {
   const member = await db<CareCircleMember>('care_circle_members')
     .where({ id: req.params['memberId'], care_profile_id: req.params['id'] })
@@ -85,6 +104,7 @@ careCircleRouter.patch('/:memberId', requireAuth, requireProfileOwner, async (re
     poa_type: z.string().optional().nullable(),
     poa_activated: z.boolean().optional(),
     permission: z.enum(['viewer', 'contributor']).optional(),
+    relationship: z.string().max(100).optional().nullable(),
   });
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -148,10 +168,12 @@ inviteRouter.post('/accept-invite/:token', requireAuth, async (req, res) => {
     return;
   }
 
+  const relationship = typeof req.body?.relationship === 'string' ? req.body.relationship.slice(0, 100) : null;
   await db('care_circle_members').where({ id: member.id }).update({
     invite_accepted: true,
     account_id: req.account!.id,
     invite_token: null,
+    ...(relationship ? { relationship } : {}),
   });
 
   res.json({ message: 'Invite accepted.', care_profile_id: member.care_profile_id });
