@@ -24,6 +24,7 @@ import { InvitePage } from './pages/InvitePage';
 import { SubscriptionPage } from './pages/account/Subscription';
 import { AccountSettings } from './pages/account/Settings';
 import { AdminUsers } from './pages/admin/AdminUsers';
+import { AdminSettings } from './pages/admin/AdminSettings';
 
 function NotFound() {
   return (
@@ -46,6 +47,12 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 function AdminGuard({ children }: { children: React.ReactNode }) {
   const role = useAuthStore((s) => s.account?.role);
   if (role !== 'admin' && role !== 'super_admin') return <Navigate to="/app" replace />;
+  return <>{children}</>;
+}
+
+function SuperAdminGuard({ children }: { children: React.ReactNode }) {
+  const role = useAuthStore((s) => s.account?.role);
+  if (role !== 'super_admin') return <Navigate to="/app" replace />;
   return <>{children}</>;
 }
 
@@ -94,6 +101,14 @@ export const router = createBrowserRouter([
           <AdminGuard>
             <AdminUsers />
           </AdminGuard>
+        ),
+      },
+      {
+        path: 'admin/settings',
+        element: (
+          <SuperAdminGuard>
+            <AdminSettings />
+          </SuperAdminGuard>
         ),
       },
       { path: '*', element: <NotFound /> },

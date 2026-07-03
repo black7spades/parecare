@@ -1,13 +1,15 @@
 import Stripe from 'stripe';
 import { db } from '../config/database';
 import { env } from '../config/env';
+import { getStripeConfig } from '../config/settings';
 import type { Account, SubscriptionTier, SubscriptionStatus } from '../types';
 
 function getStripe(): Stripe {
-  if (!env.STRIPE_SECRET_KEY) {
-    throw new Error('STRIPE_SECRET_KEY is not configured');
+  const secretKey = getStripeConfig().secretKey;
+  if (!secretKey) {
+    throw new Error('Stripe secret key is not configured');
   }
-  return new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' });
+  return new Stripe(secretKey, { apiVersion: '2023-10-16' });
 }
 
 export async function getOrCreateCustomer(account: Account): Promise<string> {
@@ -32,8 +34,8 @@ export async function createCheckoutSession(
   tier: 'family' | 'professional'
 ): Promise<string> {
   const stripe = getStripe();
-  const priceId =
-    tier === 'family' ? env.STRIPE_PRICE_FAMILY : env.STRIPE_PRICE_PROFESSIONAL;
+  const stripeCfg = getStripeConfig();
+  const priceId = tier === 'family' ? stripeCfg.priceFamily : stripeCfg.priceProfessional;
 
   if (!priceId) {
     throw new Error(`Price ID not configured for tier: ${tier}`);
@@ -137,7 +139,7 @@ export const PLAN_DETAILS = [
     description: 'For families coordinating care together.',
     price_monthly: 12,
     get price_id() {
-      return env.STRIPE_PRICE_FAMILY ?? null;
+      return getStripeConfig().priceFamily ?? null;
     },
     features: [
       'Unlimited care profiles',
@@ -159,7 +161,7 @@ export const PLAN_DETAILS = [
     description: 'For care professionals managing multiple families.',
     price_monthly: 39,
     get price_id() {
-      return env.STRIPE_PRICE_PROFESSIONAL ?? null;
+      return getStripeConfig().priceProfessional ?? null;
     },
     features: [
       'Everything in Family',
