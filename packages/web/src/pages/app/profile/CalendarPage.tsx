@@ -54,25 +54,26 @@ export function CalendarPage() {
   return (
     <div className="space-y-6">
       <div className="card">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <h2 className="text-base font-semibold text-ink">{format(month, 'MMMM yyyy')}</h2>
           <div className="flex gap-2">
-            <Button size="sm" variant="secondary" onClick={() => setMonth((m) => addMonths(m, -1))}>
-              ← Previous
+            <Button size="sm" variant="secondary" onClick={() => setMonth((m) => addMonths(m, -1))} aria-label="Previous month">
+              ←<span className="hidden sm:inline"> Previous</span>
             </Button>
             <Button size="sm" variant="secondary" onClick={() => setMonth(startOfMonth(new Date()))}>
               Today
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => setMonth((m) => addMonths(m, 1))}>
-              Next →
+            <Button size="sm" variant="secondary" onClick={() => setMonth((m) => addMonths(m, 1))} aria-label="Next month">
+              <span className="hidden sm:inline">Next </span>→
             </Button>
           </div>
         </div>
 
         <div className="grid grid-cols-7 text-xs text-muted mb-1">
           {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-            <div key={d} className="px-2 py-1 font-medium">
-              {d}
+            <div key={d} className="px-1 sm:px-2 py-1 font-medium text-center sm:text-left">
+              <span className="sm:hidden">{d[0]}</span>
+              <span className="hidden sm:inline">{d}</span>
             </div>
           ))}
         </div>
@@ -83,7 +84,7 @@ export function CalendarPage() {
             return (
               <div
                 key={day.toISOString()}
-                className={`min-h-[5.5rem] border-r border-b border-border p-1.5 ${
+                className={`min-h-[3.5rem] sm:min-h-[5.5rem] border-r border-b border-border p-1 sm:p-1.5 ${
                   isSameMonth(day, month) ? 'bg-card' : 'bg-surface'
                 }`}
               >

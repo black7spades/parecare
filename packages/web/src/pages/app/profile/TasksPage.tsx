@@ -114,7 +114,7 @@ export function TasksPage() {
                 <button
                   type="button"
                   aria-label={`Delete ${t.title}`}
-                  className="text-muted hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity text-sm"
+                  className="text-muted hover:text-red-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-sm px-1"
                   onClick={() => deleteMutation.mutate(t.id)}
                 >
                   ✕

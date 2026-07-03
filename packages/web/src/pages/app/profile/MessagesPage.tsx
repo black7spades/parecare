@@ -71,7 +71,7 @@ export function MessagesPage() {
                       <button
                         type="button"
                         aria-label="Delete message"
-                        className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity hover:text-white"
+                        className="ml-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity hover:text-white"
                         onClick={() => deleteMutation.mutate(m.id)}
                       >
                         ✕

@@ -83,46 +83,38 @@ export function DocumentsPage() {
             through email chains.
           </p>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-muted border-b border-border">
-                <th className="py-2 font-medium">Document</th>
-                <th className="py-2 font-medium">Category</th>
-                <th className="py-2 font-medium">Added</th>
-                <th className="py-2 font-medium text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {documents.map((doc) => (
-                <tr key={doc.id} className="border-b border-border last:border-0">
-                  <td className="py-2.5">
-                    <span className="font-medium text-ink">{doc.label}</span>
-                    <span className="text-xs text-muted ml-2">{formatSize(doc.file_size_bytes)}</span>
-                  </td>
-                  <td className="py-2.5">
+          <ul className="divide-y divide-border -my-2">
+            {documents.map((doc) => (
+              <li key={doc.id} className="py-3 flex flex-wrap items-start gap-x-3 gap-y-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-ink break-words">{doc.label}</span>
+                    <span className="text-xs text-muted">{formatSize(doc.file_size_bytes)}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
                     <span className="badge bg-surface-2 text-muted text-xs">{documentCategoryLabel(doc.category)}</span>
                     {(doc.visible_to_roles?.length ?? 0) > 0 ? (
                       <span
-                        className="badge bg-amber-50 text-amber-700 text-xs ml-1"
+                        className="badge bg-amber-50 text-amber-700 text-xs"
                         title={`Visible to the owner and: ${doc.visible_to_roles!.join(', ')}`}
                       >
                         Restricted
                       </span>
                     ) : null}
-                  </td>
-                  <td className="py-2.5 text-muted text-xs">{format(new Date(doc.created_at), 'd MMM yyyy')}</td>
-                  <td className="py-2.5 text-right whitespace-nowrap space-x-2">
-                    <Button size="sm" variant="secondary" onClick={() => void download(doc)}>
-                      Download
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setDeleting(doc)}>
-                      Delete
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    <span className="text-xs text-muted">{format(new Date(doc.created_at), 'd MMM yyyy')}</span>
+                  </div>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <Button size="sm" variant="secondary" onClick={() => void download(doc)}>
+                    Download
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setDeleting(doc)}>
+                    Delete
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
 
