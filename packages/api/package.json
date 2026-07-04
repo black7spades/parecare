@@ -9,7 +9,8 @@
     "migrate": "node scripts/migrate.js latest",
     "migrate:rollback": "node scripts/migrate.js rollback",
     "migrate:status": "node scripts/migrate.js status",
-    "seed": "node -e \"console.log('Nothing to seed — checklist templates are built into the app and applied when care profiles are created.')\""
+    "seed": "node -e \"console.log('Nothing to seed — checklist templates are built into the app and applied when care profiles are created.')\"",
+    "seed:dev": "node scripts/seed-dev.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",

@@ -23,8 +23,10 @@ import { AiPage } from './pages/app/profile/AiPage';
 import { InvitePage } from './pages/InvitePage';
 import { SubscriptionPage } from './pages/account/Subscription';
 import { AccountSettings } from './pages/account/Settings';
+import { Profile } from './pages/account/Profile';
 import { AdminUsers } from './pages/admin/AdminUsers';
 import { AdminSettings } from './pages/admin/AdminSettings';
+import { SystemLayout } from './pages/admin/SystemLayout';
 
 function NotFound() {
   return (
@@ -95,22 +97,30 @@ export const router = createBrowserRouter([
       },
       { path: 'account/subscription', element: <SubscriptionPage /> },
       { path: 'account/settings', element: <AccountSettings /> },
+      { path: 'account/profile', element: <Profile /> },
       {
-        path: 'admin',
+        path: 'system',
         element: (
           <AdminGuard>
-            <AdminUsers />
+            <SystemLayout />
           </AdminGuard>
         ),
+        children: [
+          { index: true, element: <Navigate to="/system/users" replace /> },
+          { path: 'users', element: <AdminUsers /> },
+          {
+            path: 'settings',
+            element: (
+              <SuperAdminGuard>
+                <AdminSettings />
+              </SuperAdminGuard>
+            ),
+          },
+        ],
       },
-      {
-        path: 'admin/settings',
-        element: (
-          <SuperAdminGuard>
-            <AdminSettings />
-          </SuperAdminGuard>
-        ),
-      },
+      // Legacy redirects from the old separate admin routes
+      { path: 'admin', element: <Navigate to="/system/users" replace /> },
+      { path: 'admin/settings', element: <Navigate to="/system/settings" replace /> },
       { path: '*', element: <NotFound /> },
     ],
   },

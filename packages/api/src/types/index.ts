@@ -8,6 +8,10 @@ export interface Account {
   password_hash: string | null;
   display_name: string;
   role: AccountRole;
+  avatar_url: string | null;
+  date_of_birth: string | Date | null;
+  gender: string | null;
+  pronouns: string | null;
   oauth_provider: 'google' | 'facebook' | null;
   oauth_subject: string | null;
   mfa_secret: string | null;

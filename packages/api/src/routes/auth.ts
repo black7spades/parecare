@@ -1,15 +1,23 @@
 import { Router } from 'express';
+import multer from 'multer';
+import path from 'path';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { env } from '../config/env';
-import { getOAuthConfig } from '../config/settings';
+import { getOAuthConfig, getStorageConfig } from '../config/settings';
 import { requireAuth } from '../middleware/auth';
 import { generateSecret, otpauthUrl, verifyTotp } from '../services/totp';
+import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
 import type { Account } from '../types';
 
 export const authRouter = Router();
+
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB — avatars
+});
 
 export function issueSessionToken(accountId: string): string {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,6 +34,7 @@ export function accountSummary(account: Account) {
     email: account.email,
     display_name: account.display_name,
     role: account.role,
+    avatar_url: account.avatar_url ?? null,
     subscription_tier: account.subscription_tier,
     subscription_status: account.subscription_status,
   };
@@ -201,6 +210,10 @@ authRouter.get('/me', requireAuth, (req, res) => {
     email: account.email,
     display_name: account.display_name,
     role: account.role,
+    avatar_url: account.avatar_url ?? null,
+    date_of_birth: account.date_of_birth ?? null,
+    gender: account.gender ?? null,
+    pronouns: account.pronouns ?? null,
     subscription_tier: account.subscription_tier,
     subscription_status: account.subscription_status,
     current_period_end: account.current_period_end,
@@ -217,6 +230,9 @@ const updateMeSchema = z.object({
   email: z.string().email().optional(),
   current_password: z.string().optional(),
   new_password: z.string().min(8).optional(),
+  date_of_birth: z.string().optional().nullable(),
+  gender: z.string().max(50).optional().nullable(),
+  pronouns: z.string().max(50).optional().nullable(),
 });
 
 authRouter.patch('/me', requireAuth, async (req, res) => {
@@ -230,6 +246,9 @@ authRouter.patch('/me', requireAuth, async (req, res) => {
   const updates: Partial<Account> & { password_hash?: string } = {};
 
   if (parsed.data.display_name) updates.display_name = parsed.data.display_name;
+  if (parsed.data.date_of_birth !== undefined) updates.date_of_birth = parsed.data.date_of_birth || null;
+  if (parsed.data.gender !== undefined) updates.gender = parsed.data.gender || null;
+  if (parsed.data.pronouns !== undefined) updates.pronouns = parsed.data.pronouns || null;
   if (parsed.data.email && parsed.data.email.toLowerCase() !== account.email.toLowerCase()) {
     const newEmail = parsed.data.email.toLowerCase();
     const existing = await db<Account>('accounts').whereRaw('lower(email) = ?', [newEmail]).first();
@@ -264,4 +283,51 @@ authRouter.patch('/me', requireAuth, async (req, res) => {
 
   await db('accounts').where({ id: account.id }).update({ ...updates, updated_at: db.fn.now() });
   res.json({ message: 'Account updated.' });
+});
+
+// Upload / replace the current user's avatar
+authRouter.post('/me/avatar', requireAuth, avatarUpload.single('avatar'), async (req, res) => {
+  const account = req.account!;
+  if (!req.file) {
+    res.status(400).json({ error: 'No image provided', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  if (!req.file.mimetype.startsWith('image/')) {
+    res.status(400).json({ error: 'Avatar must be an image', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  if (account.avatar_url) await deleteFile(account.avatar_url).catch(() => {});
+  const ext = path.extname(req.file.originalname) || '.jpg';
+  const key = `avatar/${account.id}/${Date.now()}${ext}`;
+  const avatar_url = await uploadFile(req.file.buffer, key, req.file.mimetype);
+  await db('accounts').where({ id: account.id }).update({ avatar_url, updated_at: db.fn.now() });
+  res.json({ avatar_url });
+});
+
+// Remove the current user's avatar
+authRouter.delete('/me/avatar', requireAuth, async (req, res) => {
+  const account = req.account!;
+  if (account.avatar_url) await deleteFile(account.avatar_url).catch(() => {});
+  await db('accounts').where({ id: account.id }).update({ avatar_url: null, updated_at: db.fn.now() });
+  res.json({ message: 'Avatar removed.' });
+});
+
+// Serve any account's avatar to authenticated users (<img> can't send the
+// auth header, so this is fetched as a blob by the client).
+authRouter.get('/avatar/:accountId', requireAuth, async (req, res) => {
+  const account = await db<Account>('accounts').where({ id: req.params['accountId'] }).first();
+  if (!account?.avatar_url) {
+    res.status(404).json({ error: 'No avatar', code: 'NOT_FOUND' });
+    return;
+  }
+  if (!account.avatar_url.startsWith('/uploads/')) {
+    res.redirect(await getDownloadUrl(account.avatar_url));
+    return;
+  }
+  const localPath = path.join(getStorageConfig().localPath, account.avatar_url.slice('/uploads/'.length));
+  res.sendFile(localPath, (err) => {
+    if (err && !res.headersSent) {
+      res.status(404).json({ error: 'Avatar missing from storage', code: 'NOT_FOUND' });
+    }
+  });
 });

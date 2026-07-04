@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import { Outlet, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
@@ -17,21 +17,6 @@ export interface ProfileContext {
 export function useProfile(): ProfileContext {
   return useOutletContext<ProfileContext>();
 }
-
-const TABS = [
-  { to: '', label: 'Overview', end: true },
-  { to: 'circle', label: 'Care circle' },
-  { to: 'plan', label: 'Care plan' },
-  { to: 'tasks', label: 'Tasks' },
-  { to: 'calendar', label: 'Calendar' },
-  { to: 'messages', label: 'Messages' },
-  { to: 'memory-book', label: 'Memory book' },
-  { to: 'documents', label: 'Documents' },
-  { to: 'questions', label: 'Questions' },
-  { to: 'providers', label: 'Providers' },
-  { to: 'activity', label: 'Activity' },
-  { to: 'ai', label: 'Ask PareCare' },
-];
 
 export function ProfileLayout() {
   const { profileId } = useParams<{ profileId: string }>();
@@ -84,25 +69,6 @@ export function ProfileLayout() {
           </span>
         ) : null}
       </div>
-
-      <nav className="flex gap-1 border-b border-border overflow-x-auto -mb-2 pb-0">
-        {TABS.map((tab) => (
-          <NavLink
-            key={tab.label}
-            to={tab.to}
-            end={tab.end}
-            className={({ isActive }) =>
-              `whitespace-nowrap px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${
-                isActive
-                  ? 'border-primary text-primary font-medium'
-                  : 'border-transparent text-muted hover:text-ink'
-              }`
-            }
-          >
-            {tab.label}
-          </NavLink>
-        ))}
-      </nav>
 
       <Outlet context={context} />
     </div>
