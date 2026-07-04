@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { Outlet, NavLink, useNavigate, useLocation, useMatch } from 'react-router-dom';
 import { useAuthStore, type AccountRole } from '../../stores/auth';
 import { useSubscriptionStore } from '../../stores/subscription';
 import { UpgradePrompt } from '../UpgradePrompt';
 import { ThemeToggle } from '../ThemeToggle';
+import { AvatarMenu } from './AvatarMenu';
+import { PROFILE_TABS } from '../../pages/app/profile/tabs';
 import { api } from '../../api/client';
 
 function TierBadge() {
@@ -14,7 +16,7 @@ function TierBadge() {
   return (
     <button
       onClick={() => navigate('/account/subscription')}
-      className="badge bg-primary-50 text-primary capitalize cursor-pointer hover:bg-primary-100 transition-colors"
+      className="badge bg-primary-50 text-primary capitalize cursor-pointer hover:bg-primary-100 transition-colors hidden sm:inline-flex"
     >
       {tier}
     </button>
@@ -27,131 +29,129 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   }`;
 
 export function Shell() {
-  const { account, clearAuth, updateAccount } = useAuthStore();
-  const navigate = useNavigate();
+  const updateAccount = useAuthStore((s) => s.updateAccount);
   const location = useLocation();
-  const isAdmin = account?.role === 'admin' || account?.role === 'super_admin';
-  const isSuperAdmin = account?.role === 'super_admin';
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // Refresh account info so role/tier changes apply without re-login
+  // Detect whether a care profile is open, so the left nav can switch to that
+  // profile's sections. Exclude the "profiles/new" route.
+  const profileMatch = useMatch('/app/:profileId/*');
+  const profileId =
+    profileMatch?.params.profileId && profileMatch.params.profileId !== 'profiles'
+      ? profileMatch.params.profileId
+      : null;
+
+  // Refresh account info so role/tier/avatar changes apply without re-login
   useEffect(() => {
     api
-      .get<{ role: AccountRole; subscription_tier: 'free' | 'family' | 'professional'; subscription_status: string | null }>('/auth/me')
-      .then((me) => updateAccount({ role: me.role, subscription_tier: me.subscription_tier, subscription_status: me.subscription_status }))
+      .get<{
+        role: AccountRole;
+        avatar_url: string | null;
+        subscription_tier: 'free' | 'family' | 'professional';
+        subscription_status: string | null;
+      }>('/auth/me')
+      .then((me) =>
+        updateAccount({
+          role: me.role,
+          avatar_url: me.avatar_url,
+          subscription_tier: me.subscription_tier,
+          subscription_status: me.subscription_status,
+        })
+      )
       .catch(() => {
         // 401 already clears auth via the api client
       });
   }, [updateAccount]);
 
-  // Close the mobile drawer whenever the route changes
   useEffect(() => {
     setDrawerOpen(false);
   }, [location.pathname]);
 
-  function handleLogout() {
-    clearAuth();
-    navigate('/login');
-  }
-
-  const navLinks = (
+  const sidebarNav = profileId ? (
     <>
-      <NavLink to="/app" end className={navLinkClass}>
-        Dashboard
+      <NavLink to="/app" className={navLinkClass}>
+        <span aria-hidden>←</span> All people
       </NavLink>
-      <NavLink to="/account/subscription" className={navLinkClass}>
-        Subscription
-      </NavLink>
-      <NavLink to="/account/settings" className={navLinkClass}>
-        Settings
-      </NavLink>
-      {isAdmin ? (
-        <NavLink to="/admin" className={navLinkClass}>
-          Admin
+      <div className="my-2 border-t border-border" />
+      {PROFILE_TABS.map((tab) => (
+        <NavLink
+          key={tab.label}
+          to={`/app/${profileId}${tab.to ? `/${tab.to}` : ''}`}
+          end={tab.end}
+          className={navLinkClass}
+        >
+          {tab.label}
         </NavLink>
-      ) : null}
-      {isSuperAdmin ? (
-        <NavLink to="/admin/settings" className={navLinkClass}>
-          System settings
-        </NavLink>
-      ) : null}
+      ))}
     </>
-  );
-
-  const sidebarFooter = (
-    <div className="mt-auto space-y-2">
-      <TierBadge />
-      <ThemeToggle />
-      <div className="text-xs text-muted truncate">{account?.email}</div>
-      <button onClick={handleLogout} className="text-xs text-muted hover:text-ink transition-colors">
-        Sign out
-      </button>
-    </div>
+  ) : (
+    <NavLink to="/app" end className={navLinkClass}>
+      Dashboard
+    </NavLink>
   );
 
   return (
-    <div className="min-h-screen flex flex-col lg:flex-row">
-      {/* Mobile top bar */}
-      <header className="lg:hidden sticky top-0 z-30 flex items-center justify-between bg-card border-b border-border px-4 h-14">
-        <button
-          type="button"
-          onClick={() => setDrawerOpen(true)}
-          aria-label="Open menu"
-          className="-ml-1 p-2 rounded-md text-muted hover:text-ink hover:bg-surface-2 transition-colors"
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <line x1="3" y1="6" x2="21" y2="6" />
-            <line x1="3" y1="12" x2="21" y2="12" />
-            <line x1="3" y1="18" x2="21" y2="18" />
-          </svg>
-        </button>
-        <span className="text-lg font-semibold text-primary">PareCare</span>
-        <div className="w-9" aria-hidden />
-      </header>
-
-      {/* Desktop sidebar */}
-      <nav className="hidden lg:flex w-56 shrink-0 bg-card border-r border-border flex-col py-6 px-4">
-        <div className="mb-8">
+    <div className="h-screen flex flex-col overflow-hidden">
+      {/* Top bar */}
+      <header className="shrink-0 flex items-center justify-between bg-card border-b border-border px-3 sm:px-4 h-14 z-30">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Open menu"
+            className="lg:hidden -ml-1 p-2 rounded-md text-muted hover:text-ink hover:bg-surface-2 transition-colors"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </button>
           <span className="text-lg font-semibold text-primary">PareCare</span>
         </div>
-        <div className="flex-1 space-y-1">{navLinks}</div>
-        {sidebarFooter}
-      </nav>
-
-      {/* Mobile slide-in drawer */}
-      {drawerOpen ? (
-        <div className="lg:hidden fixed inset-0 z-40">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => setDrawerOpen(false)}
-            aria-hidden
-          />
-          <nav className="absolute inset-y-0 left-0 w-64 max-w-[80%] bg-card border-r border-border flex flex-col py-6 px-4 shadow-xl">
-            <div className="mb-8 flex items-center justify-between">
-              <span className="text-lg font-semibold text-primary">PareCare</span>
-              <button
-                type="button"
-                onClick={() => setDrawerOpen(false)}
-                aria-label="Close menu"
-                className="p-1 rounded-md text-muted hover:text-ink hover:bg-surface-2 transition-colors"
-              >
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex-1 space-y-1">{navLinks}</div>
-            {sidebarFooter}
-          </nav>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <TierBadge />
+          <ThemeToggle />
+          <AvatarMenu />
         </div>
-      ) : null}
+      </header>
 
-      <main className="flex-1 min-w-0 overflow-auto bg-surface">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-          <Outlet />
-        </div>
-      </main>
+      <div className="flex flex-1 min-h-0">
+        {/* Desktop sidebar */}
+        <nav className="hidden lg:flex w-56 shrink-0 bg-card border-r border-border flex-col py-5 px-4 overflow-y-auto">
+          <div className="flex-1 space-y-1">{sidebarNav}</div>
+        </nav>
+
+        {/* Mobile slide-in drawer */}
+        {drawerOpen ? (
+          <div className="lg:hidden fixed inset-0 z-40">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setDrawerOpen(false)} aria-hidden />
+            <nav className="absolute inset-y-0 left-0 w-64 max-w-[80%] bg-card border-r border-border flex flex-col py-5 px-4 shadow-xl overflow-y-auto">
+              <div className="mb-4 flex items-center justify-between">
+                <span className="text-lg font-semibold text-primary">PareCare</span>
+                <button
+                  type="button"
+                  onClick={() => setDrawerOpen(false)}
+                  aria-label="Close menu"
+                  className="p-1 rounded-md text-muted hover:text-ink hover:bg-surface-2 transition-colors"
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                  </svg>
+                </button>
+              </div>
+              <div className="flex-1 space-y-1">{sidebarNav}</div>
+            </nav>
+          </div>
+        ) : null}
+
+        <main className="flex-1 min-w-0 overflow-auto bg-surface">
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+            <Outlet />
+          </div>
+        </main>
+      </div>
 
       <UpgradePrompt />
     </div>

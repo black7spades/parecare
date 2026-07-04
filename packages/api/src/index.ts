@@ -7,6 +7,7 @@ import { connectRedis } from './config/redis';
 import { webhookRouter } from './routes/webhooks';
 import { authRouter } from './routes/auth';
 import { oauthRouter } from './routes/oauth';
+import { accountRouter } from './routes/account';
 import { careProfilesRouter } from './routes/careProfiles';
 import { careCircleRouter, inviteRouter } from './routes/careCircle';
 import { careLogRouter } from './routes/careLog';
@@ -62,6 +63,7 @@ const v1 = express.Router();
 
 v1.use('/auth', authRouter);
 v1.use('/auth', oauthRouter);
+v1.use('/account', accountRouter);
 // Super-admin runtime settings. Must be registered before the admin router so
 // its requireRole('admin') guard doesn't shadow the super-admin-only routes.
 v1.use('/admin/settings', settingsRouter);

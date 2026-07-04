@@ -8,6 +8,7 @@ interface AccountInfo {
   email: string;
   display_name: string;
   role?: AccountRole;
+  avatar_url?: string | null;
   subscription_tier: 'free' | 'family' | 'professional';
   subscription_status: string | null;
 }
