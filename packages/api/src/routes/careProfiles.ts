@@ -1,10 +1,16 @@
 import { Router } from 'express';
+import multer from 'multer';
+import path from 'path';
 import { z } from 'zod';
 import { db } from '../config/database';
+import { getStorageConfig } from '../config/settings';
 import { requireAuth } from '../middleware/auth';
 import { requireCountBelow } from '../middleware/subscriptionGate';
+import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
 import { PHASE_CHECKLISTS } from '../db/seeds/001_checklist_templates';
 import type { CareProfile, CarePhase } from '../types';
+
+const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 export const careProfilesRouter = Router();
 
@@ -25,6 +31,24 @@ async function canAccessProfile(profileId: string, accountId: string): Promise<b
     .where({ care_profile_id: profileId, account_id: accountId, invite_accepted: true })
     .first();
   return !!member;
+}
+
+/**
+ * Who can edit a care profile (its details and photo): platform admins and
+ * super admins (global), the owner who created it, and any circle member
+ * granted the transferable edit right.
+ */
+async function editProfileAccess(
+  profile: CareProfile,
+  account: { id: string; role: string }
+): Promise<'owner' | 'admin' | 'granted' | null> {
+  if (account.role === 'super_admin' || account.role === 'admin') return 'admin';
+  if (profile.account_id === account.id) return 'owner';
+  const member = await db('care_circle_members')
+    .where({ care_profile_id: profile.id, account_id: account.id, invite_accepted: true })
+    .first();
+  if (member?.can_edit_profile) return 'granted';
+  return null;
 }
 
 // Reject malformed ids up front — postgres errors on invalid uuid input,
@@ -56,6 +80,7 @@ const profileSchema = z.object({
   primary_language: z.string().max(100).optional().nullable(),
   notes: z.string().optional().nullable(),
   owner_relationship: z.string().max(100).optional().nullable(),
+  photo_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().nullable(),
 });
 
 careProfilesRouter.get('/', requireAuth, async (req, res) => {
@@ -162,6 +187,7 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
       access: p.access,
       current_phase: p.current_phase,
       photo_url: p.photo_url,
+      photo_color: p.photo_color,
       date_of_birth: p.date_of_birth,
       pinned: pinSet.has(p.id),
       primary_phone: plan?.gp_phone || contacts[0]?.phone || null,
@@ -184,7 +210,7 @@ careProfilesRouter.get('/pinned', requireAuth, async (req, res) => {
     .where('care_profile_pins.account_id', req.account!.id)
     .andWhere('care_profiles.archived', false)
     .orderBy('care_profile_pins.pinned_at', 'asc')
-    .select('care_profiles.id', 'care_profiles.full_name', 'care_profiles.preferred_name', 'care_profiles.photo_url');
+    .select('care_profiles.id', 'care_profiles.full_name', 'care_profiles.preferred_name', 'care_profiles.photo_url', 'care_profiles.photo_color');
   res.json({ profiles: rows });
 });
 
@@ -203,6 +229,56 @@ careProfilesRouter.post('/:id/pin', requireAuth, async (req, res) => {
 careProfilesRouter.delete('/:id/pin', requireAuth, async (req, res) => {
   await db('care_profile_pins').where({ account_id: req.account!.id, care_profile_id: req.params['id'] }).del();
   res.json({ pinned: false });
+});
+
+// Care-recipient photo. Upload/remove need edit access; serving needs any access.
+careProfilesRouter.post('/:id/photo', requireAuth, photoUpload.single('photo'), async (req, res) => {
+  const profile = await db<CareProfile>('care_profiles').where({ id: req.params['id'], archived: false }).first();
+  if (!profile || !(await editProfileAccess(profile, req.account!))) {
+    res.status(profile ? 403 : 404).json({ error: profile ? 'Not allowed' : 'Care profile not found', code: profile ? 'FORBIDDEN' : 'NOT_FOUND' });
+    return;
+  }
+  if (!req.file || !req.file.mimetype.startsWith('image/')) {
+    res.status(400).json({ error: 'A valid image is required', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  if (profile.photo_url) await deleteFile(profile.photo_url).catch(() => {});
+  const ext = path.extname(req.file.originalname) || '.jpg';
+  const key = `care-photo/${profile.id}/${Date.now()}${ext}`;
+  const photo_url = await uploadFile(req.file.buffer, key, req.file.mimetype);
+  await db('care_profiles').where({ id: profile.id }).update({ photo_url, updated_at: db.fn.now() });
+  res.json({ photo_url });
+});
+
+careProfilesRouter.delete('/:id/photo', requireAuth, async (req, res) => {
+  const profile = await db<CareProfile>('care_profiles').where({ id: req.params['id'], archived: false }).first();
+  if (!profile || !(await editProfileAccess(profile, req.account!))) {
+    res.status(profile ? 403 : 404).json({ error: profile ? 'Not allowed' : 'Care profile not found', code: profile ? 'FORBIDDEN' : 'NOT_FOUND' });
+    return;
+  }
+  if (profile.photo_url) await deleteFile(profile.photo_url).catch(() => {});
+  await db('care_profiles').where({ id: profile.id }).update({ photo_url: null, updated_at: db.fn.now() });
+  res.json({ message: 'Photo removed.' });
+});
+
+careProfilesRouter.get('/:id/photo', requireAuth, async (req, res) => {
+  if (!(await canAccessProfile(req.params['id'], req.account!.id)) && req.account!.role !== 'admin' && req.account!.role !== 'super_admin') {
+    res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const profile = await db<CareProfile>('care_profiles').where({ id: req.params['id'] }).first();
+  if (!profile?.photo_url) {
+    res.status(404).json({ error: 'No photo', code: 'NOT_FOUND' });
+    return;
+  }
+  if (!profile.photo_url.startsWith('/uploads/')) {
+    res.redirect(await getDownloadUrl(profile.photo_url));
+    return;
+  }
+  const localPath = path.join(getStorageConfig().localPath, profile.photo_url.slice('/uploads/'.length));
+  res.sendFile(localPath, (err) => {
+    if (err && !res.headersSent) res.status(404).json({ error: 'Photo missing from storage', code: 'NOT_FOUND' });
+  });
 });
 
 careProfilesRouter.post(
@@ -246,7 +322,6 @@ careProfilesRouter.post(
 );
 
 careProfilesRouter.get('/:id', requireAuth, async (req, res) => {
-  // Owners and accepted circle members can view; mutations stay owner-only
   const profile = await db<CareProfile>('care_profiles')
     .where({ id: req.params['id'], archived: false })
     .first();
@@ -254,36 +329,53 @@ careProfilesRouter.get('/:id', requireAuth, async (req, res) => {
     res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
     return;
   }
+  const account = req.account!;
   const phaseHistory = await db('care_phase_history')
     .where({ care_profile_id: profile.id })
     .select('phase', 'entered_at', 'locked_at');
-  if (profile.account_id !== req.account!.id) {
+
+  const isAdmin = account.role === 'super_admin' || account.role === 'admin';
+  const isOwner = profile.account_id === account.id;
+  let access: 'owner' | 'admin' | 'contributor' | 'viewer';
+  let relationship: string | null;
+  let membershipCanEdit = false;
+
+  if (isOwner) {
+    access = 'owner';
+    relationship = profile.owner_relationship ?? null;
+  } else {
     const membership = await db('care_circle_members')
-      .where({ care_profile_id: profile.id, account_id: req.account!.id, invite_accepted: true })
+      .where({ care_profile_id: profile.id, account_id: account.id, invite_accepted: true })
       .first();
-    if (!membership) {
+    if (membership) {
+      access = membership.permission === 'viewer' ? 'viewer' : 'contributor';
+      relationship = membership.relationship ?? null;
+      membershipCanEdit = !!membership.can_edit_profile;
+    } else if (isAdmin) {
+      access = 'admin';
+      relationship = null;
+    } else {
       res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
       return;
     }
-    res.json({
-      profile,
-      access: membership.permission === 'viewer' ? 'viewer' : 'contributor',
-      relationship: membership.relationship ?? null,
-      phase_history: phaseHistory,
-    });
-    return;
   }
-  res.json({ profile, access: 'owner', relationship: profile.owner_relationship ?? null, phase_history: phaseHistory });
+
+  const canEditProfile = isAdmin || isOwner || membershipCanEdit;
+  const canManageEditors = isAdmin || isOwner;
+  res.json({ profile, access, relationship, phase_history: phaseHistory, can_edit_profile: canEditProfile, can_manage_editors: canManageEditors });
 });
 
 const updateProfileSchema = profileSchema.partial();
 
 careProfilesRouter.patch('/:id', requireAuth, async (req, res) => {
-  const profile = await db<CareProfile>('care_profiles')
-    .where({ id: req.params['id'], account_id: req.account!.id })
-    .first();
+  const profile = await db<CareProfile>('care_profiles').where({ id: req.params['id'], archived: false }).first();
   if (!profile) {
     res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const editAccess = await editProfileAccess(profile, req.account!);
+  if (!editAccess) {
+    res.status(403).json({ error: 'You do not have permission to edit this profile', code: 'FORBIDDEN' });
     return;
   }
 

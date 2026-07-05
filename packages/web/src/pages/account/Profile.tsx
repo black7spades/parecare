@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Avatar } from '../../components/ui/Avatar';
+import { AvatarEditor } from '../../components/ui/AvatarEditor';
 import { useAuthStore } from '../../stores/auth';
 
 interface Me {
@@ -11,6 +12,7 @@ interface Me {
   display_name: string;
   email: string;
   avatar_url: string | null;
+  avatar_color: string | null;
   date_of_birth: string | null;
   gender: string | null;
   pronouns: string | null;
@@ -34,7 +36,6 @@ const RELATIONSHIP_SUGGESTIONS = [
 export function Profile() {
   const { account, updateAccount } = useAuthStore();
   const queryClient = useQueryClient();
-  const fileInput = useRef<HTMLInputElement>(null);
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.get<Me>('/auth/me') });
 
@@ -71,24 +72,47 @@ export function Profile() {
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
   });
 
-  const avatarMutation = useMutation({
-    mutationFn: (file: File) => {
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [avatarError, setAvatarError] = useState('');
+
+  const refreshMe = () => void queryClient.invalidateQueries({ queryKey: ['me'] });
+
+  const photoMutation = useMutation({
+    mutationFn: (blob: Blob) => {
       const form = new FormData();
-      form.append('avatar', file);
+      form.append('avatar', blob, 'avatar.png');
       return api.upload<{ avatar_url: string }>('/auth/me/avatar', form);
     },
     onSuccess: (res) => {
       updateAccount({ avatar_url: res.avatar_url });
-      void queryClient.invalidateQueries({ queryKey: ['me'] });
-      if (fileInput.current) fileInput.current.value = '';
+      setAvatarError('');
+      setEditorOpen(false);
+      refreshMe();
     },
+    onError: (err) => setAvatarError(err instanceof Error ? err.message : 'Upload failed'),
+  });
+
+  const colorMutation = useMutation({
+    mutationFn: async (hex: string) => {
+      // Choosing a colour clears any photo so the colour shows.
+      if (me?.avatar_url) await api.delete('/auth/me/avatar');
+      await api.patch('/auth/me', { avatar_color: hex });
+      return hex;
+    },
+    onSuccess: (hex) => {
+      updateAccount({ avatar_url: null, avatar_color: hex });
+      setEditorOpen(false);
+      refreshMe();
+    },
+    onError: (err) => setAvatarError(err instanceof Error ? err.message : 'Failed to save colour'),
   });
 
   const removeAvatarMutation = useMutation({
     mutationFn: () => api.delete('/auth/me/avatar'),
     onSuccess: () => {
       updateAccount({ avatar_url: null });
-      void queryClient.invalidateQueries({ queryKey: ['me'] });
+      setEditorOpen(false);
+      refreshMe();
     },
   });
 
@@ -107,32 +131,30 @@ export function Profile() {
             accountId={account.id}
             name={account.display_name}
             avatarUrl={me?.avatar_url ?? account.avatar_url}
+            color={me?.avatar_color ?? account.avatar_color}
             size={72}
           />
-          <div className="space-y-2">
-            <input
-              ref={fileInput}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) avatarMutation.mutate(f);
-              }}
-            />
-            <div className="flex gap-2">
-              <Button size="sm" variant="secondary" onClick={() => fileInput.current?.click()} loading={avatarMutation.isPending}>
-                {me?.avatar_url ? 'Change photo' : 'Upload photo'}
-              </Button>
-              {me?.avatar_url ? (
-                <Button size="sm" variant="ghost" onClick={() => removeAvatarMutation.mutate()} loading={removeAvatarMutation.isPending}>
-                  Remove
-                </Button>
-              ) : null}
-            </div>
-            <p className="text-xs text-muted">JPG or PNG, up to 5 MB.</p>
+          <div className="space-y-1">
+            <Button size="sm" variant="secondary" onClick={() => { setAvatarError(''); setEditorOpen(true); }}>
+              Edit photo
+            </Button>
+            <p className="text-xs text-muted">Upload and crop a photo, or pick a colour.</p>
+            {avatarError ? <p className="text-xs text-red-600">{avatarError}</p> : null}
           </div>
         </div>
+
+        <AvatarEditor
+          open={editorOpen}
+          onClose={() => setEditorOpen(false)}
+          accountId={account.id}
+          name={account.display_name}
+          avatarUrl={me?.avatar_url ?? account.avatar_url}
+          color={me?.avatar_color ?? account.avatar_color}
+          onSavePhoto={(blob) => photoMutation.mutate(blob)}
+          onSaveColor={(hex) => colorMutation.mutate(hex)}
+          onRemovePhoto={() => removeAvatarMutation.mutate()}
+          saving={photoMutation.isPending || colorMutation.isPending || removeAvatarMutation.isPending}
+        />
 
         <form
           className="space-y-4"

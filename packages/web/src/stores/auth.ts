@@ -9,6 +9,7 @@ interface AccountInfo {
   display_name: string;
   role?: AccountRole;
   avatar_url?: string | null;
+  avatar_color?: string | null;
   subscription_tier: 'free' | 'family' | 'professional';
   subscription_status: string | null;
 }

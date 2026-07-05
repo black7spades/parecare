@@ -16,6 +16,7 @@ interface ProfileSummary {
   access: 'owner' | 'member';
   current_phase: string;
   photo_url: string | null;
+  photo_color: string | null;
   date_of_birth: string | null;
   pinned: boolean;
   primary_phone: string | null;
@@ -144,7 +145,7 @@ function ProfileCard({ profile: p, onTogglePin }: { profile: ProfileSummary; onT
 
       <Link to={`/app/${p.id}`} className="block">
         <div className="flex items-start gap-3 pr-6">
-          <Avatar accountId={p.id} name={p.full_name} avatarUrl={null} size={44} />
+          <Avatar accountId={p.id} name={p.full_name} avatarUrl={p.photo_url} color={p.photo_color} fetchPath={`/care-profiles/${p.id}/photo`} size={44} />
           <div className="min-w-0 flex-1">
             <h3 className="mb-0.5 truncate">{p.full_name}</h3>
             {p.relationship || p.preferred_name ? (

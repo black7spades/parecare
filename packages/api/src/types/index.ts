@@ -9,6 +9,7 @@ export interface Account {
   display_name: string;
   role: AccountRole;
   avatar_url: string | null;
+  avatar_color: string | null;
   date_of_birth: string | Date | null;
   gender: string | null;
   pronouns: string | null;
@@ -37,6 +38,7 @@ export interface CareProfile {
   pronouns: string | null;
   primary_language: string | null;
   photo_url: string | null;
+  photo_color: string | null;
   notes: string | null;
   owner_relationship: string | null;
   archived: boolean;
@@ -76,6 +78,7 @@ export interface CareCircleMember {
   poa_type: string | null;
   poa_activated: boolean;
   poa_document_id: string | null;
+  can_edit_profile: boolean;
   invite_token: string | null;
   invite_accepted: boolean;
   created_at: string | Date;
@@ -189,7 +192,8 @@ export interface AiConversation {
 }
 
 export interface CareAccess {
-  level: 'owner' | 'contributor' | 'viewer';
+  // 'admin' = platform admin / super admin with global access to any profile.
+  level: 'owner' | 'admin' | 'contributor' | 'viewer';
   member: CareCircleMember | null;
 }
 

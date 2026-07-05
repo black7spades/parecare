@@ -42,7 +42,7 @@ export function AvatarMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <Avatar accountId={account.id} name={account.display_name} avatarUrl={account.avatar_url} size={34} />
+        <Avatar accountId={account.id} name={account.display_name} avatarUrl={account.avatar_url} color={account.avatar_color} size={34} />
       </button>
 
       {open ? (

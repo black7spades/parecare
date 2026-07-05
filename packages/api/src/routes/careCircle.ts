@@ -19,6 +19,7 @@ const memberSchema = z.object({
   poa_type: z.string().optional().nullable(),
   permission: z.enum(['viewer', 'contributor']).default('contributor'),
   relationship: z.string().max(100).optional().nullable(),
+  can_edit_profile: z.boolean().optional(),
 });
 
 careCircleRouter.get('/', requireAuth, async (req, res) => {
@@ -105,6 +106,7 @@ careCircleRouter.patch('/:memberId', requireAuth, requireProfileOwner, async (re
     poa_activated: z.boolean().optional(),
     permission: z.enum(['viewer', 'contributor']).optional(),
     relationship: z.string().max(100).optional().nullable(),
+    can_edit_profile: z.boolean().optional(),
   });
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) {
