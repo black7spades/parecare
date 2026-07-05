@@ -179,6 +179,7 @@ export interface SettingDescriptor {
   enumValues?: readonly string[];
   secret: boolean;
   help?: string;
+  helpLink?: { label: string; url: string };
   source: Source;
   value?: string | number | null;
   isSet?: boolean;
@@ -195,6 +196,7 @@ export function describeSettings(): SettingDescriptor[] {
       enumValues: entry.enumValues,
       secret: entry.secret,
       help: entry.help,
+      helpLink: entry.helpLink,
       source: sourceByKey.get(entry.key) ?? 'default',
     };
     if (entry.secret) {

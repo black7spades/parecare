@@ -43,6 +43,8 @@ export interface CareProfile {
   current_phase: CarePhase;
   pronouns: string | null;
   primary_language: string | null;
+  photo_url: string | null;
+  photo_color: string | null;
   notes: string | null;
 }
 
@@ -84,7 +86,7 @@ export const poaLabel = (type: string | null) =>
   POA_TYPES.find((t) => t.value === type)?.label ?? 'Power of attorney';
 
 export type CirclePermission = 'viewer' | 'contributor';
-export type AccessLevel = 'owner' | 'contributor' | 'viewer';
+export type AccessLevel = 'owner' | 'admin' | 'contributor' | 'viewer';
 
 export const RELATIONSHIPS = [
   'Mum',
@@ -112,6 +114,7 @@ export interface CircleMember {
   role_description: string | null;
   poa_type: string | null;
   poa_activated: boolean;
+  can_edit_profile: boolean;
   invite_accepted: boolean;
   permission: CirclePermission;
   created_at: string;

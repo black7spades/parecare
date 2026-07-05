@@ -109,6 +109,12 @@ export async function requireCareProfileAccess(req: Request, res: Response, next
     .where({ care_profile_id: profileId, account_id: req.account.id, invite_accepted: true })
     .first();
   if (!membership) {
+    // Platform admins and super admins have global access to any profile.
+    if (req.account.role === 'admin' || req.account.role === 'super_admin') {
+      req.careAccess = { level: 'admin', member: null };
+      next();
+      return;
+    }
     // 404 rather than 403 so outsiders can't confirm a profile exists
     res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
     return;

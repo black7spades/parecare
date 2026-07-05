@@ -71,11 +71,14 @@ export function auditTrail(req: Request, res: Response, next: NextFunction): voi
   next();
 }
 
-/** Circle management (invites, roles, POA, removal) is owner-only. */
+/**
+ * Circle management (invites, roles, POA, removal, edit-access grants) is
+ * limited to the profile owner and platform admins / super admins.
+ */
 export function requireProfileOwner(req: Request, res: Response, next: NextFunction): void {
-  if (req.careAccess?.level !== 'owner') {
+  if (req.careAccess?.level !== 'owner' && req.careAccess?.level !== 'admin') {
     res.status(403).json({
-      error: 'Only the profile owner can manage the care circle',
+      error: 'Only the profile owner or an admin can manage the care circle',
       code: 'OWNER_ONLY',
     });
     return;

@@ -10,7 +10,7 @@ import { RelationshipSelect } from '../../../components/RelationshipSelect';
 import { useProfile } from './ProfileLayout';
 
 export function CirclePage() {
-  const { profile, isOwner, careName } = useProfile();
+  const { profile, canManageEditors, careName } = useProfile();
   const queryClient = useQueryClient();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [editing, setEditing] = useState<CircleMember | null>(null);
@@ -40,7 +40,7 @@ export function CirclePage() {
             The family members, friends and organisations involved in {careName}'s care.
           </p>
         </div>
-        {isOwner ? (
+        {canManageEditors ? (
           <Button className="self-start sm:self-auto" onClick={() => setInviteOpen(true)}>
             Invite someone
           </Button>
@@ -54,7 +54,7 @@ export function CirclePage() {
           <p className="text-sm text-muted mb-4">
             No one in the circle yet. Invite family, friends, or an organisation: anyone who should stay in the loop.
           </p>
-          {isOwner ? <Button onClick={() => setInviteOpen(true)}>Send the first invite</Button> : null}
+          {canManageEditors ? <Button onClick={() => setInviteOpen(true)}>Send the first invite</Button> : null}
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
@@ -70,6 +70,7 @@ export function CirclePage() {
                     {m.role}
                     {m.relationship ? ` · their ${m.relationship}` : ''}
                     {m.permission === 'viewer' ? ' · view only' : ''}
+                    {m.can_edit_profile ? ' · can edit profile' : ''}
                   </p>
                 </div>
                 <span
@@ -81,7 +82,7 @@ export function CirclePage() {
               {m.invited_email ? <p className="text-xs text-muted mt-1">{m.invited_email}</p> : null}
               {m.poa_type ? <p className="text-xs text-amber-700 mt-1">{poaLabel(m.poa_type)}</p> : null}
               {m.role_description ? <p className="text-sm text-ink mt-2">{m.role_description}</p> : null}
-              {isOwner ? (
+              {canManageEditors ? (
                 <div className="mt-3 flex gap-2">
                   <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>
                     Edit
@@ -327,6 +328,7 @@ function EditMemberModal({
   const [description, setDescription] = useState('');
   const [poaType, setPoaType] = useState('');
   const [poaActivated, setPoaActivated] = useState(false);
+  const [canEditProfile, setCanEditProfile] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -336,6 +338,7 @@ function EditMemberModal({
       setDescription(member.role_description ?? '');
       setPoaType(member.poa_type ?? '');
       setPoaActivated(member.poa_activated);
+      setCanEditProfile(member.can_edit_profile);
       setError('');
     }
   }, [member]);
@@ -348,6 +351,7 @@ function EditMemberModal({
         role_description: description || null,
         poa_type: poaType || null,
         poa_activated: poaType ? poaActivated : false,
+        can_edit_profile: canEditProfile,
       }),
     onSuccess: onSaved,
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
@@ -372,6 +376,18 @@ function EditMemberModal({
           rows={2}
         />
         <PoaFields poaType={poaType} setPoaType={setPoaType} poaActivated={poaActivated} setPoaActivated={setPoaActivated} />
+        <label className="flex items-start gap-2 text-sm text-ink rounded-md border border-border p-3">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+            checked={canEditProfile}
+            onChange={(e) => setCanEditProfile(e.target.checked)}
+          />
+          <span>
+            Can edit this profile
+            <span className="block text-xs text-muted">Lets them change the person's details and photo, and transfer this right onward.</span>
+          </span>
+        </label>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>

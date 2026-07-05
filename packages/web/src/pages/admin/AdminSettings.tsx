@@ -23,6 +23,109 @@ function SourceTag({ source }: { source: SettingField['source'] }) {
   return <span className={`badge text-xs ${style}`}>{label}</span>;
 }
 
+function HelpText({ field }: { field: SettingField }) {
+  if (!field.help && !field.helpLink) return null;
+  return (
+    <p className="mt-1 text-xs text-muted">
+      {field.help}{' '}
+      {field.helpLink ? (
+        <a href={field.helpLink.url} target="_blank" rel="noreferrer" className="text-primary hover:underline whitespace-nowrap">
+          {field.helpLink.label} ↗
+        </a>
+      ) : null}
+    </p>
+  );
+}
+
+const SMTP_PRESETS = [
+  {
+    id: 'gmail',
+    label: 'Gmail',
+    host: 'smtp.gmail.com',
+    port: 587,
+    note: 'Username is your full Gmail address; the password is a 16-character App Password (not your normal password). App Passwords require 2-Step Verification.',
+    link: { label: 'Create an App Password', url: 'https://myaccount.google.com/apppasswords' },
+  },
+  {
+    id: 'outlook',
+    label: 'Outlook / Microsoft 365',
+    host: 'smtp.office365.com',
+    port: 587,
+    note: 'Username is your email address. SMTP AUTH must be enabled for the mailbox; some accounts need an app password.',
+    link: { label: 'Microsoft app passwords', url: 'https://support.microsoft.com/account-billing/using-app-passwords-with-apps-that-don-t-support-two-step-verification-5896ed9b-4263-e681-128a-a6f2979a7944' },
+  },
+  {
+    id: 'sendgrid',
+    label: 'SendGrid',
+    host: 'smtp.sendgrid.net',
+    port: 587,
+    note: 'Username is literally "apikey"; the password is a SendGrid API key with Mail Send permission.',
+    link: { label: 'SendGrid API keys', url: 'https://app.sendgrid.com/settings/api_keys' },
+  },
+  {
+    id: 'mailgun',
+    label: 'Mailgun',
+    host: 'smtp.mailgun.org',
+    port: 587,
+    note: 'Use the SMTP username and password from your Mailgun sending-domain settings.',
+    link: { label: 'Mailgun', url: 'https://app.mailgun.com/' },
+  },
+];
+
+function SmtpPresets({ onApply }: { onApply: (host: string, port: number) => void }) {
+  const [id, setId] = useState('');
+  const preset = SMTP_PRESETS.find((p) => p.id === id);
+  return (
+    <div className="rounded-md border border-border bg-surface p-3 space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <label htmlFor="smtp-preset" className="text-sm font-medium text-ink">Quick setup</label>
+        <select
+          id="smtp-preset"
+          className={`${SELECT_CLASS} w-auto`}
+          value={id}
+          onChange={(e) => {
+            setId(e.target.value);
+            const p = SMTP_PRESETS.find((x) => x.id === e.target.value);
+            if (p) onApply(p.host, p.port);
+          }}
+        >
+          <option value="">Choose a provider…</option>
+          {SMTP_PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>{p.label}</option>
+          ))}
+          <option value="custom">Other / custom</option>
+        </select>
+      </div>
+      {preset ? (
+        <p className="text-xs text-muted">
+          Host and port filled in below. {preset.note}{' '}
+          <a href={preset.link.url} target="_blank" rel="noreferrer" className="text-primary hover:underline whitespace-nowrap">
+            {preset.link.label} ↗
+          </a>
+        </p>
+      ) : id === 'custom' ? (
+        <p className="text-xs text-muted">Enter your provider's SMTP host and port below.</p>
+      ) : null}
+    </div>
+  );
+}
+
+function OAuthRedirectHelp() {
+  const origin = window.location.origin;
+  const uri = (p: string) => `${origin}/api/v1/auth/oauth/${p}/callback`;
+  return (
+    <div className="rounded-md border border-border bg-surface p-3 text-xs text-muted space-y-1.5">
+      <p className="text-ink font-medium">Register these redirect URIs with the provider:</p>
+      {(['google', 'facebook'] as const).map((p) => (
+        <div key={p} className="flex items-center gap-2">
+          <span className="w-16 shrink-0 capitalize">{p}</span>
+          <code className="flex-1 truncate rounded bg-card border border-border px-2 py-1" data-testid={`redirect-${p}`}>{uri(p)}</code>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function AdminSettings() {
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ['settings'], queryFn: settingsApi.get });
@@ -96,6 +199,16 @@ export function AdminSettings() {
               </div>
               {savedGroup === group.group ? <span className="text-sm text-primary shrink-0">Saved ✓</span> : null}
             </div>
+
+            {group.group === 'email' ? (
+              <SmtpPresets
+                onApply={(host, port) => {
+                  setField('email.smtp_host', host);
+                  setField('email.smtp_port', String(port));
+                }}
+              />
+            ) : null}
+            {group.group === 'oauth' ? <OAuthRedirectHelp /> : null}
 
             <div className="grid gap-4 sm:grid-cols-2">
               {group.fields.map((field) => (
@@ -177,7 +290,7 @@ function FieldRow({
             ) : null}
           </div>
         )}
-        {field.help ? <p className="mt-1 text-xs text-muted">{field.help}</p> : null}
+        <HelpText field={field} />
       </div>
     );
   }
@@ -208,7 +321,7 @@ function FieldRow({
           onChange={(e) => onChange(e.target.value)}
         />
       )}
-      {field.help ? <p className="mt-1 text-xs text-muted">{field.help}</p> : null}
+      <HelpText field={field} />
     </div>
   );
 }

@@ -10,6 +10,7 @@ export interface SettingField {
   enumValues?: string[];
   secret: boolean;
   help?: string;
+  helpLink?: { label: string; url: string };
   source: SettingSource;
   /** Present for non-secret fields. */
   value?: string | number | null;

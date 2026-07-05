@@ -15,6 +15,7 @@ interface PinnedProfile {
   full_name: string;
   preferred_name: string | null;
   photo_url: string | null;
+  photo_color: string | null;
 }
 
 function TierBadge() {
@@ -56,6 +57,7 @@ export function Shell() {
       .get<{
         role: AccountRole;
         avatar_url: string | null;
+        avatar_color: string | null;
         subscription_tier: 'free' | 'family' | 'professional';
         subscription_status: string | null;
       }>('/auth/me')
@@ -63,6 +65,7 @@ export function Shell() {
         updateAccount({
           role: me.role,
           avatar_url: me.avatar_url,
+          avatar_color: me.avatar_color,
           subscription_tier: me.subscription_tier,
           subscription_status: me.subscription_status,
         })
@@ -109,7 +112,7 @@ export function Shell() {
           <div className="pt-4 pb-1 px-3 text-[11px] font-medium uppercase tracking-wide text-muted">Pinned</div>
           {pinned.map((p) => (
             <NavLink key={p.id} to={`/app/${p.id}`} className={navLinkClass}>
-              <Avatar accountId={p.id} name={p.full_name} avatarUrl={null} size={22} />
+              <Avatar accountId={p.id} name={p.full_name} avatarUrl={p.photo_url} color={p.photo_color} fetchPath={`/care-profiles/${p.id}/photo`} size={22} />
               <span className="truncate">{p.preferred_name || p.full_name}</span>
             </NavLink>
           ))}
