@@ -12,6 +12,12 @@ export type CarePhase = (typeof CARE_PHASES)[number]['value'];
 export const phaseLabel = (phase: string) =>
   CARE_PHASES.find((p) => p.value === phase)?.label ?? phase;
 
+export interface PhaseHistoryEntry {
+  phase: string;
+  entered_at: string;
+  locked_at: string | null;
+}
+
 export const LOG_ENTRY_TYPES = [
   { value: 'visit', label: 'Visit' },
   { value: 'medication', label: 'Medication' },
