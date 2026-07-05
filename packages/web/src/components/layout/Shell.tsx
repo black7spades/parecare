@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation, useMatch } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuthStore, type AccountRole } from '../../stores/auth';
 import { useSubscriptionStore } from '../../stores/subscription';
 import { UpgradePrompt } from '../UpgradePrompt';
 import { ThemeToggle } from '../ThemeToggle';
 import { AvatarMenu } from './AvatarMenu';
+import { Avatar } from '../ui/Avatar';
 import { PROFILE_TABS } from '../../pages/app/profile/tabs';
 import { api } from '../../api/client';
+
+interface PinnedProfile {
+  id: string;
+  full_name: string;
+  preferred_name: string | null;
+  photo_url: string | null;
+}
 
 function TierBadge() {
   const tier = useSubscriptionStore((s) => s.tier);
@@ -67,6 +76,12 @@ export function Shell() {
     setDrawerOpen(false);
   }, [location.pathname]);
 
+  const { data: pinnedData } = useQuery({
+    queryKey: ['pinned-profiles'],
+    queryFn: () => api.get<{ profiles: PinnedProfile[] }>('/care-profiles/pinned'),
+  });
+  const pinned = pinnedData?.profiles ?? [];
+
   const sidebarNav = profileId ? (
     <>
       <NavLink to="/app" className={navLinkClass}>
@@ -85,9 +100,22 @@ export function Shell() {
       ))}
     </>
   ) : (
-    <NavLink to="/app" end className={navLinkClass}>
-      Dashboard
-    </NavLink>
+    <>
+      <NavLink to="/app" end className={navLinkClass}>
+        Dashboard
+      </NavLink>
+      {pinned.length > 0 ? (
+        <>
+          <div className="pt-4 pb-1 px-3 text-[11px] font-medium uppercase tracking-wide text-muted">Pinned</div>
+          {pinned.map((p) => (
+            <NavLink key={p.id} to={`/app/${p.id}`} className={navLinkClass}>
+              <Avatar accountId={p.id} name={p.full_name} avatarUrl={null} size={22} />
+              <span className="truncate">{p.preferred_name || p.full_name}</span>
+            </NavLink>
+          ))}
+        </>
+      ) : null}
+    </>
   );
 
   return (

@@ -20,7 +20,7 @@ import {
 } from '../../../lib/care';
 
 export function OverviewPage() {
-  const { profile, careName, relationship, isOwner } = useProfile();
+  const { profile, careName, relationship, isOwner, phaseHistory } = useProfile();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -49,7 +49,7 @@ export function OverviewPage() {
 
   return (
     <div className="space-y-6">
-      <PhasePipeline profileId={profile.id} currentPhase={profile.current_phase} careName={careName} />
+      <PhasePipeline profileId={profile.id} currentPhase={profile.current_phase} careName={careName} phaseHistory={phaseHistory} />
 
       <div className="card space-y-3">
           {detailLine ? <p className="text-sm text-muted">{detailLine}</p> : null}

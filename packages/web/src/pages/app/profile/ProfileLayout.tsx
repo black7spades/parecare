@@ -2,7 +2,7 @@ import { Outlet, useNavigate, useOutletContext, useParams } from 'react-router-d
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
-import type { AccessLevel, CareProfile } from '../../../lib/care';
+import type { AccessLevel, CareProfile, PhaseHistoryEntry } from '../../../lib/care';
 
 export interface ProfileContext {
   profile: CareProfile;
@@ -12,6 +12,7 @@ export interface ProfileContext {
   /** What THIS viewer calls the person: "Mum", "Oma", else preferred/first name */
   relationship: string | null;
   careName: string;
+  phaseHistory: PhaseHistoryEntry[];
 }
 
 export function useProfile(): ProfileContext {
@@ -25,7 +26,7 @@ export function ProfileLayout() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['care-profile', profileId],
     queryFn: () =>
-      api.get<{ profile: CareProfile; access?: AccessLevel; relationship?: string | null }>(
+      api.get<{ profile: CareProfile; access?: AccessLevel; relationship?: string | null; phase_history?: PhaseHistoryEntry[] }>(
         `/care-profiles/${profileId}`
       ),
   });
@@ -50,6 +51,7 @@ export function ProfileLayout() {
     canEdit: access !== 'viewer',
     relationship,
     careName,
+    phaseHistory: data.phase_history ?? [],
   };
 
   return (
