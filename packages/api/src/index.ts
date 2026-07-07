@@ -22,6 +22,7 @@ import { messagesRouter } from './routes/messages';
 import { memoryBookRouter } from './routes/memoryBook';
 import { calendarRouter, icsRouter } from './routes/calendar';
 import { medicationsRouter } from './routes/medications';
+import { medicationCatalogueRouter } from './routes/medicationCatalogue';
 import { startReminderScheduler } from './services/scheduler';
 import { subscriptionsRouter } from './routes/subscriptions';
 import { adminRouter } from './routes/admin';
@@ -70,6 +71,9 @@ v1.use('/account', accountRouter);
 v1.use('/admin/settings', settingsRouter);
 v1.use('/admin', adminRouter);
 v1.use('/subscriptions', subscriptionsRouter);
+// Shared, instance-wide medication catalogue (read for all; add for admins;
+// edit/delete for super admins).
+v1.use('/medication-catalogue', medicationCatalogueRouter);
 v1.use('/care-circle', inviteRouter);
 v1.use('/care-profiles', careProfilesRouter);
 // Sub-resources verify profile ownership/membership here — the routers

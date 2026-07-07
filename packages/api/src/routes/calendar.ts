@@ -37,7 +37,10 @@ interface CalendarEvent {
 // Expand each active medication's scheduled times across the date range into
 // calendar events, marking a slot done if a dose was recorded that day.
 async function expandMedicationEvents(profileId: string, from: Date, to: Date): Promise<CalendarEvent[]> {
-  const meds = await db('medications').where({ care_profile_id: profileId, active: true });
+  const meds = await db('medications as m')
+    .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
+    .where({ 'm.care_profile_id': profileId, 'm.active': true })
+    .select('m.*', 'c.name as name');
   const withTimes = meds.filter((m) => Array.isArray(m.schedule_times) && m.schedule_times.length > 0);
   if (withTimes.length === 0) return [];
 

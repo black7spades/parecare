@@ -51,8 +51,11 @@ export function MedicationsPage() {
     void queryClient.invalidateQueries({ queryKey: ['calendar-events', profile.id] });
   };
 
-  // Bulk delete is limited to the owner and platform admins/super admins.
-  const canBulkDelete = access === 'owner' || access === 'admin';
+  // Managing the medication list (add/edit/delete/import, incl. bulk) is
+  // limited to the owner and platform admins/super admins. Contributors are
+  // read-only for the list but can still record administrations.
+  const canManageMeds = access === 'owner' || access === 'admin';
+  const canBulkDelete = canManageMeds;
 
   const routeFilter: DataFilter<MedicationRecord> = {
     key: 'route',
@@ -100,12 +103,12 @@ export function MedicationsPage() {
           <ImportExport
             basePath={`/care-profiles/${profile.id}/medications`}
             resource="medications"
-            canImport={canEdit}
+            canImport={canManageMeds}
             onImported={invalidate}
             templateHeaders={['Name', 'Dose', 'Form', 'Route', 'Frequency', 'Times', 'Instructions', 'Prescriber', 'Active']}
             templateSample={['Metformin', '500 mg', 'Tablet', 'Oral', 'Twice daily', '08:00; 20:00', 'With food', 'Dr Wright', 'true']}
           />
-          {canEdit ? <Button onClick={() => setAddOpen(true)}>Add medication</Button> : null}
+          {canManageMeds ? <Button onClick={() => setAddOpen(true)}>Add medication</Button> : null}
         </div>
       </div>
 
@@ -165,7 +168,7 @@ export function MedicationsPage() {
                 </td>
                 <td className="px-4 py-3 text-right whitespace-nowrap space-x-2">
                   {canEdit && m.active ? <Button size="sm" onClick={() => setLogging(m)}>Record dose</Button> : null}
-                  {canEdit ? <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>Edit</Button> : null}
+                  {canManageMeds ? <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>Edit</Button> : null}
                 </td>
               </tr>
             ))}
@@ -204,6 +207,14 @@ function MedicationForm({ profileId, med, onClose, onSaved }: { profileId: strin
   const [active, setActive] = useState(med?.active ?? true);
   const [error, setError] = useState('');
 
+  // Shared catalogue drives the name autocomplete, so the same drug is reused
+  // across people instead of being re-typed as a duplicate.
+  const { data: catalogue } = useQuery({
+    queryKey: ['medication-catalogue'],
+    queryFn: () => api.get<{ items: { id: string; name: string; form: string | null }[] }>('/medication-catalogue'),
+  });
+  const suggestions = catalogue?.items ?? [];
+
   const mutation = useMutation({
     mutationFn: () => {
       const schedule_times = times.split(',').map((t) => t.trim()).filter((t) => /^\d{1,2}:\d{2}$/.test(t)).map((t) => t.padStart(5, '0'));
@@ -217,7 +228,10 @@ function MedicationForm({ profileId, med, onClose, onSaved }: { profileId: strin
   return (
     <Modal open onClose={onClose} title={med ? 'Edit medication' : 'Add medication'}>
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (name.trim()) mutation.mutate(); }}>
-        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Metformin" />
+        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Metformin" list="med-catalogue-options" hint="Pick an existing medication to reuse it, or type a new one." />
+        <datalist id="med-catalogue-options">
+          {suggestions.map((s) => <option key={s.id} value={s.name} />)}
+        </datalist>
         <div className="grid gap-4 sm:grid-cols-2">
           <Input label="Dose" value={dose} onChange={(e) => setDose(e.target.value)} placeholder="e.g. 500 mg" />
           <Input label="Route" value={route} onChange={(e) => setRoute(e.target.value)} placeholder="e.g. Oral" />

@@ -260,6 +260,7 @@ export interface EmergencyContact {
 export interface MedicationRecord {
   id: string;
   care_profile_id: string;
+  medication_catalogue_id?: string;
   name: string;
   dose: string | null;
   form: string | null;
