@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
+import { requireProfileOwner } from '../middleware/permissions';
 import { exportRecords, importRecords, type PortDescriptor, type PortFormat } from '../services/dataPort';
 
 export const medicationsRouter = Router({ mergeParams: true });
@@ -210,6 +211,28 @@ medicationsRouter.patch('/:medId', requireAuth, async (req, res) => {
     return;
   }
   res.json({ medication: med });
+});
+
+// Bulk actions on the list. Delete is limited to the profile owner and
+// platform admins/super admins (requireProfileOwner); contributors and
+// viewers can sort/filter but never bulk-delete. Scoped to this profile, so
+// an admin only ever deletes medications for a person in their care.
+const bulkSchema = z.object({
+  action: z.literal('delete'),
+  ids: z.array(z.string().uuid()).min(1).max(500),
+});
+
+medicationsRouter.post('/bulk', requireAuth, requireProfileOwner, async (req, res) => {
+  const parsed = bulkSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const deleted = await db('medications')
+    .where({ care_profile_id: req.params['id'] })
+    .whereIn('id', parsed.data.ids)
+    .del();
+  res.json({ deleted });
 });
 
 medicationsRouter.delete('/:medId', requireAuth, async (req, res) => {
