@@ -6,6 +6,7 @@ import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { useProfile } from './ProfileLayout';
+import { ImportExport } from '../../../components/ImportExport';
 import { MED_RIGHTS, MED_STATUSES, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
 
 const SELECT = 'rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -37,7 +38,17 @@ export function MedicationsPage() {
             {careName}'s medications and a full administration record built on the six rights of medication administration.
           </p>
         </div>
-        {canEdit ? <Button onClick={() => setAddOpen(true)} className="self-start sm:self-auto">Add medication</Button> : null}
+        <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+          <ImportExport
+            basePath={`/care-profiles/${profile.id}/medications`}
+            resource="medications"
+            canImport={canEdit}
+            onImported={invalidate}
+            templateHeaders={['Name', 'Dose', 'Form', 'Route', 'Frequency', 'Times', 'Instructions', 'Prescriber', 'Active']}
+            templateSample={['Metformin', '500 mg', 'Tablet', 'Oral', 'Twice daily', '08:00; 20:00', 'With food', 'Dr Wright', 'true']}
+          />
+          {canEdit ? <Button onClick={() => setAddOpen(true)}>Add medication</Button> : null}
+        </div>
       </div>
 
       <div className="card p-0 overflow-x-auto">
@@ -66,7 +77,7 @@ export function MedicationsPage() {
                   {m.schedule_times?.length ? <div className="text-xs">{m.schedule_times.join(', ')}</div> : null}
                 </td>
                 <td className="px-4 py-3 text-right whitespace-nowrap space-x-2">
-                  {canEdit && m.active ? <Button size="sm" onClick={() => setLogging(m)}>Log dose</Button> : null}
+                  {canEdit && m.active ? <Button size="sm" onClick={() => setLogging(m)}>Record dose</Button> : null}
                   {canEdit ? <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>Edit</Button> : null}
                 </td>
               </tr>
@@ -79,7 +90,7 @@ export function MedicationsPage() {
 
       {addOpen ? <MedicationForm profileId={profile.id} onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); invalidate(); }} /> : null}
       {editing ? <MedicationForm profileId={profile.id} med={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} /> : null}
-      {logging ? <AdministerModal profileId={profile.id} med={logging} onClose={() => setLogging(null)} onSaved={() => { setLogging(null); invalidate(); }} /> : null}
+      {logging ? <AdministerModal profileId={profile.id} med={logging} careName={careName} onClose={() => setLogging(null)} onSaved={() => { setLogging(null); invalidate(); }} /> : null}
     </div>
   );
 }
@@ -133,49 +144,82 @@ function MedicationForm({ profileId, med, onClose, onSaved }: { profileId: strin
   );
 }
 
-function AdministerModal({ profileId, med, onClose, onSaved }: { profileId: string; med: MedicationRecord; onClose: () => void; onSaved: () => void }) {
+function localNow(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function AdministerModal({ profileId, med, careName, onClose, onSaved }: { profileId: string; med: MedicationRecord; careName: string; onClose: () => void; onSaved: () => void }) {
+  const [when, setWhen] = useState(localNow());
   const [status, setStatus] = useState('given');
-  const [doseGiven, setDoseGiven] = useState(med.dose ?? '');
-  const [routeGiven, setRouteGiven] = useState(med.route ?? '');
+  const [doseOk, setDoseOk] = useState('yes');
+  const [routeOk, setRouteOk] = useState('yes');
   const [notes, setNotes] = useState('');
-  // The six rights: confirmed by the person administering.
-  const [rights, setRights] = useState<Record<string, boolean>>(Object.fromEntries(MED_RIGHTS.map((r) => [r.key, true])));
   const [error, setError] = useState('');
-  const allConfirmed = MED_RIGHTS.every((r) => rights[r.key]);
 
   const mutation = useMutation({
     mutationFn: () => api.post(`/care-profiles/${profileId}/medications/${med.id}/administrations`, {
-      status, dose_given: doseGiven || null, route_given: routeGiven || null, notes: notes || null,
-      scheduled_for: new Date().toISOString(), ...rights,
+      administered_at: new Date(when).toISOString(),
+      status,
+      notes: notes || null,
+      // Patient, medication and documentation are guaranteed by context and
+      // set server-side; time is recorded here; dose and route are verified.
+      right_dose: doseOk === 'yes',
+      right_route: routeOk === 'yes',
+      right_time: true,
     }),
     onSuccess: onSaved,
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to record'),
   });
 
+  const bothVerified = doseOk === 'yes' && routeOk === 'yes';
+
   return (
-    <Modal open onClose={onClose} title={`Administer ${med.name}`}>
+    <Modal open onClose={onClose} title={`Record administration — ${med.name}`}>
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); mutation.mutate(); }}>
-        <div className="rounded-md border border-border p-3 space-y-2">
-          <p className="text-sm font-medium text-ink">Confirm the six rights</p>
-          {MED_RIGHTS.map((r) => (
-            <label key={r.key} className="flex items-center gap-2 text-sm text-ink">
-              <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary" checked={rights[r.key]} onChange={(e) => setRights((p) => ({ ...p, [r.key]: e.target.checked }))} />
-              {r.label}
-            </label>
-          ))}
-          {!allConfirmed ? <p className="text-xs text-amber-700">Any unconfirmed right is recorded as an exception.</p> : null}
+        {/* The rights that context guarantees, shown for transparency. */}
+        <div className="rounded-md bg-surface border border-border p-3 text-xs text-muted space-y-0.5">
+          <p><span className="text-primary">✓</span> Right person: <span className="text-ink font-medium">{careName}</span></p>
+          <p><span className="text-primary">✓</span> Right medication: <span className="text-ink font-medium">{med.name}{med.dose ? ` ${med.dose}` : ''}</span></p>
+          <p><span className="text-primary">✓</span> Right documentation: recorded to the MAR</p>
         </div>
+
+        <div>
+          <label htmlFor="admin-when" className="block text-sm font-medium text-ink mb-1">Date & time given <span className="text-muted font-normal">(right time)</span></label>
+          <input id="admin-when" type="datetime-local" className={`${SELECT} w-full`} value={when} onChange={(e) => setWhen(e.target.value)} required />
+        </div>
+
         <div>
           <label htmlFor="admin-status" className="block text-sm font-medium text-ink mb-1">Outcome</label>
           <select id="admin-status" className={`${SELECT} w-full`} value={status} onChange={(e) => setStatus(e.target.value)}>
             {MED_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
         </div>
+
         <div className="grid gap-4 sm:grid-cols-2">
-          <Input label="Dose given" value={doseGiven} onChange={(e) => setDoseGiven(e.target.value)} />
-          <Input label="Route" value={routeGiven} onChange={(e) => setRouteGiven(e.target.value)} />
+          <div>
+            <label htmlFor="admin-dose" className="block text-sm font-medium text-ink mb-1">
+              Right dose{med.dose ? <span className="text-muted font-normal"> ({med.dose})</span> : ''}
+            </label>
+            <select id="admin-dose" className={`${SELECT} w-full`} value={doseOk} onChange={(e) => setDoseOk(e.target.value)}>
+              <option value="yes">Yes, dose verified</option>
+              <option value="no">No</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="admin-route" className="block text-sm font-medium text-ink mb-1">
+              Right route{med.route ? <span className="text-muted font-normal"> ({med.route})</span> : ''}
+            </label>
+            <select id="admin-route" className={`${SELECT} w-full`} value={routeOk} onChange={(e) => setRouteOk(e.target.value)}>
+              <option value="yes">Yes, route verified</option>
+              <option value="no">No</option>
+            </select>
+          </div>
         </div>
-        <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Anything worth recording" />
+
+        <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder={bothVerified ? 'Anything worth recording' : 'Please note what differed'} />
+        {!bothVerified ? <p className="text-xs text-amber-700">An unverified dose or route is recorded as an exception on the MAR.</p> : null}
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
