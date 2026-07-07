@@ -7,16 +7,38 @@ import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { useProfile } from './ProfileLayout';
 import { ImportExport } from '../../../components/ImportExport';
+import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
+import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
 import { MED_RIGHTS, MED_STATUSES, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
+
+// Domain sort/filter helpers for the reusable data view.
+const earliestTime = (m: MedicationRecord): number => {
+  const times = m.schedule_times ?? [];
+  if (times.length === 0) return Number.POSITIVE_INFINITY;
+  return Math.min(...times.map((t) => { const [h, mm] = t.split(':'); return Number(h) * 60 + Number(mm); }));
+};
+const doseValue = (m: MedicationRecord): number => {
+  const n = parseFloat(String(m.dose ?? '').replace(/[^0-9.]/g, ''));
+  return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+};
+const byName = (a: MedicationRecord, b: MedicationRecord) => a.name.localeCompare(b.name);
+
+const MED_SORTS: DataSort<MedicationRecord>[] = [
+  { key: 'default', label: 'Active first, then name', compare: (a, b) => (Number(b.active) - Number(a.active)) || byName(a, b) },
+  { key: 'schedule', label: 'By time of day (through the day)', compare: (a, b) => (earliestTime(a) - earliestTime(b)) || byName(a, b) },
+  { key: 'dose', label: 'By dose (low to high)', compare: (a, b) => (doseValue(a) - doseValue(b)) || byName(a, b) },
+  { key: 'name', label: 'By name (A–Z)', compare: byName },
+];
 
 const SELECT = 'rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
 export function MedicationsPage() {
-  const { profile, canEdit, careName } = useProfile();
+  const { profile, access, canEdit, careName } = useProfile();
   const queryClient = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<MedicationRecord | null>(null);
   const [logging, setLogging] = useState<MedicationRecord | null>(null);
+  const [confirmBulk, setConfirmBulk] = useState(false);
 
   const { data } = useQuery({
     queryKey: ['medications', profile.id],
@@ -28,6 +50,42 @@ export function MedicationsPage() {
     void queryClient.invalidateQueries({ queryKey: ['mar', profile.id] });
     void queryClient.invalidateQueries({ queryKey: ['calendar-events', profile.id] });
   };
+
+  // Bulk delete is limited to the owner and platform admins/super admins.
+  const canBulkDelete = access === 'owner' || access === 'admin';
+
+  const routeFilter: DataFilter<MedicationRecord> = {
+    key: 'route',
+    label: 'Route',
+    options: [...new Set(meds.map((m) => m.route).filter((r): r is string => !!r))].map((r) => ({ value: r, label: r })),
+    match: (m, v) => m.route === v,
+  };
+  const statusFilter: DataFilter<MedicationRecord> = {
+    key: 'status',
+    label: 'Status',
+    options: [{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }],
+    match: (m, v) => (v === 'active' ? m.active : !m.active),
+  };
+
+  const dv = useDataView<MedicationRecord>({
+    rows: meds,
+    getId: (m) => m.id,
+    searchText: (m) => [m.name, m.dose, m.route, m.frequency, m.prescriber].filter(Boolean).join(' '),
+    sorts: MED_SORTS,
+    filters: [statusFilter, routeFilter],
+  });
+
+  const bulkDelete = useMutation({
+    mutationFn: () => api.post<{ deleted: number }>(`/care-profiles/${profile.id}/medications/bulk`, {
+      action: 'delete',
+      ids: dv.selectedRows.map((m) => m.id),
+    }),
+    onSuccess: () => { setConfirmBulk(false); dv.clearSelection(); invalidate(); },
+  });
+
+  const bulkActions: ToolbarBulkAction[] = canBulkDelete
+    ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulk(true) }]
+    : [];
 
   return (
     <div className="space-y-6">
@@ -51,10 +109,31 @@ export function MedicationsPage() {
         </div>
       </div>
 
+      <DataToolbar
+        search={dv.search}
+        onSearch={dv.setSearch}
+        searchPlaceholder="Search medications…"
+        sorts={MED_SORTS.map((s) => ({ key: s.key, label: s.label }))}
+        sortKey={dv.sortKey}
+        onSort={dv.setSortKey}
+        filters={[statusFilter, routeFilter].map((f) => ({ key: f.key, label: f.label, options: f.options }))}
+        filterValues={dv.filterValues}
+        onFilter={dv.setFilter}
+        selectedCount={dv.selectedRows.length}
+        bulkActions={bulkActions}
+        onClearSelection={dv.clearSelection}
+      />
+
       <div className="card p-0 overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted border-b border-border">
+              {canBulkDelete ? (
+                <th className="px-4 py-3 w-8">
+                  <input type="checkbox" aria-label="Select all" className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    checked={dv.allSelected} onChange={dv.toggleAll} />
+                </th>
+              ) : null}
               <th className="px-4 py-3 font-medium">Medication</th>
               <th className="px-4 py-3 font-medium">Dose</th>
               <th className="px-4 py-3 font-medium">Route</th>
@@ -63,12 +142,18 @@ export function MedicationsPage() {
             </tr>
           </thead>
           <tbody>
-            {meds.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-muted">No medications recorded yet.</td></tr>
-            ) : meds.map((m) => (
+            {dv.view.length === 0 ? (
+              <tr><td colSpan={canBulkDelete ? 6 : 5} className="px-4 py-8 text-center text-muted">{meds.length === 0 ? 'No medications recorded yet.' : 'No medications match your search or filters.'}</td></tr>
+            ) : dv.view.map((m) => (
               <tr key={m.id} className={`border-b border-border last:border-0 ${m.active ? '' : 'opacity-60'}`}>
+                {canBulkDelete ? (
+                  <td className="px-4 py-3">
+                    <input type="checkbox" aria-label={`Select ${m.name}`} className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                      checked={dv.selected.has(m.id)} onChange={() => dv.toggle(m.id)} />
+                  </td>
+                ) : null}
                 <td className="px-4 py-3">
-                  <div className="font-medium text-ink">{m.name}{m.active ? '' : ' (inactive)'}</div>
+                  <div data-testid="med-name" className="font-medium text-ink">{m.name}{m.active ? '' : ' (inactive)'}</div>
                   {m.prescriber ? <div className="text-xs text-muted">Prescriber: {m.prescriber}</div> : null}
                   {m.instructions ? <div className="text-xs text-muted">{m.instructions}</div> : null}
                 </td>
@@ -93,6 +178,17 @@ export function MedicationsPage() {
       {addOpen ? <MedicationForm profileId={profile.id} onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); invalidate(); }} /> : null}
       {editing ? <MedicationForm profileId={profile.id} med={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} /> : null}
       {logging ? <AdministerModal profileId={profile.id} med={logging} careName={careName} onClose={() => setLogging(null)} onSaved={() => { setLogging(null); invalidate(); }} /> : null}
+
+      <Modal open={confirmBulk} onClose={() => setConfirmBulk(false)} title="Delete medications">
+        <p className="text-sm text-muted mb-4">
+          Permanently delete <span className="font-medium text-ink">{dv.selectedRows.length}</span> selected
+          medication{dv.selectedRows.length === 1 ? '' : 's'}? Their administration history is removed too. This cannot be undone.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmBulk(false)}>Cancel</Button>
+          <Button variant="danger" loading={bulkDelete.isPending} onClick={() => bulkDelete.mutate()}>Delete {dv.selectedRows.length}</Button>
+        </div>
+      </Modal>
     </div>
   );
 }
