@@ -16,6 +16,8 @@ import { Button } from '../../../components/ui/Button';
 import { useProfile } from './ProfileLayout';
 import type { Task } from '../../../lib/care';
 
+type CalendarEvent = Task & { kind?: string; medication_id?: string };
+
 export function CalendarPage() {
   const { profile } = useProfile();
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
@@ -26,7 +28,7 @@ export function CalendarPage() {
   const { data } = useQuery({
     queryKey: ['calendar-events', profile.id, month.toISOString()],
     queryFn: () =>
-      api.get<{ events: Task[] }>(
+      api.get<{ events: CalendarEvent[] }>(
         `/care-profiles/${profile.id}/calendar?from=${gridStart.toISOString()}&to=${gridEnd.toISOString()}`
       ),
   });
@@ -101,7 +103,11 @@ export function CalendarPage() {
                       key={e.id}
                       title={`${format(new Date(e.next_due_at), 'HH:mm')} ${e.title}`}
                       className={`truncate rounded px-1.5 py-0.5 text-[11px] leading-tight ${
-                        e.completed ? 'bg-surface-2 text-muted line-through' : 'bg-primary-50 text-primary'
+                        e.completed
+                          ? 'bg-surface-2 text-muted line-through'
+                          : e.kind === 'medication'
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'
+                            : 'bg-primary-50 text-primary'
                       }`}
                     >
                       {format(new Date(e.next_due_at), 'HH:mm')} {e.title}

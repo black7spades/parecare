@@ -10,6 +10,7 @@ import { ProfileLayout } from './pages/app/profile/ProfileLayout';
 import { OverviewPage } from './pages/app/profile/OverviewPage';
 import { CirclePage } from './pages/app/profile/CirclePage';
 import { PlanPage } from './pages/app/profile/PlanPage';
+import { MedicationsPage } from './pages/app/profile/MedicationsPage';
 import { TasksPage } from './pages/app/profile/TasksPage';
 import { CalendarPage } from './pages/app/profile/CalendarPage';
 import { MessagesPage } from './pages/app/profile/MessagesPage';
@@ -83,6 +84,7 @@ export const router = createBrowserRouter([
           { path: 'dashboard', element: <OverviewPage /> },
           { path: 'circle', element: <CirclePage /> },
           { path: 'plan', element: <PlanPage /> },
+          { path: 'medications', element: <MedicationsPage /> },
           { path: 'tasks', element: <TasksPage /> },
           { path: 'calendar', element: <CalendarPage /> },
           { path: 'messages', element: <MessagesPage /> },
