@@ -65,16 +65,19 @@ export function DataToolbar({
       {selectedCount > 0 && bulkActions.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary-100 bg-primary-50 px-3 py-2">
           <span className="text-sm text-ink font-medium">{selectedCount} selected</span>
+          {/* Safe actions sit next to the selection; destructive actions are
+              pushed to the far right so Delete is never beside the checkbox. */}
           <div className="flex flex-wrap gap-2">
-            {bulkActions.map((a) => (
-              <Button key={a.key} size="sm" variant={a.destructive ? 'danger' : 'secondary'} onClick={a.onRun}>
-                {a.label}
-              </Button>
+            {bulkActions.filter((a) => !a.destructive).map((a) => (
+              <Button key={a.key} size="sm" variant="secondary" onClick={a.onRun}>{a.label}</Button>
             ))}
           </div>
           <button type="button" className="ml-auto text-xs text-primary hover:underline" onClick={onClearSelection}>
             Clear selection
           </button>
+          {bulkActions.filter((a) => a.destructive).map((a) => (
+            <Button key={a.key} size="sm" variant="danger" onClick={a.onRun}>{a.label}</Button>
+          ))}
         </div>
       ) : null}
     </div>
