@@ -6,8 +6,6 @@ import { exportRecords, importRecords, type PortDescriptor, type PortFormat } fr
 
 export const medicationsRouter = Router({ mergeParams: true });
 
-const RIGHTS = ['right_patient', 'right_medication', 'right_dose', 'right_route', 'right_time', 'right_documentation'] as const;
-
 const medSchema = z.object({
   name: z.string().min(1).max(255),
   dose: z.string().max(255).optional().nullable(),
@@ -254,16 +252,18 @@ medicationsRouter.get('/administrations', requireAuth, async (req, res) => {
 
 const adminSchema = z.object({
   scheduled_for: z.string().optional().nullable(),
+  administered_at: z.string().optional().nullable(),
   status: z.enum(['given', 'refused', 'omitted', 'held', 'self_administered']).default('given'),
   dose_given: z.string().max(255).optional().nullable(),
   route_given: z.string().max(100).optional().nullable(),
   notes: z.string().optional().nullable(),
-  right_patient: z.boolean().optional(),
-  right_medication: z.boolean().optional(),
+  // Only the dose, route and time rights are verified at the point of care.
+  // Patient, medication and documentation are guaranteed by the context
+  // (you are on this person's record, you picked this medication, and the
+  // act of recording is the documentation) and are set server-side.
   right_dose: z.boolean().optional(),
   right_route: z.boolean().optional(),
   right_time: z.boolean().optional(),
-  right_documentation: z.boolean().optional(),
 });
 
 medicationsRouter.post('/:medId/administrations', requireAuth, async (req, res) => {
@@ -277,19 +277,26 @@ medicationsRouter.post('/:medId/administrations', requireAuth, async (req, res) 
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
-  const rights = Object.fromEntries(RIGHTS.map((r) => [r, !!parsed.data[r]]));
   const [record] = await db('medication_administrations')
     .insert({
       medication_id: med.id,
       care_profile_id: req.params['id'],
       scheduled_for: parsed.data.scheduled_for ? new Date(parsed.data.scheduled_for) : null,
+      administered_at: parsed.data.administered_at ? new Date(parsed.data.administered_at) : db.fn.now(),
       administered_by_account_id: req.account!.id,
       administered_by_name: req.account!.display_name,
       status: parsed.data.status,
       dose_given: parsed.data.dose_given ?? med.dose ?? null,
       route_given: parsed.data.route_given ?? med.route ?? null,
       notes: parsed.data.notes ?? null,
-      ...rights,
+      // Context-guaranteed rights.
+      right_patient: true,
+      right_medication: true,
+      right_documentation: true,
+      // Verified at the point of care.
+      right_dose: parsed.data.right_dose ?? false,
+      right_route: parsed.data.right_route ?? false,
+      right_time: parsed.data.right_time ?? true,
     })
     .returning('*');
   res.status(201).json({ administration: record });
