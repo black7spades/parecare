@@ -66,7 +66,14 @@ const envSchema = z.object({
   AI_TOKENS_FREE: z.string().transform(Number).default('0'),
   AI_TOKENS_FAMILY: z.string().transform(Number).default('100000'),
   AI_TOKENS_PROFESSIONAL: z.string().transform(Number).default('-1'),
-  APP_URL: z.string().default('http://localhost'),
+  // Strip any trailing slash so generated links never end up with a double
+  // slash (e.g. APP_URL "http://host/" would make invite links
+  // "http://host//invite/<token>", whose "//invite" path fails to match the
+  // SPA route and lands on "Page not found").
+  APP_URL: z
+    .string()
+    .default('http://localhost')
+    .transform((v) => v.replace(/\/+$/, '')),
 });
 
 const parsed = envSchema.safeParse(process.env);
