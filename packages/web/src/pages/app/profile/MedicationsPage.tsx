@@ -56,14 +56,15 @@ export function MedicationsPage() {
           <thead>
             <tr className="text-left text-xs text-muted border-b border-border">
               <th className="px-4 py-3 font-medium">Medication</th>
-              <th className="px-4 py-3 font-medium">Dose / route</th>
+              <th className="px-4 py-3 font-medium">Dose</th>
+              <th className="px-4 py-3 font-medium">Route</th>
               <th className="px-4 py-3 font-medium">Schedule</th>
               <th className="px-4 py-3 font-medium text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {meds.length === 0 ? (
-              <tr><td colSpan={4} className="px-4 py-8 text-center text-muted">No medications recorded yet.</td></tr>
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-muted">No medications recorded yet.</td></tr>
             ) : meds.map((m) => (
               <tr key={m.id} className={`border-b border-border last:border-0 ${m.active ? '' : 'opacity-60'}`}>
                 <td className="px-4 py-3">
@@ -71,7 +72,8 @@ export function MedicationsPage() {
                   {m.prescriber ? <div className="text-xs text-muted">Prescriber: {m.prescriber}</div> : null}
                   {m.instructions ? <div className="text-xs text-muted">{m.instructions}</div> : null}
                 </td>
-                <td className="px-4 py-3 text-muted">{[m.dose, m.route].filter(Boolean).join(' · ') || '—'}</td>
+                <td className="px-4 py-3 text-muted">{m.dose || '—'}</td>
+                <td className="px-4 py-3 text-muted">{m.route || '—'}</td>
                 <td className="px-4 py-3 text-muted">
                   {m.frequency ? <div>{m.frequency}</div> : null}
                   {m.schedule_times?.length ? <div className="text-xs">{m.schedule_times.join(', ')}</div> : null}
@@ -181,7 +183,7 @@ function AdministerModal({ profileId, med, careName, onClose, onSaved }: { profi
         {/* The rights that context guarantees, shown for transparency. */}
         <div className="rounded-md bg-surface border border-border p-3 text-xs text-muted space-y-0.5">
           <p><span className="text-primary">✓</span> Right person: <span className="text-ink font-medium">{careName}</span></p>
-          <p><span className="text-primary">✓</span> Right medication: <span className="text-ink font-medium">{med.name}{med.dose ? ` ${med.dose}` : ''}</span></p>
+          <p><span className="text-primary">✓</span> Right medication: <span className="text-ink font-medium">{med.name}</span></p>
           <p><span className="text-primary">✓</span> Right documentation: recorded to the MAR</p>
         </div>
 
@@ -276,6 +278,8 @@ function MarTable({ profileId }: { profileId: string }) {
             <tr className="text-left text-xs text-muted border-b border-border">
               <th className="px-4 py-3 font-medium">When</th>
               <th className="px-4 py-3 font-medium">Medication</th>
+              <th className="px-4 py-3 font-medium">Dose</th>
+              <th className="px-4 py-3 font-medium">Route</th>
               <th className="px-4 py-3 font-medium">By</th>
               <th className="px-4 py-3 font-medium">Outcome</th>
               <th className="px-4 py-3 font-medium">Rights</th>
@@ -283,7 +287,7 @@ function MarTable({ profileId }: { profileId: string }) {
           </thead>
           <tbody>
             {records.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-muted">No administrations recorded yet.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">No administrations recorded yet.</td></tr>
             ) : records.map((a) => {
               const confirmed = MED_RIGHTS.filter((r) => a[r.key as keyof MedicationAdministration]).length;
               return (
@@ -291,9 +295,10 @@ function MarTable({ profileId }: { profileId: string }) {
                   <td className="px-4 py-3 whitespace-nowrap text-muted">{format(new Date(a.administered_at), 'd MMM yyyy, HH:mm')}</td>
                   <td className="px-4 py-3">
                     <div className="text-ink">{a.medication_name}</div>
-                    <div className="text-xs text-muted">{[a.dose_given, a.route_given].filter(Boolean).join(' · ')}</div>
                     {a.notes ? <div className="text-xs text-muted">{a.notes}</div> : null}
                   </td>
+                  <td className="px-4 py-3 text-muted">{a.dose_given || '—'}</td>
+                  <td className="px-4 py-3 text-muted">{a.route_given || '—'}</td>
                   <td className="px-4 py-3 text-muted whitespace-nowrap">{a.administered_by_name ?? '—'}</td>
                   <td className="px-4 py-3"><span className={`badge text-xs ${statusBadge(a.status)}`}>{MED_STATUSES.find((s) => s.value === a.status)?.label ?? a.status}</span></td>
                   <td className="px-4 py-3">
