@@ -2,12 +2,13 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   addDays, addMonths, addWeeks, eachDayOfInterval, endOfDay, endOfMonth, endOfWeek,
-  format, isSameDay, startOfDay, startOfMonth, startOfWeek,
+  format, startOfDay, startOfMonth, startOfWeek,
 } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { MED_STATUSES, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
+import { C64_PALETTE, contrastText } from '../../../components/ui/Avatar';
 import { AdministerModal } from './MedicationsPage';
 
 const SELECT = 'rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -23,13 +24,27 @@ interface ChartAdmin {
   notes: string | null;
 }
 
-const STATUS_CELL: Record<string, string> = {
-  given: 'bg-primary text-white',
-  self_administered: 'bg-primary text-white',
-  refused: 'bg-amber-500 text-white',
-  omitted: 'bg-red-500 text-white',
-  held: 'bg-surface-2 text-muted',
+// Dose-status colours drawn from the Commodore 64 palette (colodore).
+const C64 = {
+  green: C64_PALETTE[5],       // given
+  lightGreen: C64_PALETTE[13], // self-administered
+  orange: C64_PALETTE[8],      // refused
+  red: C64_PALETTE[2],         // omitted
+  yellow: C64_PALETTE[7],      // held
+  lightRed: C64_PALETTE[10],   // missed
+  lightGrey: C64_PALETTE[15],  // future / not due
+} as const;
+
+const STATUS_HEX: Record<string, string> = {
+  given: C64.green,
+  self_administered: C64.lightGreen,
+  refused: C64.orange,
+  omitted: C64.red,
+  held: C64.yellow,
 };
+
+const statusColorFor = (s: string): string => STATUS_HEX[s] ?? C64_PALETTE[12];
+const swatch = (hex: string) => ({ backgroundColor: hex, color: contrastText(hex) });
 const statusLabel = (s: string) => MED_STATUSES.find((x) => x.value === s)?.label ?? s;
 
 export function MedicationMar({ profileId, personName, canAdminister }: { profileId: string; personName: string; canAdminister: boolean }) {
@@ -213,12 +228,15 @@ function DayGrid({ meds, day, findAdmin, now, canAdminister, onRecord, onRound }
                 return (
                   <td key={t} className="px-2 py-2 text-center">
                     {a ? (
-                      <span data-testid={`slot-${m.id}-${t}`} title={`${statusLabel(a.status)}${a.notes ? ` — ${a.notes}` : ''}`} className={`inline-flex h-7 min-w-[2.5rem] items-center justify-center rounded px-1 text-xs ${STATUS_CELL[a.status] ?? 'bg-surface-2 text-muted'}`}>
+                      <span data-testid={`slot-${m.id}-${t}`} title={`${statusLabel(a.status)}${a.notes ? ` — ${a.notes}` : ''}`}
+                        style={swatch(statusColorFor(a.status))}
+                        className="inline-flex h-7 min-w-[2.5rem] items-center justify-center rounded px-1 text-xs font-medium">
                         {a.status === 'given' || a.status === 'self_administered' ? '✓' : statusLabel(a.status).slice(0, 4)}
                       </span>
                     ) : canAdminister ? (
                       <button type="button" data-testid={`slot-${m.id}-${t}`} onClick={() => onRecord(m, iso)}
-                        className={`inline-flex h-7 min-w-[2.5rem] items-center justify-center rounded border border-dashed px-1 text-xs ${past ? 'border-red-300 text-red-500 hover:bg-red-50' : 'border-border text-muted hover:bg-surface-2'}`}>
+                        style={past ? { borderColor: C64.lightRed, color: C64.lightRed } : undefined}
+                        className={`inline-flex h-7 min-w-[2.5rem] items-center justify-center rounded border border-dashed px-1 text-xs ${past ? 'hover:bg-surface-2' : 'border-border text-muted hover:bg-surface-2'}`}>
                         {past ? 'due' : '+'}
                       </button>
                     ) : (
@@ -270,16 +288,16 @@ function MonthGrid({ meds, days, admins, now, onPickDay }: {
                 const expected = (m.schedule_times ?? []).filter((t) => new Date(`${format(d, 'yyyy-MM-dd')}T${t}:00`) <= now).length;
                 const given = givenByMedDay.get(`${m.id}|${format(d, 'yyyy-MM-dd')}`) ?? 0;
                 const totalSlots = (m.schedule_times ?? []).length;
-                let cls = 'bg-surface-2';
+                let bg = C64.lightGrey;
                 if (totalSlots > 0 && expected > 0) {
-                  if (given >= expected) cls = 'bg-primary';
-                  else if (given > 0) cls = 'bg-amber-400';
-                  else cls = 'bg-red-300';
-                } else if (isSameDay(d, now)) cls = 'bg-surface-2';
+                  if (given >= expected) bg = C64.green;
+                  else if (given > 0) bg = C64.yellow;
+                  else bg = C64.lightRed;
+                }
                 return (
                   <td key={d.toISOString()} className="px-1 py-1 text-center">
                     <button type="button" onClick={() => onPickDay(d)} title={`${format(d, 'd MMM')}: ${given}/${totalSlots} given`}
-                      className={`inline-block h-5 w-5 rounded ${cls}`} />
+                      style={{ backgroundColor: bg }} className="inline-block h-5 w-5 rounded" />
                   </td>
                 );
               })}
@@ -377,7 +395,7 @@ function MarLog({ profileId }: { profileId: string }) {
                 <td className="px-4 py-3 text-muted">{a.dose_given || '—'}</td>
                 <td className="px-4 py-3 text-muted">{a.route_given || '—'}</td>
                 <td className="px-4 py-3 text-muted whitespace-nowrap">{a.administered_by_name ?? '—'}</td>
-                <td className="px-4 py-3"><span className={`badge text-xs ${STATUS_CELL[a.status] ? 'bg-surface-2 text-ink' : 'bg-surface-2 text-muted'}`}>{statusLabel(a.status)}</span></td>
+                <td className="px-4 py-3"><span className="badge text-xs font-medium" style={swatch(statusColorFor(a.status))}>{statusLabel(a.status)}</span></td>
               </tr>
             ))}
           </tbody>
