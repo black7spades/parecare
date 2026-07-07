@@ -256,6 +256,59 @@ export interface EmergencyContact {
   phone: string;
 }
 
+/** A first-class medication record (distinct from the care-plan summary). */
+export interface MedicationRecord {
+  id: string;
+  care_profile_id: string;
+  name: string;
+  dose: string | null;
+  form: string | null;
+  route: string | null;
+  frequency: string | null;
+  schedule_times: string[] | null;
+  instructions: string | null;
+  prescriber: string | null;
+  active: boolean;
+}
+
+export const MED_STATUSES = [
+  { value: 'given', label: 'Given' },
+  { value: 'refused', label: 'Refused' },
+  { value: 'omitted', label: 'Omitted' },
+  { value: 'held', label: 'Held' },
+  { value: 'self_administered', label: 'Self-administered' },
+] as const;
+
+export const MED_RIGHTS = [
+  { key: 'right_patient', label: 'Right patient' },
+  { key: 'right_medication', label: 'Right medication' },
+  { key: 'right_dose', label: 'Right dose' },
+  { key: 'right_route', label: 'Right route' },
+  { key: 'right_time', label: 'Right time' },
+  { key: 'right_documentation', label: 'Right documentation' },
+] as const;
+
+export interface MedicationAdministration {
+  id: string;
+  medication_id: string;
+  medication_name: string;
+  medication_dose: string | null;
+  medication_route: string | null;
+  administered_at: string;
+  scheduled_for: string | null;
+  administered_by_name: string | null;
+  status: string;
+  dose_given: string | null;
+  route_given: string | null;
+  notes: string | null;
+  right_patient: boolean;
+  right_medication: boolean;
+  right_dose: boolean;
+  right_route: boolean;
+  right_time: boolean;
+  right_documentation: boolean;
+}
+
 export interface CarePlan {
   conditions: string[];
   medications: Medication[];
