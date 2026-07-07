@@ -9,7 +9,8 @@ import { useProfile } from './ProfileLayout';
 import { ImportExport } from '../../../components/ImportExport';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
-import { MED_RIGHTS, MED_STATUSES, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
+import { MED_STATUSES, type MedicationRecord } from '../../../lib/care';
+import { MedicationMar } from './MedicationMar';
 
 // Domain sort/filter helpers for the reusable data view.
 const earliestTime = (m: MedicationRecord): number => {
@@ -176,7 +177,7 @@ export function MedicationsPage() {
         </table>
       </div>
 
-      <MarTable profileId={profile.id} />
+      <MedicationMar profileId={profile.id} personName={profile.full_name} canAdminister={canEdit} />
 
       {addOpen ? <MedicationForm profileId={profile.id} onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); invalidate(); }} /> : null}
       {editing ? <MedicationForm profileId={profile.id} med={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} /> : null}
@@ -266,8 +267,8 @@ function localNow(): string {
 // omitted, held) makes the Notes field compulsory.
 const NOTE_OPTIONAL_OUTCOMES = new Set(['given', 'self_administered']);
 
-function AdministerModal({ profileId, med, personName, onClose, onSaved }: { profileId: string; med: MedicationRecord; personName: string; onClose: () => void; onSaved: () => void }) {
-  const [when, setWhen] = useState(localNow());
+export function AdministerModal({ profileId, med, personName, scheduledFor, initialWhen, onClose, onSaved }: { profileId: string; med: MedicationRecord; personName: string; scheduledFor?: string; initialWhen?: string; onClose: () => void; onSaved: () => void }) {
+  const [when, setWhen] = useState(initialWhen ?? localNow());
   const [status, setStatus] = useState('given');
   const [doseGiven, setDoseGiven] = useState(med.dose ?? '');
   const [routeGiven, setRouteGiven] = useState(med.route ?? '');
@@ -279,6 +280,7 @@ function AdministerModal({ profileId, med, personName, onClose, onSaved }: { pro
   const mutation = useMutation({
     mutationFn: () => api.post(`/care-profiles/${profileId}/medications/${med.id}/administrations`, {
       administered_at: new Date(when).toISOString(),
+      scheduled_for: scheduledFor ?? null,
       status,
       dose_given: doseGiven || null,
       route_given: routeGiven || null,
@@ -345,86 +347,3 @@ function AdministerModal({ profileId, med, personName, onClose, onSaved }: { pro
   );
 }
 
-function statusBadge(status: string) {
-  const map: Record<string, string> = { given: 'bg-primary-50 text-primary', self_administered: 'bg-primary-50 text-primary', refused: 'bg-amber-50 text-amber-700', omitted: 'bg-amber-50 text-amber-700', held: 'bg-surface-2 text-muted' };
-  return map[status] ?? 'bg-surface-2 text-muted';
-}
-
-function MarTable({ profileId }: { profileId: string }) {
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('');
-  const [sort, setSort] = useState('recent');
-
-  const { data } = useQuery({
-    queryKey: ['mar', profileId, search, status, sort],
-    queryFn: () => {
-      const qs = new URLSearchParams();
-      if (search.trim()) qs.set('search', search.trim());
-      if (status) qs.set('status', status);
-      qs.set('sort', sort);
-      return api.get<{ administrations: MedicationAdministration[] }>(`/care-profiles/${profileId}/medications/administrations?${qs}`);
-    },
-  });
-  const records = data?.administrations ?? [];
-
-  return (
-    <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-ink">Administration record (MAR)</h3>
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex-1 min-w-[12rem]">
-          <Input aria-label="Search the record" placeholder="Search medication, notes or person…" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <select className={SELECT} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Filter by outcome">
-          <option value="">All outcomes</option>
-          {MED_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-        </select>
-        <select className={SELECT} value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">
-          <option value="recent">Newest first</option>
-          <option value="oldest">Oldest first</option>
-          <option value="medication">By medication</option>
-          <option value="administrator">By person</option>
-        </select>
-      </div>
-      <div className="card p-0 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-muted border-b border-border">
-              <th className="px-4 py-3 font-medium">When</th>
-              <th className="px-4 py-3 font-medium">Medication</th>
-              <th className="px-4 py-3 font-medium">Dose</th>
-              <th className="px-4 py-3 font-medium">Route</th>
-              <th className="px-4 py-3 font-medium">By</th>
-              <th className="px-4 py-3 font-medium">Outcome</th>
-              <th className="px-4 py-3 font-medium">Rights</th>
-            </tr>
-          </thead>
-          <tbody>
-            {records.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">No administrations recorded yet.</td></tr>
-            ) : records.map((a) => {
-              const confirmed = MED_RIGHTS.filter((r) => a[r.key as keyof MedicationAdministration]).length;
-              return (
-                <tr key={a.id} className="border-b border-border last:border-0 align-top">
-                  <td className="px-4 py-3 whitespace-nowrap text-muted">{format(new Date(a.administered_at), 'd MMM yyyy, HH:mm')}</td>
-                  <td className="px-4 py-3">
-                    <div className="text-ink">{a.medication_name}</div>
-                    {a.notes ? <div className="text-xs text-muted">{a.notes}</div> : null}
-                  </td>
-                  <td className="px-4 py-3 text-muted">{a.dose_given || '—'}</td>
-                  <td className="px-4 py-3 text-muted">{a.route_given || '—'}</td>
-                  <td className="px-4 py-3 text-muted whitespace-nowrap">{a.administered_by_name ?? '—'}</td>
-                  <td className="px-4 py-3"><span className={`badge text-xs ${statusBadge(a.status)}`}>{MED_STATUSES.find((s) => s.value === a.status)?.label ?? a.status}</span></td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs ${confirmed === 6 ? 'text-primary' : 'text-amber-700'}`} title={MED_RIGHTS.map((r) => `${r.label}: ${a[r.key as keyof MedicationAdministration] ? '✓' : '✗'}`).join('\n')}>
-                      {confirmed}/6 {confirmed === 6 ? '✓' : ''}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}

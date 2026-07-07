@@ -24,6 +24,7 @@ import { calendarRouter, icsRouter } from './routes/calendar';
 import { medicationsRouter } from './routes/medications';
 import { medicationCatalogueRouter } from './routes/medicationCatalogue';
 import { startReminderScheduler } from './services/scheduler';
+import { startMarArchiveScheduler } from './services/marArchive';
 import { subscriptionsRouter } from './routes/subscriptions';
 import { adminRouter } from './routes/admin';
 import { errorHandler, notFound } from './middleware/errorHandler';
@@ -113,6 +114,7 @@ async function start(): Promise<void> {
     await loadSettings();
     await subscribeSettingsInvalidation();
     startReminderScheduler();
+    startMarArchiveScheduler();
     app.listen(env.PORT, () => {
       console.log(`PareCare API running on port ${env.PORT}`);
     });

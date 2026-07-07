@@ -58,6 +58,7 @@ export const SETTINGS_CATALOG: readonly SettingEntry[] = [
 
   // Scheduler
   { key: 'scheduler.reminder_interval_ms', group: 'scheduler', label: 'Reminder check interval (ms)', type: 'number', secret: false, envKey: 'REMINDER_CHECK_INTERVAL_MS', help: '0 or less disables the reminder scheduler.', zod: num() },
+  { key: 'mar.retention_months', group: 'scheduler', label: 'MAR retention (months)', type: 'number', secret: false, envKey: 'MAR_RETENTION_MONTHS', help: 'Medication administrations older than this are moved out of the live record into the archive (still viewable, never deleted). Default 12 months.', zod: z.coerce.number().int().min(1).max(120) },
 
   // OAuth sign-in
   { key: 'oauth.google_client_id', group: 'oauth', label: 'Google client ID', type: 'string', secret: false, envKey: 'GOOGLE_CLIENT_ID', help: 'Create an OAuth 2.0 Client ID (type: Web application) and register the redirect URI shown above.', helpLink: { label: 'Google Cloud credentials', url: 'https://console.cloud.google.com/apis/credentials' }, zod: str() },

@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth';
 import { requireProfileOwner } from '../middleware/permissions';
 import { exportRecords, importRecords, type PortDescriptor, type PortFormat } from '../services/dataPort';
 import { resolveCatalogueId } from './medicationCatalogue';
+import { getMarRetentionMonths } from '../config/settings';
 
 export const medicationsRouter = Router({ mergeParams: true });
 
@@ -263,34 +264,89 @@ medicationsRouter.delete('/:medId', requireAuth, requireProfileOwner, async (req
   res.json({ message: 'Medication removed.' });
 });
 
-// The MAR: searchable, sortable, filterable administration record.
+// Chart view: the active regimen plus every administration touching the
+// window (matched to a scheduled slot by scheduled_for, or ad-hoc). The
+// frontend composes the schedule grid from this.
+medicationsRouter.get('/chart', requireAuth, async (req, res) => {
+  const from = req.query['from'] ? new Date(String(req.query['from'])) : new Date(Date.now() - 24 * 3600 * 1000);
+  const to = req.query['to'] ? new Date(String(req.query['to'])) : new Date(Date.now() + 24 * 3600 * 1000);
+  const medications = await medSelect().where('m.care_profile_id', req.params['id']).andWhere('m.active', true);
+  const administrations = await db('medication_administrations')
+    .where('care_profile_id', req.params['id'])
+    .andWhere((qb) =>
+      qb.whereBetween('administered_at', [from, to]).orWhereBetween('scheduled_for', [from, to])
+    )
+    .orderBy('administered_at', 'asc');
+  res.json({ medications, administrations });
+});
+
+// A window's adherence summary — expected slots vs recorded outcomes.
+medicationsRouter.get('/summary', requireAuth, async (req, res) => {
+  const from = req.query['from'] ? new Date(String(req.query['from'])) : new Date(Date.now() - 7 * 24 * 3600 * 1000);
+  const to = req.query['to'] ? new Date(String(req.query['to'])) : new Date();
+  const byStatus = (await db('medication_administrations')
+    .where('care_profile_id', req.params['id'])
+    .whereBetween('administered_at', [from, to])
+    .select('status')
+    .count({ n: '*' })
+    .groupBy('status')) as unknown as Array<{ status: string; n: string | number }>;
+  const counts: Record<string, number> = {};
+  for (const r of byStatus) counts[r.status] = Number(r.n);
+  res.json({ counts });
+});
+
+// The MAR log: chronological, filterable, cursor-paginated so it scales to
+// years of records. Optionally folds in the archive (older than retention).
 medicationsRouter.get('/administrations', requireAuth, async (req, res) => {
+  const profileId = String(req.params['id']);
   const q = String(req.query['search'] ?? '').trim();
   const status = String(req.query['status'] ?? '').trim();
   const medicationId = String(req.query['medication_id'] ?? '').trim();
   const from = req.query['from'] ? new Date(String(req.query['from'])) : null;
   const to = req.query['to'] ? new Date(String(req.query['to'])) : null;
-  const sort = String(req.query['sort'] ?? 'recent');
+  const includeArchived = String(req.query['include_archived'] ?? '') === 'true';
+  const order = String(req.query['sort'] ?? 'recent') === 'oldest' ? 'asc' : 'desc';
+  const limit = Math.min(200, Math.max(1, Number(req.query['limit']) || 50));
+  const cursor = req.query['cursor'] ? new Date(String(req.query['cursor'])) : null;
 
-  let query = db('medication_administrations as a')
+  const hot = db('medication_administrations as a')
     .join('medications as m', 'a.medication_id', 'm.id')
     .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
-    .where('a.care_profile_id', req.params['id'])
-    .select('a.*', 'c.name as medication_name', 'm.dose as medication_dose', 'm.route as medication_route');
+    .where('a.care_profile_id', profileId)
+    .select(
+      'a.id', 'a.medication_id', 'a.care_profile_id', 'c.name as medication_name',
+      'a.administered_at', 'a.scheduled_for', 'a.administered_by_name', 'a.status',
+      'a.dose_given', 'a.route_given', 'a.notes',
+      'a.right_patient', 'a.right_medication', 'a.right_dose', 'a.right_route', 'a.right_time', 'a.right_documentation',
+      db.raw('false as archived')
+    );
 
-  if (q) query = query.andWhere((qb) => qb.whereILike('c.name', `%${q}%`).orWhereILike('a.notes', `%${q}%`).orWhereILike('a.administered_by_name', `%${q}%`));
-  if (status) query = query.andWhere('a.status', status);
-  if (medicationId) query = query.andWhere('a.medication_id', medicationId);
-  if (from) query = query.andWhere('a.administered_at', '>=', from);
-  if (to) query = query.andWhere('a.administered_at', '<=', to);
+  let base = db.from(hot.as('x'));
+  if (includeArchived) {
+    const archived = db('medication_administration_archive as a')
+      .where('a.care_profile_id', profileId)
+      .select(
+        'a.id', 'a.medication_id', 'a.care_profile_id', 'a.medication_name',
+        'a.administered_at', 'a.scheduled_for', 'a.administered_by_name', 'a.status',
+        'a.dose_given', 'a.route_given', 'a.notes',
+        'a.right_patient', 'a.right_medication', 'a.right_dose', 'a.right_route', 'a.right_time', 'a.right_documentation',
+        db.raw('true as archived')
+      );
+    base = db.from(hot.unionAll([archived]).as('x'));
+  }
 
-  if (sort === 'oldest') query = query.orderBy('a.administered_at', 'asc');
-  else if (sort === 'medication') query = query.orderBy([{ column: 'c.name', order: 'asc' }, { column: 'a.administered_at', order: 'desc' }]);
-  else if (sort === 'administrator') query = query.orderBy([{ column: 'a.administered_by_name', order: 'asc' }, { column: 'a.administered_at', order: 'desc' }]);
-  else query = query.orderBy('a.administered_at', 'desc');
+  base = base.modify((qb) => {
+    if (q) qb.where((w) => w.whereILike('medication_name', `%${q}%`).orWhereILike('notes', `%${q}%`).orWhereILike('administered_by_name', `%${q}%`));
+    if (status) qb.where('status', status);
+    if (medicationId) qb.where('medication_id', medicationId);
+    if (from) qb.where('administered_at', '>=', from);
+    if (to) qb.where('administered_at', '<=', to);
+    if (cursor) qb.where('administered_at', order === 'asc' ? '>' : '<', cursor);
+  });
 
-  const administrations = await query.limit(500);
-  res.json({ administrations });
+  const administrations = await base.orderBy('administered_at', order).limit(limit);
+  const nextCursor = administrations.length === limit ? administrations[administrations.length - 1].administered_at : null;
+  res.json({ administrations, nextCursor, retentionMonths: getMarRetentionMonths() });
 });
 
 const adminSchema = z.object({
@@ -309,6 +365,35 @@ const adminSchema = z.object({
   right_time: z.boolean().optional(),
 });
 
+const NOTE_OPTIONAL = new Set(['given', 'self_administered']);
+
+// Build the insert row for one administration, deriving the context rights.
+function buildAdminRow(
+  data: z.infer<typeof adminSchema>,
+  med: { id: string; dose: string | null; route: string | null },
+  profileId: string,
+  account: { id: string; display_name: string }
+): Record<string, unknown> {
+  return {
+    medication_id: med.id,
+    care_profile_id: profileId,
+    scheduled_for: data.scheduled_for ? new Date(data.scheduled_for) : null,
+    administered_at: data.administered_at ? new Date(data.administered_at) : db.fn.now(),
+    administered_by_account_id: account.id,
+    administered_by_name: account.display_name,
+    status: data.status,
+    dose_given: data.dose_given ?? med.dose ?? null,
+    route_given: data.route_given ?? med.route ?? null,
+    notes: data.notes ?? null,
+    right_patient: true,
+    right_medication: true,
+    right_documentation: true,
+    right_dose: data.right_dose ?? false,
+    right_route: data.right_route ?? false,
+    right_time: data.right_time ?? true,
+  };
+}
+
 medicationsRouter.post('/:medId/administrations', requireAuth, async (req, res) => {
   const med = await db('medications').where({ id: req.params['medId'], care_profile_id: req.params['id'] }).first();
   if (!med) {
@@ -320,33 +405,39 @@ medicationsRouter.post('/:medId/administrations', requireAuth, async (req, res) 
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
-  // A note is compulsory whenever the dose was not given as prescribed.
-  const NOTE_OPTIONAL = new Set(['given', 'self_administered']);
   if (!NOTE_OPTIONAL.has(parsed.data.status) && !parsed.data.notes?.trim()) {
     res.status(400).json({ error: 'A note is required when the outcome is not "given" or "self-administered".', code: 'NOTE_REQUIRED' });
     return;
   }
-  const [record] = await db('medication_administrations')
-    .insert({
-      medication_id: med.id,
-      care_profile_id: req.params['id'],
-      scheduled_for: parsed.data.scheduled_for ? new Date(parsed.data.scheduled_for) : null,
-      administered_at: parsed.data.administered_at ? new Date(parsed.data.administered_at) : db.fn.now(),
-      administered_by_account_id: req.account!.id,
-      administered_by_name: req.account!.display_name,
-      status: parsed.data.status,
-      dose_given: parsed.data.dose_given ?? med.dose ?? null,
-      route_given: parsed.data.route_given ?? med.route ?? null,
-      notes: parsed.data.notes ?? null,
-      // Context-guaranteed rights.
-      right_patient: true,
-      right_medication: true,
-      right_documentation: true,
-      // Verified at the point of care.
-      right_dose: parsed.data.right_dose ?? false,
-      right_route: parsed.data.right_route ?? false,
-      right_time: parsed.data.right_time ?? true,
-    })
-    .returning('*');
+  const [record] = await db('medication_administrations').insert(buildAdminRow(parsed.data, med, req.params['id']!, req.account!)).returning('*');
   res.status(201).json({ administration: record });
+});
+
+// Record a whole medication round (or several taps) in one request.
+const batchSchema = z.object({
+  entries: z.array(adminSchema.extend({ medication_id: z.string().uuid() })).min(1).max(100),
+});
+
+medicationsRouter.post('/administrations/batch', requireAuth, async (req, res) => {
+  const parsed = batchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const medIds = [...new Set(parsed.data.entries.map((e) => e.medication_id))];
+  const meds = await db('medications').where('care_profile_id', req.params['id']).whereIn('id', medIds);
+  const byId = new Map(meds.map((m) => [m.id, m]));
+  for (const e of parsed.data.entries) {
+    if (!byId.has(e.medication_id)) {
+      res.status(400).json({ error: 'Unknown medication in batch.', code: 'VALIDATION_ERROR' });
+      return;
+    }
+    if (!NOTE_OPTIONAL.has(e.status) && !e.notes?.trim()) {
+      res.status(400).json({ error: 'A note is required for any dose not given or self-administered.', code: 'NOTE_REQUIRED' });
+      return;
+    }
+  }
+  const rows = parsed.data.entries.map((e) => buildAdminRow(e, byId.get(e.medication_id)!, req.params['id']!, req.account!));
+  const inserted = await db('medication_administrations').insert(rows).returning('id');
+  res.status(201).json({ recorded: inserted.length });
 });
