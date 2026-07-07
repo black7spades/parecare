@@ -3,11 +3,18 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { requireRole, roleAtLeast } from '../middleware/requireRole';
+import { archiveOldAdministrations } from '../services/marArchive';
 import type { Account, AccountRole } from '../types';
 
 export const adminRouter = Router();
 
 adminRouter.use(requireAuth, requireRole('admin'));
+
+// Run the MAR retention sweep on demand (it also runs daily). Super admin only.
+adminRouter.post('/mar/archive', requireRole('super_admin'), async (_req, res) => {
+  const archived = await archiveOldAdministrations();
+  res.json({ archived });
+});
 
 const ACCOUNT_COLUMNS = [
   'id',

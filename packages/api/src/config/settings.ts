@@ -139,6 +139,11 @@ export function getSchedulerConfig() {
   };
 }
 
+/** How many months of medication administrations stay in the live record. */
+export function getMarRetentionMonths(): number {
+  return numOr('mar.retention_months', 12);
+}
+
 export function getOAuthConfig() {
   return {
     googleClientId: str('oauth.google_client_id'),
