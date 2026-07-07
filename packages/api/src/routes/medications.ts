@@ -300,6 +300,12 @@ medicationsRouter.post('/:medId/administrations', requireAuth, async (req, res) 
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
+  // A note is compulsory whenever the dose was not given as prescribed.
+  const NOTE_OPTIONAL = new Set(['given', 'self_administered']);
+  if (!NOTE_OPTIONAL.has(parsed.data.status) && !parsed.data.notes?.trim()) {
+    res.status(400).json({ error: 'A note is required when the outcome is not "given" or "self-administered".', code: 'NOTE_REQUIRED' });
+    return;
+  }
   const [record] = await db('medication_administrations')
     .insert({
       medication_id: med.id,

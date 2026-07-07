@@ -177,7 +177,7 @@ export function MedicationsPage() {
 
       {addOpen ? <MedicationForm profileId={profile.id} onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); invalidate(); }} /> : null}
       {editing ? <MedicationForm profileId={profile.id} med={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} /> : null}
-      {logging ? <AdministerModal profileId={profile.id} med={logging} careName={careName} onClose={() => setLogging(null)} onSaved={() => { setLogging(null); invalidate(); }} /> : null}
+      {logging ? <AdministerModal profileId={profile.id} med={logging} personName={profile.full_name} onClose={() => setLogging(null)} onSaved={() => { setLogging(null); invalidate(); }} /> : null}
 
       <Modal open={confirmBulk} onClose={() => setConfirmBulk(false)} title="Delete medications">
         <p className="text-sm text-muted mb-4">
@@ -248,43 +248,62 @@ function localNow(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function AdministerModal({ profileId, med, careName, onClose, onSaved }: { profileId: string; med: MedicationRecord; careName: string; onClose: () => void; onSaved: () => void }) {
+// Outcomes that don't require an explanatory note. Anything else (refused,
+// omitted, held) makes the Notes field compulsory.
+const NOTE_OPTIONAL_OUTCOMES = new Set(['given', 'self_administered']);
+
+function AdministerModal({ profileId, med, personName, onClose, onSaved }: { profileId: string; med: MedicationRecord; personName: string; onClose: () => void; onSaved: () => void }) {
   const [when, setWhen] = useState(localNow());
   const [status, setStatus] = useState('given');
-  const [doseOk, setDoseOk] = useState('yes');
-  const [routeOk, setRouteOk] = useState('yes');
+  const [doseGiven, setDoseGiven] = useState(med.dose ?? '');
+  const [routeGiven, setRouteGiven] = useState(med.route ?? '');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
+
+  const notesRequired = !NOTE_OPTIONAL_OUTCOMES.has(status);
 
   const mutation = useMutation({
     mutationFn: () => api.post(`/care-profiles/${profileId}/medications/${med.id}/administrations`, {
       administered_at: new Date(when).toISOString(),
       status,
-      notes: notes || null,
-      // Patient, medication and documentation are guaranteed by context and
-      // set server-side; time is recorded here; dose and route are verified.
-      right_dose: doseOk === 'yes',
-      right_route: routeOk === 'yes',
+      dose_given: doseGiven || null,
+      route_given: routeGiven || null,
+      notes: notes.trim() || null,
+      // Person, medication and documentation are guaranteed by context and set
+      // server-side; time is the recorded moment; dose and route are recorded.
+      right_dose: !!doseGiven.trim(),
+      right_route: !!routeGiven.trim(),
       right_time: true,
     }),
     onSuccess: onSaved,
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to record'),
   });
 
-  const bothVerified = doseOk === 'yes' && routeOk === 'yes';
+  const submit = () => {
+    if (notesRequired && !notes.trim()) {
+      setError(`A note is required when the outcome is "${MED_STATUSES.find((s) => s.value === status)?.label}".`);
+      return;
+    }
+    setError('');
+    mutation.mutate();
+  };
 
   return (
-    <Modal open onClose={onClose} title={`Record administration — ${med.name}`}>
-      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); mutation.mutate(); }}>
-        {/* The rights that context guarantees, shown for transparency. */}
-        <div className="rounded-md bg-surface border border-border p-3 text-xs text-muted space-y-0.5">
-          <p><span className="text-primary">✓</span> Right person: <span className="text-ink font-medium">{careName}</span></p>
-          <p><span className="text-primary">✓</span> Right medication: <span className="text-ink font-medium">{med.name}</span></p>
-          <p><span className="text-primary">✓</span> Right documentation: recorded to the MAR</p>
+    <Modal open onClose={onClose} title="Record administration">
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        {/* MAR header: the person (right person = their name) and the date. */}
+        <div className="border-b border-border pb-3">
+          <p className="text-xs uppercase tracking-wide text-muted">MAR · {personName} · {format(new Date(when), 'd MMM yyyy')}</p>
+          <p className="text-base font-semibold text-ink">{med.name}</p>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input label="Dose" value={doseGiven} onChange={(e) => setDoseGiven(e.target.value)} placeholder="e.g. 500 mg" />
+          <Input label="Given by (route)" value={routeGiven} onChange={(e) => setRouteGiven(e.target.value)} placeholder="e.g. Oral" />
         </div>
 
         <div>
-          <label htmlFor="admin-when" className="block text-sm font-medium text-ink mb-1">Date & time given <span className="text-muted font-normal">(right time)</span></label>
+          <label htmlFor="admin-when" className="block text-sm font-medium text-ink mb-1">Time</label>
           <input id="admin-when" type="datetime-local" className={`${SELECT} w-full`} value={when} onChange={(e) => setWhen(e.target.value)} required />
         </div>
 
@@ -295,29 +314,13 @@ function AdministerModal({ profileId, med, careName, onClose, onSaved }: { profi
           </select>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label htmlFor="admin-dose" className="block text-sm font-medium text-ink mb-1">
-              Right dose{med.dose ? <span className="text-muted font-normal"> ({med.dose})</span> : ''}
-            </label>
-            <select id="admin-dose" className={`${SELECT} w-full`} value={doseOk} onChange={(e) => setDoseOk(e.target.value)}>
-              <option value="yes">Yes, dose verified</option>
-              <option value="no">No</option>
-            </select>
-          </div>
-          <div>
-            <label htmlFor="admin-route" className="block text-sm font-medium text-ink mb-1">
-              Right route{med.route ? <span className="text-muted font-normal"> ({med.route})</span> : ''}
-            </label>
-            <select id="admin-route" className={`${SELECT} w-full`} value={routeOk} onChange={(e) => setRouteOk(e.target.value)}>
-              <option value="yes">Yes, route verified</option>
-              <option value="no">No</option>
-            </select>
-          </div>
-        </div>
-
-        <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder={bothVerified ? 'Anything worth recording' : 'Please note what differed'} />
-        {!bothVerified ? <p className="text-xs text-amber-700">An unverified dose or route is recorded as an exception on the MAR.</p> : null}
+        <Textarea
+          label={notesRequired ? 'Notes (required)' : 'Notes'}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={2}
+          placeholder={notesRequired ? 'Explain why the dose was not given as prescribed' : 'Anything worth recording'}
+        />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
