@@ -238,7 +238,7 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner, async (req,
 // viewers can sort/filter but never bulk-delete. Scoped to this profile, so
 // an admin only ever deletes medications for a person in their care.
 const bulkSchema = z.object({
-  action: z.literal('delete'),
+  action: z.enum(['delete', 'activate', 'deactivate']),
   ids: z.array(z.string().uuid()).min(1).max(500),
 });
 
@@ -248,11 +248,14 @@ medicationsRouter.post('/bulk', requireAuth, requireProfileOwner, async (req, re
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
-  const deleted = await db('medications')
-    .where({ care_profile_id: req.params['id'] })
-    .whereIn('id', parsed.data.ids)
-    .del();
-  res.json({ deleted });
+  const scope = db('medications').where({ care_profile_id: req.params['id'] }).whereIn('id', parsed.data.ids);
+  if (parsed.data.action === 'delete') {
+    const deleted = await scope.del();
+    res.json({ deleted });
+    return;
+  }
+  const updated = await scope.update({ active: parsed.data.action === 'activate', updated_at: db.fn.now() });
+  res.json({ updated });
 });
 
 medicationsRouter.delete('/:medId', requireAuth, requireProfileOwner, async (req, res) => {

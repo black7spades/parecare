@@ -40,8 +40,13 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 
 export function Shell() {
   const updateAccount = useAuthStore((s) => s.updateAccount);
+  const role = useAuthStore((s) => s.account?.role);
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // The logo returns the viewer to the highest-level dashboard they can reach:
+  // the system overview for admins and super admins, otherwise the care home.
+  const homeDest = role === 'admin' || role === 'super_admin' ? '/system' : '/app';
 
   // Detect whether a care profile is open, so the left nav can switch to that
   // profile's sections. Exclude the "profiles/new" route.
@@ -138,7 +143,9 @@ export function Shell() {
               <line x1="3" y1="18" x2="21" y2="18" />
             </svg>
           </button>
-          <span className="text-lg font-semibold text-primary">PareCare</span>
+          <NavLink to={homeDest} aria-label="PareCare home" className="text-lg font-semibold text-primary hover:opacity-80 transition-opacity">
+            PareCare
+          </NavLink>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
           <TierBadge />
@@ -159,7 +166,9 @@ export function Shell() {
             <div className="absolute inset-0 bg-black/40" onClick={() => setDrawerOpen(false)} aria-hidden />
             <nav className="absolute inset-y-0 left-0 w-64 max-w-[80%] bg-card border-r border-border flex flex-col py-5 px-4 shadow-xl overflow-y-auto">
               <div className="mb-4 flex items-center justify-between">
-                <span className="text-lg font-semibold text-primary">PareCare</span>
+                <NavLink to={homeDest} onClick={() => setDrawerOpen(false)} aria-label="PareCare home" className="text-lg font-semibold text-primary hover:opacity-80 transition-opacity">
+                  PareCare
+                </NavLink>
                 <button
                   type="button"
                   onClick={() => setDrawerOpen(false)}

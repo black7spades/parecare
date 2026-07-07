@@ -40,6 +40,7 @@ export function MedicationsPage() {
   const [editing, setEditing] = useState<MedicationRecord | null>(null);
   const [logging, setLogging] = useState<MedicationRecord | null>(null);
   const [confirmBulk, setConfirmBulk] = useState(false);
+  const [confirmBulkLog, setConfirmBulkLog] = useState(false);
 
   const { data } = useQuery({
     queryKey: ['medications', profile.id],
@@ -52,11 +53,14 @@ export function MedicationsPage() {
     void queryClient.invalidateQueries({ queryKey: ['calendar-events', profile.id] });
   };
 
-  // Managing the medication list (add/edit/delete/import, incl. bulk) is
+  // Managing the medication list (add/edit/delete/import, incl. bulk delete) is
   // limited to the owner and platform admins/super admins. Contributors are
-  // read-only for the list but can still record administrations.
+  // read-only for the list but can still record administrations, so they may
+  // select rows to log a dose against several medications at once.
   const canManageMeds = access === 'owner' || access === 'admin';
   const canBulkDelete = canManageMeds;
+  const canAdminister = canEdit; // everyone except viewers
+  const canSelect = canAdminister || canBulkDelete;
 
   const routeFilter: DataFilter<MedicationRecord> = {
     key: 'route',
@@ -87,9 +91,29 @@ export function MedicationsPage() {
     onSuccess: () => { setConfirmBulk(false); dv.clearSelection(); invalidate(); },
   });
 
-  const bulkActions: ToolbarBulkAction[] = canBulkDelete
-    ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulk(true) }]
-    : [];
+  // Record a dose now for every selected medication in one shot.
+  const bulkLog = useMutation({
+    mutationFn: () => api.post<{ recorded: number }>(`/care-profiles/${profile.id}/medications/administrations/batch`, {
+      entries: dv.selectedRows.map((m) => ({ medication_id: m.id, administered_at: new Date().toISOString(), status: 'given' })),
+    }),
+    onSuccess: () => { setConfirmBulkLog(false); dv.clearSelection(); invalidate(); },
+  });
+
+  const bulkSetActive = useMutation({
+    mutationFn: (action: 'activate' | 'deactivate') => api.post(`/care-profiles/${profile.id}/medications/bulk`, {
+      action, ids: dv.selectedRows.map((m) => m.id),
+    }),
+    onSuccess: () => { dv.clearSelection(); invalidate(); },
+  });
+
+  const bulkActions: ToolbarBulkAction[] = [
+    ...(canAdminister ? [{ key: 'log', label: 'Record all doses', onRun: () => setConfirmBulkLog(true) }] : []),
+    ...(canManageMeds ? [
+      { key: 'activate', label: 'Mark active', onRun: () => bulkSetActive.mutate('activate') },
+      { key: 'deactivate', label: 'Mark inactive', onRun: () => bulkSetActive.mutate('deactivate') },
+    ] : []),
+    ...(canBulkDelete ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulk(true) }] : []),
+  ];
 
   return (
     <div className="space-y-6">
@@ -132,7 +156,7 @@ export function MedicationsPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted border-b border-border">
-              {canBulkDelete ? (
+              {canSelect ? (
                 <th className="px-4 py-3 w-8">
                   <input type="checkbox" aria-label="Select all" className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
                     checked={dv.allSelected} onChange={dv.toggleAll} />
@@ -147,10 +171,10 @@ export function MedicationsPage() {
           </thead>
           <tbody>
             {dv.view.length === 0 ? (
-              <tr><td colSpan={canBulkDelete ? 6 : 5} className="px-4 py-8 text-center text-muted">{meds.length === 0 ? 'No medications recorded yet.' : 'No medications match your search or filters.'}</td></tr>
+              <tr><td colSpan={canSelect ? 6 : 5} className="px-4 py-8 text-center text-muted">{meds.length === 0 ? 'No medications recorded yet.' : 'No medications match your search or filters.'}</td></tr>
             ) : dv.view.map((m) => (
               <tr key={m.id} className={`border-b border-border last:border-0 ${m.active ? '' : 'opacity-60'}`}>
-                {canBulkDelete ? (
+                {canSelect ? (
                   <td className="px-4 py-3">
                     <input type="checkbox" aria-label={`Select ${m.name}`} className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
                       checked={dv.selected.has(m.id)} onChange={() => dv.toggle(m.id)} />
@@ -168,7 +192,7 @@ export function MedicationsPage() {
                   {m.schedule_times?.length ? <div className="text-xs">{m.schedule_times.join(', ')}</div> : null}
                 </td>
                 <td className="px-4 py-3 text-right whitespace-nowrap space-x-2">
-                  {canEdit && m.active ? <Button size="sm" onClick={() => setLogging(m)}>Record dose</Button> : null}
+                  {canEdit && m.active ? <Button size="sm" onClick={() => setLogging(m)}>Log dose</Button> : null}
                   {canManageMeds ? <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>Edit</Button> : null}
                 </td>
               </tr>
@@ -191,6 +215,17 @@ export function MedicationsPage() {
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setConfirmBulk(false)}>Cancel</Button>
           <Button variant="danger" loading={bulkDelete.isPending} onClick={() => bulkDelete.mutate()}>Delete {dv.selectedRows.length}</Button>
+        </div>
+      </Modal>
+
+      <Modal open={confirmBulkLog} onClose={() => setConfirmBulkLog(false)} title="Record all doses">
+        <p className="text-sm text-muted mb-4">
+          Record a dose as given, now, for <span className="font-medium text-ink">{dv.selectedRows.length}</span> selected
+          medication{dv.selectedRows.length === 1 ? '' : 's'}? Each is logged to the MAR against {profile.full_name}.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmBulkLog(false)}>Cancel</Button>
+          <Button loading={bulkLog.isPending} onClick={() => bulkLog.mutate()}>Record {dv.selectedRows.length}</Button>
         </div>
       </Modal>
     </div>
@@ -305,11 +340,10 @@ export function AdministerModal({ profileId, med, personName, scheduledFor, init
   };
 
   return (
-    <Modal open onClose={onClose} title="Record administration">
+    <Modal open onClose={onClose} title={`${personName} · ${format(new Date(when), 'd MMM yyyy')}`}>
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-        {/* MAR header: the person (right person = their name) and the date. */}
+        {/* The medication being logged, under the person + date heading. */}
         <div className="border-b border-border pb-3">
-          <p className="text-xs uppercase tracking-wide text-muted">MAR · {personName} · {format(new Date(when), 'd MMM yyyy')}</p>
           <p className="text-base font-semibold text-ink">{med.name}</p>
         </div>
 
@@ -340,7 +374,7 @@ export function AdministerModal({ profileId, med, personName, scheduledFor, init
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={mutation.isPending}>Record administration</Button>
+          <Button type="submit" loading={mutation.isPending}>Log dose</Button>
         </div>
       </form>
     </Modal>
