@@ -4,8 +4,18 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { requireProfileOwner } from '../middleware/permissions';
 import { exportRecords, importRecords, type PortDescriptor, type PortFormat } from '../services/dataPort';
+import { resolveCatalogueId } from './medicationCatalogue';
 
 export const medicationsRouter = Router({ mergeParams: true });
+
+// Per-person medications carry only the variables; the drug name and form come
+// from the shared catalogue via this join.
+const medSelect = () =>
+  db('medications as m')
+    .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
+    .select('m.*', 'c.name as name', 'c.form as form');
+
+const medWithName = (id: string) => medSelect().where('m.id', id).first();
 
 const medSchema = z.object({
   name: z.string().min(1).max(255),
@@ -108,18 +118,18 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
 const readFormat = (v: unknown): PortFormat => (String(v).toLowerCase() === 'json' ? 'json' : 'csv');
 
 medicationsRouter.get('/', requireAuth, async (req, res) => {
-  const meds = await db('medications')
-    .where({ care_profile_id: req.params['id'] })
-    .orderBy([{ column: 'active', order: 'desc' }, { column: 'name', order: 'asc' }]);
+  const meds = await medSelect()
+    .where('m.care_profile_id', req.params['id'])
+    .orderBy([{ column: 'm.active', order: 'desc' }, { column: 'c.name', order: 'asc' }]);
   res.json({ medications: meds });
 });
 
 // Export the medication list as CSV or JSON.
 medicationsRouter.get('/export', requireAuth, async (req, res) => {
   const format = readFormat(req.query['format']);
-  const meds = (await db('medications')
-    .where({ care_profile_id: req.params['id'] })
-    .orderBy([{ column: 'active', order: 'desc' }, { column: 'name', order: 'asc' }])) as MedRow[];
+  const meds = (await medSelect()
+    .where('m.care_profile_id', req.params['id'])
+    .orderBy([{ column: 'm.active', order: 'desc' }, { column: 'c.name', order: 'asc' }])) as MedRow[];
   const { body, contentType, filename } = exportRecords(medPort, meds, format);
   res.setHeader('Content-Type', contentType);
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -133,7 +143,7 @@ const importSchema = z.object({
   data: z.string().min(1),
 });
 
-medicationsRouter.post('/import', requireAuth, async (req, res) => {
+medicationsRouter.post('/import', requireAuth, requireProfileOwner, async (req, res) => {
   let text: string;
   let format: PortFormat;
   if (typeof req.body === 'string') {
@@ -155,62 +165,71 @@ medicationsRouter.post('/import', requireAuth, async (req, res) => {
     return;
   }
 
-  const toInsert: Record<string, unknown>[] = records.map((r) => ({
-    care_profile_id: req.params['id'],
-    name: r.name,
-    dose: r.dose,
-    form: r.form,
-    route: r.route,
-    frequency: r.frequency,
-    instructions: r.instructions,
-    prescriber: r.prescriber,
-    active: r.active,
-    schedule_times: r.schedule_times.length
-      ? db.raw('?::jsonb', [JSON.stringify(r.schedule_times)])
-      : null,
-  }));
-  const inserted = await db('medications').insert(toInsert).returning('*');
+  const toInsert: Record<string, unknown>[] = [];
+  for (const r of records) {
+    const catalogueId = await resolveCatalogueId(r.name, r.form, req.account!.id);
+    toInsert.push({
+      care_profile_id: req.params['id'],
+      medication_catalogue_id: catalogueId,
+      dose: r.dose,
+      route: r.route,
+      frequency: r.frequency,
+      instructions: r.instructions,
+      prescriber: r.prescriber,
+      active: r.active,
+      schedule_times: r.schedule_times.length
+        ? db.raw('?::jsonb', [JSON.stringify(r.schedule_times)])
+        : null,
+    });
+  }
+  const inserted = await db('medications').insert(toInsert).returning('id');
 
-  res.status(201).json({ imported: inserted.length, skipped: errors.length, errors, medications: inserted });
+  res.status(201).json({ imported: inserted.length, skipped: errors.length, errors });
 });
 
-medicationsRouter.post('/', requireAuth, async (req, res) => {
+medicationsRouter.post('/', requireAuth, requireProfileOwner, async (req, res) => {
   const parsed = medSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
-  const { schedule_times, ...rest } = parsed.data;
+  const { schedule_times, name, form, ...rest } = parsed.data;
+  const catalogueId = await resolveCatalogueId(name, form ?? null, req.account!.id);
   const [med] = await db('medications')
     .insert({
       care_profile_id: req.params['id'],
+      medication_catalogue_id: catalogueId,
       ...rest,
       schedule_times: schedule_times ? db.raw('?::jsonb', [JSON.stringify(schedule_times)]) : null,
     })
-    .returning('*');
-  res.status(201).json({ medication: med });
+    .returning('id');
+  res.status(201).json({ medication: await medWithName((med as { id: string }).id) });
 });
 
-medicationsRouter.patch('/:medId', requireAuth, async (req, res) => {
+medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner, async (req, res) => {
   const parsed = medSchema.partial().safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
-  const { schedule_times, ...rest } = parsed.data;
+  const { schedule_times, name, form, ...rest } = parsed.data;
   const update: Record<string, unknown> = { ...rest, updated_at: db.fn.now() };
   if (schedule_times !== undefined) {
     update['schedule_times'] = schedule_times ? db.raw('?::jsonb', [JSON.stringify(schedule_times)]) : null;
   }
+  // Changing the drug identity re-points the medication at a catalogue entry.
+  if (name !== undefined) {
+    update['medication_catalogue_id'] = await resolveCatalogueId(name, form ?? null, req.account!.id);
+  }
   const [med] = await db('medications')
     .where({ id: req.params['medId'], care_profile_id: req.params['id'] })
     .update(update)
-    .returning('*');
+    .returning('id');
   if (!med) {
     res.status(404).json({ error: 'Medication not found', code: 'NOT_FOUND' });
     return;
   }
-  res.json({ medication: med });
+  res.json({ medication: await medWithName((med as { id: string }).id) });
 });
 
 // Bulk actions on the list. Delete is limited to the profile owner and
@@ -235,7 +254,7 @@ medicationsRouter.post('/bulk', requireAuth, requireProfileOwner, async (req, re
   res.json({ deleted });
 });
 
-medicationsRouter.delete('/:medId', requireAuth, async (req, res) => {
+medicationsRouter.delete('/:medId', requireAuth, requireProfileOwner, async (req, res) => {
   const affected = await db('medications').where({ id: req.params['medId'], care_profile_id: req.params['id'] }).del();
   if (!affected) {
     res.status(404).json({ error: 'Medication not found', code: 'NOT_FOUND' });
@@ -255,17 +274,18 @@ medicationsRouter.get('/administrations', requireAuth, async (req, res) => {
 
   let query = db('medication_administrations as a')
     .join('medications as m', 'a.medication_id', 'm.id')
+    .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
     .where('a.care_profile_id', req.params['id'])
-    .select('a.*', 'm.name as medication_name', 'm.dose as medication_dose', 'm.route as medication_route');
+    .select('a.*', 'c.name as medication_name', 'm.dose as medication_dose', 'm.route as medication_route');
 
-  if (q) query = query.andWhere((qb) => qb.whereILike('m.name', `%${q}%`).orWhereILike('a.notes', `%${q}%`).orWhereILike('a.administered_by_name', `%${q}%`));
+  if (q) query = query.andWhere((qb) => qb.whereILike('c.name', `%${q}%`).orWhereILike('a.notes', `%${q}%`).orWhereILike('a.administered_by_name', `%${q}%`));
   if (status) query = query.andWhere('a.status', status);
   if (medicationId) query = query.andWhere('a.medication_id', medicationId);
   if (from) query = query.andWhere('a.administered_at', '>=', from);
   if (to) query = query.andWhere('a.administered_at', '<=', to);
 
   if (sort === 'oldest') query = query.orderBy('a.administered_at', 'asc');
-  else if (sort === 'medication') query = query.orderBy([{ column: 'm.name', order: 'asc' }, { column: 'a.administered_at', order: 'desc' }]);
+  else if (sort === 'medication') query = query.orderBy([{ column: 'c.name', order: 'asc' }, { column: 'a.administered_at', order: 'desc' }]);
   else if (sort === 'administrator') query = query.orderBy([{ column: 'a.administered_by_name', order: 'asc' }, { column: 'a.administered_at', order: 'desc' }]);
   else query = query.orderBy('a.administered_at', 'desc');
 
@@ -298,6 +318,12 @@ medicationsRouter.post('/:medId/administrations', requireAuth, async (req, res) 
   const parsed = adminSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  // A note is compulsory whenever the dose was not given as prescribed.
+  const NOTE_OPTIONAL = new Set(['given', 'self_administered']);
+  if (!NOTE_OPTIONAL.has(parsed.data.status) && !parsed.data.notes?.trim()) {
+    res.status(400).json({ error: 'A note is required when the outcome is not "given" or "self-administered".', code: 'NOTE_REQUIRED' });
     return;
   }
   const [record] = await db('medication_administrations')
