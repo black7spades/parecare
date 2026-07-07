@@ -6,6 +6,7 @@ import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { useProfile } from './ProfileLayout';
+import { ImportExport } from '../../../components/ImportExport';
 import { MED_RIGHTS, MED_STATUSES, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
 
 const SELECT = 'rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -37,7 +38,17 @@ export function MedicationsPage() {
             {careName}'s medications and a full administration record built on the six rights of medication administration.
           </p>
         </div>
-        {canEdit ? <Button onClick={() => setAddOpen(true)} className="self-start sm:self-auto">Add medication</Button> : null}
+        <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+          <ImportExport
+            basePath={`/care-profiles/${profile.id}/medications`}
+            resource="medications"
+            canImport={canEdit}
+            onImported={invalidate}
+            templateHeaders={['Name', 'Dose', 'Form', 'Route', 'Frequency', 'Times', 'Instructions', 'Prescriber', 'Active']}
+            templateSample={['Metformin', '500 mg', 'Tablet', 'Oral', 'Twice daily', '08:00; 20:00', 'With food', 'Dr Wright', 'true']}
+          />
+          {canEdit ? <Button onClick={() => setAddOpen(true)}>Add medication</Button> : null}
+        </div>
       </div>
 
       <div className="card p-0 overflow-x-auto">
