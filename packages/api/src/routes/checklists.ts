@@ -105,6 +105,11 @@ checklistsRouter.patch('/:itemId', requireAuth, async (req, res) => {
   if (parsed.data.completed === true) {
     updates.completed_at = new Date();
     if (!parsed.data.achieved_on) updates.achieved_on = new Date().toISOString().slice(0, 10);
+    // Record who ticked the box, for the achievements record.
+    const member = await db('care_circle_members')
+      .where({ care_profile_id: req.params['id'], account_id: req.account!.id, invite_accepted: true })
+      .first();
+    if (member) updates.completed_by = member.id;
   } else if (parsed.data.completed === false) {
     updates.completed_at = null;
     updates.completed_by = null;

@@ -21,6 +21,9 @@ export function SystemLayout() {
         <NavLink to="/system/users" className={tabClass}>
           Users
         </NavLink>
+        <NavLink to="/system/journeys" className={tabClass}>
+          Care journeys
+        </NavLink>
         {isSuperAdmin ? (
           <NavLink to="/system/settings" className={tabClass}>
             Settings
