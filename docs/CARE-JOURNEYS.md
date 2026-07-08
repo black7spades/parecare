@@ -478,8 +478,105 @@ professional tier, alongside the organisation features it pairs with.
   doing next for Dad" from the journey, and gains two actions,
   `complete_journey_task` and `suggest_journey`, the latter only ever
   producing a suggestion card for a human to accept.
+  `complete_journey_task` takes the achieved date and a note, so "we did
+  the sunrise trip on Saturday, she loved it" lands as a completed
+  milestone with its memory attached, in one sentence to the assistant.
 - **Exports**: journeys, phases and tasks export with one column per
   field, like everything else.
+
+## The Memory Book: goals, achievements and memories
+
+Every journey in the catalogue is worked through the same way: a phase,
+its checklist, a box ticked, a note added. That mechanism is already the
+richest record in the platform, and today it evaporates into a task
+list. This section gives it a home. The Memory Book stops being a
+standalone scrapbook and becomes the place where everything a person set
+out to do, did, and felt about it is kept, sorted and searched.
+
+One mechanism captures three kinds of record:
+
+- **Life goals.** A checklist item that has not happened yet is a goal.
+  Clair's circle adds "See the ocean at sunrise" to her Living fully
+  phase; Ashe adds "One hundred smoke-free days" to Holding the line.
+  Template task seeds and hand-added items are goals the moment they
+  exist.
+- **Accomplishments.** Ticking the box with the date it really happened
+  turns the goal into an achievement: who recorded it, when it happened,
+  which journey and phase it belonged to.
+- **Memories.** The note thread on the item is where the story lives:
+  what happened, who was there, what she said, the photo. Notes can be
+  added at completion time in the same action as the tick, and forever
+  after, by anyone in the circle.
+
+### The achievements database
+
+The Memory Book gains an **Achievements** view: every completed
+checklist item for the person, across every journey past and present,
+as a table where every facet is its own sortable, filterable column,
+per the platform's one-fact-one-column rule:
+
+| Column | Filter and sort |
+|---|---|
+| What was achieved | text search |
+| Journey | pick list |
+| Phase | pick list |
+| Date it happened | range |
+| Date it was recorded | range |
+| Recorded by | pick list of the circle |
+| Milestone | yes or no |
+| Notes | count, has photos |
+
+There is no copy table. The view reads the checklist and journey
+instance tables directly, so an achievement can never drift from the
+item it is: one fact, one column, one owner. Locked phases keep their
+completed items visible here forever; a journey handing over or
+completing removes nothing. The whole view exports to CSV with one
+column per field.
+
+### Milestones
+
+Not every ticked box is worth celebrating in a timeline: "Booked the
+financial assessment" is the record, "First day back at school" is the
+memory. A **milestone** flag separates the two without losing either.
+Template tasks seed it (everything in Living fully is a milestone;
+everything in The estate and the paperwork is not) and anyone in the
+circle can toggle it per item. The achievements database shows
+everything; the Memory Book timeline interleaves milestone achievements
+with freeform Memory Book entries, newest first, one life in one
+stream. Any achievement can be promoted with **Write the story**, which
+starts a full Memory Book entry linked back to the item.
+
+### Schema additions
+
+- `checklist_items` gains `achieved_on` (nullable date, the day it
+  really happened) alongside the existing `completed_at` (when the box
+  was ticked in the app) — two facts, two columns — and `is_milestone`
+  (boolean).
+- `journey_template_tasks` gains `is_milestone` so templates seed the
+  flag.
+- `checklist_item_notes` gains `photo_url` (nullable), stored like
+  Memory Book photos.
+- `memory_book_entries` gains `checklist_item_id` (nullable), the Write
+  the story link.
+
+### Protecting the record
+
+A completed item is part of a person's history, not a row in a to-do
+list. A completed checklist item cannot be deleted, custom or not; it
+must be un-completed first, and both actions land in the audit log.
+Notes are never deleted with their item. Archiving a profile keeps the
+Memory Book and the achievements database intact; for the After a death
+journey they are the point.
+
+### The two examples again
+
+Clair's family opens Achievements, filters to journey Living with a
+terminal illness, phase Living fully, milestones only, has photos, and
+sorts by the date it happened. That result is the record of her last
+year, built entirely out of boxes the circle was ticking anyway. Ashe
+filters to Preventive health and risk reduction and sorts by date to
+watch the streak build: quit date set, first smoke-free week, first
+smoke-free month, the follow up appointment kept, one hundred days.
 
 ## Delivery plan
 
@@ -492,10 +589,12 @@ Ordered so every pass ships something usable and nothing breaks:
    keeps `current_phase` readable and writable, mapped to the migrated
    journey. No visible change.
 2. **Journey API and profile UI.** CRUD for journey instances, phase
-   progression with locking, checklist rework, the journey tab, multiple
-   active journeys, enrolment flow with life stage suggestions. The seed
-   catalogue ships with the six later life and six end of life journeys
-   first, since they serve today's user base.
+   progression with locking, checklist rework including `achieved_on`,
+   `is_milestone` and note photos, the journey tab, multiple active
+   journeys, enrolment flow with life stage suggestions, and the Memory
+   Book achievements view with the milestone timeline and Write the
+   story. The seed catalogue ships with the six later life and six end
+   of life journeys first, since they serve today's user base.
 3. **Template and life stage administration.** Library screens, create
    from scratch, clone, compose in the journey builder, publish and
    archive, the life stage manager, rights wiring, SaaS tier gate.
