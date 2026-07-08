@@ -38,7 +38,6 @@ export function MedicationsPage() {
   const queryClient = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<MedicationRecord | null>(null);
-  const [logging, setLogging] = useState<MedicationRecord | null>(null);
   const [confirmBulk, setConfirmBulk] = useState(false);
   const [confirmBulkLog, setConfirmBulkLog] = useState(false);
 
@@ -49,7 +48,8 @@ export function MedicationsPage() {
   const meds = data?.medications ?? [];
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['medications', profile.id] });
-    void queryClient.invalidateQueries({ queryKey: ['mar', profile.id] });
+    void queryClient.invalidateQueries({ queryKey: ['med-chart', profile.id] });
+    void queryClient.invalidateQueries({ queryKey: ['med-log', profile.id] });
     void queryClient.invalidateQueries({ queryKey: ['calendar-events', profile.id] });
   };
 
@@ -121,7 +121,7 @@ export function MedicationsPage() {
         <div>
           <h2 className="text-base font-semibold text-ink">Medications</h2>
           <p className="text-sm text-muted">
-            {careName}'s medications and a full administration record built on the six rights of medication administration.
+            {careName}'s current regimen. Add, edit and organise medications here; log and review doses in the record below.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 self-start sm:self-auto">
@@ -191,8 +191,7 @@ export function MedicationsPage() {
                   {m.frequency ? <div>{m.frequency}</div> : null}
                   {m.schedule_times?.length ? <div className="text-xs">{m.schedule_times.join(', ')}</div> : null}
                 </td>
-                <td className="px-4 py-3 text-right whitespace-nowrap space-x-2">
-                  {canEdit && m.active ? <Button size="sm" onClick={() => setLogging(m)}>Log dose</Button> : null}
+                <td className="px-4 py-3 text-right whitespace-nowrap">
                   {canManageMeds ? <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>Edit</Button> : null}
                 </td>
               </tr>
@@ -201,11 +200,14 @@ export function MedicationsPage() {
         </table>
       </div>
 
+      <div className="pt-2">
+        <h3 className="text-base font-semibold text-ink">Administration record (MAR)</h3>
+        <p className="text-sm text-muted">Log each dose against {careName} and review the history. Doses colour instantly as you record them.</p>
+      </div>
       <MedicationMar profileId={profile.id} personName={profile.full_name} canAdminister={canEdit} />
 
       {addOpen ? <MedicationForm profileId={profile.id} onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); invalidate(); }} /> : null}
       {editing ? <MedicationForm profileId={profile.id} med={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} /> : null}
-      {logging ? <AdministerModal profileId={profile.id} med={logging} personName={profile.full_name} onClose={() => setLogging(null)} onSaved={() => { setLogging(null); invalidate(); }} /> : null}
 
       <Modal open={confirmBulk} onClose={() => setConfirmBulk(false)} title="Delete medications">
         <p className="text-sm text-muted mb-4">
