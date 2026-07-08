@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
+import { requireAccountRight } from '../middleware/accountRights';
 import { requireFeature } from '../middleware/subscriptionGate';
 import { sendMessage } from '../services/ai';
 import type { ChatMessage } from '../services/ai';
@@ -33,6 +34,7 @@ aiRouter.get('/conversations/:convId', requireAuth, async (req, res) => {
 aiRouter.post(
   '/conversations',
   requireAuth,
+  requireAccountRight('can_use_ai'),
   requireFeature('ai_access'),
   async (req, res) => {
     const [conversation] = await db<AiConversation>('ai_conversations')
@@ -49,6 +51,7 @@ aiRouter.post(
 aiRouter.post(
   '/conversations/:convId/messages',
   requireAuth,
+  requireAccountRight('can_use_ai'),
   requireFeature('ai_access'),
   async (req, res) => {
     const schema = z.object({ content: z.string().min(1).max(4000) });

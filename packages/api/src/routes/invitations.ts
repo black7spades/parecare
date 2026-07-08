@@ -68,6 +68,9 @@ invitationsRouter.post('/:token/accept', requireAuth, async (req, res) => {
 // invitation and cannot be substituted.
 invitationsRouter.post('/:token/register', async (req, res) => {
   const schema = z.object({
+    first_name: z.string().max(100).optional().nullable(),
+    middle_name: z.string().max(100).optional().nullable(),
+    last_name: z.string().max(100).optional().nullable(),
     display_name: z.string().min(1).max(255).optional(),
     password: z.string().min(8),
     relationship: z.string().max(100).optional().nullable(),
@@ -94,6 +97,10 @@ invitationsRouter.post('/:token/register', async (req, res) => {
     const account = await createAccount({
       email: invitation.email,
       password: parsed.data.password,
+      first_name: parsed.data.first_name ?? null,
+      middle_name: parsed.data.middle_name ?? null,
+      last_name: parsed.data.last_name ?? null,
+      // Fallback when no parts are given: the name the inviter used.
       display_name: parsed.data.display_name?.trim() || invitation.display_name,
       // Invited helpers join other people's circles; they cannot create
       // care profiles of their own unless an admin grants it later.

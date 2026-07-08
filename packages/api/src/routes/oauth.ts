@@ -4,6 +4,7 @@ import { db } from '../config/database';
 import { env } from '../config/env';
 import { getOAuthConfig } from '../config/settings';
 import { accountSummary, issueMfaToken, issueSessionToken } from './auth';
+import { splitDisplayName } from '../services/accounts';
 import type { Account } from '../types';
 
 /**
@@ -172,11 +173,13 @@ oauthRouter.get('/oauth/:provider/callback', async (req, res) => {
         .update({ oauth_provider: name, oauth_subject: profile.subject, updated_at: db.fn.now() });
       account = { ...byEmail, oauth_provider: name, oauth_subject: profile.subject };
     } else {
+      const parts = splitDisplayName(profile.name);
       const [created] = await db<Account>('accounts')
         .insert({
           email,
           password_hash: null,
           display_name: profile.name,
+          ...parts,
           role: 'user',
           oauth_provider: name,
           oauth_subject: profile.subject,

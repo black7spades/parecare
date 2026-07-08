@@ -10,7 +10,7 @@ import { getOAuthConfig, getStorageConfig } from '../config/settings';
 import { requireAuth } from '../middleware/auth';
 import { generateSecret, otpauthUrl, verifyTotp } from '../services/totp';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
-import { createAccount, AccountError } from '../services/accounts';
+import { createAccount, composeDisplayName, splitDisplayName, AccountError } from '../services/accounts';
 import type { Account } from '../types';
 
 export const authRouter = Router();
@@ -34,6 +34,9 @@ export function accountSummary(account: Account) {
     id: account.id,
     email: account.email,
     display_name: account.display_name,
+    first_name: account.first_name,
+    middle_name: account.middle_name,
+    last_name: account.last_name,
     role: account.role,
     avatar_url: account.avatar_url ?? null,
     avatar_color: account.avatar_color ?? null,
@@ -52,11 +55,20 @@ authRouter.get('/providers', (_req, res) => {
   });
 });
 
-const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
-  display_name: z.string().min(1).max(255),
-});
+// Structured name parts; display_name alone is still accepted from older
+// clients and split into parts on the way in.
+const registerSchema = z
+  .object({
+    email: z.string().email(),
+    password: z.string().min(8),
+    first_name: z.string().max(100).optional(),
+    middle_name: z.string().max(100).optional().nullable(),
+    last_name: z.string().max(100).optional().nullable(),
+    display_name: z.string().min(1).max(255).optional(),
+  })
+  .refine((d) => (d.first_name ?? '').trim() !== '' || (d.display_name ?? '').trim() !== '', {
+    message: 'A first name is required',
+  });
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -210,6 +222,9 @@ authRouter.get('/me', requireAuth, (req, res) => {
     id: account.id,
     email: account.email,
     display_name: account.display_name,
+    first_name: account.first_name,
+    middle_name: account.middle_name,
+    last_name: account.last_name,
     role: account.role,
     avatar_url: account.avatar_url ?? null,
     avatar_color: account.avatar_color ?? null,
@@ -230,6 +245,9 @@ authRouter.get('/me', requireAuth, (req, res) => {
 
 const updateMeSchema = z.object({
   display_name: z.string().min(1).max(255).optional(),
+  first_name: z.string().max(100).optional().nullable(),
+  middle_name: z.string().max(100).optional().nullable(),
+  last_name: z.string().max(100).optional().nullable(),
   email: z.string().email().optional(),
   current_password: z.string().optional(),
   new_password: z.string().min(8).optional(),
@@ -249,7 +267,24 @@ authRouter.patch('/me', requireAuth, async (req, res) => {
   const account = req.account!;
   const updates: Partial<Account> & { password_hash?: string } = {};
 
-  if (parsed.data.display_name) updates.display_name = parsed.data.display_name;
+  // Name parts recompose the display name; a bare display_name from an
+  // older client is split into parts so they stay in sync.
+  const partKeys = ['first_name', 'middle_name', 'last_name'] as const;
+  if (partKeys.some((k) => k in parsed.data)) {
+    const merged = {
+      first_name: 'first_name' in parsed.data ? (parsed.data.first_name?.trim() || null) : account.first_name,
+      middle_name: 'middle_name' in parsed.data ? (parsed.data.middle_name?.trim() || null) : account.middle_name,
+      last_name: 'last_name' in parsed.data ? (parsed.data.last_name?.trim() || null) : account.last_name,
+    };
+    if (!merged.first_name) {
+      res.status(400).json({ error: 'A first name is required', code: 'VALIDATION_ERROR' });
+      return;
+    }
+    Object.assign(updates, merged, { display_name: composeDisplayName(merged) });
+  } else if (parsed.data.display_name) {
+    updates.display_name = parsed.data.display_name;
+    Object.assign(updates, splitDisplayName(parsed.data.display_name));
+  }
   if (parsed.data.date_of_birth !== undefined) updates.date_of_birth = parsed.data.date_of_birth || null;
   if (parsed.data.gender !== undefined) updates.gender = parsed.data.gender || null;
   if (parsed.data.pronouns !== undefined) updates.pronouns = parsed.data.pronouns || null;

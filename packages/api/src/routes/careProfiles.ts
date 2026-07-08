@@ -1,10 +1,11 @@
-import { Router, type Request, type Response, type NextFunction } from 'express';
+import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { getStorageConfig } from '../config/settings';
 import { requireAuth } from '../middleware/auth';
+import { requireAccountRight } from '../middleware/accountRights';
 import { requireCountBelow } from '../middleware/subscriptionGate';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
 import { PHASE_CHECKLISTS } from '../db/seeds/001_checklist_templates';
@@ -322,26 +323,12 @@ careProfilesRouter.get('/:id/photo', requireAuth, async (req, res) => {
   });
 });
 
-// Creating a person in care is an explicit account right. Invited helpers
-// (viewers and contributors in other people's circles) do not have it
-// unless an admin grants it; platform admins always do.
-function requireProfileCreationRight(req: Request, res: Response, next: NextFunction): void {
-  const account = req.account!;
-  const isAdmin = account.role === 'admin' || account.role === 'super_admin';
-  if (!isAdmin && !account.can_create_care_profiles) {
-    res.status(403).json({
-      error: 'Your account cannot create care profiles. Ask the person who invited you, or an administrator, to grant it.',
-      code: 'PROFILE_CREATION_NOT_ALLOWED',
-    });
-    return;
-  }
-  next();
-}
-
 careProfilesRouter.post(
   '/',
   requireAuth,
-  requireProfileCreationRight,
+  // Creating a person in care is an explicit account right. Invited helpers
+  // do not have it unless an admin grants it; platform admins always do.
+  requireAccountRight('can_create_care_profiles'),
   requireCountBelow('care_profiles', async (req) => {
     const result = await db('care_profiles')
       .where({ account_id: req.account!.id, archived: false })

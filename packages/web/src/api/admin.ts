@@ -5,12 +5,51 @@ export interface AdminAccount {
   id: string;
   email: string;
   display_name: string;
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
   role: AccountRole;
   subscription_tier: 'free' | 'family' | 'professional';
   subscription_status: string | null;
   ai_tokens_used: number;
   disabled_at: string | null;
   can_create_care_profiles: boolean;
+  can_invite_members: boolean;
+  can_use_ai: boolean;
+  can_export_data: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type AdminGroup = 'super_admin' | 'admin' | 'carer' | 'viewer';
+
+export interface AdminListParams {
+  search?: string;
+  page?: number;
+  per_page?: number;
+  sort?: 'name' | 'email' | 'role' | 'tier' | 'joined';
+  order?: 'asc' | 'desc';
+  group?: AdminGroup;
+  role?: AccountRole;
+  tier?: 'free' | 'family' | 'professional';
+  status?: 'active' | 'disabled';
+}
+
+export interface AccountRights {
+  can_create_care_profiles?: boolean;
+  can_invite_members?: boolean;
+  can_use_ai?: boolean;
+  can_export_data?: boolean;
+}
+
+export interface RightsTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  can_create_care_profiles: boolean;
+  can_invite_members: boolean;
+  can_use_ai: boolean;
+  can_export_data: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -42,38 +81,42 @@ export interface AdminAccountList {
 
 export interface AdminStats {
   total: number;
-  by_role: Partial<Record<AccountRole, number>>;
+  groups: Record<AdminGroup, number>;
   by_tier: Partial<Record<'free' | 'family' | 'professional', number>>;
 }
 
 export const adminApi = {
   stats: () => api.get<AdminStats>('/admin/stats'),
-  listAccounts: (params: { search?: string; page?: number; per_page?: number } = {}) => {
+  listAccounts: (params: AdminListParams = {}) => {
     const qs = new URLSearchParams();
-    if (params.search) qs.set('search', params.search);
-    if (params.page) qs.set('page', String(params.page));
-    if (params.per_page) qs.set('per_page', String(params.per_page));
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== '') qs.set(k, String(v));
+    }
     const query = qs.toString();
     return api.get<AdminAccountList>(`/admin/accounts${query ? `?${query}` : ''}`);
   },
   updateAccount: (
     id: string,
     body: {
-      display_name?: string;
+      first_name?: string;
+      middle_name?: string | null;
+      last_name?: string | null;
       email?: string;
       subscription_tier?: 'free' | 'family' | 'professional';
-      can_create_care_profiles?: boolean;
-    }
+    } & AccountRights
   ) => api.patch<AdminAccount>(`/admin/accounts/${id}`, body),
   updateRole: (id: string, role: AccountRole) => api.patch<{ id: string; role: AccountRole }>(`/admin/accounts/${id}/role`, { role }),
   deleteAccount: (id: string) => api.delete<{ message: string }>(`/admin/accounts/${id}`),
-  createAccount: (body: {
-    email: string;
-    display_name: string;
-    password: string;
-    role?: AccountRole;
-    can_create_care_profiles?: boolean;
-  }) => api.post<{ account: AdminAccount }>('/admin/accounts', body),
+  createAccount: (
+    body: {
+      email: string;
+      first_name: string;
+      middle_name?: string | null;
+      last_name?: string | null;
+      password: string;
+      role?: AccountRole;
+    } & AccountRights
+  ) => api.post<{ account: AdminAccount }>('/admin/accounts', body),
   setDisabled: (id: string, disabled: boolean) =>
     api.patch<{ id: string; disabled: boolean }>(`/admin/accounts/${id}/disabled`, { disabled }),
   listInvitations: () => api.get<{ invitations: AdminInvitation[] }>('/admin/invitations'),
@@ -94,4 +137,15 @@ export const adminApi = {
     api.post<{ assigned: string[]; skipped: Array<{ care_profile_id: string; reason: string }> }>('/admin/assignments', body),
   listCareProfiles: (search?: string) =>
     api.get<{ profiles: AdminCareProfile[] }>(`/admin/care-profiles${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+  listRightsTemplates: () => api.get<{ templates: RightsTemplate[] }>('/admin/rights-templates'),
+  createRightsTemplate: (body: { name: string; description?: string | null } & Required<AccountRights>) =>
+    api.post<{ template: RightsTemplate }>('/admin/rights-templates', body),
+  updateRightsTemplate: (id: string, body: Partial<{ name: string; description: string | null } & AccountRights>) =>
+    api.patch<{ template: RightsTemplate }>(`/admin/rights-templates/${id}`, body),
+  deleteRightsTemplate: (id: string) => api.delete<{ message: string }>(`/admin/rights-templates/${id}`),
+  applyRightsTemplate: (id: string, accountIds: string[]) =>
+    api.post<{ applied: string[]; skipped: Array<{ account_id: string; reason: string }>; template: { name: string } }>(
+      `/admin/rights-templates/${id}/apply`,
+      { account_ids: accountIds }
+    ),
 };

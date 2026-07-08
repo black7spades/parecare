@@ -40,7 +40,9 @@ export function InvitePage() {
   const isAuthed = useAuthStore((s) => !!s.token);
   const [error, setError] = useState('');
   const [relationship, setRelationship] = useState('');
-  const [displayName, setDisplayName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
@@ -67,7 +69,9 @@ export function InvitePage() {
       api.post<{ token: string; account: SessionAccount; care_profile_ids: string[] }>(
         `/invitations/${token}/register`,
         {
-          display_name: displayName.trim() || undefined,
+          first_name: firstName.trim() || undefined,
+          middle_name: middleName.trim() || undefined,
+          last_name: lastName.trim() || undefined,
           password,
           relationship: relationship.trim() || undefined,
         }
@@ -176,12 +180,27 @@ export function InvitePage() {
                 >
                   <p className="text-sm text-muted text-center">Create your account to accept. Your email is set by the invitation.</p>
                   <Input label="Email" type="email" value={invite.email} disabled readOnly />
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Input
+                      label="First name"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      placeholder={invite.display_name.split(' ')[0]}
+                      autoComplete="given-name"
+                      required
+                    />
+                    <Input
+                      label="Last name"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      autoComplete="family-name"
+                    />
+                  </div>
                   <Input
-                    label="Your name"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    placeholder={invite.display_name}
-                    hint="Shown to the care circles you join"
+                    label="Middle name"
+                    value={middleName}
+                    onChange={(e) => setMiddleName(e.target.value)}
+                    autoComplete="additional-name"
                   />
                   <Input
                     label="Password"

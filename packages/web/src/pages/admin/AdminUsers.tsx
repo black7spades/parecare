@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuthStore, type AccountRole } from '../../stores/auth';
-import { adminApi, type AdminAccount, type AdminCareProfile, type AdminInvitation, type AdminStats } from '../../api/admin';
+import { adminApi, type AdminAccount, type AdminCareProfile, type AdminGroup, type AdminInvitation, type AdminListParams, type AdminStats, type RightsTemplate } from '../../api/admin';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
+import { DataToolbar } from '../../components/data/DataToolbar';
 
 const ROLE_LABELS: Record<AccountRole, string> = {
   super_admin: 'Super admin',
@@ -31,8 +32,22 @@ export function AdminUsers() {
   const [perPage] = useState(25);
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<NonNullable<AdminListParams['sort']>>('joined');
+  const [group, setGroup] = useState<AdminGroup | ''>('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [tierFilter, setTierFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Type-to-search with a short debounce, like every other list.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setPage(1);
+      setQuery(search.trim());
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const [editing, setEditing] = useState<AdminAccount | null>(null);
   const [deleting, setDeleting] = useState<AdminAccount | null>(null);
@@ -41,12 +56,37 @@ export function AdminUsers() {
   const [assigning, setAssigning] = useState<AdminAccount | null>(null);
   const [invitesVersion, setInvitesVersion] = useState(0);
 
+  // Row selection for bulk actions, and the rights templates they apply.
+  const [selected, setSelected] = useState<string[]>([]);
+  const [applyingTemplate, setApplyingTemplate] = useState(false);
+  const [templates, setTemplates] = useState<RightsTemplate[]>([]);
+  const loadTemplates = useCallback(async () => {
+    try {
+      const res = await adminApi.listRightsTemplates();
+      setTemplates(res.templates);
+    } catch {
+      /* section shows empty; errors surface on save */
+    }
+  }, []);
+  useEffect(() => {
+    void loadTemplates();
+  }, [loadTemplates]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
       const [list, s] = await Promise.all([
-        adminApi.listAccounts({ search: query || undefined, page, per_page: perPage }),
+        adminApi.listAccounts({
+          search: query || undefined,
+          page,
+          per_page: perPage,
+          sort,
+          group: group || undefined,
+          role: (roleFilter || undefined) as AdminListParams['role'],
+          tier: (tierFilter || undefined) as AdminListParams['tier'],
+          status: (statusFilter || undefined) as AdminListParams['status'],
+        }),
         adminApi.stats(),
       ]);
       setAccounts(list.accounts);
@@ -57,7 +97,7 @@ export function AdminUsers() {
     } finally {
       setLoading(false);
     }
-  }, [query, page, perPage]);
+  }, [query, page, perPage, sort, group, roleFilter, tierFilter, statusFilter]);
 
   useEffect(() => {
     void load();
@@ -84,29 +124,72 @@ export function AdminUsers() {
       </div>
 
       {stats ? (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          <StatCard label="Total accounts" value={stats.total} />
-          <StatCard label="Super admins" value={stats.by_role.super_admin ?? 0} />
-          <StatCard label="Admins" value={stats.by_role.admin ?? 0} />
-          <StatCard label="Users" value={stats.by_role.user ?? 0} />
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+          <StatCard label="All accounts" value={stats.total} active={group === ''} onClick={() => { setGroup(''); setPage(1); }} />
+          <StatCard label="Super admins" value={stats.groups.super_admin} active={group === 'super_admin'} onClick={() => { setGroup('super_admin'); setPage(1); }} />
+          <StatCard label="Admins" value={stats.groups.admin} active={group === 'admin'} onClick={() => { setGroup('admin'); setPage(1); }} />
+          <StatCard label="Carers" value={stats.groups.carer} active={group === 'carer'} onClick={() => { setGroup('carer'); setPage(1); }} hint="Own a care profile or contribute to a circle" />
+          <StatCard label="Viewers" value={stats.groups.viewer} active={group === 'viewer'} onClick={() => { setGroup('viewer'); setPage(1); }} hint="View-only access everywhere" />
         </div>
       ) : null}
 
-      <form
-        className="mb-4 flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setPage(1);
-          setQuery(search.trim());
-        }}
-      >
-        <div className="flex-1">
-          <Input placeholder="Search by email or name…" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <Button type="submit" variant="secondary">
-          Search
-        </Button>
-      </form>
+      <div className="mb-4">
+        <DataToolbar
+          search={search}
+          onSearch={setSearch}
+          searchPlaceholder="Search by email or name…"
+          sorts={[
+            { key: 'joined', label: 'Newest first' },
+            { key: 'name', label: 'Name' },
+            { key: 'email', label: 'Email' },
+            { key: 'role', label: 'Role' },
+            { key: 'tier', label: 'Tier' },
+          ]}
+          sortKey={sort}
+          onSort={(k) => {
+            setSort(k as typeof sort);
+            setPage(1);
+          }}
+          filters={[
+            {
+              key: 'role',
+              label: 'Roles',
+              options: [
+                { value: 'super_admin', label: 'Super admin' },
+                { value: 'admin', label: 'Admin' },
+                { value: 'user', label: 'User' },
+              ],
+            },
+            {
+              key: 'tier',
+              label: 'Tiers',
+              options: [
+                { value: 'free', label: 'Free' },
+                { value: 'family', label: 'Family' },
+                { value: 'professional', label: 'Professional' },
+              ],
+            },
+            {
+              key: 'status',
+              label: 'Statuses',
+              options: [
+                { value: 'active', label: 'Active' },
+                { value: 'disabled', label: 'Disabled' },
+              ],
+            },
+          ]}
+          filterValues={{ role: roleFilter, tier: tierFilter, status: statusFilter }}
+          onFilter={(key, value) => {
+            if (key === 'role') setRoleFilter(value);
+            if (key === 'tier') setTierFilter(value);
+            if (key === 'status') setStatusFilter(value);
+            setPage(1);
+          }}
+          selectedCount={selected.length}
+          bulkActions={[{ key: 'apply-template', label: 'Apply rights template', onRun: () => setApplyingTemplate(true) }]}
+          onClearSelection={() => setSelected([])}
+        />
+      </div>
 
       {error ? <p className="text-sm text-red-600 mb-4">{error}</p> : null}
 
@@ -114,6 +197,21 @@ export function AdminUsers() {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted border-b border-border">
+              <th className="pl-4 pr-1 py-3 w-8">
+                <input
+                  type="checkbox"
+                  aria-label="Select everyone on this page"
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                  checked={accounts.length > 0 && accounts.every((a) => selected.includes(a.id))}
+                  onChange={(e) =>
+                    setSelected(
+                      e.target.checked
+                        ? [...new Set([...selected, ...accounts.map((a) => a.id)])]
+                        : selected.filter((id) => !accounts.some((a) => a.id === id))
+                    )
+                  }
+                />
+              </th>
               <th className="px-4 py-3 font-medium">Account</th>
               <th className="px-4 py-3 font-medium">Role</th>
               <th className="px-4 py-3 font-medium">Tier</th>
@@ -124,19 +222,30 @@ export function AdminUsers() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-muted">
+                <td colSpan={6} className="px-4 py-8 text-center text-muted">
                   Loading…
                 </td>
               </tr>
             ) : accounts.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-muted">
+                <td colSpan={6} className="px-4 py-8 text-center text-muted">
                   No accounts found.
                 </td>
               </tr>
             ) : (
               accounts.map((a) => (
                 <tr key={a.id} className={`border-b border-border last:border-0 ${a.disabled_at ? 'opacity-60' : ''}`}>
+                  <td className="pl-4 pr-1 py-3">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${a.display_name}`}
+                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                      checked={selected.includes(a.id)}
+                      onChange={(e) =>
+                        setSelected(e.target.checked ? [...selected, a.id] : selected.filter((id) => id !== a.id))
+                      }
+                    />
+                  </td>
                   <td className="px-4 py-3">
                     <div className="font-medium text-ink">
                       {a.display_name}
@@ -209,6 +318,7 @@ export function AdminUsers() {
         account={editing}
         isSuperAdmin={isSuperAdmin}
         selfId={me?.id}
+        templates={templates}
         onClose={() => setEditing(null)}
         onSaved={() => {
           setEditing(null);
@@ -228,6 +338,7 @@ export function AdminUsers() {
       <CreateUserModal
         open={creating}
         isSuperAdmin={isSuperAdmin}
+        templates={templates}
         onClose={() => setCreating(false)}
         onSaved={() => {
           setCreating(false);
@@ -250,17 +361,140 @@ export function AdminUsers() {
         onSaved={() => setAssigning(null)}
       />
 
+      <ApplyTemplateModal
+        open={applyingTemplate}
+        templates={templates}
+        accountIds={selected}
+        accounts={accounts}
+        onClose={() => setApplyingTemplate(false)}
+        onApplied={() => {
+          setApplyingTemplate(false);
+          setSelected([]);
+          void load();
+        }}
+      />
+
+      <TemplatesSection templates={templates} onChanged={() => void loadTemplates()} />
+
       <InvitationsSection key={invitesVersion} />
     </div>
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+/** A count that IS the filter: click it to see exactly those people. */
+function StatCard({
+  label,
+  value,
+  active,
+  onClick,
+  hint,
+}: {
+  label: string;
+  value: number;
+  active: boolean;
+  onClick: () => void;
+  hint?: string;
+}) {
   return (
-    <div className="card py-4">
+    <button
+      type="button"
+      onClick={onClick}
+      title={hint}
+      aria-pressed={active}
+      className={`card py-4 text-left transition-colors cursor-pointer hover:border-primary ${
+        active ? 'border-primary ring-1 ring-primary' : ''
+      }`}
+    >
       <div className="text-2xl font-semibold text-ink">{value}</div>
-      <div className="text-xs text-muted">{label}</div>
-    </div>
+      <div className={`text-xs ${active ? 'text-primary font-medium' : 'text-muted'}`}>{label}</div>
+    </button>
+  );
+}
+
+const ACCOUNT_RIGHTS = [
+  {
+    key: 'can_create_care_profiles',
+    label: 'Create care profiles',
+    description: 'Add their own people to care for. Usually off for invited helpers.',
+  },
+  {
+    key: 'can_invite_members',
+    label: 'Invite people to care circles',
+    description: 'Send invitations for care profiles they own.',
+  },
+  {
+    key: 'can_use_ai',
+    label: 'Use the AI assistant',
+    description: 'Chat with the assistant and request AI mediation on questions.',
+  },
+  {
+    key: 'can_export_data',
+    label: 'Export data',
+    description: 'Download CSV and JSON exports of records.',
+  },
+] as const;
+
+type RightsState = Record<(typeof ACCOUNT_RIGHTS)[number]['key'], boolean>;
+
+const templateRights = (t: RightsTemplate): RightsState => ({
+  can_create_care_profiles: t.can_create_care_profiles,
+  can_invite_members: t.can_invite_members,
+  can_use_ai: t.can_use_ai,
+  can_export_data: t.can_export_data,
+});
+
+/** One line summary of a template's rights, e.g. "Use the AI assistant, Export data". */
+function rightsSummary(t: RightsTemplate): string {
+  const on = ACCOUNT_RIGHTS.filter((r) => t[r.key]).map((r) => r.label);
+  return on.length === 0 ? 'Nothing enabled' : on.join(', ');
+}
+
+/** Granular per-account rights. Admins and super admins always pass every one. */
+function RightsChecklist({
+  rights,
+  onChange,
+  templates = [],
+}: {
+  rights: RightsState;
+  onChange: (r: RightsState) => void;
+  templates?: RightsTemplate[];
+}) {
+  return (
+    <fieldset className="rounded-md border border-border p-3 space-y-3">
+      <legend className="text-sm font-medium text-ink px-1">What this account can do</legend>
+      {templates.length > 0 ? (
+        <select
+          aria-label="Start from a rights template"
+          className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          value={templates.find((t) => ACCOUNT_RIGHTS.every((r) => t[r.key] === rights[r.key]))?.id ?? ''}
+          onChange={(e) => {
+            const t = templates.find((x) => x.id === e.target.value);
+            if (t) onChange(templateRights(t));
+          }}
+        >
+          <option value="">Start from a template…</option>
+          {templates.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+      ) : null}
+      {ACCOUNT_RIGHTS.map((r) => (
+        <label key={r.key} className="flex items-start gap-2 text-sm text-ink">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+            checked={rights[r.key]}
+            onChange={(e) => onChange({ ...rights, [r.key]: e.target.checked })}
+          />
+          <span>
+            {r.label}
+            <span className="block text-xs text-muted">{r.description}</span>
+          </span>
+        </label>
+      ))}
+    </fieldset>
   );
 }
 
@@ -268,30 +502,46 @@ function EditAccountModal({
   account,
   isSuperAdmin,
   selfId,
+  templates,
   onClose,
   onSaved,
 }: {
   account: AdminAccount | null;
   isSuperAdmin: boolean;
   selfId?: string;
+  templates: RightsTemplate[];
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [displayName, setDisplayName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [tier, setTier] = useState<AdminAccount['subscription_tier']>('free');
   const [role, setRole] = useState<AccountRole>('user');
-  const [mayCreateProfiles, setMayCreateProfiles] = useState(true);
+  const [rights, setRights] = useState<RightsState>({
+    can_create_care_profiles: true,
+    can_invite_members: true,
+    can_use_ai: true,
+    can_export_data: true,
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (account) {
-      setDisplayName(account.display_name);
+      setFirstName(account.first_name ?? account.display_name.split(' ')[0] ?? '');
+      setMiddleName(account.middle_name ?? '');
+      setLastName(account.last_name ?? '');
       setEmail(account.email);
       setTier(account.subscription_tier);
       setRole(account.role);
-      setMayCreateProfiles(account.can_create_care_profiles);
+      setRights({
+        can_create_care_profiles: account.can_create_care_profiles,
+        can_invite_members: account.can_invite_members,
+        can_use_ai: account.can_use_ai,
+        can_export_data: account.can_export_data,
+      });
       setError('');
     }
   }, [account]);
@@ -305,10 +555,14 @@ function EditAccountModal({
     setError('');
     try {
       const updates: Parameters<typeof adminApi.updateAccount>[1] = {};
-      if (displayName !== account.display_name) updates.display_name = displayName;
+      if (firstName.trim() !== (account.first_name ?? '')) updates.first_name = firstName.trim();
+      if (middleName.trim() !== (account.middle_name ?? '')) updates.middle_name = middleName.trim() || null;
+      if (lastName.trim() !== (account.last_name ?? '')) updates.last_name = lastName.trim() || null;
       if (email !== account.email) updates.email = email;
       if (tier !== account.subscription_tier) updates.subscription_tier = tier;
-      if (mayCreateProfiles !== account.can_create_care_profiles) updates.can_create_care_profiles = mayCreateProfiles;
+      for (const r of ACCOUNT_RIGHTS) {
+        if (rights[r.key] !== account[r.key]) updates[r.key] = rights[r.key];
+      }
       if (Object.keys(updates).length > 0) {
         await adminApi.updateAccount(account.id, updates);
       }
@@ -326,8 +580,13 @@ function EditAccountModal({
   return (
     <Modal open onClose={onClose} title={`Edit ${account.display_name}`}>
       <form onSubmit={handleSave} className="space-y-4">
-        <Input label="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input label="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+          <Input label="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+        </div>
+        <Input label="Middle name" value={middleName} onChange={(e) => setMiddleName(e.target.value)} />
         <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <RightsChecklist rights={rights} onChange={setRights} templates={templates} />
         <div>
           <label htmlFor="edit-tier" className="block text-sm font-medium text-ink mb-1">
             Subscription tier
@@ -343,20 +602,6 @@ function EditAccountModal({
             <option value="professional">Professional</option>
           </select>
         </div>
-        <label className="flex items-start gap-2 text-sm text-ink rounded-md border border-border p-3">
-          <input
-            type="checkbox"
-            className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
-            checked={mayCreateProfiles}
-            onChange={(e) => setMayCreateProfiles(e.target.checked)}
-          />
-          <span>
-            Can create care profiles
-            <span className="block text-xs text-muted">
-              Off for invited helpers: they can only work with people shared with them.
-            </span>
-          </span>
-        </label>
         {isSuperAdmin ? (
           <div>
             <label htmlFor="edit-role" className="block text-sm font-medium text-ink mb-1">
@@ -447,29 +692,40 @@ function DeleteAccountModal({
 function CreateUserModal({
   open,
   isSuperAdmin,
+  templates,
   onClose,
   onSaved,
 }: {
   open: boolean;
   isSuperAdmin: boolean;
+  templates: RightsTemplate[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [email, setEmail] = useState('');
-  const [displayName, setDisplayName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<AccountRole>('user');
-  const [mayCreateProfiles, setMayCreateProfiles] = useState(false);
+  const [rights, setRights] = useState<RightsState>({
+    can_create_care_profiles: false,
+    can_invite_members: true,
+    can_use_ai: true,
+    can_export_data: true,
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (open) {
       setEmail('');
-      setDisplayName('');
+      setFirstName('');
+      setMiddleName('');
+      setLastName('');
       setPassword('');
       setRole('user');
-      setMayCreateProfiles(false);
+      setRights({ can_create_care_profiles: false, can_invite_members: true, can_use_ai: true, can_export_data: true });
       setError('');
     }
   }, [open]);
@@ -483,10 +739,12 @@ function CreateUserModal({
     try {
       await adminApi.createAccount({
         email,
-        display_name: displayName,
+        first_name: firstName.trim(),
+        middle_name: middleName.trim() || null,
+        last_name: lastName.trim() || null,
         password,
         role,
-        can_create_care_profiles: mayCreateProfiles,
+        ...rights,
       });
       onSaved();
     } catch (err) {
@@ -503,7 +761,11 @@ function CreateUserModal({
           The account works immediately with the password you set here; hand it to them securely and ask them to
           change it. To let them choose their own password instead, use Invite to care.
         </p>
-        <Input label="Name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input label="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+          <Input label="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+        </div>
+        <Input label="Middle name" value={middleName} onChange={(e) => setMiddleName(e.target.value)} />
         <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         <Input
           label="Temporary password"
@@ -513,20 +775,7 @@ function CreateUserModal({
           required
           hint="At least 8 characters"
         />
-        <label className="flex items-start gap-2 text-sm text-ink rounded-md border border-border p-3">
-          <input
-            type="checkbox"
-            className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
-            checked={mayCreateProfiles}
-            onChange={(e) => setMayCreateProfiles(e.target.checked)}
-          />
-          <span>
-            Can create care profiles
-            <span className="block text-xs text-muted">
-              Leave off for carers who only work with people shared with them.
-            </span>
-          </span>
-        </label>
+        <RightsChecklist rights={rights} onChange={setRights} templates={templates} />
         {isSuperAdmin ? (
           <div>
             <label htmlFor="create-role" className="block text-sm font-medium text-ink mb-1">
@@ -969,5 +1218,295 @@ function InvitationsSection() {
         </table>
       </div>
     </div>
+  );
+}
+
+/** Stamp a template's rights onto every selected account. */
+function ApplyTemplateModal({
+  open,
+  templates,
+  accountIds,
+  accounts,
+  onClose,
+  onApplied,
+}: {
+  open: boolean;
+  templates: RightsTemplate[];
+  accountIds: string[];
+  accounts: AdminAccount[];
+  onClose: () => void;
+  onApplied: () => void;
+}) {
+  const [templateId, setTemplateId] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<{ applied: number; skipped: Array<{ reason: string }>; name: string } | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setTemplateId('');
+      setError('');
+      setResult(null);
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  const names = accountIds
+    .map((id) => accounts.find((a) => a.id === id)?.display_name)
+    .filter(Boolean)
+    .slice(0, 6);
+
+  async function handleApply() {
+    if (!templateId) {
+      setError('Pick a template.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const res = await adminApi.applyRightsTemplate(templateId, accountIds);
+      setResult({ applied: res.applied.length, skipped: res.skipped, name: res.template.name });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to apply the template');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (result) {
+    return (
+      <Modal open onClose={onApplied} title="Template applied">
+        <p className="text-sm text-ink mb-2">
+          {result.name} now applies to {result.applied} {result.applied === 1 ? 'account' : 'accounts'}.
+        </p>
+        {result.skipped.length > 0 ? (
+          <ul className="text-xs text-amber-700 mb-2 list-disc pl-4">
+            {result.skipped.map((s, i) => (
+              <li key={i}>{s.reason}</li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="flex justify-end">
+          <Button onClick={onApplied}>Done</Button>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Apply a rights template to ${accountIds.length} ${accountIds.length === 1 ? 'account' : 'accounts'}`}>
+      <p className="text-sm text-muted mb-3">
+        {names.join(', ')}
+        {accountIds.length > names.length ? ` and ${accountIds.length - names.length} more` : ''}
+      </p>
+      <div className="space-y-2 mb-4">
+        {templates.length === 0 ? (
+          <p className="text-sm text-muted">No templates yet. Create one in the Rights templates section below.</p>
+        ) : (
+          templates.map((t) => (
+            <label
+              key={t.id}
+              className={`flex items-start gap-2 rounded-md border p-3 cursor-pointer transition-colors ${
+                templateId === t.id ? 'border-primary ring-1 ring-primary' : 'border-border hover:border-primary'
+              }`}
+            >
+              <input
+                type="radio"
+                name="apply-template"
+                className="mt-0.5 h-4 w-4 border-border text-primary focus:ring-primary"
+                checked={templateId === t.id}
+                onChange={() => setTemplateId(t.id)}
+              />
+              <span className="text-sm text-ink">
+                <span className="font-medium">{t.name}</span>
+                {t.description ? <span className="block text-xs text-muted">{t.description}</span> : null}
+                <span className="block text-xs text-muted mt-0.5">Allows: {rightsSummary(t)}</span>
+              </span>
+            </label>
+          ))
+        )}
+      </div>
+      {error ? <p className="text-sm text-red-600 mb-3">{error}</p> : null}
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button loading={saving} disabled={!templateId} onClick={handleApply}>
+          Apply template
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function TemplatesSection({ templates, onChanged }: { templates: RightsTemplate[]; onChanged: () => void }) {
+  const [editing, setEditing] = useState<RightsTemplate | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState('');
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <h2 className="text-base font-semibold text-ink mb-1">Rights templates</h2>
+          <p className="text-sm text-muted">
+            Named bundles of account rights. Select people in the table above and apply a template to set them all at
+            once.
+          </p>
+        </div>
+        <Button variant="secondary" onClick={() => setCreating(true)}>
+          New template
+        </Button>
+      </div>
+      {error ? <p className="text-sm text-red-600 mb-2">{error}</p> : null}
+      <div className="card overflow-x-auto p-0">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-muted border-b border-border">
+              <th className="px-4 py-3 font-medium">Template</th>
+              <th className="px-4 py-3 font-medium">Allows</th>
+              <th className="px-4 py-3 font-medium text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {templates.length === 0 ? (
+              <tr>
+                <td colSpan={3} className="px-4 py-6 text-center text-muted">
+                  No templates yet.
+                </td>
+              </tr>
+            ) : (
+              templates.map((t) => (
+                <tr key={t.id} className="border-b border-border last:border-0">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-ink">{t.name}</div>
+                    {t.description ? <div className="text-xs text-muted">{t.description}</div> : null}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-muted">{rightsSummary(t)}</td>
+                  <td className="px-4 py-3 text-right space-x-2 whitespace-nowrap">
+                    <Button size="sm" variant="secondary" onClick={() => setEditing(t)}>
+                      Edit
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={async () => {
+                        try {
+                          await adminApi.deleteRightsTemplate(t.id);
+                          setError('');
+                          onChanged();
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : 'Failed to delete');
+                        }
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <TemplateModal
+        open={creating}
+        template={null}
+        onClose={() => setCreating(false)}
+        onSaved={() => {
+          setCreating(false);
+          onChanged();
+        }}
+      />
+      <TemplateModal
+        open={editing !== null}
+        template={editing}
+        onClose={() => setEditing(null)}
+        onSaved={() => {
+          setEditing(null);
+          onChanged();
+        }}
+      />
+    </div>
+  );
+}
+
+function TemplateModal({
+  open,
+  template,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  template: RightsTemplate | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [rights, setRights] = useState<RightsState>({
+    can_create_care_profiles: false,
+    can_invite_members: true,
+    can_use_ai: true,
+    can_export_data: true,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setName(template?.name ?? '');
+      setDescription(template?.description ?? '');
+      setRights(
+        template
+          ? templateRights(template)
+          : { can_create_care_profiles: false, can_invite_members: true, can_use_ai: true, can_export_data: true }
+      );
+      setError('');
+    }
+  }, [open, template]);
+
+  if (!open) return null;
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      const body = { name: name.trim(), description: description.trim() || null, ...rights };
+      if (template) await adminApi.updateRightsTemplate(template.id, body);
+      else await adminApi.createRightsTemplate(body);
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save the template');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={template ? `Edit ${template.name}` : 'New rights template'}>
+      <form onSubmit={handleSave} className="space-y-4">
+        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required placeholder='e.g. "Night carer"' />
+        <Input
+          label="Description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Who this template is for"
+        />
+        <RightsChecklist rights={rights} onChange={setRights} />
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={saving}>
+            {template ? 'Save changes' : 'Create template'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
