@@ -26,7 +26,7 @@ const medSchema = z.object({
   frequency: z.string().max(255).optional().nullable(),
   schedule_times: z.array(z.string().regex(/^\d{2}:\d{2}$/)).optional().nullable(),
   instructions: z.string().optional().nullable(),
-  prescriber: z.string().max(255).optional().nullable(),
+  supply: z.coerce.number().min(0).max(1e9).optional().nullable(),
   active: z.boolean().optional(),
 });
 
@@ -38,7 +38,8 @@ interface MedRow {
   frequency: string | null;
   schedule_times: string[] | null;
   instructions: string | null;
-  prescriber: string | null;
+  supply: number | null;
+  supply_remaining: number | null;
   active: boolean;
 }
 
@@ -50,9 +51,25 @@ interface MedInsert {
   frequency: string | null;
   schedule_times: string[];
   instructions: string | null;
-  prescriber: string | null;
+  supply: number | null;
   active: boolean;
 }
+
+// Extract the numeric amount from a dose string ("500 mg" -> 500, "5 mL" -> 5).
+function doseAmount(dose: string | null | undefined): number {
+  const n = parseFloat(String(dose ?? '').replace(/[^0-9.]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+// Postgres returns decimal columns as strings; hand the client real numbers so
+// supply/supply_remaining arrive as the numeric type the frontend expects.
+const numOrNull = (v: unknown): number | null => {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+const serializeMed = <T extends Record<string, unknown>>(m: T): T =>
+  ({ ...m, supply: numOrNull(m['supply']), supply_remaining: numOrNull(m['supply_remaining']) });
 
 const blank = (v: string | undefined): string | null => {
   const t = (v ?? '').trim();
@@ -92,13 +109,15 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
     { key: 'frequency', header: 'Frequency', aliases: ['freq', 'how often'], toCell: (r) => r.frequency ?? '' },
     { key: 'schedule_times', header: 'Times', aliases: ['schedule', 'schedule times', 'time'], toCell: (r) => (r.schedule_times ?? []).join('; ') },
     { key: 'instructions', header: 'Instructions', aliases: ['directions', 'notes'], toCell: (r) => r.instructions ?? '' },
-    { key: 'prescriber', header: 'Prescriber', aliases: ['prescribed by', 'doctor', 'gp'], toCell: (r) => r.prescriber ?? '' },
+    { key: 'supply', header: 'Supply', aliases: ['stock', 'quantity', 'on hand'], toCell: (r) => (r.supply ?? '').toString() },
+    { key: 'supply_remaining', header: 'Supply remaining', aliases: ['remaining'], toCell: (r) => (r.supply_remaining ?? '').toString() },
     { key: 'active', header: 'Active', aliases: ['status'], toCell: (r) => (r.active ? 'true' : 'false') },
   ],
   coerce: (raw, rowNumber) => {
     const name = (raw['name'] ?? '').trim();
     if (!name) return { ok: false as const, error: `Row ${rowNumber}: a medication name is required.` };
     if (name.length > 255) return { ok: false as const, error: `Row ${rowNumber}: name is too long.` };
+    const supplyNum = parseFloat(String(raw['supply'] ?? '').replace(/[^0-9.]/g, ''));
     return {
       ok: true as const,
       value: {
@@ -109,7 +128,7 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
         frequency: blank(raw['frequency']),
         schedule_times: parseTimes(raw['schedule_times']),
         instructions: blank(raw['instructions']),
-        prescriber: blank(raw['prescriber']),
+        supply: Number.isFinite(supplyNum) ? supplyNum : null,
         active: parseActive(raw['active']),
       },
     };
@@ -122,7 +141,7 @@ medicationsRouter.get('/', requireAuth, async (req, res) => {
   const meds = await medSelect()
     .where('m.care_profile_id', req.params['id'])
     .orderBy([{ column: 'm.active', order: 'desc' }, { column: 'c.name', order: 'asc' }]);
-  res.json({ medications: meds });
+  res.json({ medications: meds.map(serializeMed) });
 });
 
 // Export the medication list as CSV or JSON.
@@ -176,7 +195,8 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner, async (req, 
       route: r.route,
       frequency: r.frequency,
       instructions: r.instructions,
-      prescriber: r.prescriber,
+      supply: r.supply,
+      supply_remaining: r.supply,
       active: r.active,
       schedule_times: r.schedule_times.length
         ? db.raw('?::jsonb', [JSON.stringify(r.schedule_times)])
@@ -201,10 +221,12 @@ medicationsRouter.post('/', requireAuth, requireProfileOwner, async (req, res) =
       care_profile_id: req.params['id'],
       medication_catalogue_id: catalogueId,
       ...rest,
+      // A fresh supply starts fully remaining.
+      supply_remaining: rest.supply ?? null,
       schedule_times: schedule_times ? db.raw('?::jsonb', [JSON.stringify(schedule_times)]) : null,
     })
     .returning('id');
-  res.status(201).json({ medication: await medWithName((med as { id: string }).id) });
+  res.status(201).json({ medication: serializeMed(await medWithName((med as { id: string }).id)) });
 });
 
 medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner, async (req, res) => {
@@ -218,6 +240,10 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner, async (req,
   if (schedule_times !== undefined) {
     update['schedule_times'] = schedule_times ? db.raw('?::jsonb', [JSON.stringify(schedule_times)]) : null;
   }
+  // Editing the supply refills it, so the remaining count resets to the total.
+  if (rest.supply !== undefined) {
+    update['supply_remaining'] = rest.supply;
+  }
   // Changing the drug identity re-points the medication at a catalogue entry.
   if (name !== undefined) {
     update['medication_catalogue_id'] = await resolveCatalogueId(name, form ?? null, req.account!.id);
@@ -230,7 +256,7 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner, async (req,
     res.status(404).json({ error: 'Medication not found', code: 'NOT_FOUND' });
     return;
   }
-  res.json({ medication: await medWithName((med as { id: string }).id) });
+  res.json({ medication: serializeMed(await medWithName((med as { id: string }).id)) });
 });
 
 // Bulk actions on the list. Delete is limited to the profile owner and
@@ -280,7 +306,7 @@ medicationsRouter.get('/chart', requireAuth, async (req, res) => {
       qb.whereBetween('administered_at', [from, to]).orWhereBetween('scheduled_for', [from, to])
     )
     .orderBy('administered_at', 'asc');
-  res.json({ medications, administrations });
+  res.json({ medications: medications.map(serializeMed), administrations });
 });
 
 // A window's adherence summary — expected slots vs recorded outcomes.
@@ -369,6 +395,18 @@ const adminSchema = z.object({
 });
 
 const NOTE_OPTIONAL = new Set(['given', 'self_administered']);
+const GIVEN = new Set(['given', 'self_administered']);
+const FUTURE_SKEW_MS = 60 * 1000;
+const isFutureTime = (s?: string | null): boolean => !!s && new Date(s).getTime() > Date.now() + FUTURE_SKEW_MS;
+
+// A given dose draws down the medication's remaining supply (never below zero).
+async function drawDownSupply(medId: string, amount: number): Promise<void> {
+  if (amount <= 0) return;
+  await db('medications')
+    .where({ id: medId })
+    .whereNotNull('supply_remaining')
+    .update({ supply_remaining: db.raw('GREATEST(0, supply_remaining - ?)', [amount]) });
+}
 
 // Build the insert row for one administration, deriving the context rights.
 function buildAdminRow(
@@ -412,7 +450,12 @@ medicationsRouter.post('/:medId/administrations', requireAuth, async (req, res) 
     res.status(400).json({ error: 'A note is required when the outcome is not "given" or "self-administered".', code: 'NOTE_REQUIRED' });
     return;
   }
+  if (isFutureTime(parsed.data.administered_at)) {
+    res.status(400).json({ error: 'You cannot log a dose in the future.', code: 'FUTURE_TIME' });
+    return;
+  }
   const [record] = await db('medication_administrations').insert(buildAdminRow(parsed.data, med, req.params['id']!, req.account!)).returning('*');
+  if (GIVEN.has(parsed.data.status)) await drawDownSupply(med.id, doseAmount(parsed.data.dose_given ?? med.dose));
   res.status(201).json({ administration: record });
 });
 
@@ -439,8 +482,20 @@ medicationsRouter.post('/administrations/batch', requireAuth, async (req, res) =
       res.status(400).json({ error: 'A note is required for any dose not given or self-administered.', code: 'NOTE_REQUIRED' });
       return;
     }
+    if (isFutureTime(e.administered_at)) {
+      res.status(400).json({ error: 'You cannot log a dose in the future.', code: 'FUTURE_TIME' });
+      return;
+    }
   }
   const rows = parsed.data.entries.map((e) => buildAdminRow(e, byId.get(e.medication_id)!, req.params['id']!, req.account!));
   const inserted = await db('medication_administrations').insert(rows).returning('id');
+  // Draw down supply for each given dose, aggregated per medication.
+  const drawdowns = new Map<string, number>();
+  for (const e of parsed.data.entries) {
+    if (!GIVEN.has(e.status)) continue;
+    const med = byId.get(e.medication_id)!;
+    drawdowns.set(e.medication_id, (drawdowns.get(e.medication_id) ?? 0) + doseAmount(e.dose_given ?? med.dose));
+  }
+  for (const [medId, amount] of drawdowns) await drawDownSupply(medId, amount);
   res.status(201).json({ recorded: inserted.length });
 });

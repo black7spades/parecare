@@ -3,12 +3,12 @@ import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   addDays, addMonths, addWeeks, eachDayOfInterval, endOfDay, endOfMonth, endOfWeek,
-  format, startOfDay, startOfMonth, startOfWeek,
+  format, isSameDay, startOfDay, startOfMonth, startOfWeek, subMonths,
 } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
-import { MED_STATUSES, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
+import { MED_STATUSES, medStatusDescription, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
 import { C64_PALETTE, contrastText } from '../../../components/ui/Avatar';
 import { AdministerModal } from './MedicationsPage';
 
@@ -160,14 +160,24 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
     : format(anchor, 'MMMM yyyy');
   const step = (dir: number) => setAnchor((a) => period === 'day' ? addDays(a, dir) : period === 'week' ? addWeeks(a, dir) : addMonths(a, dir));
 
-  const quick = (medId: string, scheduledFor?: string) =>
-    recordDose.mutate([{ medication_id: medId, ...(scheduledFor ? { scheduled_for: scheduledFor } : {}), administered_at: new Date().toISOString(), status: 'given' }]);
+  // The system runs on time: you can never move into the future, and you can
+  // look back at most 12 months. Everything after "now" is locked.
+  const backFloor = subMonths(startOfDay(new Date()), 12);
+  const nextDisabled = to.getTime() >= now.getTime();
+  const prevDisabled = from.getTime() <= backFloor.getTime();
+
+  // Record a slot as given, dated to the slot itself so back-filled doses land
+  // on the right day (not "now").
+  const quick = (medId: string, scheduledFor: string) => {
+    if (new Date(scheduledFor) > now) return; // never log a future dose
+    recordDose.mutate([{ medication_id: medId, scheduled_for: scheduledFor, administered_at: scheduledFor, status: 'given' }]);
+  };
   const logAllDue = () => {
     const dayStr = format(anchor, 'yyyy-MM-dd');
     const entries: Entry[] = [];
     for (const m of meds) for (const t of m.schedule_times ?? []) {
       const iso = new Date(`${dayStr}T${t}:00`).toISOString();
-      if (new Date(iso) <= now && !findAdmin(m.id, iso)) entries.push({ medication_id: m.id, scheduled_for: iso, administered_at: new Date().toISOString(), status: 'given' });
+      if (new Date(iso) <= now && !findAdmin(m.id, iso)) entries.push({ medication_id: m.id, scheduled_for: iso, administered_at: iso, status: 'given' });
     }
     if (entries.length) recordDose.mutate(entries);
   };
@@ -181,9 +191,9 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="secondary" onClick={() => step(-1)} aria-label="Previous">←</Button>
+          <Button size="sm" variant="secondary" onClick={() => step(-1)} disabled={prevDisabled} aria-label="Previous">←</Button>
           <Button size="sm" variant="secondary" onClick={() => setAnchor(new Date())}>Today</Button>
-          <Button size="sm" variant="secondary" onClick={() => step(1)} aria-label="Next">→</Button>
+          <Button size="sm" variant="secondary" onClick={() => step(1)} disabled={nextDisabled} aria-label="Next" title={nextDisabled ? 'You cannot log or view future dates' : undefined}>→</Button>
         </div>
       </div>
       <p className="text-sm font-medium text-ink">{label}</p>
@@ -208,7 +218,10 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
       ) : period === 'day' ? (
         <DayGrid meds={meds} admins={admins} day={anchor} findAdmin={findAdmin} now={now} canAdminister={canAdminister}
           onQuick={quick} onLogAllDue={logAllDue}
-          onLogDetail={(med, slotISO) => setRecording({ med, slotISO: slotISO ?? undefined, whenLocal: slotISO ? format(new Date(slotISO), "yyyy-MM-dd'T'HH:mm") : format(now, "yyyy-MM-dd'T'HH:mm") })} />
+          onLogDetail={(med, slotISO) => {
+            const fallback = isSameDay(anchor, now) ? now : new Date(`${format(anchor, 'yyyy-MM-dd')}T12:00:00`);
+            setRecording({ med, slotISO: slotISO ?? undefined, whenLocal: format(slotISO ? new Date(slotISO) : fallback, "yyyy-MM-dd'T'HH:mm") });
+          }} />
       ) : (
         <MonthGrid meds={meds} days={days} admins={admins} now={now} onPickDay={(d) => { setPeriod('day'); setAnchor(d); }} />
       )}
@@ -220,6 +233,7 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
           personName={personName}
           scheduledFor={recording.slotISO}
           initialWhen={recording.whenLocal}
+          maxWhen={format(now, "yyyy-MM-dd'T'HH:mm")}
           onClose={() => setRecording(null)}
           onSaved={() => { setRecording(null); invalidate(); }}
         />
@@ -235,7 +249,7 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
 function DayGrid({ meds, admins, day, findAdmin, now, canAdminister, onQuick, onLogAllDue, onLogDetail }: {
   meds: MedicationRecord[]; admins: ChartAdmin[]; day: Date; now: Date; canAdminister: boolean;
   findAdmin: (medId: string, slotISO: string) => ChartAdmin | undefined;
-  onQuick: (medId: string, scheduledFor?: string) => void;
+  onQuick: (medId: string, scheduledFor: string) => void;
   onLogAllDue: () => void;
   onLogDetail: (med: MedicationRecord, slotISO: string | null) => void;
 }) {
@@ -268,12 +282,17 @@ function DayGrid({ meds, admins, day, findAdmin, now, canAdminister, onQuick, on
                     <span>{t}</span>{a.status === 'given' || a.status === 'self_administered' ? '✓' : statusLabel(a.status).slice(0, 3)}
                   </span>
                 );
-                if (!canAdminister) return <span key={iso} className="inline-flex items-center h-7 rounded border border-dashed border-border px-2 text-xs text-muted">{t}</span>;
+                // Future doses can't be logged yet; show them as upcoming.
+                if (!canAdminister || !past) return (
+                  <span key={iso} data-testid={`slot-${m.id}-${t}`} title={past ? t : `${t} — upcoming`} className="inline-flex items-center gap-1 h-7 rounded border border-dashed border-border px-2 text-xs text-muted">
+                    <span>{t}</span>{!past ? <span className="text-[10px]">soon</span> : null}
+                  </span>
+                );
                 return (
                   <button key={iso} type="button" data-testid={`slot-${m.id}-${t}`} onClick={() => onQuick(m.id, iso)}
-                    style={past ? { borderColor: C64.lightRed, color: C64.lightRed } : undefined}
-                    className={`inline-flex items-center gap-1 h-7 rounded border border-dashed px-2 text-xs ${past ? 'hover:bg-surface-2' : 'border-border text-muted hover:bg-surface-2'}`}>
-                    <span>{t}</span>{past ? 'due' : '+'}
+                    style={{ borderColor: C64.lightRed, color: C64.lightRed }}
+                    className="inline-flex items-center gap-1 h-7 rounded border border-dashed px-2 text-xs hover:bg-surface-2">
+                    <span>{t}</span>due
                   </button>
                 );
               })}
@@ -316,11 +335,14 @@ function MonthGrid({ meds, days, admins, now, onPickDay }: {
         <thead>
           <tr className="text-xs text-muted border-b border-border">
             <th className="px-3 py-2 text-left font-medium sticky left-0 bg-card">Medication</th>
-            {days.map((d) => (
-              <th key={d.toISOString()} className="px-1 py-2 font-medium text-center min-w-[2rem]">
-                <button type="button" className="hover:text-primary" onClick={() => onPickDay(d)} title={format(d, 'd MMM')}>{format(d, 'd')}</button>
-              </th>
-            ))}
+            {days.map((d) => {
+              const future = startOfDay(d).getTime() > startOfDay(now).getTime();
+              return (
+                <th key={d.toISOString()} className="px-1 py-2 font-medium text-center min-w-[2rem]">
+                  <button type="button" disabled={future} className={future ? 'text-muted/40 cursor-default' : 'hover:text-primary'} onClick={() => !future && onPickDay(d)} title={format(d, 'd MMM')}>{format(d, 'd')}</button>
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
@@ -328,6 +350,7 @@ function MonthGrid({ meds, days, admins, now, onPickDay }: {
             <tr key={m.id} className="border-b border-border last:border-0">
               <td className="px-3 py-2 text-ink sticky left-0 bg-card font-medium">{m.name}</td>
               {days.map((d) => {
+                const future = startOfDay(d).getTime() > startOfDay(now).getTime();
                 const expected = (m.schedule_times ?? []).filter((t) => new Date(`${format(d, 'yyyy-MM-dd')}T${t}:00`) <= now).length;
                 const { given = 0, any = 0 } = byMedDay.get(`${m.id}|${format(d, 'yyyy-MM-dd')}`) ?? {};
                 // Colour by what actually happened, so ad-hoc doses show too.
@@ -335,11 +358,11 @@ function MonthGrid({ meds, days, admins, now, onPickDay }: {
                 if (given > 0) bg = expected > 0 && given < expected ? C64.yellow : C64.green;
                 else if (any > 0) bg = C64.orange;
                 else if (expected > 0) bg = C64.lightRed;
-                const title = `${format(d, 'd MMM')}: ${given} given${expected ? ` of ${expected} due` : ''}${any > given ? `, ${any - given} exception${any - given === 1 ? '' : 's'}` : ''}`;
+                const title = future ? `${format(d, 'd MMM')}: upcoming` : `${format(d, 'd MMM')}: ${given} given${expected ? ` of ${expected} due` : ''}${any > given ? `, ${any - given} exception${any - given === 1 ? '' : 's'}` : ''}`;
                 return (
                   <td key={d.toISOString()} className="px-1 py-1 text-center">
-                    <button type="button" onClick={() => onPickDay(d)} title={title}
-                      style={{ backgroundColor: bg }} className="inline-block h-6 w-6 rounded" />
+                    <button type="button" disabled={future} onClick={() => !future && onPickDay(d)} title={title}
+                      style={{ backgroundColor: future ? undefined : bg }} className={`inline-block h-6 w-6 rounded ${future ? 'border border-dashed border-border' : ''}`} />
                   </td>
                 );
               })}
@@ -437,7 +460,7 @@ function MarLog({ profileId }: { profileId: string }) {
                 <td className="px-4 py-3 text-muted">{a.dose_given || '—'}</td>
                 <td className="px-4 py-3 text-muted">{a.route_given || '—'}</td>
                 <td className="px-4 py-3 text-muted whitespace-nowrap">{a.administered_by_name ?? '—'}</td>
-                <td className="px-4 py-3"><span className="badge text-xs font-medium" style={swatch(statusColorFor(a.status))}>{statusLabel(a.status)}</span></td>
+                <td className="px-4 py-3"><span className="badge text-xs font-medium" style={swatch(statusColorFor(a.status))} title={medStatusDescription(a.status)}>{statusLabel(a.status)}</span></td>
               </tr>
             ))}
           </tbody>

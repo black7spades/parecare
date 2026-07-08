@@ -59,13 +59,13 @@ export function CalendarPage() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <h2 className="text-base font-semibold text-ink">{format(month, 'MMMM yyyy')}</h2>
           <div className="flex gap-2">
-            <Button size="sm" variant="secondary" onClick={() => setMonth((m) => addMonths(m, -1))} aria-label="Previous month">
+            <Button size="sm" variant="secondary" disabled={startOfMonth(month) <= startOfMonth(addMonths(new Date(), -12))} onClick={() => setMonth((m) => addMonths(m, -1))} aria-label="Previous month">
               ←<span className="hidden sm:inline"> Previous</span>
             </Button>
             <Button size="sm" variant="secondary" onClick={() => setMonth(startOfMonth(new Date()))}>
               Today
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => setMonth((m) => addMonths(m, 1))} aria-label="Next month">
+            <Button size="sm" variant="secondary" disabled={startOfMonth(month) >= startOfMonth(new Date())} onClick={() => setMonth((m) => addMonths(m, 1))} aria-label="Next month" title={startOfMonth(month) >= startOfMonth(new Date()) ? 'You cannot view future months' : undefined}>
               <span className="hidden sm:inline">Next </span>→
             </Button>
           </div>
