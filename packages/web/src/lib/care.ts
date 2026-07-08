@@ -268,17 +268,23 @@ export interface MedicationRecord {
   frequency: string | null;
   schedule_times: string[] | null;
   instructions: string | null;
-  prescriber: string | null;
+  supply: number | null;
+  supply_remaining: number | null;
   active: boolean;
 }
 
+// Plain-language descriptions accompany every outcome so a family carer who
+// has never worked in aged care understands the clinical terms.
 export const MED_STATUSES = [
-  { value: 'given', label: 'Given' },
-  { value: 'refused', label: 'Refused' },
-  { value: 'omitted', label: 'Omitted' },
-  { value: 'held', label: 'Held' },
-  { value: 'self_administered', label: 'Self-administered' },
+  { value: 'given', label: 'Given', description: 'You gave the dose and it was taken.' },
+  { value: 'refused', label: 'Refused', description: 'The person did not want the dose and declined it.' },
+  { value: 'omitted', label: 'Omitted', description: 'The dose was skipped this time, for example the person was asleep, unwell or fasting.' },
+  { value: 'held', label: 'Held', description: 'The dose was deliberately paused, for example on a doctor or pharmacist instruction.' },
+  { value: 'self_administered', label: 'Self-administered', description: 'The person took the dose themselves.' },
 ] as const;
+
+export const medStatusLabel = (s: string) => MED_STATUSES.find((x) => x.value === s)?.label ?? s;
+export const medStatusDescription = (s: string) => MED_STATUSES.find((x) => x.value === s)?.description ?? '';
 
 export const MED_RIGHTS = [
   { key: 'right_patient', label: 'Right patient' },

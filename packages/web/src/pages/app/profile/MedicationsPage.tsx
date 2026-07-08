@@ -9,7 +9,7 @@ import { useProfile } from './ProfileLayout';
 import { ImportExport } from '../../../components/ImportExport';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
-import { MED_STATUSES, type MedicationRecord } from '../../../lib/care';
+import { MED_STATUSES, medStatusDescription, type MedicationRecord } from '../../../lib/care';
 import { MedicationMar } from './MedicationMar';
 
 // Domain sort/filter helpers for the reusable data view.
@@ -23,6 +23,14 @@ const doseValue = (m: MedicationRecord): number => {
   return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
 };
 const byName = (a: MedicationRecord, b: MedicationRecord) => a.name.localeCompare(b.name);
+
+// The unit is captured as part of the dose string (e.g. "500 mg"); reuse it to
+// label the supply count so "29500 mg" reads sensibly without a second field.
+const doseUnit = (dose: string | null): string => {
+  const m = String(dose ?? '').match(/[a-zA-Z%]+/);
+  return m ? m[0] : '';
+};
+const fmtNum = (n: number): string => (Number.isInteger(n) ? String(n) : String(Number(n.toFixed(3))));
 
 const MED_SORTS: DataSort<MedicationRecord>[] = [
   { key: 'default', label: 'Active first, then name', compare: (a, b) => (Number(b.active) - Number(a.active)) || byName(a, b) },
@@ -40,6 +48,9 @@ export function MedicationsPage() {
   const [editing, setEditing] = useState<MedicationRecord | null>(null);
   const [confirmBulk, setConfirmBulk] = useState(false);
   const [confirmBulkLog, setConfirmBulkLog] = useState(false);
+  // The daily action happens at the record below, so the management list starts
+  // collapsed and can be expanded to add, edit or organise medications.
+  const [listOpen, setListOpen] = useState(false);
 
   const { data } = useQuery({
     queryKey: ['medications', profile.id],
@@ -78,7 +89,7 @@ export function MedicationsPage() {
   const dv = useDataView<MedicationRecord>({
     rows: meds,
     getId: (m) => m.id,
-    searchText: (m) => [m.name, m.dose, m.route, m.frequency, m.prescriber].filter(Boolean).join(' '),
+    searchText: (m) => [m.name, m.dose, m.route, m.frequency].filter(Boolean).join(' '),
     sorts: MED_SORTS,
     filters: [statusFilter, routeFilter],
   });
@@ -119,89 +130,121 @@ export function MedicationsPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-ink">Medications</h2>
-          <p className="text-sm text-muted">
+          <h2 className="text-base font-semibold text-ink">
+            <button
+              type="button"
+              onClick={() => setListOpen((o) => !o)}
+              className="inline-flex items-center gap-2 text-left"
+              aria-expanded={listOpen}
+            >
+              <span className={`text-muted transition-transform ${listOpen ? 'rotate-90' : ''}`} aria-hidden>▶</span>
+              <span>Medications</span>
+              <span className="text-xs font-normal text-muted">{meds.length} on file · {listOpen ? 'hide' : 'manage'}</span>
+            </button>
+          </h2>
+          <p className="mt-1 text-sm text-muted">
             {careName}'s current regimen. Add, edit and organise medications here; log and review doses in the record below.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2 self-start sm:self-auto">
-          <ImportExport
-            basePath={`/care-profiles/${profile.id}/medications`}
-            resource="medications"
-            canImport={canManageMeds}
-            onImported={invalidate}
-            templateHeaders={['Name', 'Dose', 'Form', 'Route', 'Frequency', 'Times', 'Instructions', 'Prescriber', 'Active']}
-            templateSample={['Metformin', '500 mg', 'Tablet', 'Oral', 'Twice daily', '08:00; 20:00', 'With food', 'Dr Wright', 'true']}
+        {listOpen ? (
+          <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+            <ImportExport
+              basePath={`/care-profiles/${profile.id}/medications`}
+              resource="medications"
+              canImport={canManageMeds}
+              onImported={invalidate}
+              templateHeaders={['Name', 'Dose', 'Form', 'Route', 'Frequency', 'Times', 'Instructions', 'Supply', 'Active']}
+              templateSample={['Metformin', '500 mg', 'Tablet', 'Oral', 'Twice daily', '08:00; 20:00', 'With food', '30000', 'true']}
+            />
+            {canManageMeds ? <Button onClick={() => setAddOpen(true)}>Add medication</Button> : null}
+          </div>
+        ) : null}
+      </div>
+
+      {listOpen ? (
+        <>
+          <DataToolbar
+            search={dv.search}
+            onSearch={dv.setSearch}
+            searchPlaceholder="Search medications…"
+            sorts={MED_SORTS.map((s) => ({ key: s.key, label: s.label }))}
+            sortKey={dv.sortKey}
+            onSort={dv.setSortKey}
+            filters={[statusFilter, routeFilter].map((f) => ({ key: f.key, label: f.label, options: f.options }))}
+            filterValues={dv.filterValues}
+            onFilter={dv.setFilter}
+            selectedCount={dv.selectedRows.length}
+            bulkActions={bulkActions}
+            onClearSelection={dv.clearSelection}
           />
-          {canManageMeds ? <Button onClick={() => setAddOpen(true)}>Add medication</Button> : null}
-        </div>
-      </div>
 
-      <DataToolbar
-        search={dv.search}
-        onSearch={dv.setSearch}
-        searchPlaceholder="Search medications…"
-        sorts={MED_SORTS.map((s) => ({ key: s.key, label: s.label }))}
-        sortKey={dv.sortKey}
-        onSort={dv.setSortKey}
-        filters={[statusFilter, routeFilter].map((f) => ({ key: f.key, label: f.label, options: f.options }))}
-        filterValues={dv.filterValues}
-        onFilter={dv.setFilter}
-        selectedCount={dv.selectedRows.length}
-        bulkActions={bulkActions}
-        onClearSelection={dv.clearSelection}
-      />
-
-      <div className="card p-0 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-muted border-b border-border">
-              {canSelect ? (
-                <th className="px-4 py-3 w-8">
-                  <input type="checkbox" aria-label="Select all" className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                    checked={dv.allSelected} onChange={dv.toggleAll} />
-                </th>
-              ) : null}
-              <th className="px-4 py-3 font-medium">Medication</th>
-              <th className="px-4 py-3 font-medium">Dose</th>
-              <th className="px-4 py-3 font-medium">Route</th>
-              <th className="px-4 py-3 font-medium">Schedule</th>
-              <th className="px-4 py-3 font-medium text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {dv.view.length === 0 ? (
-              <tr><td colSpan={canSelect ? 6 : 5} className="px-4 py-8 text-center text-muted">{meds.length === 0 ? 'No medications recorded yet.' : 'No medications match your search or filters.'}</td></tr>
-            ) : dv.view.map((m) => (
-              <tr key={m.id} className={`border-b border-border last:border-0 ${m.active ? '' : 'opacity-60'}`}>
-                {canSelect ? (
-                  <td className="px-4 py-3">
-                    <input type="checkbox" aria-label={`Select ${m.name}`} className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                      checked={dv.selected.has(m.id)} onChange={() => dv.toggle(m.id)} />
-                  </td>
-                ) : null}
-                <td className="px-4 py-3">
-                  <div data-testid="med-name" className="font-medium text-ink">{m.name}{m.active ? '' : ' (inactive)'}</div>
-                  {m.prescriber ? <div className="text-xs text-muted">Prescriber: {m.prescriber}</div> : null}
-                  {m.instructions ? <div className="text-xs text-muted">{m.instructions}</div> : null}
-                </td>
-                <td className="px-4 py-3 text-muted">{m.dose || '—'}</td>
-                <td className="px-4 py-3 text-muted">{m.route || '—'}</td>
-                <td className="px-4 py-3 text-muted">
-                  {m.frequency ? <div>{m.frequency}</div> : null}
-                  {m.schedule_times?.length ? <div className="text-xs">{m.schedule_times.join(', ')}</div> : null}
-                </td>
-                <td className="px-4 py-3 text-right whitespace-nowrap">
-                  {canManageMeds ? <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>Edit</Button> : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          <div className="card p-0 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted border-b border-border">
+                  {canSelect ? (
+                    <th className="px-4 py-3 w-8">
+                      <input type="checkbox" aria-label="Select all" className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                        checked={dv.allSelected} onChange={dv.toggleAll} />
+                    </th>
+                  ) : null}
+                  <th className="px-4 py-3 font-medium">Medication</th>
+                  <th className="px-4 py-3 font-medium">Dose</th>
+                  <th className="px-4 py-3 font-medium">Route</th>
+                  <th className="px-4 py-3 font-medium">Schedule</th>
+                  <th className="px-4 py-3 font-medium">Supply left</th>
+                  <th className="px-4 py-3 font-medium text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dv.view.length === 0 ? (
+                  <tr><td colSpan={canSelect ? 7 : 6} className="px-4 py-8 text-center text-muted">{meds.length === 0 ? 'No medications recorded yet.' : 'No medications match your search or filters.'}</td></tr>
+                ) : dv.view.map((m) => {
+                  const unit = doseUnit(m.dose);
+                  const remaining = m.supply_remaining;
+                  return (
+                  <tr key={m.id} className={`border-b border-border last:border-0 ${m.active ? '' : 'opacity-60'}`}>
+                    {canSelect ? (
+                      <td className="px-4 py-3">
+                        <input type="checkbox" aria-label={`Select ${m.name}`} className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                          checked={dv.selected.has(m.id)} onChange={() => dv.toggle(m.id)} />
+                      </td>
+                    ) : null}
+                    <td className="px-4 py-3">
+                      <div data-testid="med-name" className="font-medium text-ink">{m.name}{m.active ? '' : ' (inactive)'}</div>
+                      {m.instructions ? <div className="text-xs text-muted">{m.instructions}</div> : null}
+                    </td>
+                    <td className="px-4 py-3 text-muted">{m.dose || '—'}</td>
+                    <td className="px-4 py-3 text-muted">{m.route || '—'}</td>
+                    <td className="px-4 py-3 text-muted">
+                      {m.frequency ? <div>{m.frequency}</div> : null}
+                      {m.schedule_times?.length ? <div className="text-xs">{m.schedule_times.join(', ')}</div> : <div className="text-xs">As needed</div>}
+                    </td>
+                    <td className="px-4 py-3">
+                      {remaining == null ? (
+                        <span className="text-muted">—</span>
+                      ) : remaining <= 0 ? (
+                        <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">Out of stock</span>
+                      ) : (
+                        <span className={`text-ink ${m.supply != null && remaining <= m.supply * 0.15 ? 'text-amber-700 dark:text-amber-300 font-medium' : ''}`}>
+                          {fmtNum(remaining)}{unit ? ` ${unit}` : ''}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      {canManageMeds ? <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>Edit</Button> : null}
+                    </td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
 
       <div className="pt-2">
-        <h3 className="text-base font-semibold text-ink">Administration record (MAR)</h3>
+        <h3 className="text-base font-semibold text-ink">Medication Administration Record</h3>
         <p className="text-sm text-muted">Log each dose against {careName} and review the history. Doses colour instantly as you record them.</p>
       </div>
       <MedicationMar profileId={profile.id} personName={profile.full_name} canAdminister={canEdit} />
@@ -240,7 +283,7 @@ function MedicationForm({ profileId, med, onClose, onSaved }: { profileId: strin
   const [route, setRoute] = useState(med?.route ?? '');
   const [frequency, setFrequency] = useState(med?.frequency ?? '');
   const [times, setTimes] = useState((med?.schedule_times ?? []).join(', '));
-  const [prescriber, setPrescriber] = useState(med?.prescriber ?? '');
+  const [supply, setSupply] = useState(med?.supply != null ? String(med.supply) : '');
   const [instructions, setInstructions] = useState(med?.instructions ?? '');
   const [active, setActive] = useState(med?.active ?? true);
   const [error, setError] = useState('');
@@ -256,7 +299,8 @@ function MedicationForm({ profileId, med, onClose, onSaved }: { profileId: strin
   const mutation = useMutation({
     mutationFn: () => {
       const schedule_times = times.split(',').map((t) => t.trim()).filter((t) => /^\d{1,2}:\d{2}$/.test(t)).map((t) => t.padStart(5, '0'));
-      const body = { name: name.trim(), dose: dose || null, route: route || null, frequency: frequency || null, schedule_times, prescriber: prescriber || null, instructions: instructions || null, active };
+      const supplyNum = supply.trim() === '' ? null : Number(supply);
+      const body = { name: name.trim(), dose: dose || null, route: route || null, frequency: frequency || null, schedule_times, supply: supplyNum, instructions: instructions || null, active };
       return med ? api.patch(`/care-profiles/${profileId}/medications/${med.id}`, body) : api.post(`/care-profiles/${profileId}/medications`, body);
     },
     onSuccess: onSaved,
@@ -275,8 +319,8 @@ function MedicationForm({ profileId, med, onClose, onSaved }: { profileId: strin
           <Input label="Route" value={route} onChange={(e) => setRoute(e.target.value)} placeholder="e.g. Oral" />
         </div>
         <Input label="Frequency" value={frequency} onChange={(e) => setFrequency(e.target.value)} placeholder="e.g. Twice daily with food" />
-        <Input label="Scheduled times (HH:MM, comma separated)" value={times} onChange={(e) => setTimes(e.target.value)} placeholder="08:00, 20:00" hint="These appear on the calendar." />
-        <Input label="Prescriber" value={prescriber} onChange={(e) => setPrescriber(e.target.value)} />
+        <Input label="Scheduled times (HH:MM, comma separated)" value={times} onChange={(e) => setTimes(e.target.value)} placeholder="08:00, 20:00" hint="Leave blank for a medication taken only as needed." />
+        <Input label={`Supply${dose ? ` (${doseUnit(dose) || 'total on hand'})` : ''}`} type="number" min="0" step="any" value={supply} onChange={(e) => setSupply(e.target.value)} placeholder="e.g. 30000" hint="Total amount on hand, in the same unit as the dose. This counts down by the dose each time a dose is given." />
         <Textarea label="Instructions" value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={2} />
         {med ? (
           <label className="flex items-center gap-2 text-sm text-ink">
@@ -304,7 +348,7 @@ function localNow(): string {
 // omitted, held) makes the Notes field compulsory.
 const NOTE_OPTIONAL_OUTCOMES = new Set(['given', 'self_administered']);
 
-export function AdministerModal({ profileId, med, personName, scheduledFor, initialWhen, onClose, onSaved }: { profileId: string; med: MedicationRecord; personName: string; scheduledFor?: string; initialWhen?: string; onClose: () => void; onSaved: () => void }) {
+export function AdministerModal({ profileId, med, personName, scheduledFor, initialWhen, maxWhen, onClose, onSaved }: { profileId: string; med: MedicationRecord; personName: string; scheduledFor?: string; initialWhen?: string; maxWhen?: string; onClose: () => void; onSaved: () => void }) {
   const [when, setWhen] = useState(initialWhen ?? localNow());
   const [status, setStatus] = useState('given');
   const [doseGiven, setDoseGiven] = useState(med.dose ?? '');
@@ -333,6 +377,10 @@ export function AdministerModal({ profileId, med, personName, scheduledFor, init
   });
 
   const submit = () => {
+    if (maxWhen && when > maxWhen) {
+      setError('You cannot log a dose in the future.');
+      return;
+    }
     if (notesRequired && !notes.trim()) {
       setError(`A note is required when the outcome is "${MED_STATUSES.find((s) => s.value === status)?.label}".`);
       return;
@@ -356,7 +404,7 @@ export function AdministerModal({ profileId, med, personName, scheduledFor, init
 
         <div>
           <label htmlFor="admin-when" className="block text-sm font-medium text-ink mb-1">Time</label>
-          <input id="admin-when" type="datetime-local" className={`${SELECT} w-full`} value={when} onChange={(e) => setWhen(e.target.value)} required />
+          <input id="admin-when" type="datetime-local" className={`${SELECT} w-full`} value={when} max={maxWhen} onChange={(e) => setWhen(e.target.value)} required />
         </div>
 
         <div>
@@ -364,6 +412,7 @@ export function AdministerModal({ profileId, med, personName, scheduledFor, init
           <select id="admin-status" className={`${SELECT} w-full`} value={status} onChange={(e) => setStatus(e.target.value)}>
             {MED_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
+          <p className="mt-1 text-xs text-muted">{medStatusDescription(status)}</p>
         </div>
 
         <Textarea

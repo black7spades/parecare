@@ -54,6 +54,16 @@ fields, but prefer structure whenever the values are queryable.
 When adding or reviewing any feature, check every table, form, DB column and
 export against this rule before shipping.
 
+## UI copy
+
+- **Never use parentheses in headings.** Name a thing one way and spell it
+  out (e.g. "Medication Administration Record", not "Administration record
+  (MAR)").
+- **No jargon without a plain-language equivalent, tooltip or legend.** Users
+  may not be trained carers. Replace clinical shorthand (e.g. "PRN" → "as
+  needed") or provide inline meaning for terms like "omitted" or "held".
+- Never use em dashes in UI copy.
+
 ## Commands
 
 Run inside the package directory (`packages/api` or `packages/web`):
