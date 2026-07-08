@@ -78,9 +78,18 @@ the shape of each situation.
 
 ## Life stages
 
-Life stages are reference data derived from the person's date of birth,
-or due date for a baby not yet born. They exist to organise the template
-library and to suggest journeys, never to restrict them.
+Life stages organise the template library and drive journey suggestions,
+never restrictions. A person's stages are derived from their date of
+birth, or due date for a baby not yet born.
+
+Life stages are **data, not code**. They live in a `life_stages` table
+that anyone with admin rights can edit: rename a stage, change its age
+boundaries, reorder the list, retire a stage, or add entirely new ones.
+A children's hospice deployment might replace the default eight with
+stages that match its clinical pathways; an aged care operator might
+split Later life into finer bands. The eight below are the seeded
+defaults, ordinary rows like the seeded rights templates, not a fixed
+vocabulary.
 
 | Life stage | Ages |
 |---|---|
@@ -92,6 +101,20 @@ library and to suggest journeys, never to restrict them.
 | Adulthood | 30 to 59 |
 | Later life | 60 and over |
 | End of life and beyond | any age |
+
+Rules for editable stages:
+
+- **Overlaps are allowed and useful.** A stage with no age bounds, like
+  End of life and beyond, applies to everyone; a person whose age falls
+  in two stages sees the suggestions of both, merged. There is no
+  requirement that stages tile the lifespan without gaps.
+- **Editing a stage never touches anyone's journeys.** Stages only
+  select which templates are suggested; enrolled journeys are copies and
+  carry no stage reference.
+- **A stage with templates assigned cannot be deleted**, only retired
+  from suggestions or edited; deleting requires reassigning or
+  unassigning its templates first, so no template silently loses its
+  place in the library.
 
 Notes:
 
@@ -335,6 +358,17 @@ the instance tables, so editing a template never rewrites anyone's
 history, and personalising one person's journey never touches the
 template.
 
+### Life stages
+
+- `life_stages` — `id`, `name`, `description`, `min_age_years`
+  (nullable), `max_age_years` (nullable), `applies_before_birth`
+  (boolean, true only for pregnancy-type stages matched by due date),
+  `sort_order`, `retired` (boolean, hides the stage from suggestions
+  without breaking template assignments), `is_system` (seeded default),
+  `created_by_account_id`, timestamps. Null age bounds mean unbounded on
+  that side; both null means the stage applies at any age. One fact per
+  column: the age range is two columns, never a packed string.
+
 ### Template library
 
 - `journey_templates` — `id`, `name`, `description`, `kind`
@@ -343,9 +377,11 @@ template.
   `source_template_id` (nullable, clone lineage), `created_by_account_id`,
   timestamps. Archiving hides a template from new enrolments; existing
   instances are copies and are unaffected.
-- `journey_template_life_stages` — `template_id`, `life_stage`. One row
-  per stage the template is suggested for; cross-cutting templates have
-  several rows.
+- `journey_template_life_stages` — `template_id`, `life_stage_id`
+  (references `life_stages`). One row per stage the template is
+  suggested for; cross-cutting templates have several rows. A template
+  with no rows is still enrollable from the full library; it simply
+  appears in no stage's suggestions.
 - `journey_template_phases` — `id`, `template_id`, `name`, `description`,
   `sort_order`.
 - `journey_template_tasks` — `id`, `template_phase_id`, `title`,
@@ -385,13 +421,20 @@ template.
 ## Who can do what
 
 - **Super admin** curates the system catalogue: edit, archive and add
-  system templates, and everything below.
-- **Admin** manages the template library for their deployment: create
-  templates from scratch, clone any published template, and **compose**
-  new templates in the journey builder by cherry-picking phases, with
-  their task seeds, from any mix of published templates, then reordering
-  and editing them. Composed and cloned templates record their lineage
-  in `source_template_id`.
+  system templates and system life stages, and everything below.
+- **Admin** manages the template library and the life stages for their
+  deployment. Templates: create **brand-new library items from
+  scratch** with their own phases and task seeds, assign them to any
+  set of life stages, clone any published template, and **compose** new
+  templates in the journey builder by cherry-picking phases, with their
+  task seeds, from any mix of published templates, then reordering and
+  editing them. New, composed and cloned templates are first-class
+  library items: they appear in stage suggestions, can be handover
+  targets, and can themselves be cloned and composed from. Composed and
+  cloned templates record their lineage in `source_template_id`; brand
+  new ones have none. Life stages: rename, reorder, change age
+  boundaries, retire, and add new stages, with template assignments
+  updating live in the suggestion lists.
 - **Care circle organisers** enrol a person in journeys, choose from the
   suggested list or the full library, and personalise the enrolled copy:
   rename, add, remove and reorder phases and tasks for that person only.
@@ -418,10 +461,18 @@ professional tier, alongside the organisation features it pairs with.
   behind a search. Preview shows phases and task counts before enrolling.
 - **Journey builder** in the admin panel: two-pane compose view, library
   on the left, the new template on the right, drag phases across,
-  reorder, edit inline, publish.
+  reorder, edit inline, publish. Starting from a blank template creates
+  a brand-new library item; a life stage picker on the template assigns
+  it to any set of stages.
+- **Life stage manager** in the admin panel: the stage list with name,
+  description, age boundaries and order editable inline, retire and add
+  actions, and a count of assigned templates per stage linking into the
+  library filtered to that stage.
 - **Life stage transitions**: a birthday crossing a stage boundary
   notifies organisers with the new stage's suggested journeys. Nothing
-  auto-enrols.
+  auto-enrols. Because boundaries are editable, transitions are computed
+  against the current `life_stages` rows at notification time, not
+  precomputed.
 - **The assistant** gains journey context in `aiContext.ts`: active
   journeys, current phases, open tasks. It can answer "what should we be
   doing next for Dad" from the journey, and gains two actions,
@@ -434,8 +485,9 @@ professional tier, alongside the organisation features it pairs with.
 
 Ordered so every pass ships something usable and nothing breaks:
 
-1. **Schema and backfill.** New tables; migrate the ageing enum into a
-   system template; enrol every existing profile in it; migrate
+1. **Schema and backfill.** New tables including `life_stages` seeded
+   with the eight defaults; migrate the ageing enum into a system
+   template; enrol every existing profile in it; migrate
    `care_phase_history` and checklist links. API compatibility layer
    keeps `current_phase` readable and writable, mapped to the migrated
    journey. No visible change.
@@ -444,8 +496,9 @@ Ordered so every pass ships something usable and nothing breaks:
    active journeys, enrolment flow with life stage suggestions. The seed
    catalogue ships with the six later life and six end of life journeys
    first, since they serve today's user base.
-3. **Template administration.** Library screens, clone, compose in the
-   journey builder, publish and archive, rights wiring, SaaS tier gate.
+3. **Template and life stage administration.** Library screens, create
+   from scratch, clone, compose in the journey builder, publish and
+   archive, the life stage manager, rights wiring, SaaS tier gate.
 4. **Full catalogue.** The remaining life stages seeded, reviewed
    against the UI copy rules, with checklist seeds localised the way the
    existing Australian seeds are, behind a per-deployment region setting.
