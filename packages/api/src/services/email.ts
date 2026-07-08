@@ -38,12 +38,12 @@ export async function sendInviteEmail(
       'Accept your invitation:',
       inviteUrl,
       '',
-      'PareCare helps families coordinate the care of ageing parents.',
+      'PareCare helps people coordinate care for anyone who needs it, including themselves.',
     ].join('\n'),
     html: `
       <p>${inviterName} has invited you to join the care circle for <strong>${profileName}</strong> on PareCare.</p>
       <p><a href="${inviteUrl}">Accept invitation</a></p>
-      <p style="color:#888;font-size:12px">PareCare helps families coordinate the care of ageing parents.</p>
+      <p style="color:#888;font-size:12px">PareCare helps people coordinate care for anyone who needs it, including themselves.</p>
     `,
   });
 }

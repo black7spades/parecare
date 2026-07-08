@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuthStore, type AccountRole } from '../../stores/auth';
 import { useSubscriptionStore } from '../../stores/subscription';
 import { UpgradePrompt } from '../UpgradePrompt';
+import { AssistantWidget } from '../assistant/AssistantWidget';
 import { ThemeToggle } from '../ThemeToggle';
 import { AvatarMenu } from './AvatarMenu';
 import { Avatar } from '../ui/Avatar';
@@ -193,6 +194,7 @@ export function Shell() {
         </main>
       </div>
 
+      <AssistantWidget profileId={profileId} />
       <UpgradePrompt />
     </div>
   );

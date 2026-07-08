@@ -8,7 +8,11 @@ import { CARE_PHASES, type CareProfile } from '../../lib/care';
 import { RelationshipSelect } from '../../components/RelationshipSelect';
 
 export function NewCareProfile() {
-  const [fullName, setFullName] = useState('');
+  const [title, setTitle] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [suffix, setSuffix] = useState('');
   const [preferredName, setPreferredName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [phase, setPhase] = useState('early_concern');
@@ -21,13 +25,22 @@ export function NewCareProfile() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  const displayName = [title, firstName, middleName, lastName, suffix]
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .join(' ');
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
     setSaving(true);
     try {
       const data = await api.post<{ profile: CareProfile }>('/care-profiles', {
-        full_name: fullName,
+        title: title.trim() || null,
+        first_name: firstName.trim(),
+        middle_name: middleName.trim() || null,
+        last_name: lastName.trim() || null,
+        suffix: suffix.trim() || null,
         preferred_name: preferredName || null,
         date_of_birth: dateOfBirth || null,
         current_phase: phase,
@@ -49,17 +62,32 @@ export function NewCareProfile() {
     <div className="max-w-xl">
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-ink">New care profile</h1>
-        <p className="text-sm text-muted">Set up a profile for the person you're caring for.</p>
+        <p className="text-sm text-muted">Set up a profile for the person whose care you are managing. That can be yourself.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="card space-y-4">
-        <Input label="Full name" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
-        <Input
-          label="Preferred name"
-          value={preferredName}
-          onChange={(e) => setPreferredName(e.target.value)}
-          hint="What they like to be called (optional)"
-        />
+        <div className="grid gap-4 sm:grid-cols-[6rem_1fr]">
+          <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Dr" />
+          <Input label="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input label="Middle name" value={middleName} onChange={(e) => setMiddleName(e.target.value)} />
+          <Input label="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input label="Suffix" value={suffix} onChange={(e) => setSuffix(e.target.value)} placeholder="e.g. OAM, Jr" />
+          <Input
+            label="Preferred name"
+            value={preferredName}
+            onChange={(e) => setPreferredName(e.target.value)}
+            hint="What they like to be called"
+          />
+        </div>
+        {displayName ? (
+          <p className="text-xs text-muted">
+            Shown across the app as <span className="font-medium text-ink">{displayName}</span>
+          </p>
+        ) : null}
         <Input label="Date of birth" type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
         <RelationshipSelect value={relationship} onChange={setRelationship} />
         <div>

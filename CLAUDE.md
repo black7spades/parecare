@@ -4,8 +4,9 @@ Guidance for Claude Code sessions in this repository.
 
 ## Project overview
 
-PareCare is a family coordination platform for managing care of ageing
-parents. Monorepo with two packages:
+PareCare is a care coordination platform for anyone in your care: your own
+health needs, a child with complex needs, an ageing relative, or the
+residents of an aged care home. Monorepo with two packages:
 
 - `packages/api` — Express + TypeScript REST API, Postgres (via Knex),
   Redis, JWT auth. Routes in `src/routes`, DB migrations in

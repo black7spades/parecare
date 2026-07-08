@@ -5,7 +5,7 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Avatar } from '../../../components/ui/Avatar';
 import { EditProfileModal } from './EditProfileModal';
-import type { AccessLevel, CareProfile, PhaseHistoryEntry } from '../../../lib/care';
+import { SELF_RELATIONSHIP, type AccessLevel, type CareProfile, type PhaseHistoryEntry } from '../../../lib/care';
 
 export interface ProfileContext {
   profile: CareProfile;
@@ -57,7 +57,10 @@ export function ProfileLayout() {
   const profile = data.profile;
   const access: AccessLevel = data.access ?? 'owner';
   const relationship = data.relationship?.trim() || null;
-  const careName = relationship ?? profile.preferred_name ?? profile.full_name.split(' ')[0];
+  const isSelf = relationship === SELF_RELATIONSHIP;
+  // "Myself" is a flag, not something to call the person by.
+  const careName =
+    (isSelf ? null : relationship) ?? profile.preferred_name ?? profile.first_name ?? profile.full_name.split(' ')[0];
   const context: ProfileContext = {
     profile,
     access,
@@ -85,7 +88,10 @@ export function ProfileLayout() {
           <div className="min-w-0">
             <h1 className="text-xl font-semibold text-ink truncate">{profile.full_name}</h1>
             <p className="text-sm text-muted">
-              {[relationship ? `Your ${relationship}` : null, profile.preferred_name ? `Known as ${profile.preferred_name}` : null]
+              {[
+                isSelf ? 'Your own care' : relationship ? `Your ${relationship}` : null,
+                profile.preferred_name ? `Known as ${profile.preferred_name}` : null,
+              ]
                 .filter(Boolean)
                 .join(' · ')}
             </p>

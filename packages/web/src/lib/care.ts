@@ -36,7 +36,13 @@ export const entryTypeLabel = (type: string) =>
 
 export interface CareProfile {
   id: string;
+  /** Composed display name derived from the structured name parts. */
   full_name: string;
+  title: string | null;
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
+  suffix: string | null;
   owner_relationship?: string | null;
   preferred_name: string | null;
   date_of_birth: string | null;
@@ -88,9 +94,16 @@ export const poaLabel = (type: string | null) =>
 export type CirclePermission = 'viewer' | 'contributor';
 export type AccessLevel = 'owner' | 'admin' | 'contributor' | 'viewer';
 
+/** Sentinel relationship for a profile that tracks the owner's own care. */
+export const SELF_RELATIONSHIP = 'Myself';
+
 export const RELATIONSHIPS = [
+  SELF_RELATIONSHIP,
   'Mum',
   'Dad',
+  'Son',
+  'Daughter',
+  'Partner',
   'Grandma',
   'Grandpa',
   'Mother-in-law',
@@ -102,6 +115,8 @@ export const RELATIONSHIPS = [
   'Cousin',
   'Friend',
   'Neighbour',
+  'Client',
+  'Resident',
 ] as const;
 
 export interface CircleMember {
