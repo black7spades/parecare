@@ -46,6 +46,8 @@ export interface CareProfile {
   owner_relationship?: string | null;
   preferred_name: string | null;
   date_of_birth: string | null;
+  /** Expected babies get a profile before birth. */
+  due_date?: string | null;
   current_phase: CarePhase;
   pronouns: string | null;
   primary_language: string | null;
@@ -56,10 +58,15 @@ export interface CareProfile {
 
 export interface ChecklistItem {
   id: string;
-  phase: CarePhase;
+  /** Legacy phase slug; null for items that live on a journey phase. */
+  phase: CarePhase | string | null;
+  care_journey_phase_id: string | null;
   title: string;
   description: string | null;
   completed: boolean;
+  /** The day it really happened, distinct from when the box was ticked. */
+  achieved_on: string | null;
+  is_milestone: boolean;
   is_custom: boolean;
   sort_order: number;
   note_count: number;
@@ -68,6 +75,7 @@ export interface ChecklistItem {
 export interface ChecklistNote {
   id: string;
   body: string;
+  photo_url?: string | null;
   created_at: string;
   author_name: string | null;
 }
@@ -158,6 +166,7 @@ const ENTITY_LABELS: Record<string, string> = {
   providers: 'provider',
   reminders: 'task',
   messages: 'message',
+  journeys: 'care journey',
   'memory-book': 'memory',
   'care-profiles': 'profile',
   ai: 'AI conversation',
@@ -260,6 +269,9 @@ export interface MemoryEntry {
   created_at: string;
   author_account_id: string | null;
   author_name: string | null;
+  /** Set when the entry is the story of an achievement. */
+  checklist_item_id?: string | null;
+  achievement_title?: string | null;
 }
 
 export interface Medication {

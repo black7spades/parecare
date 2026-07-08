@@ -8,19 +8,17 @@ import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
 import { RelationshipSelect } from '../../../components/RelationshipSelect';
-import { PhasePipeline } from './PhasePipeline';
+import { JourneysSection } from './JourneysSection';
 import { useProfile } from './ProfileLayout';
 import {
   LOG_ENTRY_TYPES,
   entryTypeLabel,
   type CareLogEntry,
-  type ChecklistItem,
-  type ChecklistNote,
   type CircleMember,
 } from '../../../lib/care';
 
 export function OverviewPage() {
-  const { profile, careName, relationship, isOwner, phaseHistory } = useProfile();
+  const { profile, careName, relationship, isOwner } = useProfile();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -49,7 +47,12 @@ export function OverviewPage() {
 
   return (
     <div className="space-y-6">
-      <PhasePipeline profileId={profile.id} currentPhase={profile.current_phase} careName={careName} phaseHistory={phaseHistory} />
+      <JourneysSection
+        profileId={profile.id}
+        careName={careName}
+        dateOfBirth={profile.date_of_birth}
+        dueDate={profile.due_date}
+      />
 
       <div className="card space-y-3">
           {detailLine ? <p className="text-sm text-muted">{detailLine}</p> : null}
@@ -78,10 +81,7 @@ export function OverviewPage() {
           {profile.notes ? <p className="text-sm whitespace-pre-wrap border-t border-border pt-3">{profile.notes}</p> : null}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2 items-start">
-        <Checklist profileId={profile.id} phase={profile.current_phase} />
-        <CareLog profileId={profile.id} />
-      </div>
+      <CareLog profileId={profile.id} />
 
       <div className="pt-4 border-t border-border">
         <Button variant="ghost" size="sm" onClick={() => setArchiveOpen(true)}>
@@ -103,126 +103,6 @@ export function OverviewPage() {
           </Button>
         </div>
       </Modal>
-    </div>
-  );
-}
-
-function Checklist({ profileId, phase }: { profileId: string; phase: string }) {
-  const queryClient = useQueryClient();
-  const [newTitle, setNewTitle] = useState('');
-  const [openNotesId, setOpenNotesId] = useState<string | null>(null);
-
-  const listKey = ['checklist', profileId, phase];
-  const { data, isLoading } = useQuery({
-    queryKey: listKey,
-    queryFn: () => api.get<{ items: ChecklistItem[] }>(`/care-profiles/${profileId}/checklists?phase=${phase}`),
-  });
-  const items = data?.items ?? [];
-
-  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['checklist', profileId] });
-
-  const toggleMutation = useMutation({
-    mutationFn: ({ id, completed }: { id: string; completed: boolean }) =>
-      api.patch(`/care-profiles/${profileId}/checklists/${id}`, { completed }),
-    onSuccess: (_data, vars) => {
-      // Ticking a box is the moment the detail is fresh: open its notes
-      if (vars.completed) setOpenNotesId(vars.id);
-    },
-    onMutate: async ({ id, completed }) => {
-      await queryClient.cancelQueries({ queryKey: listKey });
-      const previous = queryClient.getQueryData<{ items: ChecklistItem[] }>(listKey);
-      queryClient.setQueryData<{ items: ChecklistItem[] }>(listKey, (old) =>
-        old ? { items: old.items.map((i) => (i.id === id ? { ...i, completed } : i)) } : old
-      );
-      return { previous };
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.previous) queryClient.setQueryData(listKey, context.previous);
-    },
-    onSettled: invalidate,
-  });
-
-  const addMutation = useMutation({
-    mutationFn: (title: string) => api.post(`/care-profiles/${profileId}/checklists`, { phase, title }),
-    onSuccess: () => {
-      setNewTitle('');
-      invalidate();
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profileId}/checklists/${id}`),
-    onSuccess: invalidate,
-  });
-
-  const done = items.filter((i) => i.completed).length;
-
-  return (
-    <div className="card">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-base font-semibold text-ink">Checklist</h2>
-        {items.length > 0 ? (
-          <span className="text-xs text-muted">
-            {done} of {items.length} done
-          </span>
-        ) : null}
-      </div>
-
-      {isLoading ? (
-        <p className="text-sm text-muted">Loading…</p>
-      ) : items.length === 0 ? (
-        <p className="text-sm text-muted">No checklist items for this phase yet.</p>
-      ) : (
-        <ul className="space-y-3">
-          {items.map((item) => (
-            <li key={item.id} className="flex items-start gap-3 group">
-              <input
-                type="checkbox"
-                className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                checked={item.completed}
-                onChange={(e) => toggleMutation.mutate({ id: item.id, completed: e.target.checked })}
-              />
-              <div className="flex-1">
-                <p className={`text-sm ${item.completed ? 'line-through text-muted' : 'text-ink'}`}>{item.title}</p>
-                {item.description ? <p className="text-xs text-muted">{item.description}</p> : null}
-                <button
-                  type="button"
-                  className="text-xs text-primary hover:underline mt-0.5"
-                  onClick={() => setOpenNotesId((v) => (v === item.id ? null : item.id))}
-                >
-                  {item.note_count > 0 ? `Notes (${item.note_count})` : 'Add a note'}
-                </button>
-                {openNotesId === item.id ? <ItemNotes profileId={profileId} itemId={item.id} /> : null}
-              </div>
-              {item.is_custom ? (
-                <button
-                  type="button"
-                  aria-label={`Delete ${item.title}`}
-                  className="text-muted hover:text-red-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-sm px-1"
-                  onClick={() => deleteMutation.mutate(item.id)}
-                >
-                  ✕
-                </button>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <form
-        className="mt-4 flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (newTitle.trim()) addMutation.mutate(newTitle.trim());
-        }}
-      >
-        <div className="flex-1">
-          <Input placeholder="Add your own item…" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} />
-        </div>
-        <Button type="submit" variant="secondary" loading={addMutation.isPending} disabled={!newTitle.trim()}>
-          Add
-        </Button>
-      </form>
     </div>
   );
 }
@@ -387,67 +267,3 @@ function RelationshipRow({
   );
 }
 
-/**
- * The note thread on a checklist item: when it happened, who was there,
- * and where the information lives now, so a ticked box keeps its story.
- */
-function ItemNotes({ profileId, itemId }: { profileId: string; itemId: string }) {
-  const queryClient = useQueryClient();
-  const [draft, setDraft] = useState('');
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['checklist-notes', itemId],
-    queryFn: () => api.get<{ notes: ChecklistNote[] }>(`/care-profiles/${profileId}/checklists/${itemId}/notes`),
-  });
-  const notes = data?.notes ?? [];
-
-  const addMutation = useMutation({
-    mutationFn: () => api.post(`/care-profiles/${profileId}/checklists/${itemId}/notes`, { body: draft.trim() }),
-    onSuccess: () => {
-      setDraft('');
-      void queryClient.invalidateQueries({ queryKey: ['checklist-notes', itemId] });
-      void queryClient.invalidateQueries({ queryKey: ['checklist', profileId] });
-    },
-  });
-
-  return (
-    <div className="mt-2 rounded-md border border-border bg-surface p-2.5 space-y-2">
-      {isLoading ? (
-        <p className="text-xs text-muted">Loading…</p>
-      ) : notes.length === 0 ? (
-        <p className="text-xs text-muted">
-          No notes yet. Capture the details while they're fresh: when and where it happened, who was there, and
-          where the information lives now.
-        </p>
-      ) : (
-        notes.map((n) => (
-          <div key={n.id}>
-            <p className="text-xs text-muted">
-              {n.author_name ?? 'Someone'} · {format(new Date(n.created_at), 'd MMM yyyy, HH:mm')}
-            </p>
-            <p className="text-sm text-ink whitespace-pre-wrap">{n.body}</p>
-          </div>
-        ))
-      )}
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (draft.trim()) addMutation.mutate();
-        }}
-      >
-        <div className="flex-1">
-          <Input
-            aria-label="Add a note"
-            placeholder="e.g. Review held 3 July at Sunny Grove, Susan attended…"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-          />
-        </div>
-        <Button type="submit" size="sm" variant="secondary" loading={addMutation.isPending} disabled={!draft.trim()}>
-          Save
-        </Button>
-      </form>
-    </div>
-  );
-}
