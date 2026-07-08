@@ -31,6 +31,12 @@ export async function createAccount(opts: {
   password: string;
   display_name: string;
   role?: AccountRole;
+  /**
+   * Whether this account may create care profiles of its own. Self-serve
+   * registration says yes; invite acceptance says no (helpers join other
+   * people's circles); admins decide per account they create.
+   */
+  can_create_care_profiles?: boolean;
 }): Promise<Account> {
   const email = opts.email.trim().toLowerCase();
 
@@ -43,7 +49,13 @@ export async function createAccount(opts: {
 
   try {
     const [account] = await db<Account>('accounts')
-      .insert({ email, password_hash, display_name: opts.display_name, role })
+      .insert({
+        email,
+        password_hash,
+        display_name: opts.display_name,
+        role,
+        can_create_care_profiles: opts.can_create_care_profiles ?? true,
+      })
       .returning('*');
     return account;
   } catch (err) {

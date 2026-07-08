@@ -10,6 +10,7 @@ export interface AdminAccount {
   subscription_status: string | null;
   ai_tokens_used: number;
   disabled_at: string | null;
+  can_create_care_profiles: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -57,12 +58,22 @@ export const adminApi = {
   },
   updateAccount: (
     id: string,
-    body: { display_name?: string; email?: string; subscription_tier?: 'free' | 'family' | 'professional' }
+    body: {
+      display_name?: string;
+      email?: string;
+      subscription_tier?: 'free' | 'family' | 'professional';
+      can_create_care_profiles?: boolean;
+    }
   ) => api.patch<AdminAccount>(`/admin/accounts/${id}`, body),
   updateRole: (id: string, role: AccountRole) => api.patch<{ id: string; role: AccountRole }>(`/admin/accounts/${id}/role`, { role }),
   deleteAccount: (id: string) => api.delete<{ message: string }>(`/admin/accounts/${id}`),
-  createAccount: (body: { email: string; display_name: string; password: string; role?: AccountRole }) =>
-    api.post<{ account: AdminAccount }>('/admin/accounts', body),
+  createAccount: (body: {
+    email: string;
+    display_name: string;
+    password: string;
+    role?: AccountRole;
+    can_create_care_profiles?: boolean;
+  }) => api.post<{ account: AdminAccount }>('/admin/accounts', body),
   setDisabled: (id: string, disabled: boolean) =>
     api.patch<{ id: string; disabled: boolean }>(`/admin/accounts/${id}/disabled`, { disabled }),
   listInvitations: () => api.get<{ invitations: AdminInvitation[] }>('/admin/invitations'),

@@ -281,6 +281,7 @@ function EditAccountModal({
   const [email, setEmail] = useState('');
   const [tier, setTier] = useState<AdminAccount['subscription_tier']>('free');
   const [role, setRole] = useState<AccountRole>('user');
+  const [mayCreateProfiles, setMayCreateProfiles] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -290,6 +291,7 @@ function EditAccountModal({
       setEmail(account.email);
       setTier(account.subscription_tier);
       setRole(account.role);
+      setMayCreateProfiles(account.can_create_care_profiles);
       setError('');
     }
   }, [account]);
@@ -306,6 +308,7 @@ function EditAccountModal({
       if (displayName !== account.display_name) updates.display_name = displayName;
       if (email !== account.email) updates.email = email;
       if (tier !== account.subscription_tier) updates.subscription_tier = tier;
+      if (mayCreateProfiles !== account.can_create_care_profiles) updates.can_create_care_profiles = mayCreateProfiles;
       if (Object.keys(updates).length > 0) {
         await adminApi.updateAccount(account.id, updates);
       }
@@ -340,6 +343,20 @@ function EditAccountModal({
             <option value="professional">Professional</option>
           </select>
         </div>
+        <label className="flex items-start gap-2 text-sm text-ink rounded-md border border-border p-3">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+            checked={mayCreateProfiles}
+            onChange={(e) => setMayCreateProfiles(e.target.checked)}
+          />
+          <span>
+            Can create care profiles
+            <span className="block text-xs text-muted">
+              Off for invited helpers: they can only work with people shared with them.
+            </span>
+          </span>
+        </label>
         {isSuperAdmin ? (
           <div>
             <label htmlFor="edit-role" className="block text-sm font-medium text-ink mb-1">
@@ -442,6 +459,7 @@ function CreateUserModal({
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<AccountRole>('user');
+  const [mayCreateProfiles, setMayCreateProfiles] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -451,6 +469,7 @@ function CreateUserModal({
       setDisplayName('');
       setPassword('');
       setRole('user');
+      setMayCreateProfiles(false);
       setError('');
     }
   }, [open]);
@@ -462,7 +481,13 @@ function CreateUserModal({
     setSaving(true);
     setError('');
     try {
-      await adminApi.createAccount({ email, display_name: displayName, password, role });
+      await adminApi.createAccount({
+        email,
+        display_name: displayName,
+        password,
+        role,
+        can_create_care_profiles: mayCreateProfiles,
+      });
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create the account');
@@ -488,6 +513,20 @@ function CreateUserModal({
           required
           hint="At least 8 characters"
         />
+        <label className="flex items-start gap-2 text-sm text-ink rounded-md border border-border p-3">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+            checked={mayCreateProfiles}
+            onChange={(e) => setMayCreateProfiles(e.target.checked)}
+          />
+          <span>
+            Can create care profiles
+            <span className="block text-xs text-muted">
+              Leave off for carers who only work with people shared with them.
+            </span>
+          </span>
+        </label>
         {isSuperAdmin ? (
           <div>
             <label htmlFor="create-role" className="block text-sm font-medium text-ink mb-1">

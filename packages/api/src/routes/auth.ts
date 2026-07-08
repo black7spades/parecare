@@ -39,6 +39,7 @@ export function accountSummary(account: Account) {
     avatar_color: account.avatar_color ?? null,
     subscription_tier: account.subscription_tier,
     subscription_status: account.subscription_status,
+    can_create_care_profiles: account.can_create_care_profiles,
   };
 }
 
@@ -223,6 +224,7 @@ authRouter.get('/me', requireAuth, (req, res) => {
     mfa_enabled: account.mfa_enabled,
     oauth_provider: account.oauth_provider,
     has_password: !!account.password_hash,
+    can_create_care_profiles: account.can_create_care_profiles,
   });
 });
 

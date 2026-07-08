@@ -27,6 +27,7 @@ const ACCOUNT_COLUMNS = [
   'subscription_status',
   'ai_tokens_used',
   'disabled_at',
+  'can_create_care_profiles',
   'created_at',
   'updated_at',
 ] as const;
@@ -113,6 +114,7 @@ const updateAccountSchema = z.object({
   display_name: z.string().min(1).max(255).optional(),
   email: z.string().email().optional(),
   subscription_tier: z.enum(['free', 'family', 'professional']).optional(),
+  can_create_care_profiles: z.boolean().optional(),
 });
 
 adminRouter.patch('/accounts/:accountId', async (req, res) => {
@@ -164,6 +166,9 @@ const createAccountSchema = z.object({
   display_name: z.string().min(1).max(255),
   password: z.string().min(8),
   role: z.enum(['super_admin', 'admin', 'user']).default('user'),
+  // Admin-created accounts are usually carers joining existing circles, so
+  // creating their own care profiles is off unless the admin says otherwise.
+  can_create_care_profiles: z.boolean().default(false),
 });
 
 // Create a user directly, with a password the admin hands over. Elevated

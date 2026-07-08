@@ -12,6 +12,7 @@ interface AccountInfo {
   avatar_color?: string | null;
   subscription_tier: 'free' | 'family' | 'professional';
   subscription_status: string | null;
+  can_create_care_profiles?: boolean;
 }
 
 interface AuthState {
