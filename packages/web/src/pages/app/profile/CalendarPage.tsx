@@ -98,21 +98,30 @@ export function CalendarPage() {
                   {format(day, 'd')}
                 </span>
                 <div className="mt-1 space-y-1">
-                  {dayEvents.slice(0, 3).map((e) => (
-                    <div
-                      key={e.id}
-                      title={`${format(new Date(e.next_due_at), 'HH:mm')} ${e.title}`}
-                      className={`truncate rounded px-1.5 py-0.5 text-[11px] leading-tight ${
-                        e.completed
-                          ? 'bg-surface-2 text-muted line-through'
-                          : e.kind === 'medication'
-                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'
-                            : 'bg-primary-50 text-primary'
-                      }`}
-                    >
-                      {format(new Date(e.next_due_at), 'HH:mm')} {e.title}
-                    </div>
-                  ))}
+                  {dayEvents.slice(0, 3).map((e) => {
+                    const isMed = e.kind === 'medication';
+                    const past = new Date(e.next_due_at).getTime() < Date.now();
+                    // Medication doses reflect the MAR: green given, red missed,
+                    // amber upcoming. Other completed tasks stay muted.
+                    const cls = e.completed
+                      ? isMed
+                        ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200'
+                        : 'bg-surface-2 text-muted line-through'
+                      : isMed && past
+                        ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200'
+                        : isMed
+                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'
+                          : 'bg-primary-50 text-primary';
+                    return (
+                      <div
+                        key={e.id}
+                        title={`${format(new Date(e.next_due_at), 'HH:mm')} ${e.title}${isMed ? (e.completed ? ' — given' : past ? ' — missed' : '') : ''}`}
+                        className={`truncate rounded px-1.5 py-0.5 text-[11px] leading-tight ${cls}`}
+                      >
+                        {format(new Date(e.next_due_at), 'HH:mm')} {e.title}
+                      </div>
+                    );
+                  })}
                   {dayEvents.length > 3 ? (
                     <div className="text-[11px] text-muted px-1.5">+{dayEvents.length - 3} more</div>
                   ) : null}

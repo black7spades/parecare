@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   addDays, addMonths, addWeeks, eachDayOfInterval, endOfDay, endOfMonth, endOfWeek,
@@ -46,6 +47,25 @@ const STATUS_HEX: Record<string, string> = {
 const statusColorFor = (s: string): string => STATUS_HEX[s] ?? C64_PALETTE[12];
 const swatch = (hex: string) => ({ backgroundColor: hex, color: contrastText(hex) });
 const statusLabel = (s: string) => MED_STATUSES.find((x) => x.value === s)?.label ?? s;
+
+function Legend({ withPartial }: { withPartial?: boolean }) {
+  const items: [string, string][] = [
+    ['Given', C64.green],
+    ...(withPartial ? [['Partly given', C64.yellow] as [string, string]] : []),
+    ['Exception', C64.orange],
+    ['Missed', C64.lightRed],
+    ['None', C64.lightGrey],
+  ];
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+      {items.map(([label, hex]) => (
+        <span key={label} className="inline-flex items-center gap-1">
+          <span className="inline-block h-3 w-3 rounded" style={{ backgroundColor: hex }} />{label}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export function MedicationMar({ profileId, personName, canAdminister }: { profileId: string; personName: string; canAdminister: boolean }) {
   const [tab, setTab] = useState<'chart' | 'log'>('chart');
@@ -178,6 +198,11 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
         {summary.expected > 0 ? <span className="text-muted">· {Math.round((summary.given / summary.expected) * 100)}% adherence</span> : null}
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Legend withPartial={period !== 'day'} />
+        <Link to={`/app/${profileId}/calendar`} className="text-xs text-primary hover:underline">View on calendar →</Link>
+      </div>
+
       {meds.length === 0 ? (
         <p className="text-sm text-muted py-6 text-center">No active medications to chart.</p>
       ) : period === 'day' ? (
@@ -272,12 +297,15 @@ function DayGrid({ meds, admins, day, findAdmin, now, canAdminister, onQuick, on
 function MonthGrid({ meds, days, admins, now, onPickDay }: {
   meds: MedicationRecord[]; days: Date[]; admins: ChartAdmin[]; now: Date; onPickDay: (d: Date) => void;
 }) {
-  const givenByMedDay = useMemo(() => {
-    const map = new Map<string, number>();
+  // Per medication+day: how many doses were given, and how many recorded at all.
+  const byMedDay = useMemo(() => {
+    const map = new Map<string, { given: number; any: number }>();
     for (const a of admins) {
-      if (a.status !== 'given' && a.status !== 'self_administered') continue;
       const key = `${a.medication_id}|${format(new Date(a.administered_at), 'yyyy-MM-dd')}`;
-      map.set(key, (map.get(key) ?? 0) + 1);
+      const cur = map.get(key) ?? { given: 0, any: 0 };
+      cur.any += 1;
+      if (a.status === 'given' || a.status === 'self_administered') cur.given += 1;
+      map.set(key, cur);
     }
     return map;
   }, [admins]);
@@ -301,18 +329,17 @@ function MonthGrid({ meds, days, admins, now, onPickDay }: {
               <td className="px-3 py-2 text-ink sticky left-0 bg-card font-medium">{m.name}</td>
               {days.map((d) => {
                 const expected = (m.schedule_times ?? []).filter((t) => new Date(`${format(d, 'yyyy-MM-dd')}T${t}:00`) <= now).length;
-                const given = givenByMedDay.get(`${m.id}|${format(d, 'yyyy-MM-dd')}`) ?? 0;
-                const totalSlots = (m.schedule_times ?? []).length;
+                const { given = 0, any = 0 } = byMedDay.get(`${m.id}|${format(d, 'yyyy-MM-dd')}`) ?? {};
+                // Colour by what actually happened, so ad-hoc doses show too.
                 let bg = C64.lightGrey;
-                if (totalSlots > 0 && expected > 0) {
-                  if (given >= expected) bg = C64.green;
-                  else if (given > 0) bg = C64.yellow;
-                  else bg = C64.lightRed;
-                }
+                if (given > 0) bg = expected > 0 && given < expected ? C64.yellow : C64.green;
+                else if (any > 0) bg = C64.orange;
+                else if (expected > 0) bg = C64.lightRed;
+                const title = `${format(d, 'd MMM')}: ${given} given${expected ? ` of ${expected} due` : ''}${any > given ? `, ${any - given} exception${any - given === 1 ? '' : 's'}` : ''}`;
                 return (
                   <td key={d.toISOString()} className="px-1 py-1 text-center">
-                    <button type="button" onClick={() => onPickDay(d)} title={`${format(d, 'd MMM')}: ${given}/${totalSlots} given`}
-                      style={{ backgroundColor: bg }} className="inline-block h-5 w-5 rounded" />
+                    <button type="button" onClick={() => onPickDay(d)} title={title}
+                      style={{ backgroundColor: bg }} className="inline-block h-6 w-6 rounded" />
                   </td>
                 );
               })}
