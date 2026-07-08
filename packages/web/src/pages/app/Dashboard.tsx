@@ -71,19 +71,30 @@ export function Dashboard() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <h1>Welcome, {account?.display_name}</h1>
-        <Link to="/app/profiles/new">
-          <Button size="sm">Add care profile</Button>
-        </Link>
+        {account?.can_create_care_profiles !== false ? (
+          <Link to="/app/profiles/new">
+            <Button size="sm">Add care profile</Button>
+          </Link>
+        ) : null}
       </div>
 
       {isLoading ? (
         <p className="text-sm text-muted">Loading…</p>
       ) : profiles.length === 0 ? (
         <div className="card text-center py-12">
-          <p className="text-muted mb-4">No care profiles yet.</p>
-          <Link to="/app/profiles/new">
-            <Button>Create your first profile</Button>
-          </Link>
+          {account?.can_create_care_profiles !== false ? (
+            <>
+              <p className="text-muted mb-4">No care profiles yet.</p>
+              <Link to="/app/profiles/new">
+                <Button>Create your first profile</Button>
+              </Link>
+            </>
+          ) : (
+            <p className="text-muted">
+              No one has shared a care profile with you yet. When someone invites you to a care circle, the person
+              will appear here.
+            </p>
+          )}
         </div>
       ) : (
         <>

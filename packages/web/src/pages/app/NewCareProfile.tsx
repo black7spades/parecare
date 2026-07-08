@@ -6,8 +6,12 @@ import { Input, Textarea } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { CARE_PHASES, type CareProfile } from '../../lib/care';
 import { RelationshipSelect } from '../../components/RelationshipSelect';
+import { useAuthStore } from '../../stores/auth';
 
 export function NewCareProfile() {
+  const account = useAuthStore((s) => s.account);
+  const mayCreate =
+    account?.can_create_care_profiles !== false || account?.role === 'admin' || account?.role === 'super_admin';
   const [title, setTitle] = useState('');
   const [firstName, setFirstName] = useState('');
   const [middleName, setMiddleName] = useState('');
@@ -56,6 +60,23 @@ export function NewCareProfile() {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (!mayCreate) {
+    return (
+      <div className="max-w-xl">
+        <div className="card text-center py-10">
+          <p className="text-sm text-ink font-medium mb-2">Your account cannot create care profiles.</p>
+          <p className="text-sm text-muted mb-4">
+            You joined PareCare to help with someone else's care. If you also need to manage care profiles of your
+            own, ask an administrator to enable it for your account.
+          </p>
+          <Link to="/app" className="text-primary text-sm hover:underline">
+            Back to dashboard
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   return (

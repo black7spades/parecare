@@ -95,6 +95,9 @@ invitationsRouter.post('/:token/register', async (req, res) => {
       email: invitation.email,
       password: parsed.data.password,
       display_name: parsed.data.display_name?.trim() || invitation.display_name,
+      // Invited helpers join other people's circles; they cannot create
+      // care profiles of their own unless an admin grants it later.
+      can_create_care_profiles: false,
     });
     const { care_profile_ids } = await acceptInvitation(req.params['token'], account, parsed.data.relationship ?? null);
 

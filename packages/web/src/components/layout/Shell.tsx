@@ -66,6 +66,7 @@ export function Shell() {
         avatar_color: string | null;
         subscription_tier: 'free' | 'family' | 'professional';
         subscription_status: string | null;
+        can_create_care_profiles: boolean;
       }>('/auth/me')
       .then((me) =>
         updateAccount({
@@ -74,6 +75,7 @@ export function Shell() {
           avatar_color: me.avatar_color,
           subscription_tier: me.subscription_tier,
           subscription_status: me.subscription_status,
+          can_create_care_profiles: me.can_create_care_profiles,
         })
       )
       .catch(() => {

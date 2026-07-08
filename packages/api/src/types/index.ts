@@ -25,6 +25,7 @@ export interface Account {
   ai_tokens_used: number;
   ai_tokens_reset_at: string | Date;
   disabled_at: string | Date | null;
+  can_create_care_profiles: boolean;
   created_at: string | Date;
   updated_at: string | Date;
 }
