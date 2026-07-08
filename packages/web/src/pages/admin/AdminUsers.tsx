@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuthStore, type AccountRole } from '../../stores/auth';
-import { adminApi, type AdminAccount, type AdminCareProfile, type AdminInvitation, type AdminStats } from '../../api/admin';
+import { adminApi, type AdminAccount, type AdminCareProfile, type AdminGroup, type AdminInvitation, type AdminListParams, type AdminStats } from '../../api/admin';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
+import { DataToolbar } from '../../components/data/DataToolbar';
 
 const ROLE_LABELS: Record<AccountRole, string> = {
   super_admin: 'Super admin',
@@ -31,8 +32,22 @@ export function AdminUsers() {
   const [perPage] = useState(25);
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<NonNullable<AdminListParams['sort']>>('joined');
+  const [group, setGroup] = useState<AdminGroup | ''>('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [tierFilter, setTierFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Type-to-search with a short debounce, like every other list.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setPage(1);
+      setQuery(search.trim());
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const [editing, setEditing] = useState<AdminAccount | null>(null);
   const [deleting, setDeleting] = useState<AdminAccount | null>(null);
@@ -46,7 +61,16 @@ export function AdminUsers() {
     setError('');
     try {
       const [list, s] = await Promise.all([
-        adminApi.listAccounts({ search: query || undefined, page, per_page: perPage }),
+        adminApi.listAccounts({
+          search: query || undefined,
+          page,
+          per_page: perPage,
+          sort,
+          group: group || undefined,
+          role: (roleFilter || undefined) as AdminListParams['role'],
+          tier: (tierFilter || undefined) as AdminListParams['tier'],
+          status: (statusFilter || undefined) as AdminListParams['status'],
+        }),
         adminApi.stats(),
       ]);
       setAccounts(list.accounts);
@@ -57,7 +81,7 @@ export function AdminUsers() {
     } finally {
       setLoading(false);
     }
-  }, [query, page, perPage]);
+  }, [query, page, perPage, sort, group, roleFilter, tierFilter, statusFilter]);
 
   useEffect(() => {
     void load();
@@ -84,29 +108,69 @@ export function AdminUsers() {
       </div>
 
       {stats ? (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          <StatCard label="Total accounts" value={stats.total} />
-          <StatCard label="Super admins" value={stats.by_role.super_admin ?? 0} />
-          <StatCard label="Admins" value={stats.by_role.admin ?? 0} />
-          <StatCard label="Users" value={stats.by_role.user ?? 0} />
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+          <StatCard label="All accounts" value={stats.total} active={group === ''} onClick={() => { setGroup(''); setPage(1); }} />
+          <StatCard label="Super admins" value={stats.groups.super_admin} active={group === 'super_admin'} onClick={() => { setGroup('super_admin'); setPage(1); }} />
+          <StatCard label="Admins" value={stats.groups.admin} active={group === 'admin'} onClick={() => { setGroup('admin'); setPage(1); }} />
+          <StatCard label="Carers" value={stats.groups.carer} active={group === 'carer'} onClick={() => { setGroup('carer'); setPage(1); }} hint="Own a care profile or contribute to a circle" />
+          <StatCard label="Viewers" value={stats.groups.viewer} active={group === 'viewer'} onClick={() => { setGroup('viewer'); setPage(1); }} hint="View-only access everywhere" />
         </div>
       ) : null}
 
-      <form
-        className="mb-4 flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setPage(1);
-          setQuery(search.trim());
-        }}
-      >
-        <div className="flex-1">
-          <Input placeholder="Search by email or name…" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <Button type="submit" variant="secondary">
-          Search
-        </Button>
-      </form>
+      <div className="mb-4">
+        <DataToolbar
+          search={search}
+          onSearch={setSearch}
+          searchPlaceholder="Search by email or name…"
+          sorts={[
+            { key: 'joined', label: 'Newest first' },
+            { key: 'name', label: 'Name' },
+            { key: 'email', label: 'Email' },
+            { key: 'role', label: 'Role' },
+            { key: 'tier', label: 'Tier' },
+          ]}
+          sortKey={sort}
+          onSort={(k) => {
+            setSort(k as typeof sort);
+            setPage(1);
+          }}
+          filters={[
+            {
+              key: 'role',
+              label: 'Roles',
+              options: [
+                { value: 'super_admin', label: 'Super admin' },
+                { value: 'admin', label: 'Admin' },
+                { value: 'user', label: 'User' },
+              ],
+            },
+            {
+              key: 'tier',
+              label: 'Tiers',
+              options: [
+                { value: 'free', label: 'Free' },
+                { value: 'family', label: 'Family' },
+                { value: 'professional', label: 'Professional' },
+              ],
+            },
+            {
+              key: 'status',
+              label: 'Statuses',
+              options: [
+                { value: 'active', label: 'Active' },
+                { value: 'disabled', label: 'Disabled' },
+              ],
+            },
+          ]}
+          filterValues={{ role: roleFilter, tier: tierFilter, status: statusFilter }}
+          onFilter={(key, value) => {
+            if (key === 'role') setRoleFilter(value);
+            if (key === 'tier') setTierFilter(value);
+            if (key === 'status') setStatusFilter(value);
+            setPage(1);
+          }}
+        />
+      </div>
 
       {error ? <p className="text-sm text-red-600 mb-4">{error}</p> : null}
 
@@ -255,12 +319,81 @@ export function AdminUsers() {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+/** A count that IS the filter: click it to see exactly those people. */
+function StatCard({
+  label,
+  value,
+  active,
+  onClick,
+  hint,
+}: {
+  label: string;
+  value: number;
+  active: boolean;
+  onClick: () => void;
+  hint?: string;
+}) {
   return (
-    <div className="card py-4">
+    <button
+      type="button"
+      onClick={onClick}
+      title={hint}
+      aria-pressed={active}
+      className={`card py-4 text-left transition-colors cursor-pointer hover:border-primary ${
+        active ? 'border-primary ring-1 ring-primary' : ''
+      }`}
+    >
       <div className="text-2xl font-semibold text-ink">{value}</div>
-      <div className="text-xs text-muted">{label}</div>
-    </div>
+      <div className={`text-xs ${active ? 'text-primary font-medium' : 'text-muted'}`}>{label}</div>
+    </button>
+  );
+}
+
+const ACCOUNT_RIGHTS = [
+  {
+    key: 'can_create_care_profiles',
+    label: 'Create care profiles',
+    description: 'Add their own people to care for. Usually off for invited helpers.',
+  },
+  {
+    key: 'can_invite_members',
+    label: 'Invite people to care circles',
+    description: 'Send invitations for care profiles they own.',
+  },
+  {
+    key: 'can_use_ai',
+    label: 'Use the AI assistant',
+    description: 'Chat with the assistant and request AI mediation on questions.',
+  },
+  {
+    key: 'can_export_data',
+    label: 'Export data',
+    description: 'Download CSV and JSON exports of records.',
+  },
+] as const;
+
+type RightsState = Record<(typeof ACCOUNT_RIGHTS)[number]['key'], boolean>;
+
+/** Granular per-account rights. Admins and super admins always pass every one. */
+function RightsChecklist({ rights, onChange }: { rights: RightsState; onChange: (r: RightsState) => void }) {
+  return (
+    <fieldset className="rounded-md border border-border p-3 space-y-3">
+      <legend className="text-sm font-medium text-ink px-1">What this account can do</legend>
+      {ACCOUNT_RIGHTS.map((r) => (
+        <label key={r.key} className="flex items-start gap-2 text-sm text-ink">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+            checked={rights[r.key]}
+            onChange={(e) => onChange({ ...rights, [r.key]: e.target.checked })}
+          />
+          <span>
+            {r.label}
+            <span className="block text-xs text-muted">{r.description}</span>
+          </span>
+        </label>
+      ))}
+    </fieldset>
   );
 }
 
@@ -277,21 +410,35 @@ function EditAccountModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [displayName, setDisplayName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [tier, setTier] = useState<AdminAccount['subscription_tier']>('free');
   const [role, setRole] = useState<AccountRole>('user');
-  const [mayCreateProfiles, setMayCreateProfiles] = useState(true);
+  const [rights, setRights] = useState<RightsState>({
+    can_create_care_profiles: true,
+    can_invite_members: true,
+    can_use_ai: true,
+    can_export_data: true,
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (account) {
-      setDisplayName(account.display_name);
+      setFirstName(account.first_name ?? account.display_name.split(' ')[0] ?? '');
+      setMiddleName(account.middle_name ?? '');
+      setLastName(account.last_name ?? '');
       setEmail(account.email);
       setTier(account.subscription_tier);
       setRole(account.role);
-      setMayCreateProfiles(account.can_create_care_profiles);
+      setRights({
+        can_create_care_profiles: account.can_create_care_profiles,
+        can_invite_members: account.can_invite_members,
+        can_use_ai: account.can_use_ai,
+        can_export_data: account.can_export_data,
+      });
       setError('');
     }
   }, [account]);
@@ -305,10 +452,14 @@ function EditAccountModal({
     setError('');
     try {
       const updates: Parameters<typeof adminApi.updateAccount>[1] = {};
-      if (displayName !== account.display_name) updates.display_name = displayName;
+      if (firstName.trim() !== (account.first_name ?? '')) updates.first_name = firstName.trim();
+      if (middleName.trim() !== (account.middle_name ?? '')) updates.middle_name = middleName.trim() || null;
+      if (lastName.trim() !== (account.last_name ?? '')) updates.last_name = lastName.trim() || null;
       if (email !== account.email) updates.email = email;
       if (tier !== account.subscription_tier) updates.subscription_tier = tier;
-      if (mayCreateProfiles !== account.can_create_care_profiles) updates.can_create_care_profiles = mayCreateProfiles;
+      for (const r of ACCOUNT_RIGHTS) {
+        if (rights[r.key] !== account[r.key]) updates[r.key] = rights[r.key];
+      }
       if (Object.keys(updates).length > 0) {
         await adminApi.updateAccount(account.id, updates);
       }
@@ -326,8 +477,13 @@ function EditAccountModal({
   return (
     <Modal open onClose={onClose} title={`Edit ${account.display_name}`}>
       <form onSubmit={handleSave} className="space-y-4">
-        <Input label="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input label="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+          <Input label="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+        </div>
+        <Input label="Middle name" value={middleName} onChange={(e) => setMiddleName(e.target.value)} />
         <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <RightsChecklist rights={rights} onChange={setRights} />
         <div>
           <label htmlFor="edit-tier" className="block text-sm font-medium text-ink mb-1">
             Subscription tier
@@ -343,20 +499,6 @@ function EditAccountModal({
             <option value="professional">Professional</option>
           </select>
         </div>
-        <label className="flex items-start gap-2 text-sm text-ink rounded-md border border-border p-3">
-          <input
-            type="checkbox"
-            className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
-            checked={mayCreateProfiles}
-            onChange={(e) => setMayCreateProfiles(e.target.checked)}
-          />
-          <span>
-            Can create care profiles
-            <span className="block text-xs text-muted">
-              Off for invited helpers: they can only work with people shared with them.
-            </span>
-          </span>
-        </label>
         {isSuperAdmin ? (
           <div>
             <label htmlFor="edit-role" className="block text-sm font-medium text-ink mb-1">
@@ -456,20 +598,29 @@ function CreateUserModal({
   onSaved: () => void;
 }) {
   const [email, setEmail] = useState('');
-  const [displayName, setDisplayName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<AccountRole>('user');
-  const [mayCreateProfiles, setMayCreateProfiles] = useState(false);
+  const [rights, setRights] = useState<RightsState>({
+    can_create_care_profiles: false,
+    can_invite_members: true,
+    can_use_ai: true,
+    can_export_data: true,
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (open) {
       setEmail('');
-      setDisplayName('');
+      setFirstName('');
+      setMiddleName('');
+      setLastName('');
       setPassword('');
       setRole('user');
-      setMayCreateProfiles(false);
+      setRights({ can_create_care_profiles: false, can_invite_members: true, can_use_ai: true, can_export_data: true });
       setError('');
     }
   }, [open]);
@@ -483,10 +634,12 @@ function CreateUserModal({
     try {
       await adminApi.createAccount({
         email,
-        display_name: displayName,
+        first_name: firstName.trim(),
+        middle_name: middleName.trim() || null,
+        last_name: lastName.trim() || null,
         password,
         role,
-        can_create_care_profiles: mayCreateProfiles,
+        ...rights,
       });
       onSaved();
     } catch (err) {
@@ -503,7 +656,11 @@ function CreateUserModal({
           The account works immediately with the password you set here; hand it to them securely and ask them to
           change it. To let them choose their own password instead, use Invite to care.
         </p>
-        <Input label="Name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input label="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+          <Input label="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+        </div>
+        <Input label="Middle name" value={middleName} onChange={(e) => setMiddleName(e.target.value)} />
         <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         <Input
           label="Temporary password"
@@ -513,20 +670,7 @@ function CreateUserModal({
           required
           hint="At least 8 characters"
         />
-        <label className="flex items-start gap-2 text-sm text-ink rounded-md border border-border p-3">
-          <input
-            type="checkbox"
-            className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
-            checked={mayCreateProfiles}
-            onChange={(e) => setMayCreateProfiles(e.target.checked)}
-          />
-          <span>
-            Can create care profiles
-            <span className="block text-xs text-muted">
-              Leave off for carers who only work with people shared with them.
-            </span>
-          </span>
-        </label>
+        <RightsChecklist rights={rights} onChange={setRights} />
         {isSuperAdmin ? (
           <div>
             <label htmlFor="create-role" className="block text-sm font-medium text-ink mb-1">

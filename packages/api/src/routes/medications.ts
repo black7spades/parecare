@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
+import { requireAccountRight } from '../middleware/accountRights';
 import { requireProfileOwner } from '../middleware/permissions';
 import { exportRecords, importRecords, type PortDescriptor, type PortFormat } from '../services/dataPort';
 import { resolveCatalogueId } from './medicationCatalogue';
@@ -145,7 +146,7 @@ medicationsRouter.get('/', requireAuth, async (req, res) => {
 });
 
 // Export the medication list as CSV or JSON.
-medicationsRouter.get('/export', requireAuth, async (req, res) => {
+medicationsRouter.get('/export', requireAuth, requireAccountRight('can_export_data'), async (req, res) => {
   const format = readFormat(req.query['format']);
   const meds = (await medSelect()
     .where('m.care_profile_id', req.params['id'])

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
+import { requireAccountRight } from '../middleware/accountRights';
 import { requireCountBelow } from '../middleware/subscriptionGate';
 import { requireProfileOwner } from '../middleware/permissions';
 import { createInvitation, resendInvitation, revokeInvitation, inviteUrl, effectiveStatus, InviteError } from '../services/invitations';
@@ -57,6 +58,7 @@ careCircleRouter.get('/', requireAuth, async (req, res) => {
 careCircleRouter.post(
   '/',
   requireAuth,
+  requireAccountRight('can_invite_members'),
   requireProfileOwner,
   requireCountBelow('care_circle_members', async (req) => {
     const result = await db('care_circle_members')
@@ -131,7 +133,7 @@ careCircleRouter.get('/:memberId', requireAuth, async (req, res) => {
 });
 
 // New link, fresh expiry, email re-sent. For pending invites only.
-careCircleRouter.post('/:memberId/resend-invite', requireAuth, requireProfileOwner, async (req, res) => {
+careCircleRouter.post('/:memberId/resend-invite', requireAuth, requireAccountRight('can_invite_members'), requireProfileOwner, async (req, res) => {
   const member = await db<CareCircleMember>('care_circle_members')
     .where({ id: req.params['memberId'], care_profile_id: req.params['id'] })
     .first();

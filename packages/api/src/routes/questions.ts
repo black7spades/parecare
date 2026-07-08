@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { requireFeature } from '../middleware/subscriptionGate';
+import { requireAccountRight } from '../middleware/accountRights';
 import { mediateQuestion } from '../services/ai';
 import type { CareProfile, OpenQuestion } from '../types';
 
@@ -74,7 +75,7 @@ questionsRouter.get('/:questionId/responses', requireAuth, async (req, res) => {
 
 // Neutral AI mediation for a disputed question: summarises common ground,
 // each position, options, and a next step, and posts it into the thread.
-questionsRouter.post('/:questionId/mediate', requireAuth, requireFeature('ai_access'), async (req, res) => {
+questionsRouter.post('/:questionId/mediate', requireAuth, requireAccountRight('can_use_ai'), requireFeature('ai_access'), async (req, res) => {
   const question = await db<OpenQuestion>('open_questions')
     .where({ id: req.params['questionId'], care_profile_id: req.params['id'] })
     .first();

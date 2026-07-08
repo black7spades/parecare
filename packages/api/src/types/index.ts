@@ -6,7 +6,11 @@ export interface Account {
   id: string;
   email: string;
   password_hash: string | null;
+  /** Composed display name derived from the structured name parts. */
   display_name: string;
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
   role: AccountRole;
   avatar_url: string | null;
   avatar_color: string | null;
@@ -26,6 +30,9 @@ export interface Account {
   ai_tokens_reset_at: string | Date;
   disabled_at: string | Date | null;
   can_create_care_profiles: boolean;
+  can_invite_members: boolean;
+  can_use_ai: boolean;
+  can_export_data: boolean;
   created_at: string | Date;
   updated_at: string | Date;
 }

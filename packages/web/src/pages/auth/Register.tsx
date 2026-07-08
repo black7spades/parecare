@@ -7,7 +7,9 @@ import { Button } from '../../components/ui/Button';
 import { OAuthButtons } from '../../components/OAuthButtons';
 
 export function Register() {
-  const [displayName, setDisplayName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -25,7 +27,13 @@ export function Register() {
     try {
       const data = await api.post<{ token: string; account: Parameters<typeof setAuth>[1] }>(
         '/auth/register',
-        { email, password, display_name: displayName }
+        {
+          email,
+          password,
+          first_name: firstName.trim(),
+          middle_name: middleName.trim() || null,
+          last_name: lastName.trim() || null,
+        }
       );
       setAuth(data.token, data.account);
       navigate(destination);
@@ -47,12 +55,26 @@ export function Register() {
         <div className="card">
           <OAuthButtons />
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input
+                label="First name"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                autoComplete="given-name"
+                required
+              />
+              <Input
+                label="Last name"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                autoComplete="family-name"
+              />
+            </div>
             <Input
-              label="Your name"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              autoComplete="name"
-              required
+              label="Middle name"
+              value={middleName}
+              onChange={(e) => setMiddleName(e.target.value)}
+              autoComplete="additional-name"
             />
             <Input
               label="Email"

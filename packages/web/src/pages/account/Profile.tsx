@@ -10,6 +10,9 @@ import { useAuthStore } from '../../stores/auth';
 interface Me {
   id: string;
   display_name: string;
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
   email: string;
   avatar_url: string | null;
   avatar_color: string | null;
@@ -39,7 +42,9 @@ export function Profile() {
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.get<Me>('/auth/me') });
 
-  const [displayName, setDisplayName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [dob, setDob] = useState('');
   const [gender, setGender] = useState('');
   const [pronouns, setPronouns] = useState('');
@@ -48,7 +53,9 @@ export function Profile() {
 
   useEffect(() => {
     if (!me) return;
-    setDisplayName(me.display_name);
+    setFirstName(me.first_name ?? me.display_name.split(' ')[0] ?? '');
+    setMiddleName(me.middle_name ?? '');
+    setLastName(me.last_name ?? '');
     setDob(me.date_of_birth ? me.date_of_birth.slice(0, 10) : '');
     setGender(me.gender ?? '');
     setPronouns(me.pronouns ?? '');
@@ -57,7 +64,9 @@ export function Profile() {
   const saveMutation = useMutation({
     mutationFn: () =>
       api.patch('/auth/me', {
-        display_name: displayName.trim(),
+        first_name: firstName.trim(),
+        middle_name: middleName.trim() || null,
+        last_name: lastName.trim() || null,
         date_of_birth: dob || null,
         gender: gender.trim() || null,
         pronouns: pronouns.trim() || null,
@@ -66,7 +75,9 @@ export function Profile() {
       setError('');
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
-      updateAccount({ display_name: displayName.trim() });
+      updateAccount({
+        display_name: [firstName, middleName, lastName].map((v) => v.trim()).filter(Boolean).join(' '),
+      });
       void queryClient.invalidateQueries({ queryKey: ['me'] });
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
@@ -163,7 +174,11 @@ export function Profile() {
             saveMutation.mutate();
           }}
         >
-          <Input label="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input label="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+            <Input label="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+          </div>
+          <Input label="Middle name" value={middleName} onChange={(e) => setMiddleName(e.target.value)} />
           <div className="grid gap-4 sm:grid-cols-3">
             <Input label="Birthday" type="date" value={dob} onChange={(e) => setDob(e.target.value)} />
             <div>
