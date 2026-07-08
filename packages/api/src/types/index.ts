@@ -31,7 +31,13 @@ export interface Account {
 export interface CareProfile {
   id: string;
   account_id: string;
+  /** Composed display name derived from the structured name parts. */
   full_name: string;
+  title: string | null;
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
+  suffix: string | null;
   date_of_birth: string | Date | null;
   current_phase: CarePhase;
   preferred_name: string | null;

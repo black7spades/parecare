@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { api, ApiError } from '../../../api/client';
+import { api } from '../../../api/client';
+import { describeAiError } from '../../../lib/aiErrors';
 import { Button } from '../../../components/ui/Button';
 import { Textarea } from '../../../components/ui/Input';
 import { useProfile } from './ProfileLayout';
@@ -166,15 +167,4 @@ export function AiPage() {
       </div>
     </div>
   );
-}
-
-function describeAiError(err: unknown): string {
-  if (err instanceof ApiError) {
-    if (err.status === 402) return 'The AI assistant requires an upgraded plan.';
-    if (err.code === 'AI_NOT_CONFIGURED' || /api key/i.test(err.message)) {
-      return 'The AI assistant is not configured on this server. Ask the admin to set AI_PROVIDER (Anthropic, OpenAI, Gemini, Ollama, or LM Studio).';
-    }
-    return err.message;
-  }
-  return 'Something went wrong talking to the assistant.';
 }

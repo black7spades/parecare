@@ -5,7 +5,9 @@ import { requireAuth } from '../middleware/auth';
 import { requireFeature } from '../middleware/subscriptionGate';
 import { sendMessage } from '../services/ai';
 import type { ChatMessage } from '../services/ai';
-import type { AiConversation, CareProfile, CareCircleMember } from '../types';
+import { buildProfileContext } from '../services/aiContext';
+import { extractActions, executeActions } from '../services/aiActions';
+import type { AiConversation, CareProfile } from '../types';
 
 export const aiRouter = Router({ mergeParams: true });
 
@@ -72,9 +74,11 @@ aiRouter.post(
       return;
     }
 
-    const member = await db<CareCircleMember>('care_circle_members')
-      .where({ care_profile_id: req.params['id'], account_id: req.account!.id })
-      .first();
+    // Set by requireCareProfileAccess on the router mount; the member (or
+    // owner/admin) it resolved decides what the assistant may see and do.
+    const access = req.careAccess!;
+    const canWrite = access.level !== 'viewer';
+    const contextBlock = await buildProfileContext(profile, access);
 
     const messages = conversation.messages as ChatMessage[];
 
@@ -84,9 +88,11 @@ aiRouter.post(
         req.account!,
         conversation.id,
         profile,
-        member,
+        access.member ?? undefined,
         messages,
-        parsed.data.content
+        parsed.data.content,
+        contextBlock,
+        canWrite
       );
     } catch (err: unknown) {
       const appErr = err as { status?: number; code?: string; message?: string };
@@ -100,10 +106,16 @@ aiRouter.post(
       throw err;
     }
 
+    // Carry out any actions the assistant proposed, then show what happened
+    // instead of the raw action blocks.
+    const { cleanedReply, actions, parseErrors } = extractActions(result.reply);
+    const outcomes = [...(await executeActions(actions, req.params['id']!, req.account!, access)), ...parseErrors];
+    const finalReply = [cleanedReply, ...outcomes.map((o) => `✔ ${o}`)].filter(Boolean).join('\n\n');
+
     const updatedMessages = [
       ...messages,
       { role: 'user', content: parsed.data.content, timestamp: new Date().toISOString() },
-      { role: 'assistant', content: result.reply, timestamp: new Date().toISOString() },
+      { role: 'assistant', content: finalReply, timestamp: new Date().toISOString() },
     ];
 
     await db('ai_conversations').where({ id: conversation.id }).update({
@@ -111,6 +123,6 @@ aiRouter.post(
       updated_at: db.fn.now(),
     });
 
-    res.json({ reply: result.reply, tokens_used: result.tokensUsed });
+    res.json({ reply: finalReply, tokens_used: result.tokensUsed, actions_taken: outcomes });
   }
 );

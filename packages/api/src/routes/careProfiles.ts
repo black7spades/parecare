@@ -62,8 +62,49 @@ careProfilesRouter.param('id', (_req, res, next, value) => {
   next();
 });
 
+// Every name part is its own field; full_name is the composed display name.
+// full_name alone is still accepted (imports, older clients) and is split
+// into parts on the way in.
+const nameParts = {
+  title: z.string().max(50).optional().nullable(),
+  first_name: z.string().max(100).optional().nullable(),
+  middle_name: z.string().max(100).optional().nullable(),
+  last_name: z.string().max(100).optional().nullable(),
+  suffix: z.string().max(50).optional().nullable(),
+};
+
+type NameParts = {
+  title: string | null;
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
+  suffix: string | null;
+};
+
+function splitFullName(full: string): Pick<NameParts, 'first_name' | 'middle_name' | 'last_name'> {
+  const words = full.trim().split(/\s+/).filter(Boolean);
+  return {
+    first_name: words[0] ?? null,
+    middle_name: words.length > 2 ? words.slice(1, -1).join(' ') : null,
+    last_name: words.length > 1 ? words[words.length - 1] : null,
+  };
+}
+
+function composeDisplayName(parts: NameParts): string {
+  return [parts.title, parts.first_name, parts.middle_name, parts.last_name, parts.suffix]
+    .map((p) => (p ?? '').trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
+const blankToNull = (v: string | null | undefined): string | null => {
+  const t = (v ?? '').trim();
+  return t === '' ? null : t;
+};
+
 const profileSchema = z.object({
-  full_name: z.string().min(1).max(255),
+  full_name: z.string().min(1).max(255).optional(),
+  ...nameParts,
   date_of_birth: z.string().optional().nullable(),
   current_phase: z
     .enum([
@@ -298,8 +339,24 @@ careProfilesRouter.post(
       return;
     }
 
+    const parts: NameParts = {
+      title: blankToNull(parsed.data.title),
+      first_name: blankToNull(parsed.data.first_name),
+      middle_name: blankToNull(parsed.data.middle_name),
+      last_name: blankToNull(parsed.data.last_name),
+      suffix: blankToNull(parsed.data.suffix),
+    };
+    if (!parts.first_name) {
+      const legacyFull = blankToNull(parsed.data.full_name);
+      if (!legacyFull) {
+        res.status(400).json({ error: 'A first name is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+      Object.assign(parts, splitFullName(legacyFull));
+    }
+
     const [profile] = await db<CareProfile>('care_profiles')
-      .insert({ ...parsed.data, account_id: req.account!.id })
+      .insert({ ...parsed.data, ...parts, full_name: composeDisplayName(parts), account_id: req.account!.id })
       .returning('*');
 
     // Seed checklists for the initial phase
@@ -385,9 +442,30 @@ careProfilesRouter.patch('/:id', requireAuth, async (req, res) => {
     return;
   }
 
+  const update: Record<string, unknown> = { ...parsed.data };
+  const partKeys = ['title', 'first_name', 'middle_name', 'last_name', 'suffix'] as const;
+  const touchesParts = partKeys.some((k) => k in parsed.data);
+  if (touchesParts) {
+    const merged: NameParts = {
+      title: 'title' in parsed.data ? blankToNull(parsed.data.title) : profile.title,
+      first_name: 'first_name' in parsed.data ? blankToNull(parsed.data.first_name) : profile.first_name,
+      middle_name: 'middle_name' in parsed.data ? blankToNull(parsed.data.middle_name) : profile.middle_name,
+      last_name: 'last_name' in parsed.data ? blankToNull(parsed.data.last_name) : profile.last_name,
+      suffix: 'suffix' in parsed.data ? blankToNull(parsed.data.suffix) : profile.suffix,
+    };
+    if (!merged.first_name) {
+      res.status(400).json({ error: 'A first name is required', code: 'VALIDATION_ERROR' });
+      return;
+    }
+    Object.assign(update, merged, { full_name: composeDisplayName(merged) });
+  } else if (typeof parsed.data.full_name === 'string' && parsed.data.full_name.trim()) {
+    // Older clients that only send full_name keep the parts in sync.
+    Object.assign(update, splitFullName(parsed.data.full_name));
+  }
+
   const [updated] = await db<CareProfile>('care_profiles')
     .where({ id: req.params['id'] })
-    .update({ ...parsed.data, updated_at: db.fn.now() })
+    .update({ ...update, updated_at: db.fn.now() })
     .returning('*');
 
   res.json({ profile: updated });

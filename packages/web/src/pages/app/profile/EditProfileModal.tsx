@@ -19,7 +19,11 @@ export function EditProfileModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [fullName, setFullName] = useState('');
+  const [title, setTitle] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [suffix, setSuffix] = useState('');
   const [preferredName, setPreferredName] = useState('');
   const [dob, setDob] = useState('');
   const [pronouns, setPronouns] = useState('');
@@ -30,7 +34,11 @@ export function EditProfileModal({
 
   useEffect(() => {
     if (!open) return;
-    setFullName(profile.full_name);
+    setTitle(profile.title ?? '');
+    setFirstName(profile.first_name ?? '');
+    setMiddleName(profile.middle_name ?? '');
+    setLastName(profile.last_name ?? '');
+    setSuffix(profile.suffix ?? '');
     setPreferredName(profile.preferred_name ?? '');
     setDob(profile.date_of_birth ? profile.date_of_birth.slice(0, 10) : '');
     setPronouns(profile.pronouns ?? '');
@@ -38,12 +46,21 @@ export function EditProfileModal({
     setError('');
   }, [open, profile]);
 
+  const displayName = [title, firstName, middleName, lastName, suffix]
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .join(' ');
+
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['care-profile', profile.id] });
 
   const saveMutation = useMutation({
     mutationFn: () =>
       api.patch(`/care-profiles/${profile.id}`, {
-        full_name: fullName.trim(),
+        title: title.trim() || null,
+        first_name: firstName.trim(),
+        middle_name: middleName.trim() || null,
+        last_name: lastName.trim() || null,
+        suffix: suffix.trim() || null,
         preferred_name: preferredName.trim() || null,
         date_of_birth: dob || null,
         pronouns: pronouns.trim() || null,
@@ -121,7 +138,20 @@ export function EditProfileModal({
           </div>
         </div>
 
-        <Input label="Full name" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
+        <div className="grid gap-4 sm:grid-cols-[6rem_1fr]">
+          <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Dr" />
+          <Input label="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input label="Middle name" value={middleName} onChange={(e) => setMiddleName(e.target.value)} />
+          <Input label="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+        </div>
+        <Input label="Suffix" value={suffix} onChange={(e) => setSuffix(e.target.value)} placeholder="e.g. OAM, Jr" />
+        {displayName ? (
+          <p className="text-xs text-muted">
+            Shown across the app as <span className="font-medium text-ink">{displayName}</span>
+          </p>
+        ) : null}
         <div className="grid gap-4 sm:grid-cols-2">
           <Input label="Preferred name" value={preferredName} onChange={(e) => setPreferredName(e.target.value)} />
           <Input label="Date of birth" type="date" value={dob} onChange={(e) => setDob(e.target.value)} />

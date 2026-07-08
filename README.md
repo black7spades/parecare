@@ -1,6 +1,9 @@
 # PareCare
 
-Family coordination platform for managing the care of ageing parents.
+Care coordination platform for anyone in your care. That can be yourself
+managing your own medications, a parent tracking a child's appointments
+and seizures, a family supporting an ageing relative, or an aged care home
+running the medication administration record for every resident.
 
 ## Features
 
@@ -44,8 +47,12 @@ Each person in care gets a profile with:
 - **Reminder emails** — due tasks are emailed to their assignee (needs
   SMTP configured); recurring tasks roll forward automatically
 - **Providers** — directory of doctors, facilities and services
-- **Ask PareCare** — AI assistant with context on the person's situation
-  (requires `ANTHROPIC_API_KEY`)
+- **PareCare Assistant** — an AI chat widget on every screen, scoped to
+  the profile that is open: it reads that person's live record (care plan,
+  medications, administration record, tasks, circle, providers, recent
+  log) and nothing else, and it can do the logging grunt work on request:
+  record a dose, log a seizure or observation, add a task (configure any
+  provider at **/admin/settings**)
 
 ## System settings (no .env edits or restarts)
 

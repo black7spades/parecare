@@ -3,6 +3,15 @@ import { Input } from './ui/Input';
 
 const CUSTOM = '__custom__';
 
+// Family terms read naturally as "My Mum"; the professional and self options
+// need their own phrasing.
+function relationshipOptionLabel(r: string): string {
+  if (r === 'Myself') return 'Myself, this is my own care';
+  if (r === 'Client') return 'A client I care for';
+  if (r === 'Resident') return 'A resident I care for';
+  return `My ${r}`;
+}
+
 /**
  * "Who are they to you?" picker: the common terms plus a free-text option
  * for whatever the family actually says (Oma, Nonna, Pop…). A value of a
@@ -35,7 +44,7 @@ export function RelationshipSelect({
         <option value="">Prefer not to say</option>
         {RELATIONSHIPS.map((r) => (
           <option key={r} value={r}>
-            My {r}
+            {relationshipOptionLabel(r)}
           </option>
         ))}
         <option value={CUSTOM}>Something else…</option>
