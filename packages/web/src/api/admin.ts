@@ -42,6 +42,18 @@ export interface AccountRights {
   can_export_data?: boolean;
 }
 
+export interface RightsTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  can_create_care_profiles: boolean;
+  can_invite_members: boolean;
+  can_use_ai: boolean;
+  can_export_data: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AdminInvitation {
   id: string;
   email: string;
@@ -125,4 +137,15 @@ export const adminApi = {
     api.post<{ assigned: string[]; skipped: Array<{ care_profile_id: string; reason: string }> }>('/admin/assignments', body),
   listCareProfiles: (search?: string) =>
     api.get<{ profiles: AdminCareProfile[] }>(`/admin/care-profiles${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+  listRightsTemplates: () => api.get<{ templates: RightsTemplate[] }>('/admin/rights-templates'),
+  createRightsTemplate: (body: { name: string; description?: string | null } & Required<AccountRights>) =>
+    api.post<{ template: RightsTemplate }>('/admin/rights-templates', body),
+  updateRightsTemplate: (id: string, body: Partial<{ name: string; description: string | null } & AccountRights>) =>
+    api.patch<{ template: RightsTemplate }>(`/admin/rights-templates/${id}`, body),
+  deleteRightsTemplate: (id: string) => api.delete<{ message: string }>(`/admin/rights-templates/${id}`),
+  applyRightsTemplate: (id: string, accountIds: string[]) =>
+    api.post<{ applied: string[]; skipped: Array<{ account_id: string; reason: string }>; template: { name: string } }>(
+      `/admin/rights-templates/${id}/apply`,
+      { account_ids: accountIds }
+    ),
 };

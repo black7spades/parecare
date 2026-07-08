@@ -7,7 +7,7 @@ import { requireRole, roleAtLeast } from '../middleware/requireRole';
 import { archiveOldAdministrations } from '../services/marArchive';
 import { createAccount, composeDisplayName, AccountError } from '../services/accounts';
 import { createInvitation, revokeInvitation, resendInvitation, inviteUrl, effectiveStatus, InviteError } from '../services/invitations';
-import type { Account, AccountRole, Invitation } from '../types';
+import type { Account, AccountRole, Invitation, RightsTemplate } from '../types';
 
 export const adminRouter = Router();
 
@@ -312,6 +312,114 @@ adminRouter.patch('/accounts/:accountId/disabled', async (req, res) => {
     .where({ id: target.id })
     .update({ disabled_at: parsed.data.disabled ? db.fn.now() : null, updated_at: db.fn.now() });
   res.json({ id: target.id, disabled: parsed.data.disabled });
+});
+
+// --- Rights templates: named bundles of the per-account rights ---
+// Define once ("Night carer"), apply to any number of accounts at once.
+// Applying stamps the values onto each account; individual accounts can
+// still be adjusted afterwards.
+
+const RIGHT_FIELDS = ['can_create_care_profiles', 'can_invite_members', 'can_use_ai', 'can_export_data'] as const;
+
+const templateSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().max(1000).optional().nullable(),
+  can_create_care_profiles: z.boolean(),
+  can_invite_members: z.boolean(),
+  can_use_ai: z.boolean(),
+  can_export_data: z.boolean(),
+});
+
+adminRouter.get('/rights-templates', async (_req, res) => {
+  const templates = await db<RightsTemplate>('rights_templates').orderByRaw('lower(name) asc');
+  res.json({ templates });
+});
+
+adminRouter.post('/rights-templates', async (req, res) => {
+  const parsed = templateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
+    return;
+  }
+  try {
+    const [template] = await db<RightsTemplate>('rights_templates')
+      .insert({ ...parsed.data, created_by_account_id: req.account!.id })
+      .returning('*');
+    res.status(201).json({ template });
+  } catch (err) {
+    if ((err as { code?: string }).code === '23505') {
+      res.status(409).json({ error: 'A template with this name already exists', code: 'DUPLICATE_NAME' });
+      return;
+    }
+    throw err;
+  }
+});
+
+adminRouter.patch('/rights-templates/:templateId', async (req, res) => {
+  const parsed = templateSchema.partial().safeParse(req.body);
+  if (!parsed.success || Object.keys(parsed.data).length === 0) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  try {
+    const [template] = await db<RightsTemplate>('rights_templates')
+      .where({ id: req.params.templateId })
+      .update({ ...parsed.data, updated_at: db.fn.now() })
+      .returning('*');
+    if (!template) {
+      res.status(404).json({ error: 'Template not found', code: 'NOT_FOUND' });
+      return;
+    }
+    res.json({ template });
+  } catch (err) {
+    if ((err as { code?: string }).code === '23505') {
+      res.status(409).json({ error: 'A template with this name already exists', code: 'DUPLICATE_NAME' });
+      return;
+    }
+    throw err;
+  }
+});
+
+adminRouter.delete('/rights-templates/:templateId', async (req, res) => {
+  const affected = await db('rights_templates').where({ id: req.params.templateId }).delete();
+  if (!affected) {
+    res.status(404).json({ error: 'Template not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ message: 'Template deleted.' });
+});
+
+// Stamp a template's rights onto a set of accounts. The usual management
+// rule applies: admins can only change regular users; super admins anyone.
+adminRouter.post('/rights-templates/:templateId/apply', async (req, res) => {
+  const parsed = z.object({ account_ids: z.array(z.string().uuid()).min(1).max(500) }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const template = await db<RightsTemplate>('rights_templates').where({ id: req.params.templateId }).first();
+  if (!template) {
+    res.status(404).json({ error: 'Template not found', code: 'NOT_FOUND' });
+    return;
+  }
+
+  const rights = Object.fromEntries(RIGHT_FIELDS.map((f) => [f, template[f]]));
+  const applied: string[] = [];
+  const skipped: Array<{ account_id: string; reason: string }> = [];
+  for (const accountId of [...new Set(parsed.data.account_ids)]) {
+    const target = await db<Account>('accounts').where({ id: accountId }).first();
+    if (!target) {
+      skipped.push({ account_id: accountId, reason: 'Account not found.' });
+      continue;
+    }
+    if (!canManage(req.account!, target)) {
+      skipped.push({ account_id: accountId, reason: `${target.display_name}: admins can only manage regular users.` });
+      continue;
+    }
+    await db('accounts').where({ id: target.id }).update({ ...rights, updated_at: db.fn.now() });
+    applied.push(target.id);
+  }
+  res.json({ applied, skipped, template: { id: template.id, name: template.name } });
 });
 
 // --- Invitations across any set of care profiles ---

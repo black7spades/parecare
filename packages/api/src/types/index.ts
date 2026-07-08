@@ -37,6 +37,19 @@ export interface Account {
   updated_at: string | Date;
 }
 
+export interface RightsTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  can_create_care_profiles: boolean;
+  can_invite_members: boolean;
+  can_use_ai: boolean;
+  can_export_data: boolean;
+  created_by_account_id: string | null;
+  created_at: string | Date;
+  updated_at: string | Date;
+}
+
 export type InvitationStatus = 'pending' | 'accepted' | 'revoked';
 
 export interface Invitation {
