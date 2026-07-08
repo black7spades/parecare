@@ -186,6 +186,11 @@ oauthRouter.get('/oauth/:provider/callback', async (req, res) => {
     }
   }
 
+  if (account.disabled_at) {
+    res.redirect(frontendRedirect('error=account_disabled'));
+    return;
+  }
+
   if (account.mfa_enabled) {
     res.redirect(frontendRedirect(`mfa_token=${encodeURIComponent(issueMfaToken(account.id))}`));
     return;

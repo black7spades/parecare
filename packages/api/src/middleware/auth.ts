@@ -24,6 +24,12 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       res.status(401).json({ error: 'Account not found', code: 'UNAUTHORIZED' });
       return;
     }
+    // A disabled account keeps its data, but its sessions stop working
+    // immediately, not just at the next sign-in.
+    if (account.disabled_at) {
+      res.status(403).json({ error: 'This account has been disabled. Contact your administrator.', code: 'ACCOUNT_DISABLED' });
+      return;
+    }
     req.account = account;
     next();
   } catch {

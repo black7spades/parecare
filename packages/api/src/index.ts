@@ -9,7 +9,8 @@ import { authRouter } from './routes/auth';
 import { oauthRouter } from './routes/oauth';
 import { accountRouter } from './routes/account';
 import { careProfilesRouter } from './routes/careProfiles';
-import { careCircleRouter, inviteRouter } from './routes/careCircle';
+import { careCircleRouter } from './routes/careCircle';
+import { invitationsRouter } from './routes/invitations';
 import { careLogRouter } from './routes/careLog';
 import { carePlanRouter } from './routes/carePlan';
 import { checklistsRouter } from './routes/checklists';
@@ -75,7 +76,9 @@ v1.use('/subscriptions', subscriptionsRouter);
 // Shared, instance-wide medication catalogue (read for all; add for admins;
 // edit/delete for super admins).
 v1.use('/medication-catalogue', medicationCatalogueRouter);
-v1.use('/care-circle', inviteRouter);
+// Public receiving end of invitations: look up by token, accept, or
+// create the account and accept in one step.
+v1.use('/invitations', invitationsRouter);
 v1.use('/care-profiles', careProfilesRouter);
 // Sub-resources verify profile ownership/membership here — the routers
 // themselves only scope queries by the :id param. Viewers are read-only

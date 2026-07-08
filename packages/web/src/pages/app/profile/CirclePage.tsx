@@ -82,6 +82,9 @@ export function CirclePage() {
               {m.invited_email ? <p className="text-xs text-muted mt-1">{m.invited_email}</p> : null}
               {m.poa_type ? <p className="text-xs text-amber-700 mt-1">{poaLabel(m.poa_type)}</p> : null}
               {m.role_description ? <p className="text-sm text-ink mt-2">{m.role_description}</p> : null}
+              {!m.invite_accepted && canManageEditors ? (
+                <PendingInviteActions profileId={profile.id} member={m} onChanged={invalidate} />
+              ) : null}
               {canManageEditors ? (
                 <div className="mt-3 flex gap-2">
                   <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>
@@ -133,6 +136,71 @@ export function CirclePage() {
           </Button>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+/**
+ * Everything the inviter needs to hand the invite over themselves: the
+ * link is visible and copyable, so nothing depends on email delivery.
+ */
+function PendingInviteActions({
+  profileId,
+  member,
+  onChanged,
+}: {
+  profileId: string;
+  member: CircleMember;
+  onChanged: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [resentUrl, setResentUrl] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const url = resentUrl ?? member.invite_url ?? null;
+  const expired = member.invite_status === 'expired' && !resentUrl;
+
+  const resendMutation = useMutation({
+    mutationFn: () =>
+      api.post<{ invite_url: string }>(`/care-profiles/${profileId}/circle/${member.id}/resend-invite`),
+    onSuccess: (res) => {
+      setResentUrl(res.invite_url);
+      setCopied(false);
+      setError('');
+      onChanged();
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to resend'),
+  });
+
+  async function copy() {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('Could not copy. Select the link text and copy it manually.');
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-md border border-border bg-surface-2 p-2.5">
+      <p className="text-xs text-muted mb-1.5">
+        {expired
+          ? 'This invite link has expired. Send a new one.'
+          : 'Share this invite link with them directly, or resend the email.'}
+      </p>
+      {url && !expired ? <p className="text-xs text-ink break-all mb-2 font-mono">{url}</p> : null}
+      <div className="flex gap-2">
+        {url && !expired ? (
+          <Button size="sm" variant="secondary" onClick={copy}>
+            {copied ? 'Copied' : 'Copy link'}
+          </Button>
+        ) : null}
+        <Button size="sm" variant="ghost" loading={resendMutation.isPending} onClick={() => resendMutation.mutate()}>
+          {expired ? 'Send new link' : 'Resend'}
+        </Button>
+      </div>
+      {error ? <p className="text-xs text-red-600 mt-1">{error}</p> : null}
     </div>
   );
 }
@@ -234,10 +302,12 @@ function InviteModal({
   const [poaType, setPoaType] = useState('');
   const [poaActivated, setPoaActivated] = useState(false);
   const [error, setError] = useState('');
+  const [sentUrl, setSentUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const mutation = useMutation({
     mutationFn: () =>
-      api.post(`/care-profiles/${profileId}/circle`, {
+      api.post<{ invite_url: string }>(`/care-profiles/${profileId}/circle`, {
         invited_email: email,
         display_name: name,
         role,
@@ -246,19 +316,63 @@ function InviteModal({
         role_description: description || null,
         poa_type: poaType || null,
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       setEmail('');
       setName('');
       setDescription('');
       setPoaType('');
       setPoaActivated(false);
       setError('');
-      onSaved();
+      setSentUrl(res.invite_url);
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to send invite'),
   });
 
   if (!open) return null;
+
+  if (sentUrl) {
+    return (
+      <Modal
+        open
+        onClose={() => {
+          setSentUrl(null);
+          onSaved();
+        }}
+        title="Invitation created"
+      >
+        <p className="text-sm text-muted mb-3">
+          If email is set up on this server the invitation has been sent. Either way, you can share this link with
+          them directly. It creates their account if they don't have one yet.
+        </p>
+        <p className="text-xs text-ink break-all font-mono rounded-md border border-border bg-surface-2 p-2.5 mb-4">{sentUrl}</p>
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="secondary"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(sentUrl);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              } catch {
+                /* manual copy still possible */
+              }
+            }}
+          >
+            {copied ? 'Copied' : 'Copy link'}
+          </Button>
+          <Button
+            onClick={() => {
+              setSentUrl(null);
+              onSaved();
+            }}
+          >
+            Done
+          </Button>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal open onClose={onClose} title="Invite to the care circle">
       <form

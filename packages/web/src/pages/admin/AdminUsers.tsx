@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuthStore, type AccountRole } from '../../stores/auth';
-import { adminApi, type AdminAccount, type AdminStats } from '../../api/admin';
+import { adminApi, type AdminAccount, type AdminCareProfile, type AdminInvitation, type AdminStats } from '../../api/admin';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
@@ -36,6 +36,10 @@ export function AdminUsers() {
 
   const [editing, setEditing] = useState<AdminAccount | null>(null);
   const [deleting, setDeleting] = useState<AdminAccount | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [inviting, setInviting] = useState(false);
+  const [assigning, setAssigning] = useState<AdminAccount | null>(null);
+  const [invitesVersion, setInvitesVersion] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,9 +72,15 @@ export function AdminUsers() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-ink">User administration</h1>
-        <p className="text-sm text-muted">Manage accounts, roles and subscription tiers.</p>
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-ink">User administration</h1>
+          <p className="text-sm text-muted">Create accounts, invite carers to the people they look after, and manage roles and tiers.</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => setCreating(true)}>Create user</Button>
+          <Button onClick={() => setInviting(true)}>Invite to care</Button>
+        </div>
       </div>
 
       {stats ? (
@@ -126,9 +136,12 @@ export function AdminUsers() {
               </tr>
             ) : (
               accounts.map((a) => (
-                <tr key={a.id} className="border-b border-border last:border-0">
+                <tr key={a.id} className={`border-b border-border last:border-0 ${a.disabled_at ? 'opacity-60' : ''}`}>
                   <td className="px-4 py-3">
-                    <div className="font-medium text-ink">{a.display_name}</div>
+                    <div className="font-medium text-ink">
+                      {a.display_name}
+                      {a.disabled_at ? <span className="badge bg-surface-2 text-muted ml-2">Disabled</span> : null}
+                    </div>
                     <div className="text-xs text-muted">{a.email}</div>
                   </td>
                   <td className="px-4 py-3">
@@ -138,14 +151,35 @@ export function AdminUsers() {
                   <td className="px-4 py-3 text-muted">{new Date(a.created_at).toLocaleDateString()}</td>
                   <td className="px-4 py-3 text-right space-x-2 whitespace-nowrap">
                     {canEdit(a) ? (
-                      <Button size="sm" variant="secondary" onClick={() => setEditing(a)}>
-                        Edit
-                      </Button>
+                      <>
+                        <Button size="sm" variant="secondary" onClick={() => setAssigning(a)}>
+                          Assign to care
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={() => setEditing(a)}>
+                          Edit
+                        </Button>
+                      </>
                     ) : null}
                     {canEdit(a) && a.id !== me?.id ? (
-                      <Button size="sm" variant="danger" onClick={() => setDeleting(a)}>
-                        Delete
-                      </Button>
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={async () => {
+                            try {
+                              await adminApi.setDisabled(a.id, !a.disabled_at);
+                              void load();
+                            } catch (err) {
+                              setError(err instanceof Error ? err.message : 'Failed to update account');
+                            }
+                          }}
+                        >
+                          {a.disabled_at ? 'Enable' : 'Disable'}
+                        </Button>
+                        <Button size="sm" variant="danger" onClick={() => setDeleting(a)}>
+                          Delete
+                        </Button>
+                      </>
                     ) : null}
                   </td>
                 </tr>
@@ -190,6 +224,33 @@ export function AdminUsers() {
           void load();
         }}
       />
+
+      <CreateUserModal
+        open={creating}
+        isSuperAdmin={isSuperAdmin}
+        onClose={() => setCreating(false)}
+        onSaved={() => {
+          setCreating(false);
+          void load();
+        }}
+      />
+
+      <InviteToCareModal
+        open={inviting}
+        onClose={() => setInviting(false)}
+        onSaved={() => {
+          setInviting(false);
+          setInvitesVersion((v) => v + 1);
+        }}
+      />
+
+      <AssignToCareModal
+        account={assigning}
+        onClose={() => setAssigning(null)}
+        onSaved={() => setAssigning(null)}
+      />
+
+      <InvitationsSection key={invitesVersion} />
     </div>
   );
 }
@@ -363,5 +424,511 @@ function DeleteAccountModal({
         </Button>
       </div>
     </Modal>
+  );
+}
+
+function CreateUserModal({
+  open,
+  isSuperAdmin,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  isSuperAdmin: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState<AccountRole>('user');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setEmail('');
+      setDisplayName('');
+      setPassword('');
+      setRole('user');
+      setError('');
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      await adminApi.createAccount({ email, display_name: displayName, password, role });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create the account');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Create user">
+      <form onSubmit={handleSave} className="space-y-4">
+        <p className="text-sm text-muted">
+          The account works immediately with the password you set here; hand it to them securely and ask them to
+          change it. To let them choose their own password instead, use Invite to care.
+        </p>
+        <Input label="Name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required />
+        <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <Input
+          label="Temporary password"
+          type="text"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          hint="At least 8 characters"
+        />
+        {isSuperAdmin ? (
+          <div>
+            <label htmlFor="create-role" className="block text-sm font-medium text-ink mb-1">
+              Platform role
+            </label>
+            <select
+              id="create-role"
+              className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              value={role}
+              onChange={(e) => setRole(e.target.value as AccountRole)}
+            >
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+              <option value="super_admin">Super admin</option>
+            </select>
+            <p className="mt-1 text-xs text-muted">Admins can manage users and see every care profile. Most people should be users.</p>
+          </div>
+        ) : null}
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={saving}>
+            Create user
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Checkbox list of every care profile, searchable, for bulk invites and assignments. */
+function ProfileMultiPicker({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [profiles, setProfiles] = useState<AdminCareProfile[]>([]);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    adminApi
+      .listCareProfiles(search.trim() || undefined)
+      .then((res) => {
+        if (!cancelled) setProfiles(res.profiles);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [search]);
+
+  function toggle(id: string) {
+    onChange(selected.includes(id) ? selected.filter((s) => s !== id) : [...selected, id]);
+  }
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-ink mb-1">People they will help care for</label>
+      <Input placeholder="Search people…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <div className="mt-2 max-h-48 overflow-y-auto rounded-md border border-border divide-y divide-border">
+        {loading ? (
+          <p className="text-xs text-muted p-3">Loading…</p>
+        ) : profiles.length === 0 ? (
+          <p className="text-xs text-muted p-3">No care profiles found.</p>
+        ) : (
+          profiles.map((p) => (
+            <label key={p.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-surface-2">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                checked={selected.includes(p.id)}
+                onChange={() => toggle(p.id)}
+              />
+              <span className="text-ink">{p.full_name}</span>
+              <span className="text-xs text-muted ml-auto">{p.owner_name}</span>
+            </label>
+          ))
+        )}
+      </div>
+      <p className="mt-1 text-xs text-muted">{selected.length} selected</p>
+    </div>
+  );
+}
+
+function CirclePermissionSelect({ value, onChange }: { value: 'viewer' | 'contributor'; onChange: (v: 'viewer' | 'contributor') => void }) {
+  return (
+    <div>
+      <label htmlFor="bulk-permission" className="block text-sm font-medium text-ink mb-1">
+        Access level in each care circle
+      </label>
+      <select
+        id="bulk-permission"
+        className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        value={value}
+        onChange={(e) => onChange(e.target.value as 'viewer' | 'contributor')}
+      >
+        <option value="contributor">Contributor: can add and edit records</option>
+        <option value="viewer">Viewer: can read and join the conversation only</option>
+      </select>
+    </div>
+  );
+}
+
+/**
+ * One invitation covering a set of people. The Serenity Place flow: a carer
+ * covering a wing accepts once and lands in every resident's circle. If the
+ * carer has no account yet, the link creates it.
+ */
+function InviteToCareModal({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
+  const [email, setEmail] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [role, setRole] = useState('carer');
+  const [permission, setPermission] = useState<'viewer' | 'contributor'>('contributor');
+  const [selected, setSelected] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<{ invite_url: string; member_count: number; skipped: Array<{ reason: string }> } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setEmail('');
+      setDisplayName('');
+      setRole('carer');
+      setPermission('contributor');
+      setSelected([]);
+      setError('');
+      setResult(null);
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (selected.length === 0) {
+      setError('Select at least one person.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const res = await adminApi.createInvitation({
+        email,
+        display_name: displayName,
+        role,
+        permission,
+        care_profile_ids: selected,
+      });
+      setResult({ invite_url: res.invite_url, member_count: res.member_count, skipped: res.skipped });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create the invitation');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (result) {
+    return (
+      <Modal open onClose={onSaved} title="Invitation created">
+        <p className="text-sm text-muted mb-2">
+          One invitation covering {result.member_count} {result.member_count === 1 ? 'person' : 'people'}. If email is
+          configured it has been sent; either way you can hand over the link directly. It creates their account if
+          they don't have one yet.
+        </p>
+        {result.skipped.length > 0 ? (
+          <ul className="text-xs text-amber-700 mb-2 list-disc pl-4">
+            {result.skipped.map((s, i) => (
+              <li key={i}>{s.reason}</li>
+            ))}
+          </ul>
+        ) : null}
+        <p className="text-xs text-ink break-all font-mono rounded-md border border-border bg-surface-2 p-2.5 mb-4">{result.invite_url}</p>
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="secondary"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(result.invite_url);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              } catch {
+                /* manual copy still possible */
+              }
+            }}
+          >
+            {copied ? 'Copied' : 'Copy link'}
+          </Button>
+          <Button onClick={onSaved}>Done</Button>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Invite someone to care for people">
+      <form onSubmit={handleSave} className="space-y-4">
+        <Input label="Their name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required />
+        <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <Input label="Role in the circles" value={role} onChange={(e) => setRole(e.target.value)} required hint='e.g. "carer", "nurse", "case manager"' />
+        <CirclePermissionSelect value={permission} onChange={setPermission} />
+        <ProfileMultiPicker selected={selected} onChange={setSelected} />
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={saving}>
+            Create invitation
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Place an EXISTING account into a set of care circles, no invite needed. */
+function AssignToCareModal({ account, onClose, onSaved }: { account: AdminAccount | null; onClose: () => void; onSaved: () => void }) {
+  const [role, setRole] = useState('carer');
+  const [permission, setPermission] = useState<'viewer' | 'contributor'>('contributor');
+  const [selected, setSelected] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState<{ assigned: number; skipped: Array<{ reason: string }> } | null>(null);
+
+  useEffect(() => {
+    if (account) {
+      setRole('carer');
+      setPermission('contributor');
+      setSelected([]);
+      setError('');
+      setDone(null);
+    }
+  }, [account]);
+
+  if (!account) return null;
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (!account) return;
+    if (selected.length === 0) {
+      setError('Select at least one person.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const res = await adminApi.createAssignments({
+        account_id: account.id,
+        role,
+        permission,
+        care_profile_ids: selected,
+      });
+      setDone({ assigned: res.assigned.length, skipped: res.skipped });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to assign');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (done) {
+    return (
+      <Modal open onClose={onSaved} title="Assignment complete">
+        <p className="text-sm text-ink mb-2">
+          {account.display_name} now has access to {done.assigned} {done.assigned === 1 ? 'person' : 'people'}.
+        </p>
+        {done.skipped.length > 0 ? (
+          <ul className="text-xs text-amber-700 mb-2 list-disc pl-4">
+            {done.skipped.map((s, i) => (
+              <li key={i}>{s.reason}</li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="flex justify-end">
+          <Button onClick={onSaved}>Done</Button>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Assign ${account.display_name} to care`}>
+      <form onSubmit={handleSave} className="space-y-4">
+        <p className="text-sm text-muted">
+          Places {account.display_name} ({account.email}) straight into the care circle of each selected person, with
+          no invitation step.
+        </p>
+        <Input label="Role in the circles" value={role} onChange={(e) => setRole(e.target.value)} required hint='e.g. "carer", "nurse", "case manager"' />
+        <CirclePermissionSelect value={permission} onChange={setPermission} />
+        <ProfileMultiPicker selected={selected} onChange={setSelected} />
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={saving}>
+            Assign
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function InvitationsSection() {
+  const [invitations, setInvitations] = useState<AdminInvitation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await adminApi.listInvitations();
+      setInvitations(res.invitations);
+      setError('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load invitations');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const statusStyle: Record<AdminInvitation['status'], string> = {
+    pending: 'bg-primary-50 text-primary',
+    accepted: 'bg-surface-2 text-muted',
+    revoked: 'bg-surface-2 text-muted',
+    expired: 'bg-amber-50 text-amber-700',
+  };
+
+  return (
+    <div className="mt-8">
+      <h2 className="text-base font-semibold text-ink mb-1">Invitations</h2>
+      <p className="text-sm text-muted mb-3">Every invitation sent from anywhere in the system, with its link while it is pending.</p>
+      {error ? <p className="text-sm text-red-600 mb-2">{error}</p> : null}
+      <div className="card overflow-x-auto p-0">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-muted border-b border-border">
+              <th className="px-4 py-3 font-medium">Invitee</th>
+              <th className="px-4 py-3 font-medium">People covered</th>
+              <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Expires</th>
+              <th className="px-4 py-3 font-medium text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr>
+                <td colSpan={5} className="px-4 py-6 text-center text-muted">Loading…</td>
+              </tr>
+            ) : invitations.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-4 py-6 text-center text-muted">No invitations yet.</td>
+              </tr>
+            ) : (
+              invitations.map((inv) => (
+                <tr key={inv.id} className="border-b border-border last:border-0">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-ink">{inv.display_name}</div>
+                    <div className="text-xs text-muted">{inv.email}</div>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-muted max-w-[16rem]">
+                    {inv.profile_names.length > 0 ? inv.profile_names.join(', ') : '—'}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`badge capitalize ${statusStyle[inv.status]}`}>{inv.status}</span>
+                  </td>
+                  <td className="px-4 py-3 text-muted">{new Date(inv.expires_at).toLocaleDateString()}</td>
+                  <td className="px-4 py-3 text-right space-x-2 whitespace-nowrap">
+                    {inv.status === 'pending' && inv.invite_url ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(inv.invite_url!);
+                            setCopiedId(inv.id);
+                            setTimeout(() => setCopiedId(null), 2000);
+                          } catch {
+                            /* manual copy still possible */
+                          }
+                        }}
+                      >
+                        {copiedId === inv.id ? 'Copied' : 'Copy link'}
+                      </Button>
+                    ) : null}
+                    {inv.status === 'pending' || inv.status === 'expired' ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={async () => {
+                            try {
+                              await adminApi.resendInvitation(inv.id);
+                              void load();
+                            } catch (err) {
+                              setError(err instanceof Error ? err.message : 'Failed to resend');
+                            }
+                          }}
+                        >
+                          Resend
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={async () => {
+                            try {
+                              await adminApi.revokeInvitation(inv.id);
+                              void load();
+                            } catch (err) {
+                              setError(err instanceof Error ? err.message : 'Failed to revoke');
+                            }
+                          }}
+                        >
+                          Revoke
+                        </Button>
+                      </>
+                    ) : null}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

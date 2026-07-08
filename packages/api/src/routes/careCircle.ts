@@ -1,13 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { v4 as uuidv4 } from 'uuid';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { requireCountBelow } from '../middleware/subscriptionGate';
-import { sendInviteEmail } from '../services/email';
-import { env } from '../config/env';
 import { requireProfileOwner } from '../middleware/permissions';
-import type { CareCircleMember } from '../types';
+import { createInvitation, resendInvitation, revokeInvitation, inviteUrl, effectiveStatus, InviteError } from '../services/invitations';
+import type { CareCircleMember, Invitation } from '../types';
 
 export const careCircleRouter = Router({ mergeParams: true });
 
@@ -26,7 +24,34 @@ careCircleRouter.get('/', requireAuth, async (req, res) => {
   const members = await db<CareCircleMember>('care_circle_members')
     .where({ care_profile_id: req.params['id'] })
     .orderBy('created_at', 'asc');
-  res.json({ members });
+
+  // Owners and admins also see each pending invite's link and expiry so an
+  // invitation never depends on email delivery working.
+  const canManage = req.careAccess?.level === 'owner' || req.careAccess?.level === 'admin';
+  let invitationById = new Map<string, Invitation>();
+  if (canManage) {
+    const ids = members.map((m) => m.invitation_id).filter((v): v is string => !!v);
+    if (ids.length > 0) {
+      const invitations = await db<Invitation>('invitations').whereIn('id', ids);
+      invitationById = new Map(invitations.map((i) => [i.id, i]));
+    }
+  }
+
+  res.json({
+    members: members.map((m) => {
+      const inv = m.invitation_id ? invitationById.get(m.invitation_id) : undefined;
+      return {
+        ...m,
+        ...(inv
+          ? {
+              invite_status: effectiveStatus(inv),
+              invite_expires_at: inv.expires_at,
+              invite_url: inv.status === 'pending' ? inviteUrl(inv.token) : null,
+            }
+          : {}),
+      };
+    }),
+  });
 });
 
 careCircleRouter.post(
@@ -47,25 +72,32 @@ careCircleRouter.post(
       return;
     }
 
-    const invite_token = uuidv4();
-    const [member] = await db<CareCircleMember>('care_circle_members')
-      .insert({
-        care_profile_id: req.params['id'],
-        invite_token,
-        ...parsed.data,
-      })
-      .returning('*');
-
-    const profile = await db('care_profiles').where({ id: req.params['id'] }).first();
-    const inviteUrl = `${env.APP_URL}/invite/${invite_token}`;
-    await sendInviteEmail(
-      parsed.data.invited_email,
-      req.account!.display_name,
-      profile?.full_name ?? 'a care profile',
-      inviteUrl
-    ).catch((err) => console.warn('Invite email failed:', err));
-
-    res.status(201).json({ member });
+    try {
+      const result = await createInvitation({
+        email: parsed.data.invited_email,
+        display_name: parsed.data.display_name,
+        invitedBy: req.account!,
+        onConflict: 'error',
+        assignments: [
+          {
+            care_profile_id: req.params['id']!,
+            role: parsed.data.role,
+            permission: parsed.data.permission,
+            relationship: parsed.data.relationship ?? null,
+            role_description: parsed.data.role_description ?? null,
+            poa_type: parsed.data.poa_type ?? null,
+            can_edit_profile: parsed.data.can_edit_profile ?? false,
+          },
+        ],
+      });
+      res.status(201).json({ member: result.members[0], invite_url: result.invite_url });
+    } catch (err) {
+      if (err instanceof InviteError) {
+        res.status(err.status).json({ error: err.message, code: err.code });
+        return;
+      }
+      throw err;
+    }
   }
 );
 
@@ -98,6 +130,27 @@ careCircleRouter.get('/:memberId', requireAuth, async (req, res) => {
   res.json({ member });
 });
 
+// New link, fresh expiry, email re-sent. For pending invites only.
+careCircleRouter.post('/:memberId/resend-invite', requireAuth, requireProfileOwner, async (req, res) => {
+  const member = await db<CareCircleMember>('care_circle_members')
+    .where({ id: req.params['memberId'], care_profile_id: req.params['id'] })
+    .first();
+  if (!member || !member.invitation_id) {
+    res.status(404).json({ error: 'No invitation found for this member', code: 'NOT_FOUND' });
+    return;
+  }
+  try {
+    const { invitation, invite_url } = await resendInvitation(member.invitation_id, req.account!);
+    res.json({ invite_url, expires_at: invitation.expires_at });
+  } catch (err) {
+    if (err instanceof InviteError) {
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
+    throw err;
+  }
+});
+
 careCircleRouter.patch('/:memberId', requireAuth, requireProfileOwner, async (req, res) => {
   const updateSchema = z.object({
     role: z.string().min(1).optional(),
@@ -127,56 +180,23 @@ careCircleRouter.patch('/:memberId', requireAuth, requireProfileOwner, async (re
 });
 
 careCircleRouter.delete('/:memberId', requireAuth, requireProfileOwner, async (req, res) => {
-  const affected = await db('care_circle_members')
+  const member = await db<CareCircleMember>('care_circle_members')
     .where({ id: req.params['memberId'], care_profile_id: req.params['id'] })
-    .delete();
-  if (!affected) {
+    .first();
+  if (!member) {
     res.status(404).json({ error: 'Member not found', code: 'NOT_FOUND' });
     return;
   }
+  await db('care_circle_members').where({ id: member.id }).delete();
+
+  // If that was the last pending membership on a pending invitation, the
+  // invitation has nothing left to grant; revoke it so the link dies.
+  if (member.invitation_id && !member.invite_accepted) {
+    const remaining = await db('care_circle_members').where({ invitation_id: member.invitation_id }).first();
+    if (!remaining) {
+      await revokeInvitation(member.invitation_id).catch(() => {});
+    }
+  }
+
   res.json({ message: 'Member removed.' });
-});
-
-export const inviteRouter = Router();
-
-// Public — look up an invite so the invite page can show what's being accepted
-inviteRouter.get('/invite/:token', async (req, res) => {
-  const member = await db<CareCircleMember>('care_circle_members')
-    .where({ invite_token: req.params['token'] })
-    .first();
-  if (!member) {
-    res.status(404).json({ error: 'Invite not found or already accepted', code: 'NOT_FOUND' });
-    return;
-  }
-  const profile = await db('care_profiles').where({ id: member.care_profile_id }).first();
-  res.json({
-    invite: {
-      display_name: member.display_name,
-      role: member.role,
-      profile_name: profile?.full_name ?? 'a care profile',
-    },
-  });
-});
-
-// Accepting requires being logged in — the invite is linked to the
-// accepting account, never to an id supplied by the caller.
-inviteRouter.post('/accept-invite/:token', requireAuth, async (req, res) => {
-  const member = await db<CareCircleMember>('care_circle_members')
-    .where({ invite_token: req.params['token'] })
-    .first();
-
-  if (!member) {
-    res.status(404).json({ error: 'Invite not found or already accepted', code: 'NOT_FOUND' });
-    return;
-  }
-
-  const relationship = typeof req.body?.relationship === 'string' ? req.body.relationship.slice(0, 100) : null;
-  await db('care_circle_members').where({ id: member.id }).update({
-    invite_accepted: true,
-    account_id: req.account!.id,
-    invite_token: null,
-    ...(relationship ? { relationship } : {}),
-  });
-
-  res.json({ message: 'Invite accepted.', care_profile_id: member.care_profile_id });
 });
