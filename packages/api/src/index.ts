@@ -24,6 +24,9 @@ import { memoryBookRouter } from './routes/memoryBook';
 import { calendarRouter, icsRouter } from './routes/calendar';
 import { medicationsRouter } from './routes/medications';
 import { medicationCatalogueRouter } from './routes/medicationCatalogue';
+import { lifeStagesRouter } from './routes/lifeStages';
+import { journeyTemplatesRouter } from './routes/journeyTemplates';
+import { journeysRouter } from './routes/journeys';
 import { startReminderScheduler } from './services/scheduler';
 import { startMarArchiveScheduler } from './services/marArchive';
 import { subscriptionsRouter } from './routes/subscriptions';
@@ -76,6 +79,10 @@ v1.use('/subscriptions', subscriptionsRouter);
 // Shared, instance-wide medication catalogue (read for all; add for admins;
 // edit/delete for super admins).
 v1.use('/medication-catalogue', medicationCatalogueRouter);
+// The care journey library: life stages and journey templates. Read for
+// everyone signed in; shaped by admins.
+v1.use('/life-stages', lifeStagesRouter);
+v1.use('/journey-templates', journeyTemplatesRouter);
 // Public receiving end of invitations: look up by token, accept, or
 // create the account and accept in one step.
 v1.use('/invitations', invitationsRouter);
@@ -88,6 +95,7 @@ v1.use('/care-profiles/:id/circle', ...profileAccess, careCircleRouter);
 v1.use('/care-profiles/:id/log', ...profileAccess, careLogRouter);
 v1.use('/care-profiles/:id/plan', ...profileAccess, carePlanRouter);
 v1.use('/care-profiles/:id/checklists', ...profileAccess, checklistsRouter);
+v1.use('/care-profiles/:id/journeys', ...profileAccess, journeysRouter);
 v1.use('/care-profiles/:id/questions', ...profileAccess, questionsRouter);
 v1.use('/care-profiles/:id/documents', ...profileAccess, documentsRouter);
 v1.use('/care-profiles/:id/providers', ...profileAccess, providersRouter);

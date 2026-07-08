@@ -160,12 +160,17 @@ export interface CarePlan {
 export interface ChecklistItem {
   id: string;
   care_profile_id: string;
-  phase: CarePhase;
+  /** Legacy phase slug; null for items that live on a journey phase. */
+  phase: CarePhase | string | null;
+  care_journey_phase_id: string | null;
   title: string;
   description: string | null;
   completed: boolean;
   completed_by: string | null;
   completed_at: string | Date | null;
+  /** The day it really happened, distinct from completed_at. */
+  achieved_on: string | Date | null;
+  is_milestone: boolean;
   is_custom: boolean;
   sort_order: number;
   created_at: string | Date;

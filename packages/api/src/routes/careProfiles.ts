@@ -8,7 +8,13 @@ import { requireAuth } from '../middleware/auth';
 import { requireAccountRight } from '../middleware/accountRights';
 import { requireCountBelow } from '../middleware/subscriptionGate';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
-import { PHASE_CHECKLISTS } from '../db/seeds/001_checklist_templates';
+import {
+  enrolProfileInTemplate,
+  findLegacyJourney,
+  phaseState,
+  setCurrentJourneyPhase,
+  type JourneyPhaseRow,
+} from '../services/journeys';
 import type { CareProfile, CarePhase } from '../types';
 
 const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -123,6 +129,8 @@ const profileSchema = z.object({
   notes: z.string().optional().nullable(),
   owner_relationship: z.string().max(100).optional().nullable(),
   photo_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().nullable(),
+  // Expected babies get a profile before birth.
+  due_date: z.string().optional().nullable(),
 });
 
 careProfilesRouter.get('/', requireAuth, async (req, res) => {
@@ -337,9 +345,12 @@ careProfilesRouter.post(
     return Number(result?.count ?? 0);
   }),
   async (req, res) => {
+    // Journeys to enrol the new person in, chosen from the library.
+    const enrolSchema = z.object({ journey_template_ids: z.array(z.string().uuid()).optional() });
+    const enrolParsed = enrolSchema.safeParse(req.body);
     const parsed = profileSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
+    if (!parsed.success || !enrolParsed.success) {
+      res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.success ? undefined : parsed.error.flatten() });
       return;
     }
 
@@ -363,20 +374,39 @@ careProfilesRouter.post(
       .insert({ ...parsed.data, ...parts, full_name: composeDisplayName(parts), account_id: req.account!.id })
       .returning('*');
 
-    // Seed checklists for the initial phase
-    const phase = profile.current_phase as CarePhase;
-    const templates = PHASE_CHECKLISTS[phase] ?? [];
-    if (templates.length > 0) {
-      await db('checklist_items').insert(
-        templates.map((t, i) => ({
-          care_profile_id: profile.id,
-          phase,
-          title: t.title,
-          description: t.description,
-          sort_order: i,
-        }))
-      );
-    }
+    // Enrol in the chosen journeys; without a choice, a client that sent
+    // a legacy phase gets the ageing journey opened at that phase.
+    await db.transaction(async (trx) => {
+      const chosen = enrolParsed.data.journey_template_ids;
+      if (chosen && chosen.length > 0) {
+        for (const templateId of chosen) {
+          const template = await trx('journey_templates').where({ id: templateId, status: 'published' }).first();
+          if (template) {
+            await enrolProfileInTemplate(trx, {
+              careProfileId: profile.id,
+              templateId,
+              createdByAccountId: req.account!.id,
+            });
+          }
+        }
+      } else if (chosen === undefined) {
+        // Legacy client that knows nothing of journeys: preserve the old
+        // behaviour by opening the ageing journey at the given phase.
+        const ageing = await trx('journey_templates').where({ slug: 'more-help-at-home' }).first();
+        if (ageing) {
+          const phases = await trx('journey_template_phases')
+            .where({ template_id: ageing.id })
+            .orderBy('sort_order', 'asc');
+          const startAt = phases.findIndex((p) => p.legacy_phase === profile.current_phase);
+          await enrolProfileInTemplate(trx, {
+            careProfileId: profile.id,
+            templateId: ageing.id,
+            createdByAccountId: req.account!.id,
+            startAtSortOrder: Math.max(0, startAt),
+          });
+        }
+      }
+    });
 
     res.status(201).json({ profile });
   }
@@ -514,74 +544,51 @@ careProfilesRouter.patch('/:id/phase', requireAuth, async (req, res) => {
 
   const newPhase = parsed.data.current_phase;
   const oldPhase = profile.current_phase as CarePhase;
-  const oldIndex = PHASE_ORDER.indexOf(oldPhase);
-  const newIndex = PHASE_ORDER.indexOf(newPhase);
-  const isSuperAdmin = req.account!.role === 'super_admin';
-
-  if (newIndex === oldIndex) {
+  if (PHASE_ORDER.indexOf(newPhase) === PHASE_ORDER.indexOf(oldPhase)) {
     res.json({ message: 'No change.' });
     return;
   }
-  // Care journeys only move forward; going back reopens a locked phase and is
-  // reserved for super admins correcting records.
-  if (newIndex < oldIndex && !isSuperAdmin) {
-    res.status(403).json({
-      error: 'Care journeys only move forward. A super admin can unlock an earlier phase to correct records.',
-      code: 'PHASE_LOCKED',
-    });
-    return;
-  }
 
-  const now = new Date();
-  await db.transaction(async (trx) => {
-    // Make sure the phase being left has a history row before we lock it.
-    await trx('care_phase_history')
-      .insert({ care_profile_id: profile.id, phase: oldPhase, entered_at: profile.created_at ?? now })
-      .onConflict(['care_profile_id', 'phase'])
-      .ignore();
-
-    if (newIndex < oldIndex) {
-      // Super-admin unlock: reopen the target phase.
-      await trx('care_phase_history')
-        .where({ care_profile_id: profile.id, phase: newPhase })
-        .update({ locked_at: null, locked_by: null });
-    } else {
-      // Forward: lock the phase we are leaving, and (re)open the one we enter.
-      await trx('care_phase_history')
-        .where({ care_profile_id: profile.id, phase: oldPhase })
-        .whereNull('locked_at')
-        .update({ locked_at: now, locked_by: req.account!.id });
-      await trx('care_phase_history')
-        .insert({ care_profile_id: profile.id, phase: newPhase, entered_at: now })
-        .onConflict(['care_profile_id', 'phase'])
-        .ignore();
-      await trx('care_phase_history')
-        .where({ care_profile_id: profile.id, phase: newPhase })
-        .update({ locked_at: null, locked_by: null });
+  // The journey system is the source of truth: this legacy endpoint
+  // drives the profile's ageing journey, which mirrors itself back onto
+  // current_phase and care_phase_history.
+  const result = await db.transaction(async (trx) => {
+    let journey = await findLegacyJourney(profile.id, trx);
+    if (!journey) {
+      const ageing = await trx('journey_templates').where({ slug: 'more-help-at-home' }).first();
+      if (!ageing) return { ok: false as const, code: 'NOT_FOUND' as const };
+      const phases = await trx('journey_template_phases').where({ template_id: ageing.id }).orderBy('sort_order', 'asc');
+      const startAt = phases.findIndex((p) => p.legacy_phase === oldPhase);
+      journey = await enrolProfileInTemplate(trx, {
+        careProfileId: profile.id,
+        templateId: ageing.id,
+        createdByAccountId: req.account!.id,
+        startAtSortOrder: Math.max(0, startAt),
+      });
     }
-
-    await trx('care_profiles').where({ id: profile.id }).update({ current_phase: newPhase, updated_at: trx.fn.now() });
+    const journeyPhases: JourneyPhaseRow[] = await trx('care_journey_phases')
+      .where({ care_journey_id: journey.id })
+      .orderBy('sort_order', 'asc');
+    const target = journeyPhases.find((p) => p.legacy_phase === newPhase && phaseState(p) !== 'current');
+    if (!target) return { ok: false as const, code: 'NOT_FOUND' as const };
+    return setCurrentJourneyPhase(trx, {
+      journey,
+      targetPhaseId: target.id,
+      actorAccountId: req.account!.id,
+      actorIsSuperAdmin: req.account!.role === 'super_admin',
+    });
   });
 
-  // Seed checklists for the new phase if none exist
-  const existing = await db('checklist_items')
-    .where({ care_profile_id: req.params['id'], phase: newPhase })
-    .count('id as count')
-    .first();
-  if (Number(existing?.count ?? 0) === 0) {
-    const templates = PHASE_CHECKLISTS[newPhase] ?? [];
-    if (templates.length > 0) {
-      await db('checklist_items').insert(
-        templates.map((t, i) => ({
-          care_profile_id: req.params['id'],
-          phase: newPhase,
-          title: t.title,
-          description: t.description,
-          sort_order: i,
-        }))
-      );
+  if (!result.ok) {
+    if (result.code === 'PHASE_LOCKED') {
+      res.status(403).json({
+        error: 'Care journeys only move forward. A super admin can unlock an earlier phase to correct records.',
+        code: 'PHASE_LOCKED',
+      });
+    } else {
+      res.status(404).json({ error: 'Phase not found', code: 'NOT_FOUND' });
     }
+    return;
   }
-
   res.json({ message: 'Phase updated.' });
 });

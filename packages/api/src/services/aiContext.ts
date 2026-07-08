@@ -95,6 +95,30 @@ export async function buildProfileContext(profile: CareProfile, access: CareAcce
       .join('\n')
   );
 
+  // Active care journeys: which phase each is in and what is open there,
+  // so "what should we be doing next" is answerable from the record.
+  const journeys = await db('care_journeys')
+    .where({ care_profile_id: profileId, status: 'active' })
+    .orderBy('started_at', 'asc');
+  if (journeys.length > 0) {
+    const lines: string[] = ['## Care journeys'];
+    for (const j of journeys) {
+      const phases = await db('care_journey_phases').where({ care_journey_id: j.id }).orderBy('sort_order', 'asc');
+      const current = phases.find((p) => p.entered_at && !p.locked_at);
+      const openTasks = current
+        ? await db('checklist_items')
+            .where({ care_journey_phase_id: current.id, completed: false })
+            .orderBy('sort_order', 'asc')
+            .limit(10)
+        : [];
+      lines.push(
+        `- ${j.name}: currently in phase "${current?.name ?? 'not started'}" of ${phases.length}` +
+          (openTasks.length ? `. Open tasks: ${openTasks.map((t) => t.title).join('; ')}` : '')
+      );
+    }
+    sections.push(lines.join('\n'));
+  }
+
   if (plan) {
     const contacts = Array.isArray(plan.emergency_contacts) ? plan.emergency_contacts : [];
     sections.push(
