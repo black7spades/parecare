@@ -24,8 +24,24 @@ export interface Account {
   current_period_end: string | Date | null;
   ai_tokens_used: number;
   ai_tokens_reset_at: string | Date;
+  disabled_at: string | Date | null;
   created_at: string | Date;
   updated_at: string | Date;
+}
+
+export type InvitationStatus = 'pending' | 'accepted' | 'revoked';
+
+export interface Invitation {
+  id: string;
+  token: string;
+  email: string;
+  display_name: string;
+  invited_by_account_id: string | null;
+  status: InvitationStatus;
+  expires_at: string | Date;
+  accepted_account_id: string | null;
+  accepted_at: string | Date | null;
+  created_at: string | Date;
 }
 
 export interface CareProfile {
@@ -85,7 +101,7 @@ export interface CareCircleMember {
   poa_activated: boolean;
   poa_document_id: string | null;
   can_edit_profile: boolean;
-  invite_token: string | null;
+  invitation_id: string | null;
   invite_accepted: boolean;
   created_at: string | Date;
 }

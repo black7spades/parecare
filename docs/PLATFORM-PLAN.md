@@ -103,6 +103,32 @@ stored as prose:
   Partner, Client and Resident; a profile marked "Myself" reads as "Your
   own care" instead of "Your Myself".
 
+### The account and invitation backbone is real
+
+- One code path creates every account (self-serve registration, invite
+  acceptance, admin creation), enforcing lowercased, case-insensitively
+  unique emails backed by a database unique index.
+- `invitations` is a first-class table: token, invited email, sender,
+  expiry (14 days), pending/accepted/revoked lifecycle, and any number of
+  linked pending circle memberships. Accepting requires the session email
+  to match the invited email; if the person has no account, the invite
+  page creates one with the invited email locked in and accepts in the
+  same step.
+- Invite links are shown in the UI (creation, circle page, admin panel)
+  with copy and resend, so nothing silently depends on SMTP being
+  configured.
+- Admins can create users directly, invite one person to a set of care
+  profiles in one invitation (the Serenity Place wing case), and assign
+  existing users straight into circles. Elevated roles are super-admin
+  only.
+- Accounts can be disabled and re-enabled without losing any history;
+  disabled accounts cannot sign in and their live sessions stop working.
+- Verified by a 44-scenario integration suite run against real Postgres
+  and Redis: registration and duplicate-email rejection, invite
+  registration, wrong-email refusal, viewer/contributor enforcement,
+  resend and revoke, expiry, multi-profile acceptance, admin role rules,
+  and disable/enable.
+
 ## Next passes, in order
 
 ### Pass 2: one source of truth per fact

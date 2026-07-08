@@ -18,7 +18,7 @@ function getTransport(): nodemailer.Transporter {
 export async function sendInviteEmail(
   toEmail: string,
   inviterName: string,
-  profileName: string,
+  profileNames: string[],
   inviteUrl: string
 ): Promise<void> {
   const cfg = getEmailConfig();
@@ -27,22 +27,33 @@ export async function sendInviteEmail(
     return;
   }
 
+  const who =
+    profileNames.length <= 1
+      ? (profileNames[0] ?? 'a care profile')
+      : profileNames.length <= 5
+        ? profileNames.join(', ')
+        : `${profileNames.length} people`;
+  const circleWord = profileNames.length > 1 ? 'care circles' : 'care circle';
+
   const transport = getTransport();
   await transport.sendMail({
     from: cfg.from,
     to: toEmail,
     subject: `${inviterName} has invited you to PareCare`,
     text: [
-      `${inviterName} has invited you to join the care circle for ${profileName} on PareCare.`,
+      `${inviterName} has invited you to join the ${circleWord} for ${who} on PareCare.`,
       '',
       'Accept your invitation:',
       inviteUrl,
       '',
+      'If you do not have a PareCare account yet, the link above will create one for you.',
+      '',
       'PareCare helps people coordinate care for anyone who needs it, including themselves.',
     ].join('\n'),
     html: `
-      <p>${inviterName} has invited you to join the care circle for <strong>${profileName}</strong> on PareCare.</p>
+      <p>${inviterName} has invited you to join the ${circleWord} for <strong>${who}</strong> on PareCare.</p>
       <p><a href="${inviteUrl}">Accept invitation</a></p>
+      <p>If you do not have a PareCare account yet, the link above will create one for you.</p>
       <p style="color:#888;font-size:12px">PareCare helps people coordinate care for anyone who needs it, including themselves.</p>
     `,
   });

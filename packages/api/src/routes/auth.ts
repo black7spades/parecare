@@ -10,6 +10,7 @@ import { getOAuthConfig, getStorageConfig } from '../config/settings';
 import { requireAuth } from '../middleware/auth';
 import { generateSecret, otpauthUrl, verifyTotp } from '../services/totp';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
+import { createAccount, AccountError } from '../services/accounts';
 import type { Account } from '../types';
 
 export const authRouter = Router();
@@ -68,23 +69,16 @@ authRouter.post('/register', async (req, res) => {
     return;
   }
 
-  const { password, display_name } = parsed.data;
-  const email = parsed.data.email.toLowerCase(); // emails are case-insensitive
-  const existing = await db<Account>('accounts').whereRaw('lower(email) = ?', [email]).first();
-  if (existing) {
-    res.status(409).json({ error: 'An account with this email already exists', code: 'DUPLICATE_EMAIL' });
-    return;
+  try {
+    const account = await createAccount(parsed.data);
+    res.status(201).json({ token: issueSessionToken(account.id), account: accountSummary(account) });
+  } catch (err) {
+    if (err instanceof AccountError) {
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
+    throw err;
   }
-
-  const password_hash = await bcrypt.hash(password, 12);
-  // The configured super admin email is promoted on registration so a fresh
-  // install doesn't need a manual step or restart to get its super admin.
-  const role = env.SUPER_ADMIN_EMAIL === email ? 'super_admin' : 'user';
-  const [account] = await db<Account>('accounts')
-    .insert({ email, password_hash, display_name, role })
-    .returning(['id', 'email', 'display_name', 'role', 'subscription_tier', 'subscription_status', 'created_at']);
-
-  res.status(201).json({ token: issueSessionToken(account.id), account });
 });
 
 authRouter.post('/login', async (req, res) => {
@@ -113,6 +107,11 @@ authRouter.post('/login', async (req, res) => {
   const valid = await bcrypt.compare(password, account.password_hash);
   if (!valid) {
     res.status(401).json({ error: 'Invalid email or password', code: 'INVALID_CREDENTIALS' });
+    return;
+  }
+
+  if (account.disabled_at) {
+    res.status(403).json({ error: 'This account has been disabled. Contact your administrator.', code: 'ACCOUNT_DISABLED' });
     return;
   }
 

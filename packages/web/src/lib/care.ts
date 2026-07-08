@@ -133,6 +133,10 @@ export interface CircleMember {
   invite_accepted: boolean;
   permission: CirclePermission;
   created_at: string;
+  /** Present for owners and admins while an invite is pending. */
+  invite_status?: 'pending' | 'accepted' | 'revoked' | 'expired';
+  invite_expires_at?: string;
+  invite_url?: string | null;
 }
 
 export interface ActivityEntry {
