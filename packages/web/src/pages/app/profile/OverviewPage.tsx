@@ -37,10 +37,12 @@ export function OverviewPage() {
     },
   });
 
+  const isPet = profile.kind === 'pet';
   const detailLine = [
+    isPet ? profile.breed : null,
     profile.pronouns,
     profile.date_of_birth ? `Born ${format(new Date(profile.date_of_birth), 'd MMM yyyy')}` : null,
-    profile.primary_language,
+    isPet ? null : profile.primary_language,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -57,7 +59,14 @@ export function OverviewPage() {
       <div className="card space-y-3">
           {detailLine ? <p className="text-sm text-muted">{detailLine}</p> : null}
           <RelationshipRow profileId={profile.id} relationship={relationship} isOwner={isOwner} />
-          {poaHolders.length > 0 ? (
+          {isPet ? (
+            <PetDetails
+              species={profile.species}
+              breed={profile.breed}
+              desexed={profile.desexed}
+              microchip={profile.microchip_number}
+            />
+          ) : poaHolders.length > 0 ? (
             <div className="flex flex-wrap items-center gap-3">
               {poaHolders.map((m) => (
                 <span key={m.id} className="flex items-center gap-2 text-sm text-ink">
@@ -104,6 +113,35 @@ export function OverviewPage() {
         </div>
       </Modal>
     </div>
+  );
+}
+
+/** A pet's structured facts, each on its own labelled line. */
+function PetDetails({
+  species,
+  breed,
+  desexed,
+  microchip,
+}: {
+  species: string | null;
+  breed: string | null;
+  desexed: boolean;
+  microchip: string | null;
+}) {
+  const rows: { label: string; value: React.ReactNode }[] = [];
+  if (species) rows.push({ label: 'Species', value: species });
+  if (breed) rows.push({ label: 'Breed', value: breed });
+  rows.push({ label: 'Desexed', value: desexed ? 'Yes' : 'No' });
+  if (microchip) rows.push({ label: 'Microchip', value: microchip });
+  return (
+    <dl className="grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-2">
+      {rows.map((r) => (
+        <div key={r.label} className="flex gap-2">
+          <dt className="w-20 shrink-0 text-muted">{r.label}</dt>
+          <dd className="min-w-0 flex-1 text-ink">{r.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 

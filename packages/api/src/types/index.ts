@@ -65,9 +65,14 @@ export interface Invitation {
   created_at: string | Date;
 }
 
+/** The highest-level kind of care profile: a person or a pet. */
+export type ProfileKind = 'person' | 'pet';
+
 export interface CareProfile {
   id: string;
   account_id: string;
+  /** Person or pet: the top-level category the profile belongs to. */
+  kind: ProfileKind;
   /** Composed display name derived from the structured name parts. */
   full_name: string;
   title: string | null;
@@ -80,6 +85,14 @@ export interface CareProfile {
   preferred_name: string | null;
   pronouns: string | null;
   primary_language: string | null;
+  /** Pet only: the kind of animal, e.g. Dog, Cat, Rabbit. */
+  species: string | null;
+  /** Pet only: the breed, e.g. Ragdoll. */
+  breed: string | null;
+  /** Pet only: neutered or spayed. Recorded only when true. */
+  desexed: boolean;
+  /** Pet only: microchip number. */
+  microchip_number: string | null;
   photo_url: string | null;
   photo_color: string | null;
   notes: string | null;

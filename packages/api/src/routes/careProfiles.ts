@@ -110,8 +110,14 @@ const blankToNull = (v: string | null | undefined): string | null => {
 };
 
 const profileSchema = z.object({
+  kind: z.enum(['person', 'pet']).default('person'),
   full_name: z.string().min(1).max(255).optional(),
   ...nameParts,
+  // Pet-only structured facts, each its own field.
+  species: z.string().max(60).optional().nullable(),
+  breed: z.string().max(120).optional().nullable(),
+  desexed: z.boolean().optional(),
+  microchip_number: z.string().max(60).optional().nullable(),
   date_of_birth: z.string().optional().nullable(),
   current_phase: z
     .enum([
@@ -247,11 +253,14 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
     const contacts = Array.isArray(plan?.emergency_contacts) ? (plan!.emergency_contacts as Array<{ phone?: string }>) : [];
     return {
       id: p.id,
+      kind: p.kind,
       full_name: p.full_name,
       preferred_name: p.preferred_name,
       relationship: p.relationship,
       access: p.access,
       current_phase: p.current_phase,
+      species: p.species,
+      breed: p.breed,
       photo_url: p.photo_url,
       photo_color: p.photo_color,
       date_of_birth: p.date_of_birth,
@@ -406,9 +415,10 @@ careProfilesRouter.post(
             });
           }
         }
-      } else if (chosen === undefined) {
+      } else if (chosen === undefined && profile.kind !== 'pet') {
         // Legacy client that knows nothing of journeys: preserve the old
-        // behaviour by opening the ageing journey at the given phase.
+        // behaviour by opening the ageing journey at the given phase. Pets
+        // never belong in the human ageing journey.
         const ageing = await trx('journey_templates').where({ slug: 'more-help-at-home' }).first();
         if (ageing) {
           const phases = await trx('journey_template_phases')

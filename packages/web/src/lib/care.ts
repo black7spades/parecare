@@ -34,8 +34,38 @@ export type LogEntryType = (typeof LOG_ENTRY_TYPES)[number]['value'];
 export const entryTypeLabel = (type: string) =>
   LOG_ENTRY_TYPES.find((t) => t.value === type)?.label ?? type;
 
+/** The highest-level kind of care profile: a person or a pet. */
+export type ProfileKind = 'person' | 'pet';
+
+/**
+ * The kinds of animal a pet profile can be. A general list that covers the
+ * common companions; anything unusual goes under Other and is spelled out
+ * in the breed.
+ */
+export const PET_SPECIES = [
+  'Dog',
+  'Cat',
+  'Rabbit',
+  'Guinea pig',
+  'Hamster',
+  'Mouse or rat',
+  'Ferret',
+  'Bird',
+  'Fish',
+  'Reptile',
+  'Amphibian',
+  'Horse',
+  'Other',
+] as const;
+
+/** A natural relationship for a new pet, e.g. Cat becomes "pet cat". */
+export const petRelationshipFor = (species: string): string =>
+  species && species !== 'Other' ? `pet ${species.toLowerCase()}` : 'pet';
+
 export interface CareProfile {
   id: string;
+  /** Person or pet: the top-level category the profile belongs to. */
+  kind: ProfileKind;
   /** Composed display name derived from the structured name parts. */
   full_name: string;
   title: string | null;
@@ -51,6 +81,14 @@ export interface CareProfile {
   current_phase: CarePhase;
   pronouns: string | null;
   primary_language: string | null;
+  /** Pet only: the kind of animal, e.g. Dog, Cat. */
+  species: string | null;
+  /** Pet only: the breed, e.g. Ragdoll. */
+  breed: string | null;
+  /** Pet only: neutered or spayed. */
+  desexed: boolean;
+  /** Pet only: microchip number. */
+  microchip_number: string | null;
   photo_url: string | null;
   photo_color: string | null;
   notes: string | null;

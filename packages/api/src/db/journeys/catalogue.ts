@@ -2257,3 +2257,197 @@ export const JOURNEY_TEMPLATES: CatalogueTemplate[] = [
     ],
   },
 ];
+
+/**
+ * Pet care journeys, seeded by migration 036. Kept separate from the human
+ * catalogue above so pets are never suggested to people and people are
+ * never suggested to pets. These carry no life stages: a pet's age arc does
+ * not map onto the human age bands, so they are offered from the pet
+ * onboarding and the journey library rather than by date of birth. Every
+ * slug is prefixed `pet-` so each side can tell them apart. All of it is
+ * ordinary editable data once seeded.
+ */
+export const PET_JOURNEY_TEMPLATES: CatalogueTemplate[] = [
+  {
+    slug: 'pet-welcome-new',
+    name: 'Welcoming a new pet',
+    description: 'Bringing a new pet home and helping them settle in over the first weeks.',
+    kind: 'event',
+    stages: [],
+    phases: [
+      {
+        name: 'First days',
+        tasks: [
+          { title: 'Set up a safe space', description: 'A bed, food and water, and a toilet or litter spot they can always reach.' },
+          { title: 'Book the first vet visit', description: 'A first health check, and advice on vaccinations and parasite prevention.', milestone: true },
+          { title: 'Check the microchip is registered to you', description: 'If they are chipped, make sure your name and phone are on the registry.' },
+        ],
+      },
+      {
+        name: 'First weeks',
+        tasks: [
+          { title: 'Settle into a feeding and toilet routine', description: 'The same food, times and spots each day help a new pet feel safe.' },
+          { title: 'Start gentle training and handling', description: 'Short, kind sessions. Reward what you want to see.' },
+          { title: 'Introduce the household slowly', description: 'People and other pets, a little at a time, on their terms.' },
+        ],
+      },
+      {
+        name: 'Settled in',
+        tasks: [
+          { title: 'They are settled at home', description: 'Eating, sleeping and relaxed in their space.', milestone: true },
+          { title: 'Plan ongoing vaccinations and prevention', description: 'Agree the schedule with your vet so nothing lapses.' },
+        ],
+      },
+    ],
+    handovers: [{ to: 'pet-routine-health', label: 'Settled in, start routine health care' }],
+  },
+  {
+    slug: 'pet-first-year',
+    name: "A pet's first year",
+    description: 'Vaccinations, microchip, desexing and early training through the first year.',
+    kind: 'life_stage',
+    stages: [],
+    phases: [
+      {
+        name: 'Vaccinations and microchip',
+        tasks: [
+          { title: 'Complete the first course of vaccinations', description: 'Your vet will set the timing over the first months.', milestone: true },
+          { title: 'Microchip and register your details', description: 'A chip is only useful if the registry has your current contact details.' },
+          { title: 'Start parasite prevention', description: 'Regular cover for worms, fleas and, where you live, ticks.' },
+        ],
+      },
+      {
+        name: 'Desexing and growing up',
+        tasks: [
+          { title: 'Talk to your vet about desexing', description: 'They will advise the right age for your pet.' },
+          { title: 'They are desexed', description: 'Neutered or spayed, if that is your choice.', milestone: true },
+          { title: 'Move to adult food at the right age', description: 'Change over gradually to avoid an upset stomach.' },
+        ],
+      },
+      {
+        name: 'Training and socialising',
+        tasks: [
+          { title: 'Teach basic handling and house habits', description: 'Calm handling, and the routines that make daily life easy.' },
+          { title: 'Introduce new people, places and animals safely', description: 'Positive early experiences build a confident adult pet.' },
+        ],
+      },
+    ],
+    handovers: [{ to: 'pet-routine-health', label: 'First year done, start routine health care' }],
+  },
+  {
+    slug: 'pet-routine-health',
+    name: 'Keeping a pet healthy',
+    description: 'The steady, year-round care that keeps an adult pet well.',
+    kind: 'life_stage',
+    stages: [],
+    phases: [
+      {
+        name: 'Yearly check',
+        tasks: [
+          { title: 'Book the yearly health and vaccination check', description: 'A once-a-year visit catches problems early and keeps cover current.' },
+          { title: 'Keep parasite prevention up to date', description: 'Worms, fleas and ticks, on the schedule your vet advised.' },
+          { title: 'Check weight and body condition', description: 'A healthy weight prevents many later problems.' },
+        ],
+      },
+      {
+        name: 'Everyday care',
+        tasks: [
+          { title: 'Care for teeth and coat', description: 'Regular teeth cleaning and grooming, suited to your pet.' },
+          { title: 'Keep a steady diet and exercise routine', description: 'The right amount of food and activity for their age and size.' },
+          { title: 'Update the microchip when things change', description: 'A new home or phone number means a quick update to the registry.' },
+        ],
+      },
+    ],
+    handovers: [{ to: 'pet-senior', label: 'Getting older, start the senior care journey' }],
+  },
+  {
+    slug: 'pet-senior',
+    name: 'Caring for an older pet',
+    description: 'Closer checks, comfort and mobility as a pet ages.',
+    kind: 'life_stage',
+    stages: [],
+    phases: [
+      {
+        name: 'Senior wellness',
+        tasks: [
+          { title: 'Move to twice yearly vet checks', description: 'Older pets change faster, so see the vet more often.' },
+          { title: 'Ask about senior blood tests and dental care', description: 'Early signs of common older-age conditions are worth catching.' },
+          { title: 'Watch for changes in weight, thirst and toileting', description: 'Note anything new and tell your vet.' },
+        ],
+      },
+      {
+        name: 'Comfort and mobility',
+        tasks: [
+          { title: 'Make food, water and beds easy to reach', description: 'Short trips and soft resting places help stiff joints.' },
+          { title: 'Add grip and ramps where they climb', description: 'Rugs on slippery floors, and steps or ramps to favourite spots.' },
+          { title: 'Manage any pain with your vet', description: 'There is a lot that can be done to keep an older pet comfortable.' },
+        ],
+      },
+    ],
+    handovers: [{ to: 'pet-goodbye', label: 'When the time nears, start the goodbye journey' }],
+  },
+  {
+    slug: 'pet-recovery',
+    name: 'Recovering after illness or surgery',
+    description: 'Nursing a pet back to health after an operation or an illness.',
+    kind: 'event',
+    stages: [],
+    phases: [
+      {
+        name: 'Coming home',
+        tasks: [
+          { title: 'Follow the discharge and medicine instructions', description: 'Keep the sheet from the vet somewhere you will see it.' },
+          { title: 'Set up a quiet, warm place to rest', description: 'Away from other pets, children and noise.' },
+          { title: 'Know the signs to call the vet about', description: 'Ask what is normal and what is not before you leave the clinic.' },
+        ],
+      },
+      {
+        name: 'Healing',
+        tasks: [
+          { title: 'Give every medicine on time and record it', description: 'A simple log makes sure nothing is missed or doubled.' },
+          { title: 'Keep to rest and any movement limits', description: 'Rest is part of the treatment, even when they seem better.' },
+          { title: 'Go to the follow up check', description: 'The vet confirms healing is on track.', milestone: true },
+        ],
+      },
+      {
+        name: 'Back to normal',
+        tasks: [
+          { title: 'Return to normal food and activity as advised', description: 'Build back up gradually, at the pace your vet sets.' },
+          { title: 'They are fully recovered', description: 'Back to themselves.', milestone: true },
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'pet-goodbye',
+    name: 'Saying goodbye to a pet',
+    description: "Comfort, dignity and support through a pet's last days and after.",
+    kind: 'end_of_life',
+    stages: [],
+    phases: [
+      {
+        name: 'Comfort care',
+        tasks: [
+          { title: 'Talk with your vet about quality of life', description: 'An honest conversation about good days and hard days.' },
+          { title: 'Keep them comfortable and out of pain', description: 'Warmth, soft bedding, favourite foods and gentle company.' },
+          { title: 'Decide what matters most for their last days', description: 'The people, places and comforts you want them to have.' },
+        ],
+      },
+      {
+        name: 'Letting go',
+        tasks: [
+          { title: 'Understand your options and what to expect', description: 'Your vet can explain the process kindly and fully.' },
+          { title: 'Choose where and how', description: 'At home or at the clinic, whichever is gentler for your pet and family.' },
+          { title: 'Decide about burial or cremation', description: 'There is no rush. Ask the clinic what they offer.' },
+        ],
+      },
+      {
+        name: 'Afterwards',
+        tasks: [
+          { title: 'Give the family time to grieve', description: 'Losing a pet is a real loss. Be gentle with everyone, including children.' },
+          { title: 'Keep a memory of them', description: 'A photo, their name, a favourite story in the Memory Book.', milestone: true },
+        ],
+      },
+    ],
+  },
+];

@@ -17,11 +17,14 @@ interface SummaryJourney {
 
 interface ProfileSummary {
   id: string;
+  kind: 'person' | 'pet';
   full_name: string;
   preferred_name: string | null;
   relationship: string | null;
   access: 'owner' | 'member';
   current_phase: string;
+  species: string | null;
+  breed: string | null;
   photo_url: string | null;
   photo_color: string | null;
   date_of_birth: string | null;
@@ -181,15 +184,31 @@ export function Dashboard() {
             <div className="ml-auto">{viewToggle}</div>
           </div>
 
-          {view === 'cards' ? (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {shown.map((p) => (
-                <ProfileCard key={p.id} profile={p} onTogglePin={() => pinMutation.mutate({ id: p.id, pinned: p.pinned })} />
-              ))}
-            </div>
-          ) : (
-            <ProfileTable profiles={shown} onTogglePin={(p) => pinMutation.mutate({ id: p.id, pinned: p.pinned })} />
-          )}
+          {(() => {
+            const people = shown.filter((p) => p.kind !== 'pet');
+            const pets = shown.filter((p) => p.kind === 'pet');
+            const mixed = people.length > 0 && pets.length > 0;
+            const groups = [
+              { key: 'people', heading: 'People', list: people },
+              { key: 'pets', heading: 'Pets', list: pets },
+            ].filter((g) => g.list.length > 0);
+            const togglePin = (p: ProfileSummary) => pinMutation.mutate({ id: p.id, pinned: p.pinned });
+
+            return groups.map((g) => (
+              <div key={g.key} className="space-y-3">
+                {mixed ? <h2 className="text-sm font-semibold text-muted">{g.heading}</h2> : null}
+                {view === 'cards' ? (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {g.list.map((p) => (
+                      <ProfileCard key={p.id} profile={p} onTogglePin={() => togglePin(p)} />
+                    ))}
+                  </div>
+                ) : (
+                  <ProfileTable profiles={g.list} onTogglePin={togglePin} />
+                )}
+              </div>
+            ));
+          })()}
         </>
       )}
     </div>
@@ -223,16 +242,21 @@ function ProfileCard({ profile: p, onTogglePin }: { profile: ProfileSummary; onT
               </p>
             ) : null}
             <span className="mt-1 flex flex-wrap gap-1">
-              {p.journeys.length === 0 ? (
-                <span className="badge bg-surface-2 text-muted text-xs">No journey underway</span>
-              ) : (
-                p.journeys.map((j) => (
-                  <span key={j.id} className="badge bg-surface-2 text-muted text-xs">
-                    {j.name}
-                    {j.phase_name ? ` · ${j.phase_name}` : ''}
-                  </span>
-                ))
-              )}
+              {p.kind === 'pet' && (p.species || p.breed) ? (
+                <span className="badge bg-surface-2 text-muted text-xs">
+                  {[p.species, p.breed].filter(Boolean).join(' · ')}
+                </span>
+              ) : null}
+              {p.journeys.length > 0
+                ? p.journeys.map((j) => (
+                    <span key={j.id} className="badge bg-surface-2 text-muted text-xs">
+                      {j.name}
+                      {j.phase_name ? ` · ${j.phase_name}` : ''}
+                    </span>
+                  ))
+                : p.kind !== 'pet' || (!p.species && !p.breed) ? (
+                    <span className="badge bg-surface-2 text-muted text-xs">No journey underway</span>
+                  ) : null}
             </span>
           </div>
         </div>
