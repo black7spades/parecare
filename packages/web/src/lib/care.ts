@@ -386,6 +386,20 @@ export function medUnitsLabel(count: number, form: string | null): string {
 }
 
 /**
+ * How supply reads for this form. A liquid or cream is stocked by volume
+ * in its dose measure ("195 mL"); a tablet is stocked by count
+ * ("3 Tablets"). The right unit for the right kind of medicine.
+ */
+export function supplyLabel(count: number, m: { form: string | null; dose_unit: string | null }): string {
+  const type = MED_TYPES.find((t) => t.value.toLowerCase() === (m.form ?? '').toLowerCase());
+  if (type?.measured) {
+    const n = Number.isInteger(count) ? String(count) : String(Number(count.toFixed(2)));
+    return `${n} ${m.dose_unit ?? ''}`.trim();
+  }
+  return medUnitsLabel(count, m.form);
+}
+
+/**
  * The whole regimen as one readable line composed from its parts:
  * "3 x 20mg Capsules with food, by mouth". Display only; every part
  * stays its own field underneath. With food is mentioned only when true.

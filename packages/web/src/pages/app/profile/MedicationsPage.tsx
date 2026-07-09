@@ -16,8 +16,8 @@ import {
   MED_TYPES,
   SELF_RELATIONSHIP,
   medStatusDescription,
-  medUnitsLabel,
   regimenLine,
+  supplyLabel,
   type MedicalCondition,
   type MedicationRecord,
 } from '../../../lib/care';
@@ -239,7 +239,7 @@ export function MedicationsPage() {
                         <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">Out of stock</span>
                       ) : (
                         <span className={`text-ink ${m.supply != null && remaining <= m.supply * 0.15 ? 'text-amber-700 dark:text-amber-300 font-medium' : ''}`}>
-                          {medUnitsLabel(remaining, m.form)} left
+                          {supplyLabel(remaining, m)} left
                         </span>
                       )}
                     </td>
@@ -416,7 +416,9 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
   const inlineSelect = `${SELECT} inline-block w-auto`;
   const inlineInput = 'inline-block w-20 rounded-md border border-border bg-card px-2 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
   const containerWord = typeMeta?.container ?? 'pack';
-  const unitWord = typeMeta ? typeMeta.plural.toLowerCase() : 'units';
+  // A liquid or cream is stocked by volume in its dose measure (mL);
+  // everything else by count of its unit (tablets, puffs).
+  const supplyWord = typeMeta?.measured ? doseUnit.trim() || 'mL' : typeMeta ? typeMeta.plural.toLowerCase() : 'units';
 
   return (
     <Modal open onClose={onClose} title={med ? 'Edit medication' : 'Add medication'} wide>
@@ -491,18 +493,22 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
           <p className="text-sm text-ink leading-8">
             A new {containerWord} provides{' '}
             <input className={inlineInput} aria-label="A full pack provides" type="number" min="0" step="any" value={packSize} onChange={(e) => setPackSize(e.target.value)} />{' '}
-            {typeMeta?.measured ? 'doses' : unitWord}.
+            {supplyWord}.
           </p>
           <p className="text-sm text-ink leading-8">
             We have{' '}
-            <input className={inlineInput} aria-label="Units left" type="number" min="0" step="any" value={remaining} onChange={(e) => setRemaining(e.target.value)} />{' '}
-            {typeMeta?.measured ? 'doses' : unitWord} left.
+            <input className={inlineInput} aria-label="Amount left" type="number" min="0" step="any" value={remaining} onChange={(e) => setRemaining(e.target.value)} />{' '}
+            {supplyWord} left.
           </p>
           <p className="text-sm text-ink leading-8">
             Repeats due:{' '}
             <input className={`${inlineInput} w-40`} aria-label="Repeats due" type="date" value={repeatsDue} onChange={(e) => setRepeatsDue(e.target.value)} />
           </p>
-          <p className="text-xs text-muted mt-1">Each dose given counts the units on hand down by the number taken each time.</p>
+          <p className="text-xs text-muted mt-1">
+            {typeMeta?.measured
+              ? `Each dose given counts the ${supplyWord} on hand down by the dose volume.`
+              : 'Each dose given counts the units on hand down by the number taken each time.'}
+          </p>
         </section>
 
         {error ? <p className="text-sm text-red-600">{error}</p> : null}

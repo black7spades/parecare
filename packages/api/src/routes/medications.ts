@@ -534,10 +534,33 @@ const GIVEN = new Set(['given', 'self_administered']);
 const FUTURE_SKEW_MS = 60 * 1000;
 const isFutureTime = (s?: string | null): boolean => !!s && new Date(s).getTime() > Date.now() + FUTURE_SKEW_MS;
 
-// A given dose draws down the remaining supply by the units taken, never
-// below zero. Supply is counted in units: 3 tablets, not 60 mg.
-async function drawDownSupply(medId: string, doses: number, unitsPerDose: number | null): Promise<void> {
-  const amount = doses * (Number(unitsPerDose) > 0 ? Number(unitsPerDose) : 1);
+// Forms measured by volume (a liquid, a cream) dose and stock by volume:
+// 5 mL from a 200 mL bottle. Countable forms (tablets) dose and stock by
+// count. Supply is drawn down in whichever unit the form actually uses.
+const MEASURED_FORMS = new Set(['liquid', 'cream', 'ointment', 'drops']);
+
+function isMeasuredForm(form: string | null | undefined): boolean {
+  return MEASURED_FORMS.has(String(form ?? '').toLowerCase());
+}
+
+// How much one dose removes from supply: the dose volume for measured
+// forms (units × mL), or the unit count for countable ones.
+function perDoseDrawdown(med: { form: string | null; units_per_dose: unknown; dose_amount: unknown }): number {
+  const units = Number(med.units_per_dose) > 0 ? Number(med.units_per_dose) : 1;
+  if (isMeasuredForm(med.form)) {
+    const volume = parseFloat(String(med.dose_amount ?? '').replace(/[^0-9.]/g, ''));
+    return units * (Number.isFinite(volume) && volume > 0 ? volume : 1);
+  }
+  return units;
+}
+
+// A given dose draws down the remaining supply, never below zero.
+async function drawDownSupply(
+  medId: string,
+  doses: number,
+  med: { form: string | null; units_per_dose: unknown; dose_amount: unknown }
+): Promise<void> {
+  const amount = doses * perDoseDrawdown(med);
   if (amount <= 0) return;
   await db('medications')
     .where({ id: medId })
@@ -573,7 +596,9 @@ function buildAdminRow(
 }
 
 medicationsRouter.post('/:medId/administrations', requireAuth, async (req, res) => {
-  const med = await db('medications').where({ id: req.params['medId'], care_profile_id: req.params['id'] }).first();
+  // medSelect joins the catalogue so `form` (which lives there) is set,
+  // and supply draws down in the right unit for the form.
+  const med = await medSelect().where('m.id', req.params['medId']).andWhere('m.care_profile_id', req.params['id']).first();
   if (!med) {
     res.status(404).json({ error: 'Medication not found', code: 'NOT_FOUND' });
     return;
@@ -592,7 +617,7 @@ medicationsRouter.post('/:medId/administrations', requireAuth, async (req, res) 
     return;
   }
   const [record] = await db('medication_administrations').insert(buildAdminRow(parsed.data, med, req.params['id']!, req.account!)).returning('*');
-  if (GIVEN.has(parsed.data.status)) await drawDownSupply(med.id, 1, med.units_per_dose);
+  if (GIVEN.has(parsed.data.status)) await drawDownSupply(med.id, 1, med);
   res.status(201).json({ administration: record });
 });
 
@@ -608,7 +633,7 @@ medicationsRouter.post('/administrations/batch', requireAuth, async (req, res) =
     return;
   }
   const medIds = [...new Set(parsed.data.entries.map((e) => e.medication_id))];
-  const meds = await db('medications').where('care_profile_id', req.params['id']).whereIn('id', medIds);
+  const meds = await medSelect().where('m.care_profile_id', req.params['id']).whereIn('m.id', medIds);
   const byId = new Map(meds.map((m) => [m.id, m]));
   for (const e of parsed.data.entries) {
     if (!byId.has(e.medication_id)) {
@@ -633,7 +658,7 @@ medicationsRouter.post('/administrations/batch', requireAuth, async (req, res) =
     drawdowns.set(e.medication_id, (drawdowns.get(e.medication_id) ?? 0) + 1);
   }
   for (const [medId, doses] of drawdowns) {
-    await drawDownSupply(medId, doses, byId.get(medId)!.units_per_dose);
+    await drawDownSupply(medId, doses, byId.get(medId)!);
   }
   res.status(201).json({ recorded: inserted.length });
 });
