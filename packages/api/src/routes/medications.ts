@@ -30,7 +30,8 @@ const medSchema = z.object({
   instructions: z.string().optional().nullable(),
   // Units per dose, e.g. 3 capsules each time. Supply counts these down.
   units_per_dose: z.coerce.number().min(0).max(1000).optional().nullable(),
-  with_food: z.boolean().optional().nullable(),
+  // Recorded only when true; unchecked simply means false.
+  with_food: z.boolean().optional(),
   as_needed: z.boolean().optional(),
   medical_condition_id: z.string().uuid().optional().nullable(),
   supply: z.coerce.number().min(0).max(1e9).optional().nullable(),
@@ -43,7 +44,7 @@ interface MedRow {
   dose: string | null;
   form: string | null;
   route: string | null;
-  with_food: boolean | null;
+  with_food: boolean;
   as_needed: boolean;
   frequency: string | null;
   schedule_times: string[] | null;
@@ -59,7 +60,7 @@ interface MedInsert {
   dose: string | null;
   form: string | null;
   route: string | null;
-  with_food: boolean | null;
+  with_food: boolean;
   as_needed: boolean;
   frequency: string | null;
   schedule_times: string[];
@@ -119,7 +120,7 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
     { key: 'dose', header: 'Dose', aliases: ['dosage', 'strength'], toCell: (r) => r.dose ?? '' },
     { key: 'form', header: 'Type', aliases: ['form'], toCell: (r) => r.form ?? '' },
     { key: 'route', header: 'Route', toCell: (r) => r.route ?? '' },
-    { key: 'with_food', header: 'With food', aliases: ['food'], toCell: (r) => (r.with_food === null ? '' : r.with_food ? 'true' : 'false') },
+    { key: 'with_food', header: 'With food', aliases: ['food'], toCell: (r) => (r.with_food ? 'true' : 'false') },
     { key: 'as_needed', header: 'As needed', aliases: ['prn'], toCell: (r) => (r.as_needed ? 'true' : 'false') },
     { key: 'frequency', header: 'Frequency', aliases: ['freq', 'how often'], toCell: (r) => r.frequency ?? '' },
     { key: 'schedule_times', header: 'Times', aliases: ['schedule', 'schedule times', 'time'], toCell: (r) => (r.schedule_times ?? []).join('; ') },
@@ -143,7 +144,7 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
         dose: blank(raw['dose']),
         form: blank(raw['form']),
         route: blank(raw['route']),
-        with_food: foodCell === '' ? null : !['false', 'no', '0', 'without', 'n'].includes(foodCell),
+        with_food: ['true', 'yes', '1', 'with', 'with food', 'y'].includes(foodCell),
         as_needed: ['true', 'yes', '1', 'prn', 'as needed', 'y'].includes((raw['as_needed'] ?? '').trim().toLowerCase()),
         frequency: blank(raw['frequency']),
         schedule_times: parseTimes(raw['schedule_times']),
