@@ -9,6 +9,9 @@ import { matchingLifeStages, type JourneyTemplateSummary, type LifeStage } from 
 import { RelationshipSelect } from '../../components/RelationshipSelect';
 import { useAuthStore } from '../../stores/auth';
 
+/** Pet journeys are marked by a `pet-` slug so each side can tell them apart. */
+const isPetJourney = (slug: string | null) => !!slug && slug.startsWith('pet-');
+
 export function NewCareProfile() {
   const account = useAuthStore((s) => s.account);
   const mayCreate =
@@ -220,6 +223,7 @@ function PetForm({ onBack }: { onBack: () => void }) {
   const [desexed, setDesexed] = useState(false);
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [microchip, setMicrochip] = useState('');
+  const [journeyIds, setJourneyIds] = useState<string[]>([]);
   const [relationship, setRelationship] = useState('');
   // Once the carer edits the relationship, stop overwriting it from species.
   const [relationshipTouched, setRelationshipTouched] = useState(false);
@@ -250,8 +254,8 @@ function PetForm({ onBack }: { onBack: () => void }) {
         microchip_number: microchip.trim() || null,
         owner_relationship: relationshipValue.trim() || null,
         notes: notes || null,
-        // A pet is not enrolled in the human ageing journey by default.
-        journey_template_ids: [],
+        // Only the pet journeys chosen here; never the human ageing journey.
+        journey_template_ids: journeyIds,
       });
       await queryClient.invalidateQueries({ queryKey: ['care-profiles'] });
       navigate(`/app/${data.profile.id}`);
@@ -338,6 +342,7 @@ function PetForm({ onBack }: { onBack: () => void }) {
           Desexed
           <span className="text-xs text-muted">neutered or spayed</span>
         </label>
+        <PetJourneyPicker selected={journeyIds} onChange={setJourneyIds} />
         <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
@@ -381,7 +386,11 @@ function JourneyPicker({
     queryFn: () => api.get<{ templates: JourneyTemplateSummary[] }>(`/journey-templates`),
   });
   const stages = useMemo(() => stagesData?.stages ?? [], [stagesData]);
-  const templates = useMemo(() => templatesData?.templates ?? [], [templatesData]);
+  // Pet journeys are offered on the pet form, not to people.
+  const templates = useMemo(
+    () => (templatesData?.templates ?? []).filter((t) => !isPetJourney(t.slug)),
+    [templatesData]
+  );
 
   const matched = useMemo(
     () => matchingLifeStages(stages, { date_of_birth: dateOfBirth || null, due_date: dueDate || null }),
@@ -425,6 +434,52 @@ function JourneyPicker({
           {showAll ? 'Show suggestions only' : `Show the whole library (${templates.length})`}
         </button>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Pet care journeys to start with: the pet library only, no age matching.
+ * Optional, and journeys can be added or changed at any time.
+ */
+function PetJourneyPicker({ selected, onChange }: { selected: string[]; onChange: (ids: string[]) => void }) {
+  const { data } = useQuery({
+    queryKey: ['journey-templates'],
+    queryFn: () => api.get<{ templates: JourneyTemplateSummary[] }>(`/journey-templates`),
+  });
+  const templates = useMemo(
+    () => (data?.templates ?? []).filter((t) => isPetJourney(t.slug)),
+    [data]
+  );
+
+  const toggle = (id: string) =>
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+
+  if (templates.length === 0) return null;
+
+  return (
+    <div>
+      <p className="block text-sm font-medium text-ink mb-1">Care journeys to start with</p>
+      <p className="text-xs text-muted mb-2">
+        Optional. A journey gives your pet phases to move through and a checklist for each one. You can add or change
+        them at any time.
+      </p>
+      <div className="max-h-44 overflow-y-auto rounded-md border border-border divide-y divide-border">
+        {templates.map((t) => (
+          <label key={t.id} className="flex items-start gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-surface">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+              checked={selected.includes(t.id)}
+              onChange={() => toggle(t.id)}
+            />
+            <span>
+              <span className="text-ink">{t.name}</span>
+              <span className="block text-xs text-muted line-clamp-1">{t.description}</span>
+            </span>
+          </label>
+        ))}
+      </div>
     </div>
   );
 }
