@@ -544,6 +544,37 @@ careProfilesRouter.delete('/:id', requireAuth, async (req, res) => {
   res.json({ message: 'Profile archived.' });
 });
 
+/**
+ * Permanently delete a profile and everything under it. Unlike archiving,
+ * this cannot be undone: the row is removed and every child record
+ * (journeys, logs, medications, circle, documents and the rest) goes with
+ * it through the foreign-key cascades. Owner or platform admin only.
+ * Uploaded files are cleaned up first, best effort, since they live in
+ * storage rather than the database and would otherwise be orphaned.
+ */
+careProfilesRouter.delete('/:id/permanent', requireAuth, async (req, res) => {
+  const profile = await db<CareProfile>('care_profiles').where({ id: req.params['id'] }).first();
+  if (!profile) {
+    res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const isOwner = profile.account_id === req.account!.id;
+  const isAdmin = req.account!.role === 'admin' || req.account!.role === 'super_admin';
+  if (!isOwner && !isAdmin) {
+    res.status(403).json({ error: 'Only the profile owner can permanently delete it', code: 'FORBIDDEN' });
+    return;
+  }
+
+  if (profile.photo_url) await deleteFile(profile.photo_url).catch(() => {});
+  const docs = await db('documents').where({ care_profile_id: profile.id }).select('file_url');
+  for (const doc of docs as Array<{ file_url: string }>) {
+    if (doc.file_url) await deleteFile(doc.file_url).catch(() => {});
+  }
+
+  await db('care_profiles').where({ id: profile.id }).del();
+  res.json({ message: 'Profile permanently deleted.' });
+});
+
 careProfilesRouter.patch('/:id/phase', requireAuth, async (req, res) => {
   const phaseSchema = z.object({
     current_phase: z.enum([

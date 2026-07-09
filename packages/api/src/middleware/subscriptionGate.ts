@@ -79,6 +79,31 @@ export function requireCountBelow(
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Resolve an account's access to a single care profile, or null if the
+ * profile does not exist or the account cannot reach it. The same rules the
+ * middleware enforces, exposed so routes that touch more than one profile
+ * (fan-out, cross-profile links) can check each target the same way.
+ */
+export async function getCareAccess(
+  account: NonNullable<Request['account']>,
+  profileId: string
+): Promise<Request['careAccess'] | null> {
+  if (!UUID_RE.test(profileId)) return null;
+  const profile = await db('care_profiles').where({ id: profileId, archived: false }).first();
+  if (!profile) return null;
+  if (profile.account_id === account.id) return { level: 'owner', member: null };
+  const membership = await db('care_circle_members')
+    .where({ care_profile_id: profileId, account_id: account.id, invite_accepted: true })
+    .first();
+  if (!membership) {
+    // Platform admins and super admins have global access to any profile.
+    if (account.role === 'admin' || account.role === 'super_admin') return { level: 'admin', member: null };
+    return null;
+  }
+  return { level: membership.permission === 'viewer' ? 'viewer' : 'contributor', member: membership };
+}
+
 // Verify the requester owns the care profile or is an accepted circle member.
 export async function requireCareProfileAccess(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (!req.account) {
@@ -90,38 +115,12 @@ export async function requireCareProfileAccess(req: Request, res: Response, next
     next();
     return;
   }
-  if (!UUID_RE.test(profileId)) {
-    res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
-    return;
-  }
-
-  const profile = await db('care_profiles').where({ id: profileId, archived: false }).first();
-  if (!profile) {
-    res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
-    return;
-  }
-  if (profile.account_id === req.account.id) {
-    req.careAccess = { level: 'owner', member: null };
-    next();
-    return;
-  }
-  const membership = await db('care_circle_members')
-    .where({ care_profile_id: profileId, account_id: req.account.id, invite_accepted: true })
-    .first();
-  if (!membership) {
-    // Platform admins and super admins have global access to any profile.
-    if (req.account.role === 'admin' || req.account.role === 'super_admin') {
-      req.careAccess = { level: 'admin', member: null };
-      next();
-      return;
-    }
+  const access = await getCareAccess(req.account, profileId);
+  if (!access) {
     // 404 rather than 403 so outsiders can't confirm a profile exists
     res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
     return;
   }
-  req.careAccess = {
-    level: membership.permission === 'viewer' ? 'viewer' : 'contributor',
-    member: membership,
-  };
+  req.careAccess = access;
   next();
 }
