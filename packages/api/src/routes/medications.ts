@@ -22,7 +22,11 @@ const medWithName = (id: string) => medSelect().where('m.id', id).first();
 
 const medSchema = z.object({
   name: z.string().min(1).max(255),
+  // Dose amount and measure are two data points; `dose` is composed from
+  // them for display. A combined `dose` string is still accepted.
   dose: z.string().max(255).optional().nullable(),
+  dose_amount: z.string().max(50).optional().nullable(),
+  dose_unit: z.string().max(30).optional().nullable(),
   form: z.string().max(100).optional().nullable(),
   route: z.string().max(100).optional().nullable(),
   frequency: z.string().max(255).optional().nullable(),
@@ -34,38 +38,75 @@ const medSchema = z.object({
   with_food: z.boolean().optional(),
   as_needed: z.boolean().optional(),
   medical_condition_id: z.string().uuid().optional().nullable(),
+  // Free-typed condition, resolved to an existing one or created.
+  medical_condition_name: z.string().max(255).optional().nullable(),
+  // A full new pack provides this many units.
   supply: z.coerce.number().min(0).max(1e9).optional().nullable(),
+  // How many units are on hand now. Independently editable.
+  supply_remaining: z.coerce.number().min(0).max(1e9).optional().nullable(),
+  repeats_due: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   active: z.boolean().optional(),
 });
+
+// Compose the display dose from its parts, e.g. "20" + "mg" -> "20mg".
+function composeDose(amount: string | null | undefined, unit: string | null | undefined): string | null {
+  const a = (amount ?? '').trim();
+  const u = (unit ?? '').trim();
+  return `${a}${u}`.trim() || null;
+}
+
+// Split a combined dose string into amount and measure ("500 mg" -> 500, mg).
+function splitDose(dose: string | null | undefined): { dose_amount: string | null; dose_unit: string | null } {
+  const raw = (dose ?? '').trim();
+  if (!raw) return { dose_amount: null, dose_unit: null };
+  const m = /^([0-9]+(?:\.[0-9]+)?)\s*(.*)$/.exec(raw);
+  return m ? { dose_amount: m[1], dose_unit: m[2].trim() || null } : { dose_amount: null, dose_unit: raw };
+}
+
+// Resolve a free-typed condition name to an existing condition on this
+// profile, creating one if it is new. Empty clears the tie.
+async function resolveConditionId(name: string | null | undefined, profileId: string): Promise<string | null> {
+  const trimmed = (name ?? '').trim();
+  if (!trimmed) return null;
+  const existing = await db('medical_conditions')
+    .where({ care_profile_id: profileId })
+    .whereRaw('lower(name) = lower(?)', [trimmed])
+    .first();
+  if (existing) return existing.id;
+  const [created] = await db('medical_conditions').insert({ care_profile_id: profileId, name: trimmed }).returning('id');
+  return (created as { id: string }).id;
+}
 
 interface MedRow {
   name: string;
   units_per_dose: number | null;
-  dose: string | null;
+  dose_amount: string | null;
+  dose_unit: string | null;
   form: string | null;
   route: string | null;
   with_food: boolean;
   as_needed: boolean;
   frequency: string | null;
   schedule_times: string[] | null;
-  instructions: string | null;
   supply: number | null;
   supply_remaining: number | null;
+  repeats_due: string | null;
   active: boolean;
 }
 
 interface MedInsert {
   name: string;
   units_per_dose: number | null;
-  dose: string | null;
+  dose_amount: string | null;
+  dose_unit: string | null;
   form: string | null;
   route: string | null;
   with_food: boolean;
   as_needed: boolean;
   frequency: string | null;
   schedule_times: string[];
-  instructions: string | null;
   supply: number | null;
+  repeats_due: string | null;
   active: boolean;
 }
 
@@ -76,12 +117,21 @@ const numOrNull = (v: unknown): number | null => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
+// A plain date as YYYY-MM-DD, from a Date or an already-string value,
+// without a timezone shift.
+const dateOrNull = (v: unknown): string | null => {
+  if (!v) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  const s = String(v);
+  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
+};
 const serializeMed = <T extends Record<string, unknown>>(m: T): T =>
   ({
     ...m,
     supply: numOrNull(m['supply']),
     supply_remaining: numOrNull(m['supply_remaining']),
     units_per_dose: numOrNull(m['units_per_dose']),
+    repeats_due: dateOrNull(m['repeats_due']),
   });
 
 const blank = (v: string | undefined): string | null => {
@@ -117,16 +167,16 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
   columns: [
     { key: 'name', header: 'Name', aliases: ['medication', 'drug', 'medicine'], toCell: (r) => r.name },
     { key: 'units_per_dose', header: 'Units per dose', aliases: ['unit', 'units', 'quantity per dose'], toCell: (r) => (r.units_per_dose ?? '').toString() },
-    { key: 'dose', header: 'Dose', aliases: ['dosage', 'strength'], toCell: (r) => r.dose ?? '' },
+    { key: 'dose_amount', header: 'Dose amount', aliases: ['dose', 'dosage', 'strength'], toCell: (r) => r.dose_amount ?? '' },
+    { key: 'dose_unit', header: 'Dose measure', aliases: ['measure', 'dose unit'], toCell: (r) => r.dose_unit ?? '' },
     { key: 'form', header: 'Type', aliases: ['form'], toCell: (r) => r.form ?? '' },
     { key: 'route', header: 'Route', toCell: (r) => r.route ?? '' },
     { key: 'with_food', header: 'With food', aliases: ['food'], toCell: (r) => (r.with_food ? 'true' : 'false') },
     { key: 'as_needed', header: 'As needed', aliases: ['prn'], toCell: (r) => (r.as_needed ? 'true' : 'false') },
-    { key: 'frequency', header: 'Frequency', aliases: ['freq', 'how often'], toCell: (r) => r.frequency ?? '' },
     { key: 'schedule_times', header: 'Times', aliases: ['schedule', 'schedule times', 'time'], toCell: (r) => (r.schedule_times ?? []).join('; ') },
-    { key: 'instructions', header: 'Instructions', aliases: ['directions', 'notes'], toCell: (r) => r.instructions ?? '' },
-    { key: 'supply', header: 'Supply in units', aliases: ['supply', 'stock', 'quantity', 'on hand'], toCell: (r) => (r.supply ?? '').toString() },
+    { key: 'supply', header: 'A full pack provides', aliases: ['supply', 'stock', 'quantity', 'on hand', 'supply in units', 'pack size'], toCell: (r) => (r.supply ?? '').toString() },
     { key: 'supply_remaining', header: 'Units left', aliases: ['remaining', 'supply remaining'], toCell: (r) => (r.supply_remaining ?? '').toString() },
+    { key: 'repeats_due', header: 'Repeats due', aliases: ['repeat', 'repeat due'], toCell: (r) => r.repeats_due ?? '' },
     { key: 'active', header: 'Active', aliases: ['status'], toCell: (r) => (r.active ? 'true' : 'false') },
   ],
   coerce: (raw, rowNumber) => {
@@ -136,20 +186,32 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
     const supplyNum = parseFloat(String(raw['supply'] ?? '').replace(/[^0-9.]/g, ''));
     const unitsNum = parseFloat(String(raw['units_per_dose'] ?? '').replace(/[^0-9.]/g, ''));
     const foodCell = (raw['with_food'] ?? '').trim().toLowerCase();
+    // Accept split amount/measure, or a combined "Dose" cell to split.
+    const amountRaw = blank(raw['dose_amount']);
+    const unitRaw = blank(raw['dose_unit']);
+    let dose_amount = amountRaw;
+    let dose_unit = unitRaw;
+    if (amountRaw && !unitRaw) {
+      const split = splitDose(amountRaw);
+      dose_amount = split.dose_amount ?? amountRaw;
+      dose_unit = split.dose_unit;
+    }
+    const repeats = blank(raw['repeats_due']);
     return {
       ok: true as const,
       value: {
         name,
         units_per_dose: Number.isFinite(unitsNum) && unitsNum > 0 ? unitsNum : null,
-        dose: blank(raw['dose']),
+        dose_amount,
+        dose_unit,
         form: blank(raw['form']),
         route: blank(raw['route']),
         with_food: ['true', 'yes', '1', 'with', 'with food', 'y'].includes(foodCell),
         as_needed: ['true', 'yes', '1', 'prn', 'as needed', 'y'].includes((raw['as_needed'] ?? '').trim().toLowerCase()),
         frequency: blank(raw['frequency']),
         schedule_times: parseTimes(raw['schedule_times']),
-        instructions: blank(raw['instructions']),
         supply: Number.isFinite(supplyNum) ? supplyNum : null,
+        repeats_due: repeats && /^\d{4}-\d{2}-\d{2}$/.test(repeats) ? repeats : null,
         active: parseActive(raw['active']),
       },
     };
@@ -213,14 +275,16 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner, async (req, 
       care_profile_id: req.params['id'],
       medication_catalogue_id: catalogueId,
       units_per_dose: r.units_per_dose,
-      dose: r.dose,
+      dose_amount: r.dose_amount,
+      dose_unit: r.dose_unit,
+      dose: composeDose(r.dose_amount, r.dose_unit),
       route: r.route,
       with_food: r.with_food,
       as_needed: r.as_needed,
       frequency: r.frequency,
-      instructions: r.instructions,
       supply: r.supply,
       supply_remaining: r.supply,
+      repeats_due: r.repeats_due,
       active: r.active,
       schedule_times: r.schedule_times.length
         ? db.raw('?::jsonb', [JSON.stringify(r.schedule_times)])
@@ -239,6 +303,39 @@ async function conditionBelongsToProfile(conditionId: string | null | undefined,
   return !!row;
 }
 
+// Resolve the condition tie from either an id or a free-typed name, and
+// compose the dose columns, shared by create and edit.
+async function medFieldsFrom(data: z.infer<typeof medSchema> | Partial<z.infer<typeof medSchema>>, profileId: string) {
+  const fields: Record<string, unknown> = {};
+  if ('units_per_dose' in data) fields['units_per_dose'] = data.units_per_dose ?? null;
+  if ('route' in data) fields['route'] = data.route ?? null;
+  if ('with_food' in data) fields['with_food'] = data.with_food ?? false;
+  if ('as_needed' in data) fields['as_needed'] = data.as_needed ?? false;
+  if ('frequency' in data) fields['frequency'] = data.frequency ?? null;
+  if ('repeats_due' in data) fields['repeats_due'] = data.repeats_due ?? null;
+  if ('active' in data) fields['active'] = data.active ?? true;
+
+  // Dose amount and measure are the source of truth; dose is composed.
+  if ('dose_amount' in data || 'dose_unit' in data) {
+    fields['dose_amount'] = data.dose_amount ?? null;
+    fields['dose_unit'] = data.dose_unit ?? null;
+    fields['dose'] = composeDose(data.dose_amount, data.dose_unit);
+  } else if ('dose' in data) {
+    const split = splitDose(data.dose);
+    fields['dose_amount'] = split.dose_amount;
+    fields['dose_unit'] = split.dose_unit;
+    fields['dose'] = data.dose ?? null;
+  }
+
+  // A free-typed condition resolves to an existing one or creates it.
+  if ('medical_condition_name' in data) {
+    fields['medical_condition_id'] = await resolveConditionId(data.medical_condition_name, profileId);
+  } else if ('medical_condition_id' in data) {
+    fields['medical_condition_id'] = data.medical_condition_id ?? null;
+  }
+  return fields;
+}
+
 medicationsRouter.post('/', requireAuth, requireProfileOwner, async (req, res) => {
   const parsed = medSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -249,16 +346,17 @@ medicationsRouter.post('/', requireAuth, requireProfileOwner, async (req, res) =
     res.status(400).json({ error: 'Condition not found', code: 'VALIDATION_ERROR' });
     return;
   }
-  const { schedule_times, name, form, ...rest } = parsed.data;
-  const catalogueId = await resolveCatalogueId(name, form ?? null, req.account!.id);
+  const catalogueId = await resolveCatalogueId(parsed.data.name, parsed.data.form ?? null, req.account!.id);
+  const fields = await medFieldsFrom(parsed.data, req.params['id']!);
   const [med] = await db('medications')
     .insert({
       care_profile_id: req.params['id'],
       medication_catalogue_id: catalogueId,
-      ...rest,
-      // A fresh supply starts fully remaining.
-      supply_remaining: rest.supply ?? null,
-      schedule_times: schedule_times ? db.raw('?::jsonb', [JSON.stringify(schedule_times)]) : null,
+      ...fields,
+      supply: parsed.data.supply ?? null,
+      // Start with what's on hand if given, otherwise a full pack.
+      supply_remaining: parsed.data.supply_remaining ?? parsed.data.supply ?? null,
+      schedule_times: parsed.data.schedule_times ? db.raw('?::jsonb', [JSON.stringify(parsed.data.schedule_times)]) : null,
     })
     .returning('id');
   res.status(201).json({ medication: serializeMed(await medWithName((med as { id: string }).id)) });
@@ -274,18 +372,16 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner, async (req,
     res.status(400).json({ error: 'Condition not found', code: 'VALIDATION_ERROR' });
     return;
   }
-  const { schedule_times, name, form, ...rest } = parsed.data;
-  const update: Record<string, unknown> = { ...rest, updated_at: db.fn.now() };
-  if (schedule_times !== undefined) {
-    update['schedule_times'] = schedule_times ? db.raw('?::jsonb', [JSON.stringify(schedule_times)]) : null;
+  const update: Record<string, unknown> = { ...(await medFieldsFrom(parsed.data, req.params['id']!)), updated_at: db.fn.now() };
+  if (parsed.data.schedule_times !== undefined) {
+    update['schedule_times'] = parsed.data.schedule_times ? db.raw('?::jsonb', [JSON.stringify(parsed.data.schedule_times)]) : null;
   }
-  // Editing the supply refills it, so the remaining count resets to the total.
-  if (rest.supply !== undefined) {
-    update['supply_remaining'] = rest.supply;
-  }
+  // Pack size and units-on-hand are edited independently.
+  if (parsed.data.supply !== undefined) update['supply'] = parsed.data.supply;
+  if (parsed.data.supply_remaining !== undefined) update['supply_remaining'] = parsed.data.supply_remaining;
   // Changing the drug identity re-points the medication at a catalogue entry.
-  if (name !== undefined) {
-    update['medication_catalogue_id'] = await resolveCatalogueId(name, form ?? null, req.account!.id);
+  if (parsed.data.name !== undefined) {
+    update['medication_catalogue_id'] = await resolveCatalogueId(parsed.data.name, parsed.data.form ?? null, req.account!.id);
   }
   const [med] = await db('medications')
     .where({ id: req.params['medId'], care_profile_id: req.params['id'] })
@@ -438,10 +534,33 @@ const GIVEN = new Set(['given', 'self_administered']);
 const FUTURE_SKEW_MS = 60 * 1000;
 const isFutureTime = (s?: string | null): boolean => !!s && new Date(s).getTime() > Date.now() + FUTURE_SKEW_MS;
 
-// A given dose draws down the remaining supply by the units taken, never
-// below zero. Supply is counted in units: 3 tablets, not 60 mg.
-async function drawDownSupply(medId: string, doses: number, unitsPerDose: number | null): Promise<void> {
-  const amount = doses * (Number(unitsPerDose) > 0 ? Number(unitsPerDose) : 1);
+// Forms measured by volume (a liquid, a cream) dose and stock by volume:
+// 5 mL from a 200 mL bottle. Countable forms (tablets) dose and stock by
+// count. Supply is drawn down in whichever unit the form actually uses.
+const MEASURED_FORMS = new Set(['liquid', 'cream', 'ointment', 'drops']);
+
+function isMeasuredForm(form: string | null | undefined): boolean {
+  return MEASURED_FORMS.has(String(form ?? '').toLowerCase());
+}
+
+// How much one dose removes from supply: the dose volume for measured
+// forms (units × mL), or the unit count for countable ones.
+function perDoseDrawdown(med: { form: string | null; units_per_dose: unknown; dose_amount: unknown }): number {
+  const units = Number(med.units_per_dose) > 0 ? Number(med.units_per_dose) : 1;
+  if (isMeasuredForm(med.form)) {
+    const volume = parseFloat(String(med.dose_amount ?? '').replace(/[^0-9.]/g, ''));
+    return units * (Number.isFinite(volume) && volume > 0 ? volume : 1);
+  }
+  return units;
+}
+
+// A given dose draws down the remaining supply, never below zero.
+async function drawDownSupply(
+  medId: string,
+  doses: number,
+  med: { form: string | null; units_per_dose: unknown; dose_amount: unknown }
+): Promise<void> {
+  const amount = doses * perDoseDrawdown(med);
   if (amount <= 0) return;
   await db('medications')
     .where({ id: medId })
@@ -477,7 +596,9 @@ function buildAdminRow(
 }
 
 medicationsRouter.post('/:medId/administrations', requireAuth, async (req, res) => {
-  const med = await db('medications').where({ id: req.params['medId'], care_profile_id: req.params['id'] }).first();
+  // medSelect joins the catalogue so `form` (which lives there) is set,
+  // and supply draws down in the right unit for the form.
+  const med = await medSelect().where('m.id', req.params['medId']).andWhere('m.care_profile_id', req.params['id']).first();
   if (!med) {
     res.status(404).json({ error: 'Medication not found', code: 'NOT_FOUND' });
     return;
@@ -496,7 +617,7 @@ medicationsRouter.post('/:medId/administrations', requireAuth, async (req, res) 
     return;
   }
   const [record] = await db('medication_administrations').insert(buildAdminRow(parsed.data, med, req.params['id']!, req.account!)).returning('*');
-  if (GIVEN.has(parsed.data.status)) await drawDownSupply(med.id, 1, med.units_per_dose);
+  if (GIVEN.has(parsed.data.status)) await drawDownSupply(med.id, 1, med);
   res.status(201).json({ administration: record });
 });
 
@@ -512,7 +633,7 @@ medicationsRouter.post('/administrations/batch', requireAuth, async (req, res) =
     return;
   }
   const medIds = [...new Set(parsed.data.entries.map((e) => e.medication_id))];
-  const meds = await db('medications').where('care_profile_id', req.params['id']).whereIn('id', medIds);
+  const meds = await medSelect().where('m.care_profile_id', req.params['id']).whereIn('m.id', medIds);
   const byId = new Map(meds.map((m) => [m.id, m]));
   for (const e of parsed.data.entries) {
     if (!byId.has(e.medication_id)) {
@@ -537,7 +658,7 @@ medicationsRouter.post('/administrations/batch', requireAuth, async (req, res) =
     drawdowns.set(e.medication_id, (drawdowns.get(e.medication_id) ?? 0) + 1);
   }
   for (const [medId, doses] of drawdowns) {
-    await drawDownSupply(medId, doses, byId.get(medId)!.units_per_dose);
+    await drawDownSupply(medId, doses, byId.get(medId)!);
   }
   res.status(201).json({ recorded: inserted.length });
 });

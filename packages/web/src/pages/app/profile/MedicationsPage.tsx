@@ -10,12 +10,14 @@ import { ImportExport } from '../../../components/ImportExport';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
 import {
+  DOSE_MEASURES,
   MED_ROUTES,
   MED_STATUSES,
   MED_TYPES,
+  SELF_RELATIONSHIP,
   medStatusDescription,
-  medUnitsLabel,
   regimenLine,
+  supplyLabel,
   type MedicalCondition,
   type MedicationRecord,
 } from '../../../lib/care';
@@ -45,7 +47,8 @@ const MED_SORTS: DataSort<MedicationRecord>[] = [
 const SELECT = 'rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
 export function MedicationsPage() {
-  const { profile, access, canEdit, careName } = useProfile();
+  const { profile, access, canEdit, careName, relationship } = useProfile();
+  const selfCare = relationship === SELF_RELATIONSHIP;
   const queryClient = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<MedicationRecord | null>(null);
@@ -236,7 +239,7 @@ export function MedicationsPage() {
                         <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">Out of stock</span>
                       ) : (
                         <span className={`text-ink ${m.supply != null && remaining <= m.supply * 0.15 ? 'text-amber-700 dark:text-amber-300 font-medium' : ''}`}>
-                          {medUnitsLabel(remaining, m.form)} left
+                          {supplyLabel(remaining, m)} left
                         </span>
                       )}
                     </td>
@@ -258,8 +261,8 @@ export function MedicationsPage() {
       </div>
       <MedicationMar profileId={profile.id} personName={profile.full_name} canAdminister={canEdit} />
 
-      {addOpen ? <MedicationForm profileId={profile.id} onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); invalidate(); }} /> : null}
-      {editing ? <MedicationForm profileId={profile.id} med={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} /> : null}
+      {addOpen ? <MedicationForm profileId={profile.id} selfCare={selfCare} onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); invalidate(); }} /> : null}
+      {editing ? <MedicationForm profileId={profile.id} med={editing} selfCare={selfCare} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} /> : null}
 
       <Modal open={confirmBulk} onClose={() => setConfirmBulk(false)} title="Delete medications">
         <p className="text-sm text-muted mb-4">
@@ -286,23 +289,69 @@ export function MedicationsPage() {
   );
 }
 
-function MedicationForm({ profileId, med, onClose, onSaved }: { profileId: string; med?: MedicationRecord; onClose: () => void; onSaved: () => void }) {
+// Convert stored 24h "HH:MM" to 12h parts and back, for the schedule inputs.
+function to12(hhmm: string): { hour: string; minute: string; ampm: 'AM' | 'PM' } {
+  const [h, m] = hhmm.split(':');
+  const hour = Number(h);
+  return {
+    hour: String(hour % 12 === 0 ? 12 : hour % 12),
+    minute: m ?? '00',
+    ampm: hour >= 12 ? 'PM' : 'AM',
+  };
+}
+function to24(hour: string, minute: string, ampm: 'AM' | 'PM'): string {
+  let h = Number(hour) % 12;
+  if (ampm === 'PM') h += 12;
+  return `${String(h).padStart(2, '0')}:${(minute || '00').padStart(2, '0')}`;
+}
+
+/** One time-of-day picker in 12-hour form, stored as 24h "HH:MM". */
+function TimeField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { hour, minute, ampm } = to12(value || '08:00');
+  return (
+    <span className="inline-flex items-center gap-1">
+      <select aria-label="Hour" className={SELECT} value={hour} onChange={(e) => onChange(to24(e.target.value, minute, ampm))}>
+        {Array.from({ length: 12 }, (_, i) => String(i + 1)).map((h) => <option key={h} value={h}>{h}</option>)}
+      </select>
+      <span className="text-muted">:</span>
+      <select aria-label="Minute" className={SELECT} value={minute} onChange={(e) => onChange(to24(hour, e.target.value, ampm))}>
+        {['00', '15', '30', '45'].map((m) => <option key={m} value={m}>{m}</option>)}
+      </select>
+      <select aria-label="AM or PM" className={SELECT} value={ampm} onChange={(e) => onChange(to24(hour, minute, e.target.value as 'AM' | 'PM'))}>
+        <option value="AM">AM</option>
+        <option value="PM">PM</option>
+      </select>
+    </span>
+  );
+}
+
+/**
+ * The medication editor, laid out as three plain-language sentences:
+ * the treatment, the schedule, and the supply. Every value in the
+ * sentences is its own field underneath.
+ */
+function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profileId: string; med?: MedicationRecord; selfCare: boolean; onClose: () => void; onSaved: () => void }) {
+  const subject = selfCare ? 'I' : 'They';
   const [name, setName] = useState(med?.name ?? '');
+  const [condition, setCondition] = useState(med?.condition_name ?? '');
   const [units, setUnits] = useState(med?.units_per_dose != null ? String(med.units_per_dose) : '1');
-  const [dose, setDose] = useState(med?.dose ?? '');
+  const [doseAmount, setDoseAmount] = useState(med?.dose_amount ?? '');
+  const [doseUnit, setDoseUnit] = useState(med?.dose_unit ?? '');
   const [type, setType] = useState(med?.form ?? '');
   const [route, setRoute] = useState(med?.route ?? '');
   const [withFood, setWithFood] = useState(med?.with_food ?? false);
-  const [asNeeded, setAsNeeded] = useState(med?.as_needed ?? false);
-  const [conditionId, setConditionId] = useState(med?.medical_condition_id ?? '');
-  const [times, setTimes] = useState((med?.schedule_times ?? []).join(', '));
-  const [supply, setSupply] = useState(med?.supply != null ? String(med.supply) : '');
-  const [instructions, setInstructions] = useState(med?.instructions ?? '');
-  const [active, setActive] = useState(med?.active ?? true);
+  // Times a day drives how many time fields show; 0 means as needed.
+  const initialTimes = med?.schedule_times ?? [];
+  const [perDay, setPerDay] = useState(med?.as_needed ? 0 : initialTimes.length || 1);
+  const [slots, setSlots] = useState<string[]>(initialTimes.length ? initialTimes : ['08:00']);
+  const [packSize, setPackSize] = useState(med?.supply != null ? String(med.supply) : '');
+  const [remaining, setRemaining] = useState(med?.supply_remaining != null ? String(med.supply_remaining) : '');
+  const [repeatsDue, setRepeatsDue] = useState(med?.repeats_due ?? '');
   const [error, setError] = useState('');
 
-  // Shared catalogue drives the name autocomplete, so the same drug is reused
-  // across people instead of being re-typed as a duplicate.
+  const typeMeta = MED_TYPES.find((t) => t.value.toLowerCase() === type.toLowerCase());
+
+  // Shared catalogue drives the name autocomplete, so the same drug is reused.
   const { data: catalogue } = useQuery({
     queryKey: ['medication-catalogue'],
     queryFn: () => api.get<{ items: { id: string; name: string; form: string | null }[] }>('/medication-catalogue'),
@@ -319,36 +368,41 @@ function MedicationForm({ profileId, med, onClose, onSaved }: { profileId: strin
   const pickType = (value: string) => {
     setType(value);
     const t = MED_TYPES.find((x) => x.value === value);
-    if (t && !route) setRoute(t.defaultRoute);
-    if (t && route && MED_ROUTES.includes(route as (typeof MED_ROUTES)[number])) setRoute(t.defaultRoute);
+    if (t && (!route || MED_ROUTES.includes(route as (typeof MED_ROUTES)[number]))) setRoute(t.defaultRoute);
   };
 
-  const unitsNum = units.trim() === '' ? null : Number(units);
-  const preview = regimenLine({
-    units_per_dose: unitsNum,
-    dose: dose || null,
-    form: type || null,
-    with_food: withFood,
-    route: route || null,
-  });
+  // Keep the number of time slots in step with the times-a-day number.
+  const setPerDayCount = (n: number) => {
+    const count = Math.max(0, Math.min(12, Math.floor(n)));
+    setPerDay(count);
+    setSlots((prev) => {
+      if (count <= prev.length) return prev.slice(0, count);
+      const next = [...prev];
+      const defaults = ['08:00', '12:00', '18:00', '22:00'];
+      while (next.length < count) next.push(defaults[next.length] ?? '08:00');
+      return next;
+    });
+  };
+
+  const setSlot = (i: number, v: string) => setSlots((prev) => prev.map((s, j) => (j === i ? v : s)));
 
   const mutation = useMutation({
     mutationFn: () => {
-      const schedule_times = times.split(',').map((t) => t.trim()).filter((t) => /^\d{1,2}:\d{2}$/.test(t)).map((t) => t.padStart(5, '0'));
-      const supplyNum = supply.trim() === '' ? null : Number(supply);
+      const asNeeded = perDay < 1;
       const body = {
         name: name.trim(),
-        units_per_dose: unitsNum,
-        dose: dose || null,
+        medical_condition_name: condition.trim() || '',
+        units_per_dose: units.trim() === '' ? null : Number(units),
+        dose_amount: doseAmount.trim() || null,
+        dose_unit: doseUnit.trim() || null,
         form: type || null,
         route: route || null,
         with_food: withFood,
         as_needed: asNeeded,
-        medical_condition_id: conditionId || null,
-        schedule_times: asNeeded ? [] : schedule_times,
-        supply: supplyNum,
-        instructions: instructions || null,
-        active,
+        schedule_times: asNeeded ? [] : slots.slice(0, perDay),
+        supply: packSize.trim() === '' ? null : Number(packSize),
+        supply_remaining: remaining.trim() === '' ? null : Number(remaining),
+        repeats_due: repeatsDue || null,
       };
       return med ? api.patch(`/care-profiles/${profileId}/medications/${med.id}`, body) : api.post(`/care-profiles/${profileId}/medications`, body);
     },
@@ -356,75 +410,107 @@ function MedicationForm({ profileId, med, onClose, onSaved }: { profileId: strin
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
   });
 
-  // Keep an unusual stored route selectable rather than silently losing it.
   const routeOptions: string[] = [...MED_ROUTES];
   if (route && !routeOptions.includes(route)) routeOptions.unshift(route);
 
+  const inlineSelect = `${SELECT} inline-block w-auto`;
+  const inlineInput = 'inline-block w-20 rounded-md border border-border bg-card px-2 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
+  const containerWord = typeMeta?.container ?? 'pack';
+  // A liquid or cream is stocked by volume in its dose measure (mL);
+  // everything else by count of its unit (tablets, puffs).
+  const supplyWord = typeMeta?.measured ? doseUnit.trim() || 'mL' : typeMeta ? typeMeta.plural.toLowerCase() : 'units';
+
   return (
-    <Modal open onClose={onClose} title={med ? 'Edit medication' : 'Add medication'}>
-      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (name.trim()) mutation.mutate(); }}>
+    <Modal open onClose={onClose} title={med ? 'Edit medication' : 'Add medication'} wide>
+      <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); if (name.trim()) mutation.mutate(); }}>
         <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Metformin" list="med-catalogue-options" hint="Pick an existing medication to reuse it, or type a new one." />
         <datalist id="med-catalogue-options">
           {suggestions.map((s) => <option key={s.id} value={s.name} />)}
         </datalist>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Input label="Unit" type="number" min="0" step="any" value={units} onChange={(e) => setUnits(e.target.value)} placeholder="e.g. 3" hint="How many are taken each time" />
-          <Input label="Dose" value={dose} onChange={(e) => setDose(e.target.value)} placeholder="e.g. 20mg" hint="The strength of each one" />
-          <div>
-            <label htmlFor="med-type" className="block text-sm font-medium text-ink mb-1">Type</label>
-            <select id="med-type" className={`${SELECT} w-full`} value={type} onChange={(e) => pickType(e.target.value)}>
-              <option value="">Choose…</option>
+
+        <section>
+          <h3 className="text-sm font-semibold text-ink mb-2">Treatment</h3>
+          <p className="text-sm text-ink leading-8">
+            To treat{' '}
+            <input
+              className={`${inlineInput} w-44`}
+              aria-label="Condition"
+              placeholder="condition"
+              list="condition-options"
+              value={condition}
+              onChange={(e) => setCondition(e.target.value)}
+            />
+            <datalist id="condition-options">
+              {conditions.map((c) => <option key={c.id} value={c.name} />)}
+            </datalist>{' '}
+            {subject} take{' '}
+            <input className={inlineInput} aria-label="Units per dose" type="number" min="0" step="any" value={units} onChange={(e) => setUnits(e.target.value)} />{' '}
+            <input className={`${inlineInput} w-16`} aria-label="Dose amount" placeholder="20" value={doseAmount} onChange={(e) => setDoseAmount(e.target.value)} />
+            <input className={`${inlineInput} w-16`} aria-label="Dose measure" placeholder="mg" list="dose-measures" value={doseUnit} onChange={(e) => setDoseUnit(e.target.value)} />
+            <datalist id="dose-measures">
+              {DOSE_MEASURES.map((m) => <option key={m} value={m} />)}
+            </datalist>{' '}
+            in{' '}
+            <select className={inlineSelect} aria-label="Type" value={type} onChange={(e) => pickType(e.target.value)}>
+              <option value="">…</option>
               {MED_TYPES.map((t) => <option key={t.value} value={t.value}>{t.value}</option>)}
               {type && !MED_TYPES.some((t) => t.value === type) ? <option value={type}>{type}</option> : null}
-            </select>
-          </div>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label htmlFor="med-route" className="block text-sm font-medium text-ink mb-1">Route</label>
-            <select id="med-route" className={`${SELECT} w-full`} value={route} onChange={(e) => setRoute(e.target.value)}>
-              <option value="">Choose…</option>
+            </select>{' '}
+            form via{' '}
+            <select className={inlineSelect} aria-label="Route" value={route} onChange={(e) => setRoute(e.target.value)}>
+              <option value="">…</option>
               {routeOptions.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="med-condition" className="block text-sm font-medium text-ink mb-1">For condition</label>
-            <select id="med-condition" className={`${SELECT} w-full`} value={conditionId} onChange={(e) => setConditionId(e.target.value)}>
-              <option value="">Not tied to a condition</option>
-              {conditions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-x-6 gap-y-2">
-          <label className="flex items-center gap-2 text-sm text-ink">
-            <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary" checked={withFood} onChange={(e) => setWithFood(e.target.checked)} />
-            With food
-          </label>
-          <label className="flex items-center gap-2 text-sm text-ink">
-            <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary" checked={asNeeded} onChange={(e) => setAsNeeded(e.target.checked)} />
-            Only as needed, not on a schedule
-          </label>
-        </div>
-        {!asNeeded ? (
-          <Input label="Times each day, comma separated" value={times} onChange={(e) => setTimes(e.target.value)} placeholder="08:00, 20:00" />
-        ) : null}
-        {preview ? (
-          <p className="text-sm text-muted rounded-md bg-surface-2 px-3 py-2">
-            Reads as: <span className="text-ink">{preview}</span>
+            </select>.
           </p>
-        ) : null}
-        <Input
-          label={`Supply in ${type ? (MED_TYPES.find((t) => t.value === type)?.plural.toLowerCase() ?? 'units') : 'units'}`}
-          type="number" min="0" step="any" value={supply} onChange={(e) => setSupply(e.target.value)} placeholder="e.g. 60"
-          hint="How many are on hand. Each dose given counts down by the unit number above."
-        />
-        <Textarea label="Instructions" value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={2} />
-        {med ? (
-          <label className="flex items-center gap-2 text-sm text-ink">
-            <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary" checked={active} onChange={(e) => setActive(e.target.checked)} />
-            Active (uncheck to stop and keep the history)
-          </label>
-        ) : null}
+          <p className="text-xs text-muted mt-1">A condition that isn't already recorded is added to this person's conditions.</p>
+        </section>
+
+        <section>
+          <h3 className="text-sm font-semibold text-ink mb-2">Schedule</h3>
+          <p className="text-sm text-ink leading-8">
+            It's taken{' '}
+            <input className={inlineInput} aria-label="Times a day" type="number" min="0" max="12" value={perDay} onChange={(e) => setPerDayCount(Number(e.target.value))} />{' '}
+            {perDay === 1 ? 'time a day' : 'times a day'},{' '}
+            <label className="inline-flex items-center gap-1.5">
+              <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary" checked={withFood} onChange={(e) => setWithFood(e.target.checked)} />
+              with food
+            </label>
+            {perDay > 0 ? ', at' : '.'}
+          </p>
+          {perDay > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {slots.slice(0, perDay).map((s, i) => (
+                <TimeField key={i} value={s} onChange={(v) => setSlot(i, v)} />
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted">Set to 0 for a medication taken only as needed.</p>
+          )}
+        </section>
+
+        <section>
+          <h3 className="text-sm font-semibold text-ink mb-2">Supply</h3>
+          <p className="text-sm text-ink leading-8">
+            A new {containerWord} provides{' '}
+            <input className={inlineInput} aria-label="A full pack provides" type="number" min="0" step="any" value={packSize} onChange={(e) => setPackSize(e.target.value)} />{' '}
+            {supplyWord}.
+          </p>
+          <p className="text-sm text-ink leading-8">
+            We have{' '}
+            <input className={inlineInput} aria-label="Amount left" type="number" min="0" step="any" value={remaining} onChange={(e) => setRemaining(e.target.value)} />{' '}
+            {supplyWord} left.
+          </p>
+          <p className="text-sm text-ink leading-8">
+            Repeats due:{' '}
+            <input className={`${inlineInput} w-40`} aria-label="Repeats due" type="date" value={repeatsDue} onChange={(e) => setRepeatsDue(e.target.value)} />
+          </p>
+          <p className="text-xs text-muted mt-1">
+            {typeMeta?.measured
+              ? `Each dose given counts the ${supplyWord} on hand down by the dose volume.`
+              : 'Each dose given counts the units on hand down by the number taken each time.'}
+          </p>
+        </section>
+
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
