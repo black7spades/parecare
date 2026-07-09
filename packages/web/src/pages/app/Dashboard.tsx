@@ -284,7 +284,6 @@ function ProfileTable({ profiles, onTogglePin }: { profiles: ProfileSummary[]; o
             <th className="px-3 py-2 w-8" aria-label="Pinned" />
             <th className="px-3 py-2 font-medium">Name</th>
             <th className="px-3 py-2 font-medium">Relationship</th>
-            <th className="px-3 py-2 font-medium">Journey</th>
             <th className="px-3 py-2 font-medium">Phase</th>
             <th className="px-3 py-2 font-medium">Next</th>
             <th className="px-3 py-2 font-medium">Last update</th>
@@ -293,7 +292,6 @@ function ProfileTable({ profiles, onTogglePin }: { profiles: ProfileSummary[]; o
         <tbody>
           {profiles.map((p) => {
             const j = firstJourney(p);
-            const extra = p.journeys.length - 1;
             return (
               <tr key={p.id} className="border-b border-border last:border-0 align-top">
                 <td className="px-3 py-2">
@@ -312,10 +310,6 @@ function ProfileTable({ profiles, onTogglePin }: { profiles: ProfileSummary[]; o
                   </Link>
                 </td>
                 <td className="px-3 py-2 text-muted">{p.relationship ?? ''}</td>
-                <td className="px-3 py-2 text-muted">
-                  {j ? j.name : ''}
-                  {extra > 0 ? <span className="text-xs"> +{extra} more</span> : null}
-                </td>
                 <td className="px-3 py-2 text-muted">{j?.phase_name ?? ''}</td>
                 <td className="px-3 py-2 text-muted whitespace-nowrap">
                   {p.next_event ? `${p.next_event.title} · ${format(new Date(p.next_event.next_due_at), 'd MMM, HH:mm')}` : ''}

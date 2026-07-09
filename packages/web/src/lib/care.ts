@@ -310,6 +310,9 @@ export interface MedicationRecord {
   name: string;
   /** How many units make up one dose, e.g. 3 capsules. */
   units_per_dose: number | null;
+  /** The strength number, e.g. "20"; dose is the composed display. */
+  dose_amount: string | null;
+  dose_unit: string | null;
   dose: string | null;
   form: string | null;
   route: string | null;
@@ -322,9 +325,11 @@ export interface MedicationRecord {
   frequency: string | null;
   schedule_times: string[] | null;
   instructions: string | null;
-  /** Counted in units: 3 tablets, not 60 mg. */
+  /** Counted in units: a full pack provides this many. */
   supply: number | null;
   supply_remaining: number | null;
+  /** When a repeat prescription is next due. */
+  repeats_due: string | null;
   active: boolean;
 }
 
@@ -347,22 +352,29 @@ export const MED_ROUTES = [
   'Through a feeding tube',
 ] as const;
 
-/** What the medication physically is. The type suggests the route. */
-export const MED_TYPES: { value: string; plural: string; defaultRoute: string }[] = [
-  { value: 'Tablet', plural: 'Tablets', defaultRoute: 'By mouth' },
-  { value: 'Capsule', plural: 'Capsules', defaultRoute: 'By mouth' },
-  { value: 'Liquid', plural: 'Doses', defaultRoute: 'By mouth' },
-  { value: 'Wafer', plural: 'Wafers', defaultRoute: 'By mouth' },
-  { value: 'Powder', plural: 'Doses', defaultRoute: 'By mouth' },
-  { value: 'Injection', plural: 'Injections', defaultRoute: 'Injection under the skin' },
-  { value: 'Patch', plural: 'Patches', defaultRoute: 'Skin patch' },
-  { value: 'Cream', plural: 'Applications', defaultRoute: 'On the skin' },
-  { value: 'Ointment', plural: 'Applications', defaultRoute: 'On the skin' },
-  { value: 'Drops', plural: 'Doses', defaultRoute: 'Eye drops' },
-  { value: 'Inhaler', plural: 'Puffs', defaultRoute: 'Inhaled' },
-  { value: 'Spray', plural: 'Sprays', defaultRoute: 'Into the nose' },
-  { value: 'Suppository', plural: 'Suppositories', defaultRoute: 'Rectal' },
+/**
+ * What the medication physically is. The type suggests the route, names
+ * the container a new supply comes in ("a new pack", "a new bottle"),
+ * and whether it is counted (tablets) or measured (a volume).
+ */
+export const MED_TYPES: { value: string; plural: string; defaultRoute: string; container: string; measured: boolean }[] = [
+  { value: 'Tablet', plural: 'Tablets', defaultRoute: 'By mouth', container: 'pack', measured: false },
+  { value: 'Capsule', plural: 'Capsules', defaultRoute: 'By mouth', container: 'pack', measured: false },
+  { value: 'Liquid', plural: 'Doses', defaultRoute: 'By mouth', container: 'bottle', measured: true },
+  { value: 'Wafer', plural: 'Wafers', defaultRoute: 'By mouth', container: 'pack', measured: false },
+  { value: 'Powder', plural: 'Sachets', defaultRoute: 'By mouth', container: 'box', measured: false },
+  { value: 'Injection', plural: 'Injections', defaultRoute: 'Injection under the skin', container: 'box', measured: false },
+  { value: 'Patch', plural: 'Patches', defaultRoute: 'Skin patch', container: 'pack', measured: false },
+  { value: 'Cream', plural: 'Applications', defaultRoute: 'On the skin', container: 'tube', measured: true },
+  { value: 'Ointment', plural: 'Applications', defaultRoute: 'On the skin', container: 'tube', measured: true },
+  { value: 'Drops', plural: 'Doses', defaultRoute: 'Eye drops', container: 'bottle', measured: true },
+  { value: 'Inhaler', plural: 'Puffs', defaultRoute: 'Inhaled', container: 'inhaler', measured: false },
+  { value: 'Spray', plural: 'Sprays', defaultRoute: 'Into the nose', container: 'bottle', measured: false },
+  { value: 'Suppository', plural: 'Suppositories', defaultRoute: 'Rectal', container: 'pack', measured: false },
 ];
+
+/** Common dose measures, offered as a datalist but freely typeable. */
+export const DOSE_MEASURES = ['mg', 'mcg', 'g', 'mL', 'IU', 'units', '%'] as const;
 
 /** "3 Capsules", "1 Tablet", or a sensible fallback when type is unknown. */
 export function medUnitsLabel(count: number, form: string | null): string {
