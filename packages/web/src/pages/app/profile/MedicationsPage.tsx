@@ -292,7 +292,7 @@ function MedicationForm({ profileId, med, onClose, onSaved }: { profileId: strin
   const [dose, setDose] = useState(med?.dose ?? '');
   const [type, setType] = useState(med?.form ?? '');
   const [route, setRoute] = useState(med?.route ?? '');
-  const [withFood, setWithFood] = useState(med?.with_food === true);
+  const [withFood, setWithFood] = useState(med?.with_food ?? false);
   const [asNeeded, setAsNeeded] = useState(med?.as_needed ?? false);
   const [conditionId, setConditionId] = useState(med?.medical_condition_id ?? '');
   const [times, setTimes] = useState((med?.schedule_times ?? []).join(', '));
@@ -328,7 +328,7 @@ function MedicationForm({ profileId, med, onClose, onSaved }: { profileId: strin
     units_per_dose: unitsNum,
     dose: dose || null,
     form: type || null,
-    with_food: withFood ? true : null,
+    with_food: withFood,
     route: route || null,
   });
 
@@ -342,7 +342,7 @@ function MedicationForm({ profileId, med, onClose, onSaved }: { profileId: strin
         dose: dose || null,
         form: type || null,
         route: route || null,
-        with_food: withFood ? true : false,
+        with_food: withFood,
         as_needed: asNeeded,
         medical_condition_id: conditionId || null,
         schedule_times: asNeeded ? [] : schedule_times,

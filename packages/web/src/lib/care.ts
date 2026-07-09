@@ -313,8 +313,8 @@ export interface MedicationRecord {
   dose: string | null;
   form: string | null;
   route: string | null;
-  /** Taken with food (true), without food (false), unspecified (null). */
-  with_food: boolean | null;
+  /** Recorded only when true; unchecked simply means false. */
+  with_food: boolean;
   /** Only taken when needed, not on a schedule. */
   as_needed: boolean;
   medical_condition_id: string | null;
@@ -376,7 +376,7 @@ export function medUnitsLabel(count: number, form: string | null): string {
 /**
  * The whole regimen as one readable line composed from its parts:
  * "3 x 20mg Capsules with food, by mouth". Display only; every part
- * stays its own field underneath.
+ * stays its own field underneath. With food is mentioned only when true.
  */
 export function regimenLine(m: Pick<MedicationRecord, 'units_per_dose' | 'dose' | 'form' | 'with_food' | 'route'>): string {
   const type = MED_TYPES.find((t) => t.value.toLowerCase() === (m.form ?? '').toLowerCase());
@@ -386,7 +386,7 @@ export function regimenLine(m: Pick<MedicationRecord, 'units_per_dose' | 'dose' 
     units ? `${Number.isInteger(units) ? units : units.toFixed(2)} x` : null,
     m.dose,
     typeWord,
-    m.with_food === true ? 'with food' : m.with_food === false ? 'without food' : null,
+    m.with_food ? 'with food' : null,
   ].filter(Boolean);
   const head = parts.join(' ');
   return [head, m.route ? m.route.charAt(0).toLowerCase() + m.route.slice(1) : null].filter(Boolean).join(', ');
