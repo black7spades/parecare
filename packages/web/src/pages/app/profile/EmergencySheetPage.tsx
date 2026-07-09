@@ -4,7 +4,7 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { PoaBadge } from '../../../components/PoaBadge';
 import { useProfile } from './ProfileLayout';
-import { poaLabel, providerTypeLabel, type CarePlan, type CircleMember, type Provider } from '../../../lib/care';
+import { poaLabel, providerTypeLabel, type Allergy, type CarePlan, type CircleMember, type MedicalCondition, type Provider } from '../../../lib/care';
 
 export function EmergencySheetPage() {
   const { profile } = useProfile();
@@ -12,6 +12,14 @@ export function EmergencySheetPage() {
   const { data: planData } = useQuery({
     queryKey: ['care-plan', profile.id],
     queryFn: () => api.get<{ plan: CarePlan | null }>(`/care-profiles/${profile.id}/plan`),
+  });
+  const { data: allergyData } = useQuery({
+    queryKey: ['allergies', profile.id],
+    queryFn: () => api.get<{ allergies: Allergy[] }>(`/care-profiles/${profile.id}/allergies`),
+  });
+  const { data: conditionData } = useQuery({
+    queryKey: ['conditions', profile.id],
+    queryFn: () => api.get<{ conditions: MedicalCondition[] }>(`/care-profiles/${profile.id}/conditions`),
   });
   const { data: circleData } = useQuery({
     queryKey: ['circle', profile.id],
@@ -27,7 +35,8 @@ export function EmergencySheetPage() {
   const providers = providerData?.providers ?? [];
   const asArray = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
   const meds = asArray<{ name: string; dose?: string; frequency?: string }>(plan?.medications);
-  const conditions = asArray<string>(plan?.conditions);
+  const allergies = allergyData?.allergies ?? [];
+  const conditions = conditionData?.conditions ?? [];
   const contacts = asArray<{ name: string; relationship?: string; phone: string }>(plan?.emergency_contacts);
 
   return (
@@ -52,6 +61,23 @@ export function EmergencySheetPage() {
               .join(' · ')}
           </p>
         </div>
+
+        <Section title="Allergies, do not give">
+          {allergies.length === 0 ? (
+            <p className="text-sm">No known allergies recorded.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <tbody>
+                {allergies.map((a) => (
+                  <tr key={a.id}>
+                    <td className="py-0.5 font-bold text-red-700">{a.substance}</td>
+                    <td className="py-0.5">{a.reaction ?? ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Section>
 
         <Section title="Emergency contacts">
           {contacts.length === 0 ? (
@@ -82,7 +108,7 @@ export function EmergencySheetPage() {
         </Section>
 
         <Section title="Medical conditions">
-          {conditions.length === 0 ? <Empty /> : <p className="text-sm">{conditions.join(' · ')}</p>}
+          {conditions.length === 0 ? <Empty /> : <p className="text-sm">{conditions.map((c) => c.name).join(' · ')}</p>}
         </Section>
 
         <Section title="Current medications">

@@ -9,7 +9,16 @@ import { useProfile } from './ProfileLayout';
 import { ImportExport } from '../../../components/ImportExport';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
-import { MED_STATUSES, medStatusDescription, type MedicationRecord } from '../../../lib/care';
+import {
+  MED_ROUTES,
+  MED_STATUSES,
+  MED_TYPES,
+  medStatusDescription,
+  medUnitsLabel,
+  regimenLine,
+  type MedicalCondition,
+  type MedicationRecord,
+} from '../../../lib/care';
 import { MedicationMar } from './MedicationMar';
 
 // Domain sort/filter helpers for the reusable data view.
@@ -24,12 +33,6 @@ const doseValue = (m: MedicationRecord): number => {
 };
 const byName = (a: MedicationRecord, b: MedicationRecord) => a.name.localeCompare(b.name);
 
-// The unit is captured as part of the dose string (e.g. "500 mg"); reuse it to
-// label the supply count so "29500 mg" reads sensibly without a second field.
-const doseUnit = (dose: string | null): string => {
-  const m = String(dose ?? '').match(/[a-zA-Z%]+/);
-  return m ? m[0] : '';
-};
 const fmtNum = (n: number): string => (Number.isInteger(n) ? String(n) : String(Number(n.toFixed(3))));
 
 const MED_SORTS: DataSort<MedicationRecord>[] = [
@@ -153,8 +156,8 @@ export function MedicationsPage() {
               resource="medications"
               canImport={canManageMeds}
               onImported={invalidate}
-              templateHeaders={['Name', 'Dose', 'Form', 'Route', 'Frequency', 'Times', 'Instructions', 'Supply', 'Active']}
-              templateSample={['Metformin', '500 mg', 'Tablet', 'Oral', 'Twice daily', '08:00; 20:00', 'With food', '30000', 'true']}
+              templateHeaders={['Name', 'Units per dose', 'Dose', 'Type', 'Route', 'With food', 'As needed', 'Times', 'Instructions', 'Supply in units', 'Active']}
+              templateSample={['Metformin', '1', '500 mg', 'Tablet', 'By mouth', 'true', 'false', '08:00; 20:00', 'Take with a full glass of water', '60', 'true']}
             />
             {canManageMeds ? <Button onClick={() => setAddOpen(true)}>Add medication</Button> : null}
           </div>
@@ -189,6 +192,7 @@ export function MedicationsPage() {
                     </th>
                   ) : null}
                   <th className="px-4 py-3 font-medium">Medication</th>
+                  <th className="px-4 py-3 font-medium">Unit</th>
                   <th className="px-4 py-3 font-medium">Dose</th>
                   <th className="px-4 py-3 font-medium">Route</th>
                   <th className="px-4 py-3 font-medium">Schedule</th>
@@ -198,9 +202,8 @@ export function MedicationsPage() {
               </thead>
               <tbody>
                 {dv.view.length === 0 ? (
-                  <tr><td colSpan={canSelect ? 7 : 6} className="px-4 py-8 text-center text-muted">{meds.length === 0 ? 'No medications recorded yet.' : 'No medications match your search or filters.'}</td></tr>
+                  <tr><td colSpan={canSelect ? 8 : 7} className="px-4 py-8 text-center text-muted">{meds.length === 0 ? 'No medications recorded yet.' : 'No medications match your search or filters.'}</td></tr>
                 ) : dv.view.map((m) => {
-                  const unit = doseUnit(m.dose);
                   const remaining = m.supply_remaining;
                   return (
                   <tr key={m.id} className={`border-b border-border last:border-0 ${m.active ? '' : 'opacity-60'}`}>
@@ -212,13 +215,19 @@ export function MedicationsPage() {
                     ) : null}
                     <td className="px-4 py-3">
                       <div data-testid="med-name" className="font-medium text-ink">{m.name}{m.active ? '' : ' (inactive)'}</div>
-                      {m.instructions ? <div className="text-xs text-muted">{m.instructions}</div> : null}
+                      {m.condition_name ? <div className="text-xs text-muted">For {m.condition_name}</div> : null}
                     </td>
+                    <td className="px-4 py-3 text-muted">{m.units_per_dose != null ? fmtNum(m.units_per_dose) : '—'}</td>
                     <td className="px-4 py-3 text-muted">{m.dose || '—'}</td>
                     <td className="px-4 py-3 text-muted">{m.route || '—'}</td>
                     <td className="px-4 py-3 text-muted">
-                      {m.frequency ? <div>{m.frequency}</div> : null}
-                      {m.schedule_times?.length ? <div className="text-xs">{m.schedule_times.join(', ')}</div> : <div className="text-xs">As needed</div>}
+                      <div>{regimenLine(m) || '—'}</div>
+                      {m.as_needed ? (
+                        <div className="text-xs">As needed</div>
+                      ) : m.schedule_times?.length ? (
+                        <div className="text-xs">{m.schedule_times.join(', ')}</div>
+                      ) : null}
+                      {m.instructions ? <div className="text-xs">{m.instructions}</div> : null}
                     </td>
                     <td className="px-4 py-3">
                       {remaining == null ? (
@@ -227,7 +236,7 @@ export function MedicationsPage() {
                         <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">Out of stock</span>
                       ) : (
                         <span className={`text-ink ${m.supply != null && remaining <= m.supply * 0.15 ? 'text-amber-700 dark:text-amber-300 font-medium' : ''}`}>
-                          {fmtNum(remaining)}{unit ? ` ${unit}` : ''}
+                          {medUnitsLabel(remaining, m.form)} left
                         </span>
                       )}
                     </td>
@@ -279,9 +288,13 @@ export function MedicationsPage() {
 
 function MedicationForm({ profileId, med, onClose, onSaved }: { profileId: string; med?: MedicationRecord; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(med?.name ?? '');
+  const [units, setUnits] = useState(med?.units_per_dose != null ? String(med.units_per_dose) : '1');
   const [dose, setDose] = useState(med?.dose ?? '');
+  const [type, setType] = useState(med?.form ?? '');
   const [route, setRoute] = useState(med?.route ?? '');
-  const [frequency, setFrequency] = useState(med?.frequency ?? '');
+  const [withFood, setWithFood] = useState(med?.with_food === true);
+  const [asNeeded, setAsNeeded] = useState(med?.as_needed ?? false);
+  const [conditionId, setConditionId] = useState(med?.medical_condition_id ?? '');
   const [times, setTimes] = useState((med?.schedule_times ?? []).join(', '));
   const [supply, setSupply] = useState(med?.supply != null ? String(med.supply) : '');
   const [instructions, setInstructions] = useState(med?.instructions ?? '');
@@ -296,16 +309,56 @@ function MedicationForm({ profileId, med, onClose, onSaved }: { profileId: strin
   });
   const suggestions = catalogue?.items ?? [];
 
+  const { data: conditionData } = useQuery({
+    queryKey: ['conditions', profileId],
+    queryFn: () => api.get<{ conditions: MedicalCondition[] }>(`/care-profiles/${profileId}/conditions`),
+  });
+  const conditions = conditionData?.conditions ?? [];
+
+  // The type suggests the route; the route stays editable.
+  const pickType = (value: string) => {
+    setType(value);
+    const t = MED_TYPES.find((x) => x.value === value);
+    if (t && !route) setRoute(t.defaultRoute);
+    if (t && route && MED_ROUTES.includes(route as (typeof MED_ROUTES)[number])) setRoute(t.defaultRoute);
+  };
+
+  const unitsNum = units.trim() === '' ? null : Number(units);
+  const preview = regimenLine({
+    units_per_dose: unitsNum,
+    dose: dose || null,
+    form: type || null,
+    with_food: withFood ? true : null,
+    route: route || null,
+  });
+
   const mutation = useMutation({
     mutationFn: () => {
       const schedule_times = times.split(',').map((t) => t.trim()).filter((t) => /^\d{1,2}:\d{2}$/.test(t)).map((t) => t.padStart(5, '0'));
       const supplyNum = supply.trim() === '' ? null : Number(supply);
-      const body = { name: name.trim(), dose: dose || null, route: route || null, frequency: frequency || null, schedule_times, supply: supplyNum, instructions: instructions || null, active };
+      const body = {
+        name: name.trim(),
+        units_per_dose: unitsNum,
+        dose: dose || null,
+        form: type || null,
+        route: route || null,
+        with_food: withFood ? true : false,
+        as_needed: asNeeded,
+        medical_condition_id: conditionId || null,
+        schedule_times: asNeeded ? [] : schedule_times,
+        supply: supplyNum,
+        instructions: instructions || null,
+        active,
+      };
       return med ? api.patch(`/care-profiles/${profileId}/medications/${med.id}`, body) : api.post(`/care-profiles/${profileId}/medications`, body);
     },
     onSuccess: onSaved,
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
   });
+
+  // Keep an unusual stored route selectable rather than silently losing it.
+  const routeOptions: string[] = [...MED_ROUTES];
+  if (route && !routeOptions.includes(route)) routeOptions.unshift(route);
 
   return (
     <Modal open onClose={onClose} title={med ? 'Edit medication' : 'Add medication'}>
@@ -314,13 +367,57 @@ function MedicationForm({ profileId, med, onClose, onSaved }: { profileId: strin
         <datalist id="med-catalogue-options">
           {suggestions.map((s) => <option key={s.id} value={s.name} />)}
         </datalist>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Input label="Dose" value={dose} onChange={(e) => setDose(e.target.value)} placeholder="e.g. 500 mg" />
-          <Input label="Route" value={route} onChange={(e) => setRoute(e.target.value)} placeholder="e.g. Oral" />
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Input label="Unit" type="number" min="0" step="any" value={units} onChange={(e) => setUnits(e.target.value)} placeholder="e.g. 3" hint="How many are taken each time" />
+          <Input label="Dose" value={dose} onChange={(e) => setDose(e.target.value)} placeholder="e.g. 20mg" hint="The strength of each one" />
+          <div>
+            <label htmlFor="med-type" className="block text-sm font-medium text-ink mb-1">Type</label>
+            <select id="med-type" className={`${SELECT} w-full`} value={type} onChange={(e) => pickType(e.target.value)}>
+              <option value="">Choose…</option>
+              {MED_TYPES.map((t) => <option key={t.value} value={t.value}>{t.value}</option>)}
+              {type && !MED_TYPES.some((t) => t.value === type) ? <option value={type}>{type}</option> : null}
+            </select>
+          </div>
         </div>
-        <Input label="Frequency" value={frequency} onChange={(e) => setFrequency(e.target.value)} placeholder="e.g. Twice daily with food" />
-        <Input label="Scheduled times (HH:MM, comma separated)" value={times} onChange={(e) => setTimes(e.target.value)} placeholder="08:00, 20:00" hint="Leave blank for a medication taken only as needed." />
-        <Input label={`Supply${dose ? ` (${doseUnit(dose) || 'total on hand'})` : ''}`} type="number" min="0" step="any" value={supply} onChange={(e) => setSupply(e.target.value)} placeholder="e.g. 30000" hint="Total amount on hand, in the same unit as the dose. This counts down by the dose each time a dose is given." />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="med-route" className="block text-sm font-medium text-ink mb-1">Route</label>
+            <select id="med-route" className={`${SELECT} w-full`} value={route} onChange={(e) => setRoute(e.target.value)}>
+              <option value="">Choose…</option>
+              {routeOptions.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="med-condition" className="block text-sm font-medium text-ink mb-1">For condition</label>
+            <select id="med-condition" className={`${SELECT} w-full`} value={conditionId} onChange={(e) => setConditionId(e.target.value)}>
+              <option value="">Not tied to a condition</option>
+              {conditions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-x-6 gap-y-2">
+          <label className="flex items-center gap-2 text-sm text-ink">
+            <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary" checked={withFood} onChange={(e) => setWithFood(e.target.checked)} />
+            With food
+          </label>
+          <label className="flex items-center gap-2 text-sm text-ink">
+            <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary" checked={asNeeded} onChange={(e) => setAsNeeded(e.target.checked)} />
+            Only as needed, not on a schedule
+          </label>
+        </div>
+        {!asNeeded ? (
+          <Input label="Times each day, comma separated" value={times} onChange={(e) => setTimes(e.target.value)} placeholder="08:00, 20:00" />
+        ) : null}
+        {preview ? (
+          <p className="text-sm text-muted rounded-md bg-surface-2 px-3 py-2">
+            Reads as: <span className="text-ink">{preview}</span>
+          </p>
+        ) : null}
+        <Input
+          label={`Supply in ${type ? (MED_TYPES.find((t) => t.value === type)?.plural.toLowerCase() ?? 'units') : 'units'}`}
+          type="number" min="0" step="any" value={supply} onChange={(e) => setSupply(e.target.value)} placeholder="e.g. 60"
+          hint="How many are on hand. Each dose given counts down by the unit number above."
+        />
         <Textarea label="Instructions" value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={2} />
         {med ? (
           <label className="flex items-center gap-2 text-sm text-ink">

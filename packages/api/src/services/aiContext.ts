@@ -119,12 +119,29 @@ export async function buildProfileContext(profile: CareProfile, access: CareAcce
     sections.push(lines.join('\n'));
   }
 
+  // Allergies come first among the health facts: the assistant must
+  // never suggest anything on this list.
+  const [allergies, conditions] = await Promise.all([
+    db('allergies').where({ care_profile_id: profileId }).orderBy('sort_order', 'asc'),
+    db('medical_conditions').where({ care_profile_id: profileId }).orderBy('sort_order', 'asc'),
+  ]);
+  if (allergies.length > 0) {
+    sections.push(
+      `## Allergies, must never be given\n` +
+        allergies.map((a) => `- ${a.substance}${a.reaction ? `: causes ${a.reaction}` : ''}`).join('\n')
+    );
+  }
+  if (conditions.length > 0) {
+    sections.push(
+      `## Medical conditions\n` + conditions.map((c) => `- ${c.name}${c.notes ? `: ${c.notes}` : ''}`).join('\n')
+    );
+  }
+
   if (plan) {
     const contacts = Array.isArray(plan.emergency_contacts) ? plan.emergency_contacts : [];
     sections.push(
       [
         `## Care plan`,
-        Array.isArray(plan.conditions) && plan.conditions.length ? `Conditions: ${plan.conditions.join('; ')}` : null,
         Array.isArray(plan.dietary_requirements) && plan.dietary_requirements.length
           ? `Dietary requirements: ${plan.dietary_requirements.join('; ')}`
           : null,

@@ -88,6 +88,7 @@ export function JourneysSection({
         open={enrolOpen}
         onClose={() => setEnrolOpen(false)}
         profileId={profileId}
+        careName={careName}
         dateOfBirth={dateOfBirth}
         dueDate={dueDate}
       />
@@ -596,12 +597,14 @@ function EnrolModal({
   open,
   onClose,
   profileId,
+  careName,
   dateOfBirth,
   dueDate,
 }: {
   open: boolean;
   onClose: () => void;
   profileId: string;
+  careName?: string;
   dateOfBirth: string | null;
   dueDate?: string | null;
 }) {
@@ -634,12 +637,14 @@ function EnrolModal({
   );
   const matchedIds = new Set(matched.map((s) => s.id));
 
-  const filtered = templates.filter(
-    (t) =>
-      !search.trim() ||
-      t.name.toLowerCase().includes(search.trim().toLowerCase()) ||
-      (t.description ?? '').toLowerCase().includes(search.trim().toLowerCase())
-  );
+  // People describe what is happening in their own words; match any of
+  // them rather than demanding the exact phrase.
+  const words = search.toLowerCase().split(/\s+/).filter((w) => w.length >= 3);
+  const filtered = templates.filter((t) => {
+    if (words.length === 0) return true;
+    const haystack = `${t.name} ${t.description ?? ''}`.toLowerCase();
+    return words.some((w) => haystack.includes(w));
+  });
   const suggested = filtered.filter((t) => t.life_stage_ids.some((id) => matchedIds.has(id)));
   const rest = filtered.filter((t) => !t.life_stage_ids.some((id) => matchedIds.has(id)));
 
@@ -675,7 +680,14 @@ function EnrolModal({
   return (
     <Modal open={open} onClose={onClose} title="Choose a journey" wide>
       <div className="space-y-3">
-        <Input placeholder="Search the journey library…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <p className="text-sm text-muted -mt-2">
+          What's happening for {careName || 'them'} right now? Type a word or two, or browse below.
+        </p>
+        <Input
+          placeholder="e.g. memory, new diagnosis, quitting smoking, school…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
         <div className="grid gap-3 sm:grid-cols-2 max-h-96 overflow-y-auto pr-1">
           <div className="space-y-2">
             {matched.length > 0 && suggested.length > 0 ? (
@@ -713,10 +725,6 @@ function EnrolModal({
                 <Button size="sm" className="w-full" loading={enrolMutation.isPending} onClick={() => enrolMutation.mutate(preview.id)}>
                   Start this journey
                 </Button>
-                <p className="text-xs text-muted mt-2">
-                  The journey becomes this person's own copy. Phases and items can be renamed, added or removed for
-                  them without changing the library.
-                </p>
               </>
             ) : (
               <p className="text-xs text-muted">Select a journey to see its phases before starting it.</p>

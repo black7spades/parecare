@@ -18,7 +18,8 @@ import type { Achievement, CareJourney } from '../../../lib/journeys';
  * across every journey.
  */
 export function MemoryBookPage() {
-  const { profile, careName } = useProfile();
+  const { profile } = useProfile();
+  const personName = profile.preferred_name ?? profile.first_name ?? profile.full_name.split(' ')[0];
   const [view, setView] = useState<'book' | 'achievements'>('book');
   const [storyOf, setStoryOf] = useState<Achievement | null>(null);
 
@@ -39,7 +40,7 @@ export function MemoryBookPage() {
       {view === 'book' ? (
         <BookView
           profileId={profile.id}
-          careName={careName}
+          personName={personName}
           storyOf={storyOf}
           onStoryDone={() => setStoryOf(null)}
         />
@@ -58,12 +59,12 @@ export function MemoryBookPage() {
 
 function BookView({
   profileId,
-  careName,
+  personName,
   storyOf,
   onStoryDone,
 }: {
   profileId: string;
-  careName: string;
+  personName: string;
   storyOf: Achievement | null;
   onStoryDone: () => void;
 }) {
@@ -157,7 +158,7 @@ function BookView({
           </p>
         ) : (
           <p className="text-sm text-muted -mt-2">
-            Stories, photos and messages for {careName}, written while there's still time to share them together.
+            Stories, photos and messages for {personName}.
           </p>
         )}
         <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. The caravan trip, 1987" />
@@ -276,7 +277,7 @@ function MilestoneCard({ achievement }: { achievement: Achievement }) {
   );
 }
 
-type SortKey = 'title' | 'journey' | 'phase' | 'achieved' | 'recorded' | 'by' | 'milestone' | 'notes';
+type SortKey = 'title' | 'journey' | 'achieved' | 'milestone';
 
 function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWriteStory: (a: Achievement) => void }) {
   const [q, setQ] = useState('');
@@ -287,7 +288,7 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
   const [to, setTo] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('achieved');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  const [openNotesId, setOpenNotesId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
 
   const params = new URLSearchParams();
   if (q.trim()) params.set('q', q.trim());
@@ -320,18 +321,10 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
           return a.title.toLowerCase();
         case 'journey':
           return (a.journey_name ?? '').toLowerCase();
-        case 'phase':
-          return (a.phase_name ?? a.legacy_phase ?? '').toLowerCase();
         case 'achieved':
           return new Date(a.achieved_on ?? a.completed_at).getTime();
-        case 'recorded':
-          return new Date(a.completed_at).getTime();
-        case 'by':
-          return (a.recorded_by_name ?? '').toLowerCase();
         case 'milestone':
           return a.is_milestone ? 1 : 0;
-        case 'notes':
-          return a.note_count;
       }
     };
     return [...list].sort((x, y) => {
@@ -345,13 +338,15 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     else {
       setSortKey(key);
-      setSortDir(key === 'title' || key === 'journey' || key === 'phase' || key === 'by' ? 'asc' : 'desc');
+      setSortDir(key === 'title' || key === 'journey' ? 'asc' : 'desc');
     }
   };
 
+  // The export keeps every fact as its own column even though the table
+  // shows only the essentials.
   const exportCsv = () => {
     const esc = (v: string | number | null) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = ['What was achieved', 'Journey', 'Phase', 'Date it happened', 'Date it was recorded', 'Recorded by', 'Milestone', 'Notes', 'Photos'];
+    const header = ['Achievement', 'Journey', 'Phase', 'Date it happened', 'Date it was recorded', 'Recorded by', 'Milestone', 'Notes', 'Photos'];
     const lines = rows.map((a) =>
       [
         a.title,
@@ -376,8 +371,8 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
     URL.revokeObjectURL(url);
   };
 
-  const th = (key: SortKey, label: string) => (
-    <th className="px-2 py-2 text-left font-medium text-muted whitespace-nowrap">
+  const th = (key: SortKey, label: string, extra = '') => (
+    <th className={`px-3 py-2 text-left font-medium text-muted ${extra}`}>
       <button type="button" className="hover:text-ink" onClick={() => sortBy(key)}>
         {label}
         {sortKey === key ? <span className="ml-0.5">{sortDir === 'asc' ? '↑' : '↓'}</span> : null}
@@ -392,7 +387,7 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
           <div>
             <h2 className="text-base font-semibold text-ink">Achievements</h2>
             <p className="text-sm text-muted">
-              Every completed checklist item, across every journey. Goals set, things done, memories kept.
+              Every completed checklist item, across every journey. Select one to see its whole story.
             </p>
           </div>
           <Button size="sm" variant="secondary" onClick={exportCsv} disabled={rows.length === 0}>
@@ -437,7 +432,7 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
         </div>
       </div>
 
-      <div className="card overflow-x-auto p-0">
+      <div className="card p-0">
         {isLoading ? (
           <p className="text-sm text-muted p-4">Loading…</p>
         ) : rows.length === 0 ? (
@@ -448,15 +443,10 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
           <table className="w-full text-sm">
             <thead className="border-b border-border">
               <tr>
-                {th('title', 'What was achieved')}
-                {th('journey', 'Journey')}
-                {th('phase', 'Phase')}
-                {th('achieved', 'Date it happened')}
-                {th('recorded', 'Date recorded')}
-                {th('by', 'Recorded by')}
-                {th('milestone', 'Milestone')}
-                {th('notes', 'Notes')}
-                <th className="px-2 py-2" />
+                {th('title', 'Achievement')}
+                {th('journey', 'Journey', 'hidden sm:table-cell')}
+                {th('achieved', 'Date')}
+                {th('milestone', 'Milestone', 'hidden sm:table-cell')}
               </tr>
             </thead>
             <tbody>
@@ -465,8 +455,8 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
                   key={a.id}
                   profileId={profileId}
                   achievement={a}
-                  notesOpen={openNotesId === a.id}
-                  onToggleNotes={() => setOpenNotesId((v) => (v === a.id ? null : a.id))}
+                  open={openId === a.id}
+                  onToggle={() => setOpenId((v) => (v === a.id ? null : a.id))}
                   onWriteStory={() => onWriteStory(a)}
                 />
               ))}
@@ -478,50 +468,64 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
   );
 }
 
+/**
+ * One achievement. The title is the link: it opens the whole record,
+ * with the note, the photo, who recorded it and Write the story.
+ */
 function AchievementRow({
   profileId,
   achievement: a,
-  notesOpen,
-  onToggleNotes,
+  open,
+  onToggle,
   onWriteStory,
 }: {
   profileId: string;
   achievement: Achievement;
-  notesOpen: boolean;
-  onToggleNotes: () => void;
+  open: boolean;
+  onToggle: () => void;
   onWriteStory: () => void;
 }) {
+  const when = a.achieved_on ?? a.completed_at;
   return (
     <>
       <tr className="border-b border-border last:border-0 align-top">
-        <td className="px-2 py-2 text-ink">{a.title}</td>
-        <td className="px-2 py-2 text-muted whitespace-nowrap">{a.journey_name ?? ''}</td>
-        <td className="px-2 py-2 text-muted whitespace-nowrap">{a.phase_name ?? a.legacy_phase ?? ''}</td>
-        <td className="px-2 py-2 text-muted whitespace-nowrap">
-          {a.achieved_on ? format(new Date(a.achieved_on), 'd MMM yyyy') : ''}
-        </td>
-        <td className="px-2 py-2 text-muted whitespace-nowrap">{format(new Date(a.completed_at), 'd MMM yyyy')}</td>
-        <td className="px-2 py-2 text-muted whitespace-nowrap">{a.recorded_by_name ?? ''}</td>
-        <td className="px-2 py-2">{a.is_milestone ? '⭐' : ''}</td>
-        <td className="px-2 py-2 whitespace-nowrap">
-          <button type="button" className="text-primary hover:underline" onClick={onToggleNotes}>
-            {a.note_count > 0 ? `${a.note_count}${a.photo_count > 0 ? ' 📷' : ''}` : 'Add'}
+        <td className="px-3 py-2">
+          <button type="button" className="text-left text-primary hover:underline" onClick={onToggle}>
+            {a.title}
           </button>
         </td>
-        <td className="px-2 py-2 whitespace-nowrap">
-          {a.story_entry_id ? (
-            <span className="text-xs text-muted">Story written</span>
-          ) : (
-            <button type="button" className="text-xs text-primary hover:underline" onClick={onWriteStory}>
-              Write the story
-            </button>
-          )}
-        </td>
+        <td className="px-3 py-2 text-muted hidden sm:table-cell">{a.journey_name ?? ''}</td>
+        <td className="px-3 py-2 text-muted whitespace-nowrap">{when ? format(new Date(when), 'd MMM yyyy') : ''}</td>
+        <td className="px-3 py-2 hidden sm:table-cell">{a.is_milestone ? '⭐' : ''}</td>
       </tr>
-      {notesOpen ? (
+      {open ? (
         <tr className="border-b border-border last:border-0">
-          <td colSpan={9} className="px-2 pb-3">
-            <ItemNotesThread profileId={profileId} itemId={a.id} />
+          <td colSpan={4} className="px-3 pb-3">
+            <div className="rounded-md border border-border bg-surface p-3 space-y-2">
+              {a.description ? <p className="text-sm text-ink">{a.description}</p> : null}
+              <p className="text-xs text-muted">
+                {[
+                  a.journey_name,
+                  a.phase_name ?? a.legacy_phase,
+                  a.achieved_on ? `Happened ${format(new Date(a.achieved_on), 'd MMM yyyy')}` : null,
+                  `Recorded ${format(new Date(a.completed_at), 'd MMM yyyy')}` +
+                    (a.recorded_by_name ? ` by ${a.recorded_by_name}` : ''),
+                  a.is_milestone ? 'Milestone' : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+              <ItemNotesThread profileId={profileId} itemId={a.id} />
+              <div>
+                {a.story_entry_id ? (
+                  <span className="text-xs text-muted">The story of this achievement is in the book.</span>
+                ) : (
+                  <button type="button" className="text-xs text-primary hover:underline" onClick={onWriteStory}>
+                    Write the story
+                  </button>
+                )}
+              </div>
+            </div>
           </td>
         </tr>
       ) : null}

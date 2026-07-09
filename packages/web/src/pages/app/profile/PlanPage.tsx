@@ -5,7 +5,7 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { useProfile } from './ProfileLayout';
-import type { CarePlan, EmergencyContact, Medication } from '../../../lib/care';
+import type { Allergy, CarePlan, EmergencyContact, MedicalCondition, Medication } from '../../../lib/care';
 
 const EMPTY_PLAN: CarePlan = {
   conditions: [],
@@ -49,12 +49,16 @@ export function PlanPage() {
   }, [data]);
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      api.put(`/care-profiles/${profile.id}/plan`, {
-        ...plan,
+    mutationFn: () => {
+      // Conditions now live in their own table; never write the legacy
+      // array so the two can't drift.
+      const { conditions: _legacyConditions, ...rest } = plan;
+      return api.put(`/care-profiles/${profile.id}/plan`, {
+        ...rest,
         medications: plan.medications.filter((m) => m.name.trim()),
         emergency_contacts: plan.emergency_contacts.filter((c) => c.name.trim() && c.phone.trim()),
-      }),
+      });
+    },
     onSuccess: () => {
       setError('');
       setSaved(true);
@@ -95,14 +99,11 @@ export function PlanPage() {
       </div>
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
+      <AllergiesSection profileId={profile.id} />
+      <ConditionsSection profileId={profile.id} />
+
       <div className="card space-y-4">
         <h3 className="text-sm font-semibold text-ink">Health</h3>
-        <TagListEditor
-          label="Conditions"
-          placeholder="e.g. Type 2 diabetes"
-          values={plan.conditions}
-          onChange={(v) => set('conditions', v)}
-        />
         <MedicationsEditor medications={plan.medications} onChange={(v) => set('medications', v)} />
         <TagListEditor
           label="Dietary requirements"
@@ -164,6 +165,191 @@ export function PlanPage() {
         <ContactsEditor contacts={plan.emergency_contacts} onChange={(v) => set('emergency_contacts', v)} />
       </div>
     </form>
+  );
+}
+
+/**
+ * What this person must not be given. The substance and the reaction it
+ * causes are two facts, so they are two fields. Saves immediately.
+ */
+function AllergiesSection({ profileId }: { profileId: string }) {
+  const queryClient = useQueryClient();
+  const [substance, setSubstance] = useState('');
+  const [reaction, setReaction] = useState('');
+
+  const { data } = useQuery({
+    queryKey: ['allergies', profileId],
+    queryFn: () => api.get<{ allergies: Allergy[] }>(`/care-profiles/${profileId}/allergies`),
+  });
+  const allergies = data?.allergies ?? [];
+  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['allergies', profileId] });
+
+  const addMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/care-profiles/${profileId}/allergies`, {
+        substance: substance.trim(),
+        reaction: reaction.trim() || null,
+      }),
+    onSuccess: () => {
+      setSubstance('');
+      setReaction('');
+      invalidate();
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/care-profiles/${profileId}/allergies/${id}`),
+    onSuccess: invalidate,
+  });
+
+  const add = () => {
+    if (substance.trim()) addMutation.mutate();
+  };
+
+  return (
+    <div className="card space-y-3 border-l-4 border-l-red-500">
+      <div>
+        <h3 className="text-sm font-semibold text-ink">Allergies</h3>
+        <p className="text-sm text-muted">What they must not be given, and what happens if they are. Saves straight away.</p>
+      </div>
+      {allergies.length > 0 ? (
+        <ul className="space-y-1.5">
+          {allergies.map((a) => (
+            <li key={a.id} className="flex items-start gap-2 group">
+              <span className="badge bg-red-50 text-red-700 text-xs shrink-0">{a.substance}</span>
+              <span className="text-sm text-ink flex-1">{a.reaction ?? ''}</span>
+              <button
+                type="button"
+                aria-label={`Remove ${a.substance}`}
+                className="text-muted hover:text-red-600 text-sm px-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                onClick={() => deleteMutation.mutate(a.id)}
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted">No allergies recorded.</p>
+      )}
+      <div className="grid gap-2 sm:grid-cols-[1fr_2fr_auto]">
+        <Input
+          aria-label="Allergic to"
+          placeholder="Allergic to, e.g. Penicillin"
+          value={substance}
+          onChange={(e) => setSubstance(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <Input
+          aria-label="Reaction"
+          placeholder="Reaction, e.g. red rash"
+          value={reaction}
+          onChange={(e) => setReaction(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <Button type="button" variant="secondary" size="sm" onClick={add} disabled={!substance.trim()} loading={addMutation.isPending}>
+          Add
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What this person lives with. Each condition shows the medications tied
+ * to it on the Medications page. Saves immediately.
+ */
+function ConditionsSection({ profileId }: { profileId: string }) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState('');
+
+  const { data } = useQuery({
+    queryKey: ['conditions', profileId],
+    queryFn: () => api.get<{ conditions: MedicalCondition[] }>(`/care-profiles/${profileId}/conditions`),
+  });
+  const conditions = data?.conditions ?? [];
+  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['conditions', profileId] });
+
+  const addMutation = useMutation({
+    mutationFn: () => api.post(`/care-profiles/${profileId}/conditions`, { name: name.trim() }),
+    onSuccess: () => {
+      setName('');
+      invalidate();
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/care-profiles/${profileId}/conditions/${id}`),
+    onSuccess: invalidate,
+  });
+
+  const add = () => {
+    if (name.trim()) addMutation.mutate();
+  };
+
+  return (
+    <div className="card space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold text-ink">Medical conditions</h3>
+        <p className="text-sm text-muted">
+          Conditions being lived with. Tie medications to a condition on the Medications page and the link shows here.
+          Saves straight away.
+        </p>
+      </div>
+      {conditions.length > 0 ? (
+        <ul className="space-y-1.5">
+          {conditions.map((c) => (
+            <li key={c.id} className="flex items-start gap-2 group">
+              <span className="badge bg-surface-2 text-ink text-xs shrink-0">{c.name}</span>
+              <span className="text-sm text-muted flex-1">
+                {c.medications.length > 0
+                  ? `Treated with ${c.medications.map((m) => m.name).join(', ')}`
+                  : ''}
+              </span>
+              <button
+                type="button"
+                aria-label={`Remove ${c.name}`}
+                className="text-muted hover:text-red-600 text-sm px-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                onClick={() => deleteMutation.mutate(c.id)}
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted">No conditions recorded.</p>
+      )}
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <Input
+            aria-label="Condition"
+            placeholder="e.g. High blood pressure"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                add();
+              }
+            }}
+          />
+        </div>
+        <Button type="button" variant="secondary" size="sm" onClick={add} disabled={!name.trim()} loading={addMutation.isPending}>
+          Add
+        </Button>
+      </div>
+    </div>
   );
 }
 
