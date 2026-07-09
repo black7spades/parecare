@@ -29,6 +29,9 @@ export function OverviewPage() {
   });
   const poaHolders = (circleData?.members ?? []).filter((m) => m.poa_type);
 
+  const [confirmText, setConfirmText] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+
   const archiveMutation = useMutation({
     mutationFn: () => api.delete(`/care-profiles/${profile.id}`),
     onSuccess: () => {
@@ -36,6 +39,23 @@ export function OverviewPage() {
       navigate('/app');
     },
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => api.delete(`/care-profiles/${profile.id}/permanent`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['care-profiles'] });
+      void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
+      navigate('/app');
+    },
+    onError: (err) => setDeleteError(err instanceof Error ? err.message : 'Failed to delete'),
+  });
+
+  const nameMatches = confirmText.trim().toLowerCase() === profile.full_name.trim().toLowerCase();
+  const closeArchive = () => {
+    setArchiveOpen(false);
+    setConfirmText('');
+    setDeleteError('');
+  };
 
   const isPet = profile.kind === 'pet';
   const detailLine = [
@@ -94,23 +114,54 @@ export function OverviewPage() {
 
       <div className="pt-4 border-t border-border">
         <Button variant="ghost" size="sm" onClick={() => setArchiveOpen(true)}>
-          Archive this profile
+          Archive or delete this profile
         </Button>
       </div>
 
-      <Modal open={archiveOpen} onClose={() => setArchiveOpen(false)} title="Archive profile">
+      <Modal open={archiveOpen} onClose={closeArchive} title="Archive or delete profile">
         <p className="text-sm text-muted mb-4">
           Archiving hides {profile.preferred_name ?? profile.full_name}'s profile and its records from your
-          dashboard. Nothing is deleted.
+          dashboard. Nothing is deleted, and you can bring it back later.
         </p>
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setArchiveOpen(false)}>
+          <Button variant="ghost" onClick={closeArchive}>
             Cancel
           </Button>
-          <Button variant="danger" loading={archiveMutation.isPending} onClick={() => archiveMutation.mutate()}>
+          <Button variant="secondary" loading={archiveMutation.isPending} onClick={() => archiveMutation.mutate()}>
             Archive
           </Button>
         </div>
+
+        {isOwner ? (
+          <div className="mt-6 pt-4 border-t border-border">
+            <p className="text-sm font-medium text-ink mb-1">Delete permanently</p>
+            <p className="text-sm text-muted mb-3">
+              This cannot be undone. It removes {profile.preferred_name ?? profile.full_name} and everything recorded
+              for them: journeys, care log, tasks, medications, documents and the care circle. To confirm, type their
+              full name <span className="font-medium text-ink">{profile.full_name}</span> below.
+            </p>
+            <Input
+              aria-label="Type the full name to confirm deletion"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder={profile.full_name}
+            />
+            {deleteError ? <p className="mt-2 text-sm text-red-600">{deleteError}</p> : null}
+            <div className="mt-3 flex justify-end">
+              <Button
+                variant="danger"
+                loading={deleteMutation.isPending}
+                disabled={!nameMatches}
+                onClick={() => {
+                  setDeleteError('');
+                  deleteMutation.mutate();
+                }}
+              >
+                Delete permanently
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </Modal>
     </div>
   );

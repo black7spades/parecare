@@ -5,7 +5,12 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { useProfile } from './ProfileLayout';
-import type { CircleMember, Task } from '../../../lib/care';
+import type { CareProfile, CircleMember, Task } from '../../../lib/care';
+
+interface FanOutResult {
+  created: { profile_id: string }[];
+  skipped: { profile_id: string; reason: 'no_access' | 'view_only' }[];
+}
 
 const REPEAT_LABELS: Record<Task['reminder_type'], string> = {
   once: 'One-off',
@@ -25,6 +30,9 @@ export function TasksPage() {
   const [dueTime, setDueTime] = useState('09:00');
   const [repeat, setRepeat] = useState<Task['reminder_type']>('once');
   const [assignee, setAssignee] = useState('');
+  const [alsoIds, setAlsoIds] = useState<string[]>([]);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [note, setNote] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['tasks', profile.id],
@@ -39,37 +47,77 @@ export function TasksPage() {
   const members = circleData?.members ?? [];
   const memberName = (id: string | null) => members.find((m) => m.id === id)?.display_name;
 
-  const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: ['tasks', profile.id] });
-    void queryClient.invalidateQueries({ queryKey: ['calendar-events', profile.id] });
+  // Other profiles this carer holds, to add the same task to in one go.
+  const { data: profilesData } = useQuery({
+    queryKey: ['care-profiles'],
+    queryFn: () =>
+      api.get<{ profiles: (CareProfile & { access: string; relationship: string | null })[] }>(`/care-profiles`),
+  });
+  const otherProfiles = (profilesData?.profiles ?? []).filter((p) => p.id !== profile.id);
+  const profileName = (id: string) => {
+    const p = otherProfiles.find((x) => x.id === id);
+    return p ? p.preferred_name ?? p.full_name : 'a profile';
+  };
+
+  const invalidate = (ids: string[] = [profile.id]) => {
+    for (const id of ids) {
+      void queryClient.invalidateQueries({ queryKey: ['tasks', id] });
+      void queryClient.invalidateQueries({ queryKey: ['calendar-events', id] });
+    }
+    void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
+  };
+
+  const resetForm = () => {
+    setTitle('');
+    setNotes('');
+    setError('');
+    setNote('');
+    setAlsoIds([]);
+    setShareOpen(false);
   };
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      api.post(`/care-profiles/${profile.id}/reminders`, {
+    mutationFn: async () => {
+      const payload = {
         title: title.trim(),
         body: notes.trim() || null,
         reminder_type: repeat,
         next_due_at: new Date(`${dueDate}T${dueTime}`).toISOString(),
-        assigned_to: assignee || null,
-      }),
-    onSuccess: () => {
-      setTitle('');
-      setNotes('');
-      setError('');
-      invalidate();
+      };
+      if (alsoIds.length > 0) {
+        return api.post<FanOutResult>(`/care-profiles/${profile.id}/reminders/fan-out`, {
+          ...payload,
+          assigned_to: assignee || null,
+          also_profile_ids: alsoIds,
+        });
+      }
+      await api.post(`/care-profiles/${profile.id}/reminders`, { ...payload, assigned_to: assignee || null });
+      return null;
+    },
+    onSuccess: (result) => {
+      const targets = alsoIds;
+      resetForm();
+      invalidate([profile.id, ...targets]);
+      if (result) {
+        const added = result.created.length;
+        const names = result.skipped.map((s) => profileName(s.profile_id));
+        setNote(
+          `Task added to ${added} ${added === 1 ? 'profile' : 'profiles'}.` +
+            (names.length > 0 ? ` Skipped ${names.join(', ')}, which you cannot edit.` : '')
+        );
+      }
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to create task'),
   });
 
   const completeMutation = useMutation({
     mutationFn: (id: string) => api.patch(`/care-profiles/${profile.id}/reminders/${id}`, { completed: true }),
-    onSuccess: invalidate,
+    onSuccess: () => invalidate(),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/reminders/${id}`),
-    onSuccess: invalidate,
+    onSuccess: () => invalidate(),
   });
 
   const overdue = (t: Task) => new Date(t.next_due_at) < new Date();
@@ -173,9 +221,47 @@ export function TasksPage() {
             ))}
           </select>
         </div>
+        {otherProfiles.length > 0 ? (
+          <div className="rounded-md border border-border">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between px-3 py-2 text-sm text-ink"
+              onClick={() => setShareOpen((v) => !v)}
+            >
+              <span>
+                Also add to other profiles
+                {alsoIds.length > 0 ? <span className="text-primary font-medium"> · {alsoIds.length}</span> : null}
+              </span>
+              <span className="text-muted">{shareOpen ? '▲' : '▼'}</span>
+            </button>
+            {shareOpen ? (
+              <div className="max-h-40 overflow-y-auto border-t border-border px-3 py-2 space-y-1">
+                <p className="text-xs text-muted mb-1">For a shared trip like the same vet or doctor visit. Each profile gets its own copy.</p>
+                {otherProfiles.map((p) => (
+                  <label key={p.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                      checked={alsoIds.includes(p.id)}
+                      onChange={() =>
+                        setAlsoIds((ids) => (ids.includes(p.id) ? ids.filter((x) => x !== p.id) : [...ids, p.id]))
+                      }
+                    />
+                    <span className="text-ink">{p.preferred_name ?? p.full_name}</span>
+                    {p.relationship ? <span className="text-xs text-muted">Your {p.relationship}</span> : null}
+                  </label>
+                ))}
+                {alsoIds.length > 0 ? (
+                  <p className="text-xs text-muted pt-1">The assignee applies to this profile only; copies are left unassigned.</p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {note ? <p className="text-sm text-primary">{note}</p> : null}
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <Button type="submit" className="w-full" loading={createMutation.isPending} disabled={!title.trim() || !dueDate}>
-          Add task
+          {alsoIds.length > 0 ? `Add task to ${alsoIds.length + 1} profiles` : 'Add task'}
         </Button>
       </form>
     </div>
