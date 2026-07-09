@@ -6,9 +6,9 @@ import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { AvatarEditor } from '../../../components/ui/AvatarEditor';
 import { Avatar } from '../../../components/ui/Avatar';
-import type { CareProfile } from '../../../lib/care';
+import { PET_SPECIES, type CareProfile } from '../../../lib/care';
 
-/** Edit the person-in-care's details and photo. Shown only to those with edit access. */
+/** Edit the person or pet in care, and their photo. Shown only to those with edit access. */
 export function EditProfileModal({
   profile,
   open,
@@ -18,6 +18,7 @@ export function EditProfileModal({
   open: boolean;
   onClose: () => void;
 }) {
+  const isPet = profile.kind === 'pet';
   const queryClient = useQueryClient();
   const [title, setTitle] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -28,6 +29,10 @@ export function EditProfileModal({
   const [dob, setDob] = useState('');
   const [pronouns, setPronouns] = useState('');
   const [notes, setNotes] = useState('');
+  const [species, setSpecies] = useState('');
+  const [breed, setBreed] = useState('');
+  const [desexed, setDesexed] = useState(false);
+  const [microchip, setMicrochip] = useState('');
   const [error, setError] = useState('');
   const [photoOpen, setPhotoOpen] = useState(false);
   const [photoError, setPhotoError] = useState('');
@@ -43,10 +48,14 @@ export function EditProfileModal({
     setDob(profile.date_of_birth ? profile.date_of_birth.slice(0, 10) : '');
     setPronouns(profile.pronouns ?? '');
     setNotes(profile.notes ?? '');
+    setSpecies(profile.species ?? '');
+    setBreed(profile.breed ?? '');
+    setDesexed(!!profile.desexed);
+    setMicrochip(profile.microchip_number ?? '');
     setError('');
   }, [open, profile]);
 
-  const displayName = [title, firstName, middleName, lastName, suffix]
+  const displayName = (isPet ? [firstName, lastName] : [title, firstName, middleName, lastName, suffix])
     .map((p) => p.trim())
     .filter(Boolean)
     .join(' ');
@@ -55,17 +64,33 @@ export function EditProfileModal({
 
   const saveMutation = useMutation({
     mutationFn: () =>
-      api.patch(`/care-profiles/${profile.id}`, {
-        title: title.trim() || null,
-        first_name: firstName.trim(),
-        middle_name: middleName.trim() || null,
-        last_name: lastName.trim() || null,
-        suffix: suffix.trim() || null,
-        preferred_name: preferredName.trim() || null,
-        date_of_birth: dob || null,
-        pronouns: pronouns.trim() || null,
-        notes: notes.trim() || null,
-      }),
+      api.patch(
+        `/care-profiles/${profile.id}`,
+        isPet
+          ? {
+              first_name: firstName.trim(),
+              last_name: lastName.trim() || null,
+              preferred_name: preferredName.trim() || null,
+              date_of_birth: dob || null,
+              pronouns: pronouns.trim() || null,
+              species: species || null,
+              breed: breed.trim() || null,
+              desexed,
+              microchip_number: microchip.trim() || null,
+              notes: notes.trim() || null,
+            }
+          : {
+              title: title.trim() || null,
+              first_name: firstName.trim(),
+              middle_name: middleName.trim() || null,
+              last_name: lastName.trim() || null,
+              suffix: suffix.trim() || null,
+              preferred_name: preferredName.trim() || null,
+              date_of_birth: dob || null,
+              pronouns: pronouns.trim() || null,
+              notes: notes.trim() || null,
+            }
+      ),
     onSuccess: () => {
       invalidate();
       void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
@@ -113,7 +138,7 @@ export function EditProfileModal({
   });
 
   return (
-    <Modal open={open} onClose={onClose} title="Edit profile">
+    <Modal open={open} onClose={onClose} title={isPet ? 'Edit pet' : 'Edit profile'}>
       <form
         className="space-y-4"
         onSubmit={(e) => {
@@ -138,25 +163,78 @@ export function EditProfileModal({
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-[6rem_1fr]">
-          <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Dr" />
-          <Input label="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Input label="Middle name" value={middleName} onChange={(e) => setMiddleName(e.target.value)} />
-          <Input label="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
-        </div>
-        <Input label="Suffix" value={suffix} onChange={(e) => setSuffix(e.target.value)} placeholder="e.g. OAM, Jr" />
-        {displayName ? (
-          <p className="text-xs text-muted">
-            Shown across the app as <span className="font-medium text-ink">{displayName}</span>
-          </p>
-        ) : null}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Input label="Preferred name" value={preferredName} onChange={(e) => setPreferredName(e.target.value)} />
-          <Input label="Date of birth" type="date" value={dob} onChange={(e) => setDob(e.target.value)} />
-        </div>
-        <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
+        {isPet ? (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input label="Name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+              <Input label="Family name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+            </div>
+            <Input label="Known as" value={preferredName} onChange={(e) => setPreferredName(e.target.value)} />
+            {displayName ? (
+              <p className="text-xs text-muted">
+                Shown across the app as <span className="font-medium text-ink">{displayName}</span>
+              </p>
+            ) : null}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label htmlFor="edit-pet-species" className="block text-sm font-medium text-ink mb-1">
+                  Species
+                </label>
+                <select
+                  id="edit-pet-species"
+                  className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  value={species}
+                  onChange={(e) => setSpecies(e.target.value)}
+                >
+                  <option value="">Choose one…</option>
+                  {PET_SPECIES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Input label="Breed" value={breed} onChange={(e) => setBreed(e.target.value)} placeholder="e.g. Ragdoll" />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input label="Date of birth" type="date" value={dob} onChange={(e) => setDob(e.target.value)} />
+              <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
+            </div>
+            <Input label="Microchip number" value={microchip} onChange={(e) => setMicrochip(e.target.value)} />
+            <label className="flex items-center gap-2 text-sm text-ink">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                checked={desexed}
+                onChange={(e) => setDesexed(e.target.checked)}
+              />
+              Desexed
+              <span className="text-xs text-muted">neutered or spayed</span>
+            </label>
+          </>
+        ) : (
+          <>
+            <div className="grid gap-4 sm:grid-cols-[6rem_1fr]">
+              <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Dr" />
+              <Input label="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input label="Middle name" value={middleName} onChange={(e) => setMiddleName(e.target.value)} />
+              <Input label="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+            </div>
+            <Input label="Suffix" value={suffix} onChange={(e) => setSuffix(e.target.value)} placeholder="e.g. OAM, Jr" />
+            {displayName ? (
+              <p className="text-xs text-muted">
+                Shown across the app as <span className="font-medium text-ink">{displayName}</span>
+              </p>
+            ) : null}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input label="Preferred name" value={preferredName} onChange={(e) => setPreferredName(e.target.value)} />
+              <Input label="Date of birth" type="date" value={dob} onChange={(e) => setDob(e.target.value)} />
+            </div>
+            <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
+          </>
+        )}
         <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
