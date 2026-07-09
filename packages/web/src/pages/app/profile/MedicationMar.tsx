@@ -8,6 +8,7 @@ import {
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
+import { Modal } from '../../../components/ui/Modal';
 import { MED_STATUSES, medStatusDescription, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
 import { C64_PALETTE, contrastText } from '../../../components/ui/Avatar';
 import { AdministerModal } from './MedicationsPage';
@@ -77,7 +78,7 @@ export function MedicationMar({ profileId, personName, canAdminister }: { profil
       </div>
       {tab === 'chart'
         ? <MarChart profileId={profileId} personName={personName} canAdminister={canAdminister} />
-        : <MarLog profileId={profileId} />}
+        : <MarLog profileId={profileId} canAdminister={canAdminister} />}
     </div>
   );
 }
@@ -375,13 +376,15 @@ function MonthGrid({ meds, days, admins, now, onPickDay }: {
 }
 
 // Full record: chronological, filterable, cursor-paginated, archive-aware.
-function MarLog({ profileId }: { profileId: string }) {
+function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister: boolean }) {
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [includeArchived, setIncludeArchived] = useState(false);
   const [pages, setPages] = useState<MedicationAdministration[][]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<MedicationAdministration | null>(null);
 
   const params = (c: string | null) => {
     const qs = new URLSearchParams({ limit: '50' });
@@ -414,6 +417,18 @@ function MarLog({ profileId }: { profileId: string }) {
     setDone(res.nextCursor === null);
   };
 
+  // Deleting a mistaken dose also gives its supply back on the server.
+  const deleteDose = useMutation({
+    mutationFn: (id: string) => api.delete(`/care-profiles/${profileId}/medications/administrations/${id}`),
+    onSuccess: () => {
+      setPendingDelete(null);
+      void refetch();
+      void queryClient.invalidateQueries({ queryKey: ['med-chart', profileId] });
+      void queryClient.invalidateQueries({ queryKey: ['medications', profileId] });
+      void queryClient.invalidateQueries({ queryKey: ['calendar-events', profileId] });
+    },
+  });
+
   const rows = pages.flat();
 
   return (
@@ -442,16 +457,19 @@ function MarLog({ profileId }: { profileId: string }) {
               <th className="px-4 py-3 font-medium">Route</th>
               <th className="px-4 py-3 font-medium">By</th>
               <th className="px-4 py-3 font-medium">Outcome</th>
+              {canAdminister ? <th className="px-4 py-3 font-medium text-right">Actions</th> : null}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted">{isFetching ? 'Loading…' : 'No administrations recorded yet.'}</td></tr>
-            ) : rows.map((a) => (
-              <tr key={a.id} className="border-b border-border last:border-0 align-top">
+              <tr><td colSpan={canAdminister ? 7 : 6} className="px-4 py-8 text-center text-muted">{isFetching ? 'Loading…' : 'No administrations recorded yet.'}</td></tr>
+            ) : rows.map((a) => {
+              const archived = (a as { archived?: boolean }).archived;
+              return (
+              <tr key={a.id} className="border-b border-border last:border-0 align-top group">
                 <td className="px-4 py-3 whitespace-nowrap text-muted">
                   {format(new Date(a.administered_at), 'd MMM yyyy, HH:mm')}
-                  {(a as { archived?: boolean }).archived ? <span className="ml-1 badge bg-surface-2 text-muted text-[10px]">archived</span> : null}
+                  {archived ? <span className="ml-1 badge bg-surface-2 text-muted text-[10px]">archived</span> : null}
                 </td>
                 <td className="px-4 py-3">
                   <div className="text-ink">{a.medication_name}</div>
@@ -461,11 +479,42 @@ function MarLog({ profileId }: { profileId: string }) {
                 <td className="px-4 py-3 text-muted">{a.route_given || '—'}</td>
                 <td className="px-4 py-3 text-muted whitespace-nowrap">{a.administered_by_name ?? '—'}</td>
                 <td className="px-4 py-3"><span className="badge text-xs font-medium" style={swatch(statusColorFor(a.status))} title={medStatusDescription(a.status)}>{statusLabel(a.status)}</span></td>
+                {canAdminister ? (
+                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                    {archived ? (
+                      <span className="text-xs text-muted" title="Archived records are a permanent history and cannot be changed.">—</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="text-xs text-muted hover:text-red-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                        onClick={() => setPendingDelete(a)}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </td>
+                ) : null}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
+
+      <Modal open={pendingDelete !== null} onClose={() => setPendingDelete(null)} title="Remove this dose record">
+        <p className="text-sm text-muted mb-4">
+          Remove the record of{' '}
+          <span className="font-medium text-ink">{pendingDelete?.medication_name}</span>
+          {pendingDelete ? ` on ${format(new Date(pendingDelete.administered_at), 'd MMM yyyy, HH:mm')}` : ''}? If it was a
+          given dose, its supply is added back. This is for fixing a mistake, like logging the same dose twice.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setPendingDelete(null)}>Cancel</Button>
+          <Button variant="danger" loading={deleteDose.isPending} onClick={() => pendingDelete && deleteDose.mutate(pendingDelete.id)}>
+            Remove record
+          </Button>
+        </div>
+      </Modal>
       {!done && rows.length > 0 ? (
         <div className="text-center">
           <Button size="sm" variant="secondary" onClick={() => void loadMore()}>Load older</Button>

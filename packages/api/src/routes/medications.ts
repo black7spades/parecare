@@ -568,6 +568,19 @@ async function drawDownSupply(
     .update({ supply_remaining: db.raw('GREATEST(0, supply_remaining - ?)', [amount]) });
 }
 
+// Deleting a recorded dose gives its supply back, capped at a full pack.
+async function restoreSupply(
+  med: { id: string; form: string | null; units_per_dose: unknown; dose_amount: unknown },
+  doses: number
+): Promise<void> {
+  const amount = doses * perDoseDrawdown(med);
+  if (amount <= 0) return;
+  await db('medications')
+    .where({ id: med.id })
+    .whereNotNull('supply_remaining')
+    .update({ supply_remaining: db.raw('LEAST(COALESCE(supply, supply_remaining + ?), supply_remaining + ?)', [amount, amount]) });
+}
+
 // Build the insert row for one administration, deriving the context rights.
 function buildAdminRow(
   data: z.infer<typeof adminSchema>,
@@ -661,4 +674,23 @@ medicationsRouter.post('/administrations/batch', requireAuth, async (req, res) =
     await drawDownSupply(medId, doses, byId.get(medId)!);
   }
   res.status(201).json({ recorded: inserted.length });
+});
+
+// Delete a recorded dose (e.g. logged twice by mistake). Any non-viewer
+// may correct the record; the change is audited by the mounted middleware.
+// A given dose gives its supply back. Archived history stays immutable.
+medicationsRouter.delete('/administrations/:adminId', requireAuth, async (req, res) => {
+  const admin = await db('medication_administrations')
+    .where({ id: req.params['adminId'], care_profile_id: req.params['id'] })
+    .first();
+  if (!admin) {
+    res.status(404).json({ error: 'That dose record was not found, or has been archived and cannot be changed.', code: 'NOT_FOUND' });
+    return;
+  }
+  if (GIVEN.has(admin.status)) {
+    const med = await medSelect().where('m.id', admin.medication_id).first();
+    if (med) await restoreSupply(med, 1);
+  }
+  await db('medication_administrations').where({ id: admin.id }).delete();
+  res.json({ message: 'Dose record removed.' });
 });
