@@ -6,7 +6,14 @@ import { api } from '../../api/client';
 import { useAuthStore } from '../../stores/auth';
 import { Button } from '../../components/ui/Button';
 import { Avatar } from '../../components/ui/Avatar';
-import { CARE_PHASES, phaseLabel, POA_TYPES } from '../../lib/care';
+import { POA_TYPES } from '../../lib/care';
+
+interface SummaryJourney {
+  id: string;
+  name: string;
+  phase_name: string | null;
+  phase_sort_order: number | null;
+}
 
 interface ProfileSummary {
   id: string;
@@ -23,18 +30,23 @@ interface ProfileSummary {
   poa_holders: { display_name: string; poa_type: string | null; poa_activated: boolean }[];
   last_activity: { action: string; entity_type: string; summary: string | null; created_at: string; actor_name: string | null } | null;
   next_event: { title: string; next_due_at: string } | null;
+  journeys: SummaryJourney[];
 }
 
-type SortKey = 'name' | 'activity' | 'phase';
+type SortKey = 'name' | 'activity' | 'journey';
 
 const poaLabel = (type: string | null) => POA_TYPES.find((t) => t.value === type)?.label ?? 'POA';
+
+/** The journey used when sorting by journey: first active, phase order breaks ties. */
+const firstJourney = (p: ProfileSummary): SummaryJourney | null => p.journeys[0] ?? null;
 
 export function Dashboard() {
   const { account } = useAuthStore();
   const queryClient = useQueryClient();
   const [sort, setSort] = useState<SortKey>('name');
-  const [phaseFilter, setPhaseFilter] = useState('');
+  const [journeyFilter, setJourneyFilter] = useState('');
   const [poaOnly, setPoaOnly] = useState(false);
+  const [view, setView] = useState<'cards' | 'table'>('cards');
 
   const { data, isLoading } = useQuery({
     queryKey: ['care-profiles-summary'],
@@ -51,13 +63,34 @@ export function Dashboard() {
     },
   });
 
+  // Every distinct journey name across the people shown, for the filter.
+  const journeyNames = useMemo(
+    () => [...new Set(profiles.flatMap((p) => p.journeys.map((j) => j.name)))].sort((a, b) => a.localeCompare(b)),
+    [profiles]
+  );
+
   const shown = useMemo(() => {
     let list = profiles.slice();
-    if (phaseFilter) list = list.filter((p) => p.current_phase === phaseFilter);
+    if (journeyFilter) list = list.filter((p) => p.journeys.some((j) => j.name === journeyFilter));
     if (poaOnly) list = list.filter((p) => p.poa_holders.length > 0);
     list.sort((a, b) => {
       if (sort === 'name') return a.full_name.localeCompare(b.full_name);
-      if (sort === 'phase') return CARE_PHASES.findIndex((x) => x.value === a.current_phase) - CARE_PHASES.findIndex((x) => x.value === b.current_phase);
+      if (sort === 'journey') {
+        // Group by journey name; inside a journey, order by how far
+        // through its phases each person is.
+        const pick = (p: ProfileSummary) =>
+          journeyFilter ? p.journeys.find((j) => j.name === journeyFilter) ?? null : firstJourney(p);
+        const ja = pick(a);
+        const jb = pick(b);
+        if (!ja && !jb) return a.full_name.localeCompare(b.full_name);
+        if (!ja) return 1;
+        if (!jb) return -1;
+        return (
+          ja.name.localeCompare(jb.name) ||
+          (ja.phase_sort_order ?? 0) - (jb.phase_sort_order ?? 0) ||
+          a.full_name.localeCompare(b.full_name)
+        );
+      }
       // activity: most recent first
       const ta = a.last_activity ? new Date(a.last_activity.created_at).getTime() : 0;
       const tb = b.last_activity ? new Date(b.last_activity.created_at).getTime() : 0;
@@ -65,7 +98,24 @@ export function Dashboard() {
     });
     // pinned first, keeping the chosen order within each group
     return list.sort((a, b) => Number(b.pinned) - Number(a.pinned));
-  }, [profiles, sort, phaseFilter, poaOnly]);
+  }, [profiles, sort, journeyFilter, poaOnly]);
+
+  const viewToggle = (
+    <div className="flex items-center gap-1 bg-surface-2 rounded-md p-0.5">
+      {(['cards', 'table'] as const).map((v) => (
+        <button
+          key={v}
+          type="button"
+          className={`px-2.5 py-1 text-xs rounded transition-colors ${
+            view === v ? 'bg-card text-ink font-medium shadow-sm' : 'text-muted hover:text-ink'
+          }`}
+          onClick={() => setView(v)}
+        >
+          {v === 'cards' ? 'Cards' : 'Table'}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -98,40 +148,48 @@ export function Dashboard() {
         </div>
       ) : (
         <>
-          {profiles.length > 1 ? (
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <label className="text-muted">Sort</label>
-              <select
-                className="rounded-md border border-border bg-card px-2 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                value={sort}
-                onChange={(e) => setSort(e.target.value as SortKey)}
-              >
-                <option value="name">Name</option>
-                <option value="activity">Recent activity</option>
-                <option value="phase">Care phase</option>
-              </select>
-              <select
-                className="rounded-md border border-border bg-card px-2 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                value={phaseFilter}
-                onChange={(e) => setPhaseFilter(e.target.value)}
-              >
-                <option value="">All phases</option>
-                {CARE_PHASES.map((p) => (
-                  <option key={p.value} value={p.value}>{p.label}</option>
-                ))}
-              </select>
-              <label className="flex items-center gap-1.5 text-muted">
-                <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary" checked={poaOnly} onChange={(e) => setPoaOnly(e.target.checked)} />
-                Has POA
-              </label>
-            </div>
-          ) : null}
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            {shown.map((p) => (
-              <ProfileCard key={p.id} profile={p} onTogglePin={() => pinMutation.mutate({ id: p.id, pinned: p.pinned })} />
-            ))}
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            {profiles.length > 1 ? (
+              <>
+                <label className="text-muted">Sort</label>
+                <select
+                  className="rounded-md border border-border bg-card px-2 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value as SortKey)}
+                >
+                  <option value="name">Name</option>
+                  <option value="activity">Recent activity</option>
+                  <option value="journey">Journey, then phase</option>
+                </select>
+                <select
+                  aria-label="Filter by journey"
+                  className="rounded-md border border-border bg-card px-2 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  value={journeyFilter}
+                  onChange={(e) => setJourneyFilter(e.target.value)}
+                >
+                  <option value="">All journeys</option>
+                  {journeyNames.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+                <label className="flex items-center gap-1.5 text-muted">
+                  <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary" checked={poaOnly} onChange={(e) => setPoaOnly(e.target.checked)} />
+                  Has POA
+                </label>
+              </>
+            ) : null}
+            <div className="ml-auto">{viewToggle}</div>
           </div>
+
+          {view === 'cards' ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {shown.map((p) => (
+                <ProfileCard key={p.id} profile={p} onTogglePin={() => pinMutation.mutate({ id: p.id, pinned: p.pinned })} />
+              ))}
+            </div>
+          ) : (
+            <ProfileTable profiles={shown} onTogglePin={(p) => pinMutation.mutate({ id: p.id, pinned: p.pinned })} />
+          )}
         </>
       )}
     </div>
@@ -164,7 +222,18 @@ function ProfileCard({ profile: p, onTogglePin }: { profile: ProfileSummary; onT
                 {[p.relationship ? `Your ${p.relationship}` : null, p.preferred_name ? `Known as ${p.preferred_name}` : null].filter(Boolean).join(' · ')}
               </p>
             ) : null}
-            <span className="badge bg-surface-2 text-muted text-xs mt-1 inline-block">{phaseLabel(p.current_phase)}</span>
+            <span className="mt-1 flex flex-wrap gap-1">
+              {p.journeys.length === 0 ? (
+                <span className="badge bg-surface-2 text-muted text-xs">No journey underway</span>
+              ) : (
+                p.journeys.map((j) => (
+                  <span key={j.id} className="badge bg-surface-2 text-muted text-xs">
+                    {j.name}
+                    {j.phase_name ? ` · ${j.phase_name}` : ''}
+                  </span>
+                ))
+              )}
+            </span>
           </div>
         </div>
       </Link>
@@ -201,6 +270,66 @@ function ProfileCard({ profile: p, onTogglePin }: { profile: ProfileSummary; onT
           </Row>
         ) : null}
       </dl>
+    </div>
+  );
+}
+
+/** The same people as a spreadsheet: one row each, one fact per column. */
+function ProfileTable({ profiles, onTogglePin }: { profiles: ProfileSummary[]; onTogglePin: (p: ProfileSummary) => void }) {
+  return (
+    <div className="card p-0 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="border-b border-border">
+          <tr className="text-left text-xs text-muted">
+            <th className="px-3 py-2 w-8" aria-label="Pinned" />
+            <th className="px-3 py-2 font-medium">Name</th>
+            <th className="px-3 py-2 font-medium">Relationship</th>
+            <th className="px-3 py-2 font-medium">Journey</th>
+            <th className="px-3 py-2 font-medium">Phase</th>
+            <th className="px-3 py-2 font-medium">Next</th>
+            <th className="px-3 py-2 font-medium">Last update</th>
+          </tr>
+        </thead>
+        <tbody>
+          {profiles.map((p) => {
+            const j = firstJourney(p);
+            const extra = p.journeys.length - 1;
+            return (
+              <tr key={p.id} className="border-b border-border last:border-0 align-top">
+                <td className="px-3 py-2">
+                  <button
+                    type="button"
+                    aria-label={p.pinned ? 'Unpin' : 'Pin to quick access'}
+                    onClick={() => onTogglePin(p)}
+                    className={`leading-none ${p.pinned ? 'text-primary' : 'text-muted hover:text-primary'}`}
+                  >
+                    {p.pinned ? '★' : '☆'}
+                  </button>
+                </td>
+                <td className="px-3 py-2">
+                  <Link to={`/app/${p.id}`} className="font-medium text-primary hover:underline">
+                    {p.full_name}
+                  </Link>
+                </td>
+                <td className="px-3 py-2 text-muted">{p.relationship ?? ''}</td>
+                <td className="px-3 py-2 text-muted">
+                  {j ? j.name : ''}
+                  {extra > 0 ? <span className="text-xs"> +{extra} more</span> : null}
+                </td>
+                <td className="px-3 py-2 text-muted">{j?.phase_name ?? ''}</td>
+                <td className="px-3 py-2 text-muted whitespace-nowrap">
+                  {p.next_event ? `${p.next_event.title} · ${format(new Date(p.next_event.next_due_at), 'd MMM, HH:mm')}` : ''}
+                </td>
+                <td className="px-3 py-2 text-muted">
+                  {p.last_activity
+                    ? `${p.last_activity.summary || `${p.last_activity.action} ${p.last_activity.entity_type}`} · ${formatDistanceToNow(new Date(p.last_activity.created_at), { addSuffix: true })}`
+                    : ''}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

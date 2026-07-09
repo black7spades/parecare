@@ -15,7 +15,8 @@ export const medicationsRouter = Router({ mergeParams: true });
 const medSelect = () =>
   db('medications as m')
     .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
-    .select('m.*', 'c.name as name', 'c.form as form');
+    .leftJoin('medical_conditions as mc', 'm.medical_condition_id', 'mc.id')
+    .select('m.*', 'c.name as name', 'c.form as form', 'mc.name as condition_name');
 
 const medWithName = (id: string) => medSelect().where('m.id', id).first();
 
@@ -27,15 +28,23 @@ const medSchema = z.object({
   frequency: z.string().max(255).optional().nullable(),
   schedule_times: z.array(z.string().regex(/^\d{2}:\d{2}$/)).optional().nullable(),
   instructions: z.string().optional().nullable(),
+  // Units per dose, e.g. 3 capsules each time. Supply counts these down.
+  units_per_dose: z.coerce.number().min(0).max(1000).optional().nullable(),
+  with_food: z.boolean().optional().nullable(),
+  as_needed: z.boolean().optional(),
+  medical_condition_id: z.string().uuid().optional().nullable(),
   supply: z.coerce.number().min(0).max(1e9).optional().nullable(),
   active: z.boolean().optional(),
 });
 
 interface MedRow {
   name: string;
+  units_per_dose: number | null;
   dose: string | null;
   form: string | null;
   route: string | null;
+  with_food: boolean | null;
+  as_needed: boolean;
   frequency: string | null;
   schedule_times: string[] | null;
   instructions: string | null;
@@ -46,20 +55,17 @@ interface MedRow {
 
 interface MedInsert {
   name: string;
+  units_per_dose: number | null;
   dose: string | null;
   form: string | null;
   route: string | null;
+  with_food: boolean | null;
+  as_needed: boolean;
   frequency: string | null;
   schedule_times: string[];
   instructions: string | null;
   supply: number | null;
   active: boolean;
-}
-
-// Extract the numeric amount from a dose string ("500 mg" -> 500, "5 mL" -> 5).
-function doseAmount(dose: string | null | undefined): number {
-  const n = parseFloat(String(dose ?? '').replace(/[^0-9.]/g, ''));
-  return Number.isFinite(n) ? n : 0;
 }
 
 // Postgres returns decimal columns as strings; hand the client real numbers so
@@ -70,7 +76,12 @@ const numOrNull = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 const serializeMed = <T extends Record<string, unknown>>(m: T): T =>
-  ({ ...m, supply: numOrNull(m['supply']), supply_remaining: numOrNull(m['supply_remaining']) });
+  ({
+    ...m,
+    supply: numOrNull(m['supply']),
+    supply_remaining: numOrNull(m['supply_remaining']),
+    units_per_dose: numOrNull(m['units_per_dose']),
+  });
 
 const blank = (v: string | undefined): string | null => {
   const t = (v ?? '').trim();
@@ -104,14 +115,17 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
   resource: 'medications',
   columns: [
     { key: 'name', header: 'Name', aliases: ['medication', 'drug', 'medicine'], toCell: (r) => r.name },
+    { key: 'units_per_dose', header: 'Units per dose', aliases: ['unit', 'units', 'quantity per dose'], toCell: (r) => (r.units_per_dose ?? '').toString() },
     { key: 'dose', header: 'Dose', aliases: ['dosage', 'strength'], toCell: (r) => r.dose ?? '' },
-    { key: 'form', header: 'Form', aliases: ['type'], toCell: (r) => r.form ?? '' },
+    { key: 'form', header: 'Type', aliases: ['form'], toCell: (r) => r.form ?? '' },
     { key: 'route', header: 'Route', toCell: (r) => r.route ?? '' },
+    { key: 'with_food', header: 'With food', aliases: ['food'], toCell: (r) => (r.with_food === null ? '' : r.with_food ? 'true' : 'false') },
+    { key: 'as_needed', header: 'As needed', aliases: ['prn'], toCell: (r) => (r.as_needed ? 'true' : 'false') },
     { key: 'frequency', header: 'Frequency', aliases: ['freq', 'how often'], toCell: (r) => r.frequency ?? '' },
     { key: 'schedule_times', header: 'Times', aliases: ['schedule', 'schedule times', 'time'], toCell: (r) => (r.schedule_times ?? []).join('; ') },
     { key: 'instructions', header: 'Instructions', aliases: ['directions', 'notes'], toCell: (r) => r.instructions ?? '' },
-    { key: 'supply', header: 'Supply', aliases: ['stock', 'quantity', 'on hand'], toCell: (r) => (r.supply ?? '').toString() },
-    { key: 'supply_remaining', header: 'Supply remaining', aliases: ['remaining'], toCell: (r) => (r.supply_remaining ?? '').toString() },
+    { key: 'supply', header: 'Supply in units', aliases: ['supply', 'stock', 'quantity', 'on hand'], toCell: (r) => (r.supply ?? '').toString() },
+    { key: 'supply_remaining', header: 'Units left', aliases: ['remaining', 'supply remaining'], toCell: (r) => (r.supply_remaining ?? '').toString() },
     { key: 'active', header: 'Active', aliases: ['status'], toCell: (r) => (r.active ? 'true' : 'false') },
   ],
   coerce: (raw, rowNumber) => {
@@ -119,13 +133,18 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
     if (!name) return { ok: false as const, error: `Row ${rowNumber}: a medication name is required.` };
     if (name.length > 255) return { ok: false as const, error: `Row ${rowNumber}: name is too long.` };
     const supplyNum = parseFloat(String(raw['supply'] ?? '').replace(/[^0-9.]/g, ''));
+    const unitsNum = parseFloat(String(raw['units_per_dose'] ?? '').replace(/[^0-9.]/g, ''));
+    const foodCell = (raw['with_food'] ?? '').trim().toLowerCase();
     return {
       ok: true as const,
       value: {
         name,
+        units_per_dose: Number.isFinite(unitsNum) && unitsNum > 0 ? unitsNum : null,
         dose: blank(raw['dose']),
         form: blank(raw['form']),
         route: blank(raw['route']),
+        with_food: foodCell === '' ? null : !['false', 'no', '0', 'without', 'n'].includes(foodCell),
+        as_needed: ['true', 'yes', '1', 'prn', 'as needed', 'y'].includes((raw['as_needed'] ?? '').trim().toLowerCase()),
         frequency: blank(raw['frequency']),
         schedule_times: parseTimes(raw['schedule_times']),
         instructions: blank(raw['instructions']),
@@ -192,8 +211,11 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner, async (req, 
     toInsert.push({
       care_profile_id: req.params['id'],
       medication_catalogue_id: catalogueId,
+      units_per_dose: r.units_per_dose,
       dose: r.dose,
       route: r.route,
+      with_food: r.with_food,
+      as_needed: r.as_needed,
       frequency: r.frequency,
       instructions: r.instructions,
       supply: r.supply,
@@ -209,10 +231,21 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner, async (req, 
   res.status(201).json({ imported: inserted.length, skipped: errors.length, errors });
 });
 
+// A medication can only be tied to one of this person's own conditions.
+async function conditionBelongsToProfile(conditionId: string | null | undefined, profileId: string): Promise<boolean> {
+  if (!conditionId) return true;
+  const row = await db('medical_conditions').where({ id: conditionId, care_profile_id: profileId }).first();
+  return !!row;
+}
+
 medicationsRouter.post('/', requireAuth, requireProfileOwner, async (req, res) => {
   const parsed = medSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  if (!(await conditionBelongsToProfile(parsed.data.medical_condition_id, req.params['id']!))) {
+    res.status(400).json({ error: 'Condition not found', code: 'VALIDATION_ERROR' });
     return;
   }
   const { schedule_times, name, form, ...rest } = parsed.data;
@@ -234,6 +267,10 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner, async (req,
   const parsed = medSchema.partial().safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  if (!(await conditionBelongsToProfile(parsed.data.medical_condition_id, req.params['id']!))) {
+    res.status(400).json({ error: 'Condition not found', code: 'VALIDATION_ERROR' });
     return;
   }
   const { schedule_times, name, form, ...rest } = parsed.data;
@@ -400,8 +437,10 @@ const GIVEN = new Set(['given', 'self_administered']);
 const FUTURE_SKEW_MS = 60 * 1000;
 const isFutureTime = (s?: string | null): boolean => !!s && new Date(s).getTime() > Date.now() + FUTURE_SKEW_MS;
 
-// A given dose draws down the medication's remaining supply (never below zero).
-async function drawDownSupply(medId: string, amount: number): Promise<void> {
+// A given dose draws down the remaining supply by the units taken, never
+// below zero. Supply is counted in units: 3 tablets, not 60 mg.
+async function drawDownSupply(medId: string, doses: number, unitsPerDose: number | null): Promise<void> {
+  const amount = doses * (Number(unitsPerDose) > 0 ? Number(unitsPerDose) : 1);
   if (amount <= 0) return;
   await db('medications')
     .where({ id: medId })
@@ -456,7 +495,7 @@ medicationsRouter.post('/:medId/administrations', requireAuth, async (req, res) 
     return;
   }
   const [record] = await db('medication_administrations').insert(buildAdminRow(parsed.data, med, req.params['id']!, req.account!)).returning('*');
-  if (GIVEN.has(parsed.data.status)) await drawDownSupply(med.id, doseAmount(parsed.data.dose_given ?? med.dose));
+  if (GIVEN.has(parsed.data.status)) await drawDownSupply(med.id, 1, med.units_per_dose);
   res.status(201).json({ administration: record });
 });
 
@@ -494,9 +533,10 @@ medicationsRouter.post('/administrations/batch', requireAuth, async (req, res) =
   const drawdowns = new Map<string, number>();
   for (const e of parsed.data.entries) {
     if (!GIVEN.has(e.status)) continue;
-    const med = byId.get(e.medication_id)!;
-    drawdowns.set(e.medication_id, (drawdowns.get(e.medication_id) ?? 0) + doseAmount(e.dose_given ?? med.dose));
+    drawdowns.set(e.medication_id, (drawdowns.get(e.medication_id) ?? 0) + 1);
   }
-  for (const [medId, amount] of drawdowns) await drawDownSupply(medId, amount);
+  for (const [medId, doses] of drawdowns) {
+    await drawDownSupply(medId, doses, byId.get(medId)!.units_per_dose);
+  }
   res.status(201).json({ recorded: inserted.length });
 });

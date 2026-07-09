@@ -281,6 +281,21 @@ export interface Medication {
   prescriber?: string;
 }
 
+/** What they must not be given, and what happens if they are. */
+export interface Allergy {
+  id: string;
+  substance: string;
+  reaction: string | null;
+}
+
+/** What they live with, tied to the medications that treat it. */
+export interface MedicalCondition {
+  id: string;
+  name: string;
+  notes: string | null;
+  medications: { name: string; active: boolean }[];
+}
+
 export interface EmergencyContact {
   name: string;
   relationship?: string;
@@ -293,15 +308,88 @@ export interface MedicationRecord {
   care_profile_id: string;
   medication_catalogue_id?: string;
   name: string;
+  /** How many units make up one dose, e.g. 3 capsules. */
+  units_per_dose: number | null;
   dose: string | null;
   form: string | null;
   route: string | null;
+  /** Taken with food (true), without food (false), unspecified (null). */
+  with_food: boolean | null;
+  /** Only taken when needed, not on a schedule. */
+  as_needed: boolean;
+  medical_condition_id: string | null;
+  condition_name?: string | null;
   frequency: string | null;
   schedule_times: string[] | null;
   instructions: string | null;
+  /** Counted in units: 3 tablets, not 60 mg. */
   supply: number | null;
   supply_remaining: number | null;
   active: boolean;
+}
+
+/** Every way a medication can enter the body, in plain language. */
+export const MED_ROUTES = [
+  'By mouth',
+  'Under the tongue',
+  'Inside the cheek',
+  'Inhaled',
+  'Into the nose',
+  'Eye drops',
+  'Ear drops',
+  'On the skin',
+  'Skin patch',
+  'Injection under the skin',
+  'Injection into muscle',
+  'Into a vein',
+  'Rectal',
+  'Vaginal',
+  'Through a feeding tube',
+] as const;
+
+/** What the medication physically is. The type suggests the route. */
+export const MED_TYPES: { value: string; plural: string; defaultRoute: string }[] = [
+  { value: 'Tablet', plural: 'Tablets', defaultRoute: 'By mouth' },
+  { value: 'Capsule', plural: 'Capsules', defaultRoute: 'By mouth' },
+  { value: 'Liquid', plural: 'Doses', defaultRoute: 'By mouth' },
+  { value: 'Wafer', plural: 'Wafers', defaultRoute: 'By mouth' },
+  { value: 'Powder', plural: 'Doses', defaultRoute: 'By mouth' },
+  { value: 'Injection', plural: 'Injections', defaultRoute: 'Injection under the skin' },
+  { value: 'Patch', plural: 'Patches', defaultRoute: 'Skin patch' },
+  { value: 'Cream', plural: 'Applications', defaultRoute: 'On the skin' },
+  { value: 'Ointment', plural: 'Applications', defaultRoute: 'On the skin' },
+  { value: 'Drops', plural: 'Doses', defaultRoute: 'Eye drops' },
+  { value: 'Inhaler', plural: 'Puffs', defaultRoute: 'Inhaled' },
+  { value: 'Spray', plural: 'Sprays', defaultRoute: 'Into the nose' },
+  { value: 'Suppository', plural: 'Suppositories', defaultRoute: 'Rectal' },
+];
+
+/** "3 Capsules", "1 Tablet", or a sensible fallback when type is unknown. */
+export function medUnitsLabel(count: number, form: string | null): string {
+  const type = MED_TYPES.find((t) => t.value.toLowerCase() === (form ?? '').toLowerCase());
+  const one = type?.value ?? 'unit';
+  const many = type?.plural ?? 'units';
+  const n = Number.isInteger(count) ? String(count) : String(Number(count.toFixed(2)));
+  return `${n} ${count === 1 ? one : many}`;
+}
+
+/**
+ * The whole regimen as one readable line composed from its parts:
+ * "3 x 20mg Capsules with food, by mouth". Display only; every part
+ * stays its own field underneath.
+ */
+export function regimenLine(m: Pick<MedicationRecord, 'units_per_dose' | 'dose' | 'form' | 'with_food' | 'route'>): string {
+  const type = MED_TYPES.find((t) => t.value.toLowerCase() === (m.form ?? '').toLowerCase());
+  const units = m.units_per_dose && m.units_per_dose > 0 ? m.units_per_dose : null;
+  const typeWord = type ? (units && units !== 1 ? type.plural : type.value) : m.form;
+  const parts = [
+    units ? `${Number.isInteger(units) ? units : units.toFixed(2)} x` : null,
+    m.dose,
+    typeWord,
+    m.with_food === true ? 'with food' : m.with_food === false ? 'without food' : null,
+  ].filter(Boolean);
+  const head = parts.join(' ');
+  return [head, m.route ? m.route.charAt(0).toLowerCase() + m.route.slice(1) : null].filter(Boolean).join(', ');
 }
 
 // Plain-language descriptions accompany every outcome so a family carer who

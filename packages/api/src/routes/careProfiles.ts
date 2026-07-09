@@ -193,7 +193,7 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
     return;
   }
 
-  const [pins, plans, poa, activity, events] = await Promise.all([
+  const [pins, plans, poa, activity, events, journeyRows] = await Promise.all([
     db('care_profile_pins').where({ account_id: accountId }).whereIn('care_profile_id', ids).select('care_profile_id'),
     db('care_plans').whereIn('care_profile_id', ids).select('care_profile_id', 'gp_phone', 'emergency_contacts'),
     db('care_circle_members')
@@ -213,6 +213,16 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
        ORDER BY care_profile_id, next_due_at ASC`,
       [ids]
     ),
+    // Active journeys with their current phase, for dashboard sort/filter.
+    db.raw(
+      `SELECT j.care_profile_id, j.id, j.name, p.name AS phase_name, p.sort_order AS phase_sort_order
+       FROM care_journeys j
+       LEFT JOIN care_journey_phases p
+         ON p.care_journey_id = j.id AND p.entered_at IS NOT NULL AND p.locked_at IS NULL
+       WHERE j.care_profile_id = ANY(?) AND j.status = 'active'
+       ORDER BY j.started_at ASC`,
+      [ids]
+    ),
   ]);
 
   const pinSet = new Set(pins.map((p: { care_profile_id: string }) => p.care_profile_id));
@@ -225,6 +235,12 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
   }
   const actMap = new Map((activity.rows as Array<{ care_profile_id: string }>).map((r) => [r.care_profile_id, r]));
   const evMap = new Map((events.rows as Array<{ care_profile_id: string }>).map((r) => [r.care_profile_id, r]));
+  const journeyMap = new Map<string, Array<Record<string, unknown>>>();
+  for (const j of journeyRows.rows as Array<{ care_profile_id: string; id: string; name: string; phase_name: string | null; phase_sort_order: number | null }>) {
+    const arr = journeyMap.get(j.care_profile_id) ?? [];
+    arr.push({ id: j.id, name: j.name, phase_name: j.phase_name, phase_sort_order: j.phase_sort_order });
+    journeyMap.set(j.care_profile_id, arr);
+  }
 
   const result = profiles.map((p) => {
     const plan = planMap.get(p.id) as { gp_phone?: string; emergency_contacts?: unknown } | undefined;
@@ -248,6 +264,7 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
       })),
       last_activity: actMap.get(p.id) ?? null,
       next_event: evMap.get(p.id) ?? null,
+      journeys: journeyMap.get(p.id) ?? [],
     };
   });
   res.json({ profiles: result });
