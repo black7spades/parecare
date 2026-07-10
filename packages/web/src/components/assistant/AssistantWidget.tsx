@@ -8,16 +8,17 @@ import { useAuthStore } from '../../stores/auth';
 import type { CareProfile } from '../../lib/care';
 
 /**
- * Pare, the care assistant, present on every care screen. Two modes,
+ * Pare, the care assistant, present on every signed-in screen. Two modes,
  * decided by the route:
  *
- * - Dashboard mode on /app: one account-wide conversation that sees a
- *   summary of everyone in the user's care, can create profiles, and can
- *   navigate the user to the right screen.
  * - Profile mode inside /app/:profileId: scoped to that person's full
- *   record, exactly as before.
+ *   record.
+ * - Dashboard mode everywhere else (the dashboard itself, account
+ *   settings, the system screens): one account-wide conversation that
+ *   sees a summary of everyone in the user's care, can create profiles,
+ *   log across profiles, and navigate the user to the right screen.
  *
- * Anywhere else (account settings, admin) Pare stays out of the way.
+ * The bubble never disappears between pages; only its scope changes.
  * Conversations persist on the server and are kept per day: opening Pare
  * resumes today's chat for the current scope on any device, and each new
  * day starts a fresh chat log.
@@ -56,15 +57,13 @@ const SECTION_PATHS: Record<string, string> = {
 };
 
 export function AssistantWidget() {
-  const dashboardMatch = useMatch('/app');
   const profileMatch = useMatch('/app/:profileId/*');
   const routeProfileId =
     profileMatch?.params.profileId && profileMatch.params.profileId !== 'profiles'
       ? profileMatch.params.profileId
       : null;
-  const mode: 'dashboard' | 'profile' | null = dashboardMatch ? 'dashboard' : routeProfileId ? 'profile' : null;
+  const mode: 'dashboard' | 'profile' = routeProfileId ? 'profile' : 'dashboard';
 
-  if (!mode) return null;
   return <AssistantPanel mode={mode} profileId={routeProfileId} />;
 }
 
