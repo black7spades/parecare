@@ -85,6 +85,31 @@ export interface AdminStats {
   by_tier: Partial<Record<'free' | 'family' | 'professional', number>>;
 }
 
+export interface AdminChatSummary {
+  id: string;
+  chat_day: string;
+  account_id: string;
+  account_display_name: string;
+  account_email: string;
+  care_profile_id: string | null;
+  care_profile_name: string | null;
+  message_count: number;
+  tokens_used: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminChatDetail extends AdminChatSummary {
+  messages: Array<{ role: 'user' | 'assistant'; content: string; timestamp: string }>;
+}
+
+export interface AdminChatList {
+  chats: AdminChatSummary[];
+  total: number;
+  page: number;
+  per_page: number;
+}
+
 export const adminApi = {
   stats: () => api.get<AdminStats>('/admin/stats'),
   listAccounts: (params: AdminListParams = {}) => {
@@ -143,6 +168,15 @@ export const adminApi = {
   updateRightsTemplate: (id: string, body: Partial<{ name: string; description: string | null } & AccountRights>) =>
     api.patch<{ template: RightsTemplate }>(`/admin/rights-templates/${id}`, body),
   deleteRightsTemplate: (id: string) => api.delete<{ message: string }>(`/admin/rights-templates/${id}`),
+  listChats: (params: { day?: string; page?: number; per_page?: number } = {}) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== '') qs.set(k, String(v));
+    }
+    const query = qs.toString();
+    return api.get<AdminChatList>(`/admin/chats${query ? `?${query}` : ''}`);
+  },
+  getChat: (id: string) => api.get<{ conversation: AdminChatDetail }>(`/admin/chats/${id}`),
   applyRightsTemplate: (id: string, accountIds: string[]) =>
     api.post<{ applied: string[]; skipped: Array<{ account_id: string; reason: string }>; template: { name: string } }>(
       `/admin/rights-templates/${id}/apply`,

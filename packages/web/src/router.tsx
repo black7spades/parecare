@@ -27,6 +27,7 @@ import { AccountSettings } from './pages/account/Settings';
 import { Profile } from './pages/account/Profile';
 import { AdminUsers } from './pages/admin/AdminUsers';
 import { AdminJourneys } from './pages/admin/AdminJourneys';
+import { AdminChats } from './pages/admin/AdminChats';
 import { AdminSettings } from './pages/admin/AdminSettings';
 import { SystemLayout } from './pages/admin/SystemLayout';
 
@@ -112,6 +113,7 @@ export const router = createBrowserRouter([
           { index: true, element: <Navigate to="/system/users" replace /> },
           { path: 'users', element: <AdminUsers /> },
           { path: 'journeys', element: <AdminJourneys /> },
+          { path: 'chats', element: <AdminChats /> },
           {
             path: 'settings',
             element: (

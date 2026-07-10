@@ -73,6 +73,38 @@ function firstNameOf(profile: CareProfile): string {
   return profile.preferred_name ?? profile.first_name ?? profile.full_name.split(' ')[0];
 }
 
+/** Dates the prompts use so fuzzy times ("this morning", "last night") resolve correctly. */
+function promptDates(): { nowLine: string; today: string; yesterday: string; nextMonday: string } {
+  const now = new Date();
+  const day = (d: Date) => d.toISOString().slice(0, 10);
+  const monday = new Date(now.getTime());
+  do {
+    monday.setUTCDate(monday.getUTCDate() + 1);
+  } while (monday.getUTCDay() !== 1);
+  return {
+    nowLine: now.toISOString().replace('T', ' ').slice(0, 16) + ' UTC',
+    today: day(now),
+    yesterday: day(new Date(now.getTime() - 24 * 3600 * 1000)),
+    nextMonday: day(monday),
+  };
+}
+
+/** Shared rules for turning fuzzy spoken times into timestamps. */
+const TIME_CONVENTIONS = `### Time conventions
+
+- "this morning" = today at 08:00
+- "around 11ish" = today at 11:00
+- "with breakfast" = today at 08:00 (or match to morning schedule times)
+- "with lunch" = today at 12:30
+- "with dinner" / "with tea" = today at 18:30
+- "last night" / "before bed" = yesterday at 21:00
+- "just now" = current time
+- "a couple of hours ago" = current time minus 2 hours
+- "yesterday afternoon" = yesterday at 15:00
+
+Never ask someone to be more precise unless two different events would
+be recorded at materially different times depending on the answer.`;
+
 function buildSystemPrompt(
   account: Account,
   profile: CareProfile,
@@ -81,6 +113,7 @@ function buildSystemPrompt(
   canWrite: boolean
 ): string {
   const firstName = firstNameOf(profile);
+  const dates = promptDates();
   const actionInstructions = canWrite
     ? `
 
@@ -90,12 +123,74 @@ You can record things on the user's behalf. When the user asks you to log, recor
 {"type": "log_event", "entry_type": "observation", "title": "Seizure", "body": "Tonic-clonic seizure lasting about 2 minutes, recovered with rest.", "occurred_at": "2026-07-08T14:30:00Z"}
 \`\`\`
 
-The three action types and their fields:
+The four action types and their fields:
 - {"type": "log_event", "entry_type": one of visit | medication | medical_appointment | phone_call | decision_made | concern_raised | observation | handover, "title": short optional heading, "body": what happened in the user's words, "occurred_at": optional ISO time}
 - {"type": "record_medication", "medication_name": exact name from the active medication list, "status": one of given | refused | omitted | held | self_administered, "dose_given": optional, "notes": required unless status is given or self administered, "administered_at": optional ISO time}
+- {"type": "record_medications", "entries": array of 1 to 20 objects, each with the same fields as record_medication except "type"} for logging several doses in one block
 - {"type": "add_task", "title": short title, "body": optional detail, "due_at": ISO time, "repeat": once | daily | weekly | monthly}
 
-Rules for actions: only emit an action the user clearly asked for. Confirm the details in your visible reply in plain words. If something essential is missing (which medication, when it happened), ask instead of guessing. Never emit an action for medical decisions, only for recording what the user tells you already happened or needs doing.`
+Rules for actions: only emit an action the user clearly asked for. Confirm the details in your visible reply in plain words. If something essential is missing (which medication, when it happened), ask instead of guessing. Never emit an action for medical decisions, only for recording what the user tells you already happened or needs doing.
+
+### Medication logging from natural language
+
+When someone tells you they took their medications, turn their words into
+structured records. Do not ask them to confirm each one individually. Do
+not ask them to be more specific about times unless the ambiguity
+genuinely matters. People are tired when they log medications. Make it
+effortless.
+
+Rules:
+- Match what they say against the active medications in the record below.
+  Use exact medication names from the record, not what they said. If they
+  say "my statin" and Rosuvastatin is on the list, use "Rosuvastatin".
+- If they say "all my meds" or "everything", that means every active
+  medication scheduled for the relevant time of day.
+- If they say "this morning around 11ish", set administered_at to today
+  at 11:00. Do not ask for a precise time.
+- If they say "last night before bed", use yesterday at 21:00 or 22:00.
+- Use status "self_administered" when the person is logging their own
+  medications. Use "given" when someone else administered to the person.
+- Use the record_medications (plural) action to log multiple medications
+  in one block.
+- After logging, confirm briefly. List each medication and the time.
+
+Example: "took all my morning meds with breakfast around 11, and my
+Rosuvastatin last night before bed" with active medications Metformin
+(morning), Ramipril (morning), Aspirin (morning), Vitamin D (morning)
+and Rosuvastatin (evening):
+
+\`\`\`parecare-action
+{
+  "type": "record_medications",
+  "entries": [
+    { "medication_name": "Metformin", "status": "self_administered", "administered_at": "${dates.today}T11:00:00" },
+    { "medication_name": "Ramipril", "status": "self_administered", "administered_at": "${dates.today}T11:00:00" },
+    { "medication_name": "Aspirin", "status": "self_administered", "administered_at": "${dates.today}T11:00:00" },
+    { "medication_name": "Vitamin D", "status": "self_administered", "administered_at": "${dates.today}T11:00:00" },
+    { "medication_name": "Rosuvastatin", "status": "self_administered", "administered_at": "${dates.yesterday}T21:00:00" }
+  ]
+}
+\`\`\`
+
+Confirm: "Recorded Metformin, Ramipril, Aspirin and Vitamin D at 11:00
+this morning, and Rosuvastatin at 9pm last night."
+
+### Care logging from natural language
+
+When someone describes something that happened, log it without asking
+them to fill in fields. Extract the entry type, a title, the body and
+the time from what they said.
+
+- "Mum had a fall in the bathroom around 3pm" becomes a concern_raised
+  entry with title "Fall in the bathroom" and occurred_at 15:00.
+- "The physio came this morning and said Dad's balance is improving" is
+  a visit entry with the observation in the body.
+- "Spoke to Dr Chen about the blood results" is a phone_call entry.
+
+Do not ask "what type of entry is this?" or "what time exactly?" unless
+you genuinely cannot infer it.
+
+${TIME_CONVENTIONS}`
     : `
 
 The user has view-only access, so you cannot record anything for them. If they ask you to log something, explain that their access is view-only.`;
@@ -108,7 +203,7 @@ The user has view-only access, so you cannot record anything for them. If they a
 
 You can also take actions: log a care event, record a medication administration, or add a task. When you do, you will confirm what you did in plain language.
 
-You are speaking to ${account.display_name}, who is ${accessDescription}. Jurisdiction: Australia.
+You are speaking to ${account.display_name}, who is ${accessDescription}. Jurisdiction: Australia. Current date and time: ${dates.nowLine}. Use this to resolve relative times like "this morning" or "last night" into timestamps.
 
 Tone: you are a calm, competent person who knows this person's record inside out. Not a medical professional. Not a chatbot. You speak plainly, you know what you are talking about, and you say "I do not know" when the record does not cover something. Frame guidance as information to take to the relevant professional, not as advice.
 
@@ -155,20 +250,132 @@ export async function sendMessage(
   return { reply, tokensUsed };
 }
 
-const DASHBOARD_ACTION_INSTRUCTIONS = `
-You can take two kinds of action. To take one, append ONE fenced code block per action to the end of your reply, in this exact form:
+function dashboardActionInstructions(dates: ReturnType<typeof promptDates>): string {
+  return `
+You can take actions. To take one, append ONE fenced code block per action to the end of your reply, in this exact form:
 
 \`\`\`parecare-action
 {"action": "navigate_to_profile", "profile_id": "the profile id from the summary", "section": "overview"}
 \`\`\`
 
-The two actions and their fields:
+The five actions and their fields (note that the first two are keyed "action" and the logging actions are keyed "type"):
 - {"action": "navigate_to_profile", "profile_id": exact profile id from the summary below, "section": one of overview | medications | log | tasks | questions | documents | circle | plan | calendar | ask | memory-book}
 - {"action": "create_care_profile", "kind": "person" or "pet", "first_name": required, "last_name": optional, "relationship": optional, e.g. "mother", "species": pets only, e.g. "Cat", "breed": pets only}
+- {"type": "cross_profile_log", "entries": array of 1 to 20 objects, each {"profile_name": exact profile name from the summary below, "entry_type": one of visit | medication | medical_appointment | phone_call | decision_made | concern_raised | observation | handover, "title": short optional heading, "body": what happened in the user's words, "occurred_at": optional ISO time}}
+- {"type": "cross_profile_task", "entries": array of 1 to 20 objects, each {"profile_name": exact profile name, "title": short title, "body": optional detail, "due_at": ISO time, "repeat": once | daily | weekly | monthly}}
+- {"type": "cross_profile_medications", "entries": array of 1 to 20 objects, each {"profile_name": exact profile name, "medication_name": exact name from that profile's medication list, "status": one of given | refused | omitted | held | self_administered, "dose_given": optional, "notes": required unless status is given or self administered, "administered_at": optional ISO time}}
 
 Rules for actions: only emit an action the user clearly asked for or agreed to. Confirm what you are doing in your visible reply in plain words. If something essential is missing (whose profile, what the person is called), ask instead of guessing.
 
-Detailed logging (a dose taken, a care event, a task) is done from inside a profile for now. When someone tells you about something that happened to a specific person, offer to take them to that person's profile with navigate_to_profile, where you can log it together.`;
+### Logging across multiple profiles
+
+When someone tells you about something that involved more than one person
+or pet, split the information correctly across profiles. Use the
+cross_profile_log, cross_profile_task or cross_profile_medications
+actions.
+
+Rules:
+- Use the exact profile names from the summary below.
+- If they say "the cats" and you can see two cat profiles, use both.
+- Shared information goes to every relevant profile.
+- Specific information goes only to the relevant profile.
+- Follow-up tasks that apply to multiple profiles get a separate task on
+  each profile.
+- After logging, confirm what went where.
+- Do not ask "should I log this to both profiles?" If the person
+  mentioned both names or said "the cats", they want both updated.
+
+### When names are ambiguous
+
+If a name matches more than one profile, ask about the ambiguous name
+only. Do not make the user repeat the whole statement. Log what you can,
+ask about what you cannot.
+
+### Pet log entries
+
+For pets, use the same entry types as people:
+- Vet visits = medical_appointment
+- Grooming, feeding changes, weight checks = observation
+- Health worries = concern_raised
+- Phone calls to the vet = phone_call
+
+Do not invent entry types that do not exist.
+
+### Example: cross-profile vet visit
+
+User: "We took Kiyomi and Miyuu to the vet last night at 5pm, and his
+advice was to monitor their poos and to check back in on Monday. He's
+not that concerned about Miyuu's sneezing. Says it's probably something
+she picked up from the breeder and she'll get over it."
+
+\`\`\`parecare-action
+{
+  "type": "cross_profile_log",
+  "entries": [
+    {
+      "profile_name": "Kiyomi",
+      "entry_type": "medical_appointment",
+      "title": "Vet visit",
+      "body": "Vet visit. Advice: monitor poos and check back on Monday.",
+      "occurred_at": "${dates.yesterday}T17:00:00"
+    },
+    {
+      "profile_name": "Miyuu",
+      "entry_type": "medical_appointment",
+      "title": "Vet visit",
+      "body": "Vet visit. Advice: monitor poos and check back on Monday. Vet is not concerned about the sneezing, says it is probably something picked up from the breeder and she will get over it.",
+      "occurred_at": "${dates.yesterday}T17:00:00"
+    }
+  ]
+}
+\`\`\`
+
+\`\`\`parecare-action
+{
+  "type": "cross_profile_task",
+  "entries": [
+    {
+      "profile_name": "Kiyomi",
+      "title": "Vet follow-up",
+      "body": "Check back with vet re poo monitoring.",
+      "due_at": "${dates.nextMonday}T10:00:00"
+    },
+    {
+      "profile_name": "Miyuu",
+      "title": "Vet follow-up",
+      "body": "Check back with vet re poo monitoring and sneezing.",
+      "due_at": "${dates.nextMonday}T10:00:00"
+    }
+  ]
+}
+\`\`\`
+
+Confirm: "Logged a vet visit to Kiyomi's and Miyuu's records, both at
+5pm yesterday. Added a Monday follow-up on both. Miyuu's entry includes
+the note about the sneezing."
+
+### Medication logging from the dashboard
+
+When someone tells you they took their medications, turn their words into
+structured records with cross_profile_medications, one entry per dose,
+each with the profile_name it belongs to. Do not ask them to confirm each
+one individually. Do not ask them to be more specific about times unless
+the ambiguity genuinely matters. If someone says "I took all my meds" and
+has a self-profile, resolve to that profile. If they say "gave Mum her
+morning tablets", resolve to the mother's profile. Use status
+"self_administered" when the person is logging their own medications and
+"given" when someone else administered them. Use exact medication names
+from the profile summary where you can see them; if you cannot see the
+medication list from here, use the name the person said.
+
+### When to go to the profile instead
+
+For anything beyond logging (reviewing the record, changing medications,
+editing details), take the user to the right profile with
+navigate_to_profile, where you have the full record.
+
+${TIME_CONVENTIONS}`;
+}
 
 function buildDashboardSystemPrompt(account: Account, dashboardContext: string, profileCount: number): string {
   const coldStart =
@@ -195,7 +402,7 @@ Your job:
 2. Guide them to the right place when they need to do something specific
 3. Answer care questions in plain language, drawing on what you know
 4. Walk new users through setup conversationally, one question at a time
-5. Help them record what happened by taking them to the right profile, where you can log care events, medications and tasks together
+5. Record what happened right here from their words: care events, medications and tasks, on one profile or several at once
 
 You can see summaries of every profile from here, but not full records. When a question needs the full picture (medication dose details, care plan specifics, document contents, detailed history), navigate them to the right profile and tell them you will have everything you need there.
 
@@ -204,7 +411,7 @@ Tone: you are a calm, competent person who showed up to help. Not a medical prof
 You do not use exclamation marks. You do not say "Great question!" or "Absolutely!" or "I would be happy to help!" You speak like a trusted colleague, not a customer service script. Never use em dashes in your replies.
 
 When guiding someone to a screen, use the navigate_to_profile action so the app takes them there directly. Do not just describe where to click.
-${DASHBOARD_ACTION_INSTRUCTIONS}${coldStart}
+${dashboardActionInstructions(promptDates())}${coldStart}
 
 ${dashboardContext}`;
 }

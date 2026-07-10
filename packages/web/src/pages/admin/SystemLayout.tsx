@@ -24,6 +24,9 @@ export function SystemLayout() {
         <NavLink to="/system/journeys" className={tabClass}>
           Care journeys
         </NavLink>
+        <NavLink to="/system/chats" className={tabClass}>
+          Pare chats
+        </NavLink>
         {isSuperAdmin ? (
           <NavLink to="/system/settings" className={tabClass}>
             Settings

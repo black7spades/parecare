@@ -9,6 +9,9 @@ import { useProfile } from './ProfileLayout';
 
 interface ConversationSummary {
   id: string;
+  account_id: string;
+  account_display_name: string;
+  is_own: boolean;
   tokens_used: number;
   created_at: string;
   updated_at: string;
@@ -33,6 +36,7 @@ export function AiPage() {
     queryFn: () => api.get<{ conversations: ConversationSummary[] }>(`/care-profiles/${profile.id}/ai/conversations`),
   });
   const conversations = listData?.conversations ?? [];
+  const activeConversation = conversations.find((c) => c.id === activeId) ?? null;
 
   const { data: convData } = useQuery({
     queryKey: ['ai-conversation', activeId],
@@ -88,7 +92,8 @@ export function AiPage() {
                     activeId === c.id ? 'bg-primary-50 text-primary font-medium' : 'text-muted hover:bg-surface-2'
                   }`}
                 >
-                  {format(new Date(c.updated_at), 'd MMM yyyy, HH:mm')}
+                  <span className="block">{format(new Date(c.updated_at), 'd MMM yyyy, HH:mm')}</span>
+                  {!c.is_own ? <span className="block opacity-75">{c.account_display_name}</span> : null}
                 </button>
               </li>
             ))}
@@ -136,7 +141,13 @@ export function AiPage() {
 
         {error ? <p className="text-sm text-red-600 mb-2">{error}</p> : null}
 
-        {activeId ? (
+        {activeConversation && !activeConversation.is_own ? (
+          <p className="text-xs text-muted mb-2">
+            This chat belongs to {activeConversation.account_display_name}. You can read it but not add to it.
+          </p>
+        ) : null}
+
+        {activeId && (!activeConversation || activeConversation.is_own) ? (
           <form
             className="flex gap-2 items-end"
             onSubmit={(e) => {

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { accountHasRight } from '../middleware/accountRights';
 import { getEffectiveTier, PLAN_LIMITS, getCareAccess } from '../middleware/subscriptionGate';
-import { extractActionBlocks, type ExtractedActions } from './aiActions';
+import { extractActionBlocks, crossProfileActionSchema, type CrossProfileAction, type ExtractedActions } from './aiActions';
 import type { Account, CareProfile } from '../types';
 
 /**
@@ -50,6 +50,14 @@ const createProfileSchema = z.object({
 export const dashboardActionSchema = z.discriminatedUnion('action', [navigateSchema, createProfileSchema]);
 export type DashboardAction = z.infer<typeof dashboardActionSchema>;
 
+/**
+ * Everything the dashboard assistant can emit: single-profile dashboard
+ * actions (discriminated by "action") plus the cross-profile logging
+ * actions shared with the profile assistant (discriminated by "type").
+ */
+const anyDashboardActionSchema = z.union([dashboardActionSchema, crossProfileActionSchema]);
+export type AnyDashboardAction = DashboardAction | CrossProfileAction;
+
 /** Actions the web app carries out after the reply arrives. */
 export interface ClientAction {
   action: 'navigate_to_profile' | 'profile_created';
@@ -58,8 +66,22 @@ export interface ClientAction {
   name?: string;
 }
 
-export function extractDashboardActions(reply: string): ExtractedActions<DashboardAction> {
-  return extractActionBlocks(reply, dashboardActionSchema);
+export function extractDashboardActions(reply: string): ExtractedActions<AnyDashboardAction> {
+  return extractActionBlocks(reply, anyDashboardActionSchema);
+}
+
+/** Split a mixed batch into dashboard actions and cross-profile actions. */
+export function splitDashboardActions(actions: AnyDashboardAction[]): {
+  single: DashboardAction[];
+  cross: CrossProfileAction[];
+} {
+  const single: DashboardAction[] = [];
+  const cross: CrossProfileAction[] = [];
+  for (const a of actions) {
+    if ('action' in a) single.push(a);
+    else cross.push(a);
+  }
+  return { single, cross };
 }
 
 async function createProfile(
