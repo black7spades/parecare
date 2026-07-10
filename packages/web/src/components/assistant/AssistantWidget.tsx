@@ -147,7 +147,7 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
   // persist per browser.
   const [rect, setRect] = useState<WindowRect | null>(() => loadWindowPrefs().rect);
   const [opacity, setOpacity] = useState<number>(() => loadWindowPrefs().opacity);
-  const [hovering, setHovering] = useState(false);
+  const [typing, setTyping] = useState(false);
   const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 640px)').matches);
   const rectRef = useRef(rect);
   rectRef.current = rect;
@@ -371,13 +371,16 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
         windowRect ? 'rounded-xl border' : 'inset-x-0 bottom-0 h-[75vh] rounded-t-2xl border-t'
       }`}
       style={{
-        opacity: hovering ? 1 : opacity / 100,
+        // The slider sets how see-through the window is, and it stays that
+        // way so the user can read what is behind it. Dragging the slider
+        // does not count as typing, so the window updates live as they drag.
+        // It only snaps fully solid while they are actively typing, when the
+        // text needs to be crisp.
+        opacity: typing ? 1 : opacity / 100,
         ...(windowRect
           ? { left: windowRect.x, top: windowRect.y, width: windowRect.width, height: windowRect.height }
           : {}),
       }}
-      onPointerEnter={() => setHovering(true)}
-      onPointerLeave={() => setHovering(false)}
     >
       <div
         className={`flex items-center justify-between gap-2 px-4 py-3 border-b border-border bg-surface-2 shrink-0 ${isDesktop ? 'cursor-move touch-none select-none' : ''}`}
@@ -478,6 +481,8 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
           placeholder="Talk to Pare"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          onFocus={() => setTyping(true)}
+          onBlur={() => setTyping(false)}
           rows={2}
           className="flex-1 resize-none rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
           onKeyDown={(e) => {
