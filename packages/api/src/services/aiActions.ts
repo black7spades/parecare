@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { db } from '../config/database';
 import type { Account, CareAccess, CareCircleMember, CareProfile } from '../types';
+import { parseZonedTime, formatInZone } from '../lib/timezone';
 
 /**
  * Actions the assistant can carry out on the user's behalf: logging a care
@@ -177,10 +178,15 @@ export function extractActions(reply: string): ExtractedActions {
   return extractActionBlocks(reply, actionSchema);
 }
 
-function parseWhen(value: string | null | undefined): Date {
+/**
+ * Turn an assistant-supplied time into a UTC instant. A naive wall-clock
+ * time ("2026-07-10T11:00:00") is read in the user's own time zone, so
+ * "11am this morning" is stored as 11am where they are, not 11am UTC.
+ */
+function parseWhen(value: string | null | undefined, timeZone: string | null | undefined): Date {
   if (!value) return new Date();
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return new Date();
+  const d = parseZonedTime(value, timeZone);
+  if (!d) return new Date();
   // Never record anything in the future; clamp to now (same rule as the MAR).
   return d.getTime() > Date.now() + 60_000 ? new Date() : d;
 }
@@ -211,7 +217,12 @@ interface MedicationEntry {
  * profile's active list, insert the MAR row, draw down the supply and audit.
  * Shared by the singular and batch actions.
  */
-async function recordOneMedication(entry: MedicationEntry, profileId: string, account: Account): Promise<string> {
+async function recordOneMedication(
+  entry: MedicationEntry,
+  profileId: string,
+  account: Account,
+  timeZone: string | null | undefined
+): Promise<string> {
   const med = await db('medications as m')
     .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
     .where({ 'm.care_profile_id': profileId, 'm.active': true })
@@ -224,7 +235,7 @@ async function recordOneMedication(entry: MedicationEntry, profileId: string, ac
   if (!GIVEN.has(entry.status) && !entry.notes?.trim()) {
     return `Could not record the ${entry.status} dose of ${med.name}: a note explaining why is required.`;
   }
-  const administeredAt = parseWhen(entry.administered_at);
+  const administeredAt = parseWhen(entry.administered_at, timeZone);
   await db('medication_administrations').insert({
     medication_id: med.id,
     care_profile_id: profileId,
@@ -254,18 +265,20 @@ async function recordOneMedication(entry: MedicationEntry, profileId: string, ac
     }
   }
   await audit(profileId, account.id, 'medications', `${med.name} ${entry.status}`);
-  return `Recorded ${med.name}${entry.dose_given ?? med.dose ? ` ${entry.dose_given ?? med.dose}` : ''} as ${entry.status.replace(/_/g, ' ')}.`;
+  const at = formatInZone(administeredAt, timeZone);
+  return `Recorded ${med.name}${entry.dose_given ?? med.dose ? ` ${entry.dose_given ?? med.dose}` : ''} as ${entry.status.replace(/_/g, ' ')} at ${at}.`;
 }
 
 async function executeOne(
   action: AssistantAction,
   profileId: string,
   account: Account,
-  access: CareAccess
+  access: CareAccess,
+  timeZone: string | null | undefined
 ): Promise<string | string[]> {
   switch (action.type) {
     case 'log_event': {
-      const occurredAt = parseWhen(action.occurred_at);
+      const occurredAt = parseWhen(action.occurred_at, timeZone);
       await db('care_log_entries').insert({
         care_profile_id: profileId,
         author_member_id: access.member?.id ?? null,
@@ -275,17 +288,17 @@ async function executeOne(
         occurred_at: occurredAt,
       });
       await audit(profileId, account.id, 'log', action.title ?? action.body);
-      return `Logged a ${action.entry_type.replace(/_/g, ' ')} entry${action.title ? `: ${action.title}` : ''}.`;
+      return `Logged a ${action.entry_type.replace(/_/g, ' ')} entry${action.title ? `: ${action.title}` : ''} at ${formatInZone(occurredAt, timeZone)}.`;
     }
     case 'record_medication': {
-      return recordOneMedication(action, profileId, account);
+      return recordOneMedication(action, profileId, account, timeZone);
     }
     case 'record_medications': {
       // One dose failing to record must not stop the rest of the batch.
       const results: string[] = [];
       for (const entry of action.entries) {
         try {
-          results.push(await recordOneMedication(entry, profileId, account));
+          results.push(await recordOneMedication(entry, profileId, account, timeZone));
         } catch (err) {
           console.warn('Assistant batch medication entry failed:', (err as Error).message);
           results.push(`Could not record ${entry.medication_name}. Please record it directly in the app.`);
@@ -294,8 +307,8 @@ async function executeOne(
       return results;
     }
     case 'add_task': {
-      const due = new Date(action.due_at);
-      if (Number.isNaN(due.getTime())) {
+      const due = parseZonedTime(action.due_at, timeZone);
+      if (!due) {
         return `Could not add the task "${action.title}": the due time was unclear.`;
       }
       await db('reminders').insert({
@@ -306,7 +319,7 @@ async function executeOne(
         next_due_at: due,
       });
       await audit(profileId, account.id, 'reminders', action.title);
-      return `Added the task "${action.title}" due ${due.toISOString().replace('T', ' ').slice(0, 16)} UTC.`;
+      return `Added the task "${action.title}" due ${formatInZone(due, timeZone)}.`;
     }
   }
 }
@@ -315,7 +328,8 @@ export async function executeActions(
   actions: AssistantAction[],
   profileId: string,
   account: Account,
-  access: CareAccess
+  access: CareAccess,
+  timeZone?: string | null
 ): Promise<string[]> {
   if (actions.length === 0) return [];
   if (access.level === 'viewer') {
@@ -324,7 +338,7 @@ export async function executeActions(
   const results: string[] = [];
   for (const action of actions) {
     try {
-      const outcome = await executeOne(action, profileId, account, access);
+      const outcome = await executeOne(action, profileId, account, access, timeZone);
       results.push(...(Array.isArray(outcome) ? outcome : [outcome]));
     } catch (err) {
       console.warn('Assistant action failed:', (err as Error).message);
@@ -432,7 +446,11 @@ function toSingleProfileAction(action: CrossProfileAction, entry: CrossProfileAc
  * execution path as the single-profile assistant. A name that cannot be
  * resolved fails that entry only; the rest still run.
  */
-export async function executeCrossProfileActions(actions: CrossProfileAction[], account: Account): Promise<string[]> {
+export async function executeCrossProfileActions(
+  actions: CrossProfileAction[],
+  account: Account,
+  timeZone?: string | null
+): Promise<string[]> {
   if (actions.length === 0) return [];
   const results: string[] = [];
   const resolved = new Map<string, ResolvedProfile | null>();
@@ -455,7 +473,7 @@ export async function executeCrossProfileActions(actions: CrossProfileAction[], 
         continue;
       }
       try {
-        const outcome = await executeOne(toSingleProfileAction(action, entry), target.profileId, account, target.access);
+        const outcome = await executeOne(toSingleProfileAction(action, entry), target.profileId, account, target.access, timeZone);
         for (const line of Array.isArray(outcome) ? outcome : [outcome]) {
           results.push(`${target.name}: ${line}`);
         }

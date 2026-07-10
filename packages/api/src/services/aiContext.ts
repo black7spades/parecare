@@ -1,4 +1,5 @@
 import { db } from '../config/database';
+import { formatInZone } from '../lib/timezone';
 import type { CareAccess, CareProfile } from '../types';
 
 /**
@@ -29,17 +30,21 @@ function age(dob: string | Date | null): number | null {
   return years;
 }
 
-function fmtDate(v: string | Date | null | undefined): string {
+function fmtDate(v: string | Date | null | undefined, timeZone?: string | null): string {
   if (!v) return 'unknown time';
   const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? 'unknown time' : d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+  return Number.isNaN(d.getTime()) ? 'unknown time' : formatInZone(d, timeZone);
 }
 
 function line(items: Array<string | null | undefined>): string {
   return items.filter(Boolean).join(', ');
 }
 
-export async function buildProfileContext(profile: CareProfile, access: CareAccess): Promise<string> {
+export async function buildProfileContext(
+  profile: CareProfile,
+  access: CareAccess,
+  timeZone?: string | null
+): Promise<string> {
   const profileId = profile.id;
   const now = new Date();
   const marSince = new Date(now.getTime() - MAR_DAYS * 24 * 3600 * 1000);
@@ -189,7 +194,7 @@ export async function buildProfileContext(profile: CareProfile, access: CareAcce
         mar
           .map(
             (a) =>
-              `- ${fmtDate(a.administered_at)}: ${a.med_name}${a.dose_given ? ` ${a.dose_given}` : ''} status ${a.status}${a.administered_by_name ? ` by ${a.administered_by_name}` : ''}${a.notes ? ` (note: ${a.notes})` : ''}`
+              `- ${fmtDate(a.administered_at, timeZone)}: ${a.med_name}${a.dose_given ? ` ${a.dose_given}` : ''} status ${a.status}${a.administered_by_name ? ` by ${a.administered_by_name}` : ''}${a.notes ? ` (note: ${a.notes})` : ''}`
           )
           .join('\n')
     );
@@ -199,7 +204,7 @@ export async function buildProfileContext(profile: CareProfile, access: CareAcce
     sections.push(
       `## Upcoming tasks and appointments, next 30 days\n` +
         tasks
-          .map((t) => `- ${fmtDate(t.next_due_at)}: ${t.title}${t.reminder_type !== 'once' ? ` (repeats ${t.reminder_type})` : ''}${t.body ? ` — ${t.body}` : ''}`)
+          .map((t) => `- ${fmtDate(t.next_due_at, timeZone)}: ${t.title}${t.reminder_type !== 'once' ? ` (repeats ${t.reminder_type})` : ''}${t.body ? ` — ${t.body}` : ''}`)
           .join('\n')
     );
   }
@@ -231,7 +236,7 @@ export async function buildProfileContext(profile: CareProfile, access: CareAcce
     sections.push(
       `## Care log, last ${LOG_DAYS} days (newest first)\n` +
         log
-          .map((e) => `- ${fmtDate(e.occurred_at)} [${String(e.entry_type).replace(/_/g, ' ')}]${e.title ? ` ${e.title}:` : ''} ${e.body}`)
+          .map((e) => `- ${fmtDate(e.occurred_at, timeZone)} [${String(e.entry_type).replace(/_/g, ' ')}]${e.title ? ` ${e.title}:` : ''} ${e.body}`)
           .join('\n')
     );
   }
@@ -248,7 +253,7 @@ export async function buildProfileContext(profile: CareProfile, access: CareAcce
   if (visibleDocs.length) {
     sections.push(
       `## Documents on file (names only, contents not readable here)\n` +
-        visibleDocs.map((d) => `- ${d.label} (${String(d.category).replace(/_/g, ' ')}, added ${fmtDate(d.created_at)})`).join('\n')
+        visibleDocs.map((d) => `- ${d.label} (${String(d.category).replace(/_/g, ' ')}, added ${fmtDate(d.created_at, timeZone)})`).join('\n')
     );
   }
 

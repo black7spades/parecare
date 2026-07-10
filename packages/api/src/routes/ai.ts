@@ -98,12 +98,13 @@ aiRouter.post(
   requireAccountRight('can_use_ai'),
   requireFeature('ai_access'),
   async (req, res) => {
-    const schema = z.object({ content: z.string().min(1).max(4000) });
+    const schema = z.object({ content: z.string().min(1).max(4000), timezone: z.string().max(64).optional() });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
       return;
     }
+    const timeZone = parsed.data.timezone ?? null;
 
     const conversation = await db<AiConversation>('ai_conversations')
       .where({ id: req.params['convId'], account_id: req.account!.id })
@@ -125,7 +126,7 @@ aiRouter.post(
     // owner/admin) it resolved decides what the assistant may see and do.
     const access = req.careAccess!;
     const canWrite = access.level !== 'viewer';
-    const contextBlock = await buildProfileContext(profile, access);
+    const contextBlock = await buildProfileContext(profile, access, timeZone);
 
     const messages = conversation.messages as ChatMessage[];
 
@@ -139,7 +140,8 @@ aiRouter.post(
         messages,
         parsed.data.content,
         contextBlock,
-        canWrite
+        canWrite,
+        timeZone
       );
     } catch (err: unknown) {
       const appErr = err as { status?: number; code?: string; message?: string };
@@ -156,7 +158,7 @@ aiRouter.post(
     // Carry out any actions the assistant proposed, then show what happened
     // instead of the raw action blocks.
     const { cleanedReply, actions, parseErrors } = extractActions(result.reply);
-    const outcomes = [...(await executeActions(actions, req.params['id']!, req.account!, access)), ...parseErrors];
+    const outcomes = [...(await executeActions(actions, req.params['id']!, req.account!, access, timeZone)), ...parseErrors];
     const finalReply = [cleanedReply, ...outcomes.map((o) => `✔ ${o}`)].filter(Boolean).join('\n\n');
 
     const updatedMessages = [

@@ -3,6 +3,7 @@ import { useMatch, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../../api/client';
 import { describeAiError } from '../../lib/aiErrors';
+import { browserTimeZone } from '../../lib/datetime';
 import { useAssistantStore } from '../../stores/assistant';
 import { useAuthStore } from '../../stores/auth';
 import type { CareProfile } from '../../lib/care';
@@ -293,7 +294,7 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
       };
       const conversation = convId ?? (await startConversation());
       try {
-        return await api.post<SendResponse>(`${apiBase}/conversations/${conversation}/messages`, { content });
+        return await api.post<SendResponse>(`${apiBase}/conversations/${conversation}/messages`, { content, timezone: browserTimeZone() });
       } catch (err) {
         // A resumed conversation can go stale (different login, deleted
         // record); start a fresh one instead of losing the message.

@@ -85,12 +85,13 @@ aiDashboardRouter.post(
   requireAccountRight('can_use_ai'),
   requireFeature('ai_access'),
   async (req, res) => {
-    const schema = z.object({ content: z.string().min(1).max(4000) });
+    const schema = z.object({ content: z.string().min(1).max(4000), timezone: z.string().max(64).optional() });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
       return;
     }
+    const timeZone = parsed.data.timezone ?? null;
 
     const conversation = await db<AiConversation>('ai_conversations')
       .where({ id: req.params['convId'], account_id: req.account!.id })
@@ -101,12 +102,12 @@ aiDashboardRouter.post(
       return;
     }
 
-    const { context, profileCount } = await buildDashboardContext(req.account!);
+    const { context, profileCount } = await buildDashboardContext(req.account!, timeZone);
     const messages = conversation.messages as ChatMessage[];
 
     let result: { reply: string; tokensUsed: number };
     try {
-      result = await sendDashboardMessage(req.account!, conversation.id, messages, parsed.data.content, context, profileCount);
+      result = await sendDashboardMessage(req.account!, conversation.id, messages, parsed.data.content, context, profileCount, timeZone);
     } catch (err: unknown) {
       const appErr = err as { status?: number; code?: string; message?: string };
       if (appErr.status) {
@@ -125,7 +126,7 @@ aiDashboardRouter.post(
     const { cleanedReply, actions, parseErrors } = extractDashboardActions(result.reply);
     const { single, cross } = splitDashboardActions(actions);
     const { outcomes, clientActions } = await executeDashboardActions(single, req.account!);
-    const crossOutcomes = await executeCrossProfileActions(cross, req.account!);
+    const crossOutcomes = await executeCrossProfileActions(cross, req.account!, timeZone);
     const allOutcomes = [...outcomes, ...crossOutcomes, ...parseErrors];
     const finalReply = [cleanedReply, ...allOutcomes.map((o) => `✔ ${o}`)].filter(Boolean).join('\n\n');
 

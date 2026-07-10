@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { describeAiError } from '../../../lib/aiErrors';
+import { browserTimeZone } from '../../../lib/datetime';
 import { Button } from '../../../components/ui/Button';
 import { Textarea } from '../../../components/ui/Input';
 import { useProfile } from './ProfileLayout';
@@ -61,7 +62,10 @@ export function AiPage() {
 
   const sendMutation = useMutation({
     mutationFn: (content: string) =>
-      api.post<{ reply: string }>(`/care-profiles/${profile.id}/ai/conversations/${activeId}/messages`, { content }),
+      api.post<{ reply: string }>(`/care-profiles/${profile.id}/ai/conversations/${activeId}/messages`, {
+        content,
+        timezone: browserTimeZone(),
+      }),
     onMutate: (content) => setPendingReply(content),
     onSettled: () => setPendingReply(null),
     onSuccess: () => {
