@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
@@ -12,18 +12,62 @@ import type { AiConversation, CareProfile } from '../types';
 
 export const aiRouter = Router({ mergeParams: true });
 
+/**
+ * Whether this requester may read chats other people had about this
+ * person: the profile owner and platform admins can, so the person
+ * coordinating the care can review every conversation in one place.
+ * Circle members only ever see their own conversations.
+ */
+function canReadAllChats(req: Request): boolean {
+  const level = req.careAccess?.level;
+  return level === 'owner' || level === 'admin';
+}
+
 aiRouter.get('/conversations', requireAuth, async (req, res) => {
-  const conversations = await db<AiConversation>('ai_conversations')
-    .where({ care_profile_id: req.params['id'], account_id: req.account!.id })
-    .orderBy('updated_at', 'desc')
-    .select('id', 'tokens_used', 'created_at', 'updated_at');
+  const query = db<AiConversation>('ai_conversations')
+    .join('accounts', 'ai_conversations.account_id', 'accounts.id')
+    .where({ care_profile_id: req.params['id'] })
+    .orderBy('ai_conversations.updated_at', 'desc')
+    .select(
+      'ai_conversations.id',
+      'ai_conversations.account_id',
+      'accounts.display_name as account_display_name',
+      'ai_conversations.tokens_used',
+      db.raw("to_char(ai_conversations.created_at, 'YYYY-MM-DD') as chat_day"),
+      'ai_conversations.created_at',
+      'ai_conversations.updated_at'
+    );
+  if (!canReadAllChats(req)) {
+    query.where({ 'ai_conversations.account_id': req.account!.id });
+  }
+  const conversations = (await query).map((c) => ({ ...c, is_own: c.account_id === req.account!.id }));
   res.json({ conversations });
 });
 
-aiRouter.get('/conversations/:convId', requireAuth, async (req, res) => {
+/**
+ * Today's conversation for this requester on this profile, so a chat
+ * survives closing the browser and picks up where it left off on any
+ * device. Conversations belong to the day they were started; a new day
+ * starts a new chat log.
+ */
+aiRouter.get('/conversations/current', requireAuth, async (req, res) => {
   const conversation = await db<AiConversation>('ai_conversations')
-    .where({ id: req.params['convId'], account_id: req.account!.id, care_profile_id: req.params['id'] })
+    .where({ care_profile_id: req.params['id'], account_id: req.account!.id })
+    .whereRaw('created_at::date = CURRENT_DATE')
+    .orderBy('created_at', 'desc')
     .first();
+  res.json({ conversation: conversation ?? null });
+});
+
+aiRouter.get('/conversations/:convId', requireAuth, async (req, res) => {
+  const query = db<AiConversation>('ai_conversations').where({
+    id: req.params['convId'],
+    care_profile_id: req.params['id'],
+  });
+  if (!canReadAllChats(req)) {
+    query.where({ account_id: req.account!.id });
+  }
+  const conversation = await query.first();
   if (!conversation) {
     res.status(404).json({ error: 'Conversation not found', code: 'NOT_FOUND' });
     return;

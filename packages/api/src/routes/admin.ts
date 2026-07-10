@@ -599,6 +599,112 @@ adminRouter.get('/care-profiles', async (req, res) => {
   res.json({ profiles: await q });
 });
 
+/**
+ * Chat oversight: every conversation with Pare is kept and organised by
+ * the day it started. Super admins can read every chat on the platform.
+ * Admins are scoped to the people in their care: their own chats plus any
+ * chat about a care profile they own or belong to the circle of.
+ */
+function scopeChatsToCare(q: Knex.QueryBuilder, actor: Account): Knex.QueryBuilder {
+  if (actor.role === 'super_admin') return q;
+  return q.where((b) =>
+    b
+      .where('ai_conversations.account_id', actor.id)
+      .orWhereIn('ai_conversations.care_profile_id', db('care_profiles').select('id').where({ account_id: actor.id }))
+      .orWhereIn(
+        'ai_conversations.care_profile_id',
+        db('care_circle_members').select('care_profile_id').where({ account_id: actor.id, invite_accepted: true })
+      )
+  );
+}
+
+const chatListSchema = z.object({
+  day: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  per_page: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+adminRouter.get('/chats', async (req, res) => {
+  const parsed = chatListSchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid query', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const { day, page, per_page } = parsed.data;
+
+  const base = () => {
+    const q = db('ai_conversations')
+      .join('accounts', 'ai_conversations.account_id', 'accounts.id')
+      .leftJoin('care_profiles', 'ai_conversations.care_profile_id', 'care_profiles.id');
+    if (day) q.whereRaw('ai_conversations.created_at::date = ?', [day]);
+    return scopeChatsToCare(q, req.account!);
+  };
+
+  const [rows, totalRow] = await Promise.all([
+    base()
+      .select(
+        'ai_conversations.id',
+        db.raw("to_char(ai_conversations.created_at, 'YYYY-MM-DD') as chat_day"),
+        'ai_conversations.account_id',
+        'accounts.display_name as account_display_name',
+        'accounts.email as account_email',
+        'ai_conversations.care_profile_id',
+        'care_profiles.full_name as care_profile_name',
+        db.raw('jsonb_array_length(ai_conversations.messages) as message_count'),
+        'ai_conversations.tokens_used',
+        'ai_conversations.created_at',
+        'ai_conversations.updated_at'
+      )
+      .orderBy('ai_conversations.updated_at', 'desc')
+      .limit(per_page)
+      .offset((page - 1) * per_page),
+    base().count('ai_conversations.id as count').first(),
+  ]);
+
+  res.json({
+    chats: rows,
+    total: Number((totalRow as { count?: string } | undefined)?.count ?? 0),
+    page,
+    per_page,
+  });
+});
+
+adminRouter.get('/chats/:conversationId', async (req, res) => {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.params.conversationId ?? '')) {
+    res.status(404).json({ error: 'Conversation not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const conversation = await scopeChatsToCare(
+    db('ai_conversations')
+      .join('accounts', 'ai_conversations.account_id', 'accounts.id')
+      .leftJoin('care_profiles', 'ai_conversations.care_profile_id', 'care_profiles.id')
+      .where('ai_conversations.id', req.params.conversationId),
+    req.account!
+  )
+    .select(
+      'ai_conversations.id',
+      db.raw("to_char(ai_conversations.created_at, 'YYYY-MM-DD') as chat_day"),
+      'ai_conversations.account_id',
+      'accounts.display_name as account_display_name',
+      'accounts.email as account_email',
+      'ai_conversations.care_profile_id',
+      'care_profiles.full_name as care_profile_name',
+      'ai_conversations.messages',
+      'ai_conversations.tokens_used',
+      'ai_conversations.created_at',
+      'ai_conversations.updated_at'
+    )
+    .first();
+  if (!conversation) {
+    res.status(404).json({ error: 'Conversation not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ conversation });
+});
+
 const updateRoleSchema = z.object({
   role: z.enum(['super_admin', 'admin', 'user']),
 });

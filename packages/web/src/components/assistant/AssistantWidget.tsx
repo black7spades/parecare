@@ -18,9 +18,9 @@ import type { CareProfile } from '../../lib/care';
  *   record, exactly as before.
  *
  * Anywhere else (account settings, admin) Pare stays out of the way.
- * Each conversation is kept for the browser session under its own key, so
- * moving between the dashboard and a profile and back resumes where the
- * user left off.
+ * Conversations persist on the server and are kept per day: opening Pare
+ * resumes today's chat for the current scope on any device, and each new
+ * day starts a fresh chat log.
  */
 
 interface ConversationDetail {
@@ -54,8 +54,6 @@ const SECTION_PATHS: Record<string, string> = {
   ask: 'ai',
   'memory-book': 'memory-book',
 };
-
-const convStorageKey = (scope: string) => `parecare-assistant-conv-${scope}`;
 
 export function AssistantWidget() {
   const dashboardMatch = useMatch('/app');
@@ -92,11 +90,32 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
   const apiBase = mode === 'dashboard' ? '/ai/dashboard' : `/care-profiles/${profileId}/ai`;
 
   // Follow the route: switching between dashboard and a profile resumes
-  // the conversation stored for that scope.
+  // today's conversation for that scope, kept on the server so it
+  // survives closing the browser.
+  // "New chat" sets today's conversation aside; a refetch of the current
+  // conversation must not bring it back.
+  const [dismissedConvId, setDismissedConvId] = useState<string | null>(null);
+
   useEffect(() => {
     setError('');
-    setConvId(sessionStorage.getItem(convStorageKey(convScope)));
+    setConvId(null);
+    setDismissedConvId(null);
   }, [convScope]);
+
+  const currentQuery = useQuery({
+    queryKey: ['assistant-current', convScope],
+    queryFn: () => api.get<{ conversation: { id: string } | null }>(`${apiBase}/conversations/current`),
+    enabled: open,
+  });
+  useEffect(() => {
+    if (currentQuery.data) {
+      const id = currentQuery.data.conversation?.id ?? null;
+      setConvId(id && id !== dismissedConvId ? id : null);
+    }
+  }, [currentQuery.data, dismissedConvId]);
+  // Hold sends until we know whether today's chat already exists, so a
+  // quick first message continues it instead of forking a second one.
+  const resumeReady = currentQuery.isFetched || currentQuery.isError;
 
   const { data: profileData } = useQuery({
     queryKey: ['care-profile', profileId],
@@ -114,14 +133,14 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
   });
   const messages = convData?.conversation.messages ?? [];
 
-  // A stored conversation can go stale (different login, deleted profile);
+  // A resumed conversation can go stale (different login, deleted profile);
   // drop it and start fresh instead of showing an error.
   useEffect(() => {
     if (convError) {
-      sessionStorage.removeItem(convStorageKey(convScope));
+      queryClient.setQueryData(['assistant-current', convScope], { conversation: null });
       setConvId(null);
     }
-  }, [convError, convScope]);
+  }, [convError, convScope, queryClient]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });
@@ -131,7 +150,7 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
     mutationFn: async (content: string) => {
       const startConversation = async () => {
         const created = await api.post<{ conversation: { id: string } }>(`${apiBase}/conversations`);
-        sessionStorage.setItem(convStorageKey(convScope), created.conversation.id);
+        queryClient.setQueryData(['assistant-current', convScope], { conversation: created.conversation });
         setConvId(created.conversation.id);
         return created.conversation.id;
       };
@@ -139,10 +158,9 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
       try {
         return await api.post<SendResponse>(`${apiBase}/conversations/${conversation}/messages`, { content });
       } catch (err) {
-        // A stored conversation can go stale (different login, deleted
+        // A resumed conversation can go stale (different login, deleted
         // record); start a fresh one instead of losing the message.
         if (err instanceof ApiError && err.status === 404 && conversation === convId) {
-          sessionStorage.removeItem(convStorageKey(convScope));
           const fresh = await startConversation();
           return api.post<SendResponse>(`${apiBase}/conversations/${fresh}/messages`, { content });
         }
@@ -174,23 +192,24 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
   });
 
   // A message queued from elsewhere (the dashboard welcome card or the
-  // attention prompt) is sent as soon as we are open and idle.
+  // attention prompt) is sent as soon as we are open, resumed and idle.
   useEffect(() => {
-    if (open && pendingMessage && !sendMutation.isPending) {
+    if (open && pendingMessage && resumeReady && !sendMutation.isPending) {
       const message = consumePendingMessage();
       if (message) sendMutation.mutate(message);
     }
-  }, [open, pendingMessage, sendMutation, consumePendingMessage]);
+  }, [open, pendingMessage, resumeReady, sendMutation, consumePendingMessage]);
 
   function startNewConversation() {
-    sessionStorage.removeItem(convStorageKey(convScope));
+    setDismissedConvId(convId);
+    queryClient.setQueryData(['assistant-current', convScope], { conversation: null });
     setConvId(null);
     setError('');
   }
 
   function send() {
     const content = draft.trim();
-    if (content && !sendMutation.isPending) sendMutation.mutate(content);
+    if (content && resumeReady && !sendMutation.isPending) sendMutation.mutate(content);
   }
 
   if (!open) {
@@ -247,8 +266,8 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
         {messages.length === 0 && !pendingReply ? (
           <p className="text-sm text-muted text-center mt-6 px-4">
             {mode === 'dashboard'
-              ? 'Ask what needs attention, tell me about someone new to look after, or ask me to take you anywhere in the app.'
-              : `Ask anything about ${personName ?? 'this person'}, or tell me something to log, like a dose taken, a seizure, an appointment or a task.`}
+              ? 'Ask what needs attention, tell me what happened so I can log it for everyone involved, or ask me to take you anywhere in the app.'
+              : `Ask anything about ${personName ?? 'this person'}, or tell me something to log, like the medications you took, a seizure, an appointment or a task.`}
           </p>
         ) : null}
         {messages.map((m, i) => (

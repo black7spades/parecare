@@ -7,7 +7,8 @@ import { requireFeature } from '../middleware/subscriptionGate';
 import { sendDashboardMessage } from '../services/ai';
 import type { ChatMessage } from '../services/ai';
 import { buildDashboardContext, countAttentionItems } from '../services/aiDashboardContext';
-import { extractDashboardActions, executeDashboardActions } from '../services/aiDashboardActions';
+import { extractDashboardActions, splitDashboardActions, executeDashboardActions } from '../services/aiDashboardActions';
+import { executeCrossProfileActions } from '../services/aiActions';
 import type { AiConversation } from '../types';
 
 /**
@@ -32,6 +33,21 @@ aiDashboardRouter.get('/conversations', requireAuth, async (req, res) => {
     .orderBy('updated_at', 'desc')
     .select('id', 'tokens_used', 'created_at', 'updated_at');
   res.json({ conversations });
+});
+
+/**
+ * Today's dashboard conversation, so a chat survives closing the browser
+ * and picks up where it left off on any device. Conversations belong to
+ * the day they were started; a new day starts a new chat log.
+ */
+aiDashboardRouter.get('/conversations/current', requireAuth, async (req, res) => {
+  const conversation = await db<AiConversation>('ai_conversations')
+    .where({ account_id: req.account!.id })
+    .whereNull('care_profile_id')
+    .whereRaw('created_at::date = CURRENT_DATE')
+    .orderBy('created_at', 'desc')
+    .first();
+  res.json({ conversation: conversation ?? null });
 });
 
 aiDashboardRouter.get('/conversations/:convId', requireAuth, async (req, res) => {
@@ -104,10 +120,13 @@ aiDashboardRouter.post(
     }
 
     // Carry out any actions the assistant proposed. Navigation is passed
-    // through for the web app to perform; profile creation happens here.
+    // through for the web app to perform; profile creation happens here;
+    // cross-profile logging resolves each named profile and writes to it.
     const { cleanedReply, actions, parseErrors } = extractDashboardActions(result.reply);
-    const { outcomes, clientActions } = await executeDashboardActions(actions, req.account!);
-    const allOutcomes = [...outcomes, ...parseErrors];
+    const { single, cross } = splitDashboardActions(actions);
+    const { outcomes, clientActions } = await executeDashboardActions(single, req.account!);
+    const crossOutcomes = await executeCrossProfileActions(cross, req.account!);
+    const allOutcomes = [...outcomes, ...crossOutcomes, ...parseErrors];
     const finalReply = [cleanedReply, ...allOutcomes.map((o) => `✔ ${o}`)].filter(Boolean).join('\n\n');
 
     const updatedMessages = [
