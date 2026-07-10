@@ -151,19 +151,25 @@ export interface ExtractedActions<T = AssistantAction> {
 export function extractActionBlocks<T>(reply: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>): ExtractedActions<T> {
   const actions: T[] = [];
   const parseErrors: string[] = [];
-  const cleanedReply = reply
-    .replace(ACTION_BLOCK_RE, (_whole, json: string) => {
-      try {
-        const parsed = schema.safeParse(JSON.parse(json));
-        if (parsed.success) actions.push(parsed.data);
-        else parseErrors.push('The assistant suggested an action that was not valid, so it was not carried out.');
-      } catch {
-        parseErrors.push('The assistant suggested an action that could not be read, so it was not carried out.');
-      }
-      return '';
-    })
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  let cleanedReply = reply.replace(ACTION_BLOCK_RE, (_whole, json: string) => {
+    try {
+      const parsed = schema.safeParse(JSON.parse(json));
+      if (parsed.success) actions.push(parsed.data);
+      else parseErrors.push('The assistant suggested an action that was not valid, so it was not carried out.');
+    } catch {
+      parseErrors.push('The assistant suggested an action that could not be read, so it was not carried out.');
+    }
+    return '';
+  });
+  // A reply cut off mid-action (provider token limit) leaves an opening
+  // fence with no closing one. Never show the half-written JSON to the
+  // user, and say plainly that nothing was recorded for it.
+  const dangling = cleanedReply.indexOf('```parecare-action');
+  if (dangling !== -1) {
+    cleanedReply = cleanedReply.slice(0, dangling);
+    parseErrors.push('The reply was cut off before this could be recorded, so nothing was saved. Please ask again.');
+  }
+  cleanedReply = cleanedReply.replace(/\n{3,}/g, '\n\n').trim();
   return { cleanedReply, actions, parseErrors };
 }
 
