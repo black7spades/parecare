@@ -1,4 +1,5 @@
 import { db } from '../config/database';
+import { formatInZone } from '../lib/timezone';
 import type { Account, CareProfile } from '../types';
 
 /**
@@ -28,10 +29,10 @@ export interface DashboardData {
 
 const STALE_QUESTION_DAYS = 7;
 
-function fmtDate(v: string | Date | null | undefined): string {
+function fmtDate(v: string | Date | null | undefined, timeZone?: string | null): string {
   if (!v) return 'unknown time';
   const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? 'unknown time' : d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+  return Number.isNaN(d.getTime()) ? 'unknown time' : formatInZone(d, timeZone);
 }
 
 async function accessibleProfiles(accountId: string): Promise<Array<CareProfile & { relationship: string | null }>> {
@@ -218,7 +219,7 @@ export async function gatherDashboardData(accountId: string): Promise<DashboardD
   return { profiles: summaries, attentionCount };
 }
 
-function profileBlock(s: ProfileSummaryData): string {
+function profileBlock(s: ProfileSummaryData, timeZone?: string | null): string {
   const p = s.profile;
   const lines: string[] = [];
   const who = [
@@ -239,7 +240,7 @@ function profileBlock(s: ProfileSummaryData): string {
     lines.push('Journeys: none started yet');
   }
   if (s.overdueReminders.length > 0) {
-    const top = s.overdueReminders.slice(0, 3).map((r) => `"${r.title}" was due ${fmtDate(r.next_due_at)}`);
+    const top = s.overdueReminders.slice(0, 3).map((r) => `"${r.title}" was due ${fmtDate(r.next_due_at, timeZone)}`);
     lines.push(`Overdue tasks: ${s.overdueReminders.length} (${top.join('; ')})`);
   }
   if (s.medications.length > 0) {
@@ -259,16 +260,19 @@ function profileBlock(s: ProfileSummaryData): string {
     lines.push(`Open questions with no response in ${STALE_QUESTION_DAYS}+ days: ${s.staleQuestionCount}`);
   }
   if (s.nextEvent) {
-    lines.push(`Next event within 48 hours: "${s.nextEvent.title}" at ${fmtDate(s.nextEvent.next_due_at)}`);
+    lines.push(`Next event within 48 hours: "${s.nextEvent.title}" at ${fmtDate(s.nextEvent.next_due_at, timeZone)}`);
   }
   if (s.lastLog) {
     const summary = s.lastLog.title ?? s.lastLog.body.slice(0, 120);
-    lines.push(`Last care log entry: [${s.lastLog.entry_type.replace(/_/g, ' ')}] ${summary} at ${fmtDate(s.lastLog.occurred_at)}`);
+    lines.push(`Last care log entry: [${s.lastLog.entry_type.replace(/_/g, ' ')}] ${summary} at ${fmtDate(s.lastLog.occurred_at, timeZone)}`);
   }
   return lines.join('\n');
 }
 
-export async function buildDashboardContext(account: Account): Promise<{ context: string; profileCount: number; attentionCount: number }> {
+export async function buildDashboardContext(
+  account: Account,
+  timeZone?: string | null
+): Promise<{ context: string; profileCount: number; attentionCount: number }> {
   const data = await gatherDashboardData(account.id);
   const now = new Date();
 
@@ -279,7 +283,7 @@ export async function buildDashboardContext(account: Account): Promise<{ context
   const header = [
     `## Situation`,
     `User: ${account.display_name}`,
-    `Current date and time: ${fmtDate(now)}`,
+    `Current date and time: ${fmtDate(now, timeZone)}`,
     `Profiles in their care: ${data.profiles.length} (${people} ${people === 1 ? 'person' : 'people'}, ${pets} ${pets === 1 ? 'pet' : 'pets'})`,
     noJourney.length > 0 ? `Profiles with no journey started yet: ${noJourney.join(', ')}` : null,
   ]
@@ -290,7 +294,7 @@ export async function buildDashboardContext(account: Account): Promise<{ context
     return { context: header, profileCount: 0, attentionCount: 0 };
   }
 
-  const context = [header, `## Everyone in their care`, ...data.profiles.map(profileBlock)].join('\n\n');
+  const context = [header, `## Everyone in their care`, ...data.profiles.map((p) => profileBlock(p, timeZone))].join('\n\n');
   return { context, profileCount: data.profiles.length, attentionCount: data.attentionCount };
 }
 

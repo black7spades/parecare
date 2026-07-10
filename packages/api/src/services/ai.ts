@@ -2,6 +2,7 @@ import { db } from '../config/database';
 import { env } from '../config/env';
 import { getAiConfig } from '../config/settings';
 import { complete, isAiConfigured } from './aiProvider';
+import { isValidTimeZone, nowInZone, dateInZone } from '../lib/timezone';
 import type { Account, CareProfile, CareCircleMember } from '../types';
 
 function ensureConfigured(): void {
@@ -73,20 +74,30 @@ function firstNameOf(profile: CareProfile): string {
   return profile.preferred_name ?? profile.first_name ?? profile.full_name.split(' ')[0];
 }
 
-/** Dates the prompts use so fuzzy times ("this morning", "last night") resolve correctly. */
-function promptDates(): { nowLine: string; today: string; yesterday: string; nextMonday: string } {
+/**
+ * Dates the prompts use so fuzzy times ("this morning", "last night")
+ * resolve correctly, computed in the user's own time zone so "today" is
+ * their calendar day, not the server's. The assistant emits naive local
+ * times against these dates and the action executor converts them back to
+ * UTC using the same zone.
+ */
+function promptDates(timeZone: string | null | undefined): {
+  nowLine: string;
+  today: string;
+  yesterday: string;
+  nextMonday: string;
+} {
   const now = new Date();
-  const day = (d: Date) => d.toISOString().slice(0, 10);
-  const monday = new Date(now.getTime());
-  do {
-    monday.setUTCDate(monday.getUTCDate() + 1);
-  } while (monday.getUTCDay() !== 1);
-  return {
-    nowLine: now.toISOString().replace('T', ' ').slice(0, 16) + ' UTC',
-    today: day(now),
-    yesterday: day(new Date(now.getTime() - 24 * 3600 * 1000)),
-    nextMonday: day(monday),
-  };
+  const today = dateInZone(now, timeZone);
+  const yesterday = dateInZone(new Date(now.getTime() - 24 * 3600 * 1000), timeZone);
+  // Walk forward from today until the weekday in the user's zone is Monday.
+  let monday = new Date(now.getTime());
+  for (let i = 0; i < 8; i++) {
+    monday = new Date(now.getTime() + i * 24 * 3600 * 1000);
+    const weekday = new Intl.DateTimeFormat('en-US', { timeZone: isValidTimeZone(timeZone) ? timeZone : 'UTC', weekday: 'short' }).format(monday);
+    if (i > 0 && weekday === 'Mon') break;
+  }
+  return { nowLine: nowInZone(timeZone), today, yesterday, nextMonday: dateInZone(monday, timeZone) };
 }
 
 /** Shared rules for turning fuzzy spoken times into timestamps. */
@@ -110,10 +121,11 @@ function buildSystemPrompt(
   profile: CareProfile,
   member: CareCircleMember | undefined,
   contextBlock: string,
-  canWrite: boolean
+  canWrite: boolean,
+  timeZone: string | null | undefined
 ): string {
   const firstName = firstNameOf(profile);
-  const dates = promptDates();
+  const dates = promptDates(timeZone);
   const actionInstructions = canWrite
     ? `
 
@@ -214,7 +226,7 @@ The user has view-only access, so you cannot record anything for them. If they a
 
 You can also take actions: log a care event, record a medication administration, or add a task. When you do, you will confirm what you did in plain language.
 
-You are speaking to ${account.display_name}, who is ${accessDescription}. Jurisdiction: Australia. Current date and time: ${dates.nowLine}. Use this to resolve relative times like "this morning" or "last night" into timestamps.
+You are speaking to ${account.display_name}, who is ${accessDescription}. Jurisdiction: Australia. Current date and time where the user is: ${dates.nowLine}. Use this to resolve relative times like "this morning" or "last night". Write every time you emit in an action as the user's own local wall-clock time with no time zone suffix (for example "${dates.today}T11:00:00"); the app converts it to the correct instant using their zone. Never convert times to UTC yourself.
 
 Tone: you are a calm, competent person who knows this person's record inside out. Not a medical professional. Not a chatbot. You speak plainly, you know what you are talking about, and you say "I do not know" when the record does not cover something. Frame guidance as information to take to the relevant professional, not as advice.
 
@@ -243,12 +255,13 @@ export async function sendMessage(
   messages: ChatMessage[],
   newUserMessage: string,
   contextBlock: string,
-  canWrite: boolean
+  canWrite: boolean,
+  timeZone?: string | null
 ): Promise<{ reply: string; tokensUsed: number }> {
   ensureConfigured();
   await checkTokenBudget(account);
 
-  const systemPrompt = buildSystemPrompt(account, profile, member, contextBlock, canWrite);
+  const systemPrompt = buildSystemPrompt(account, profile, member, contextBlock, canWrite, timeZone);
   const turns = [
     ...messages.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user' as const, content: newUserMessage },
@@ -399,7 +412,13 @@ navigate_to_profile, where you have the full record.
 ${TIME_CONVENTIONS}`;
 }
 
-function buildDashboardSystemPrompt(account: Account, dashboardContext: string, profileCount: number): string {
+function buildDashboardSystemPrompt(
+  account: Account,
+  dashboardContext: string,
+  profileCount: number,
+  timeZone: string | null | undefined
+): string {
+  const dates = promptDates(timeZone);
   const coldStart =
     profileCount === 0
       ? `
@@ -417,7 +436,7 @@ Keep it conversational. Keep it calm. This person may be in crisis (an ageing pa
 
   return `You are Pare. You are the care assistant inside PareCare, and you are the reason this app works. Think of yourself as an au pair: you live with this family, you know everyone's schedule and needs, and you are always ready to help. You are not a feature bolted onto the side of an app. You are the app's way of meeting people where they are.
 
-You are speaking to ${account.display_name} on their dashboard, where you can see a summary of everyone in their care.
+You are speaking to ${account.display_name} on their dashboard, where you can see a summary of everyone in their care. Current date and time where the user is: ${dates.nowLine}. Write every time you emit in an action as the user's own local wall-clock time with no time zone suffix (for example "${dates.today}T11:00:00"); the app converts it to the correct instant using their zone. Never convert times to UTC yourself.
 
 Your job:
 1. Help them understand what needs attention right now, across everyone
@@ -433,7 +452,7 @@ Tone: you are a calm, competent person who showed up to help. Not a medical prof
 You do not use exclamation marks. You do not say "Great question!" or "Absolutely!" or "I would be happy to help!" You speak like a trusted colleague, not a customer service script. Never use em dashes in your replies.
 
 When guiding someone to a screen, use the navigate_to_profile action so the app takes them there directly. Do not just describe where to click.
-${dashboardActionInstructions(promptDates())}${coldStart}
+${dashboardActionInstructions(dates)}${coldStart}
 
 ${dashboardContext}`;
 }
@@ -444,12 +463,13 @@ export async function sendDashboardMessage(
   messages: ChatMessage[],
   newUserMessage: string,
   dashboardContext: string,
-  profileCount: number
+  profileCount: number,
+  timeZone?: string | null
 ): Promise<{ reply: string; tokensUsed: number }> {
   ensureConfigured();
   await checkTokenBudget(account);
 
-  const systemPrompt = buildDashboardSystemPrompt(account, dashboardContext, profileCount);
+  const systemPrompt = buildDashboardSystemPrompt(account, dashboardContext, profileCount, timeZone);
   const turns = [
     ...messages.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user' as const, content: newUserMessage },
