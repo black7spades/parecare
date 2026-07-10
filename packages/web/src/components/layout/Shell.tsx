@@ -196,7 +196,7 @@ export function Shell() {
         </main>
       </div>
 
-      <AssistantWidget profileId={profileId} />
+      <AssistantWidget />
       <UpgradePrompt />
     </div>
   );

@@ -52,20 +52,25 @@ export type AssistantAction = z.infer<typeof actionSchema>;
 
 const ACTION_BLOCK_RE = /```parecare-action\s*\n([\s\S]*?)```/g;
 
-export interface ExtractedActions {
+export interface ExtractedActions<T = AssistantAction> {
   /** The reply with action blocks removed. */
   cleanedReply: string;
-  actions: AssistantAction[];
+  actions: T[];
   parseErrors: string[];
 }
 
-export function extractActions(reply: string): ExtractedActions {
-  const actions: AssistantAction[] = [];
+/**
+ * Pull every fenced parecare-action block out of a reply and validate it
+ * against the given schema. Shared by the profile-level assistant and the
+ * dashboard assistant, which understand different action sets.
+ */
+export function extractActionBlocks<T>(reply: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>): ExtractedActions<T> {
+  const actions: T[] = [];
   const parseErrors: string[] = [];
   const cleanedReply = reply
     .replace(ACTION_BLOCK_RE, (_whole, json: string) => {
       try {
-        const parsed = actionSchema.safeParse(JSON.parse(json));
+        const parsed = schema.safeParse(JSON.parse(json));
         if (parsed.success) actions.push(parsed.data);
         else parseErrors.push('The assistant suggested an action that was not valid, so it was not carried out.');
       } catch {
@@ -76,6 +81,10 @@ export function extractActions(reply: string): ExtractedActions {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   return { cleanedReply, actions, parseErrors };
+}
+
+export function extractActions(reply: string): ExtractedActions {
+  return extractActionBlocks(reply, actionSchema);
 }
 
 function parseWhen(value: string | null | undefined): Date {
