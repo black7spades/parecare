@@ -129,7 +129,9 @@ The four action types and their fields:
 - {"type": "record_medications", "entries": array of 1 to 20 objects, each with the same fields as record_medication except "type"} for logging several doses in one block
 - {"type": "add_task", "title": short title, "body": optional detail, "due_at": ISO time, "repeat": once | daily | weekly | monthly}
 
-Rules for actions: only emit an action the user clearly asked for. Confirm the details in your visible reply in plain words. If something essential is missing (which medication, when it happened), ask instead of guessing. Never emit an action for medical decisions, only for recording what the user tells you already happened or needs doing.
+Rules for actions: only emit an action the user clearly asked for. If something essential is missing (which medication, when it happened), ask instead of guessing. Never emit an action for medical decisions, only for recording what the user tells you already happened or needs doing.
+
+Never say that something has been recorded, logged or updated. The app carries out each action after your reply and adds its own confirmation line for every record that succeeds; a record only exists once that line appears. Say what you are recording, keep the visible reply short, and put the action blocks at the very end of the reply.
 
 ### Medication logging from natural language
 
@@ -143,8 +145,16 @@ Rules:
 - Match what they say against the active medications in the record below.
   Use exact medication names from the record, not what they said. If they
   say "my statin" and Rosuvastatin is on the list, use "Rosuvastatin".
+- Only ever log medication names that appear on the active medication
+  list. Never guess or invent a medication name, even a common one. If
+  they mention something that is not on the list, record the ones that
+  are and say which one you could not find.
 - If they say "all my meds" or "everything", that means every active
-  medication scheduled for the relevant time of day.
+  medication scheduled for the relevant time of day, taken exactly from
+  the list. Do not add anything that is not listed.
+- If some doses were already recorded and the person corrects or adds to
+  what they said, log only the doses that are still missing. Never record
+  the same dose twice.
 - If they say "this morning around 11ish", set administered_at to today
   at 11:00. Do not ask for a precise time.
 - If they say "last night before bed", use yesterday at 21:00 or 22:00.
@@ -152,7 +162,8 @@ Rules:
   medications. Use "given" when someone else administered to the person.
 - Use the record_medications (plural) action to log multiple medications
   in one block.
-- After logging, confirm briefly. List each medication and the time.
+- In your visible reply, briefly list each medication and time you are
+  recording, in the present tense.
 
 Example: "took all my morning meds with breakfast around 11, and my
 Rosuvastatin last night before bed" with active medications Metformin
@@ -172,8 +183,8 @@ and Rosuvastatin (evening):
 }
 \`\`\`
 
-Confirm: "Recorded Metformin, Ramipril, Aspirin and Vitamin D at 11:00
-this morning, and Rosuvastatin at 9pm last night."
+Visible reply: "Recording Metformin, Ramipril, Aspirin and Vitamin D at
+11:00 this morning, and Rosuvastatin at 9pm last night."
 
 ### Care logging from natural language
 
@@ -243,7 +254,7 @@ export async function sendMessage(
     { role: 'user' as const, content: newUserMessage },
   ];
 
-  const { text: reply, tokensUsed } = await complete(systemPrompt, turns, 1024, 'chat');
+  const { text: reply, tokensUsed } = await complete(systemPrompt, turns, 4096, 'chat');
 
   await recordTokenUsage(account.id, conversationId, tokensUsed);
 
@@ -265,7 +276,9 @@ The five actions and their fields (note that the first two are keyed "action" an
 - {"type": "cross_profile_task", "entries": array of 1 to 20 objects, each {"profile_name": exact profile name, "title": short title, "body": optional detail, "due_at": ISO time, "repeat": once | daily | weekly | monthly}}
 - {"type": "cross_profile_medications", "entries": array of 1 to 20 objects, each {"profile_name": exact profile name, "medication_name": exact name from that profile's medication list, "status": one of given | refused | omitted | held | self_administered, "dose_given": optional, "notes": required unless status is given or self administered, "administered_at": optional ISO time}}
 
-Rules for actions: only emit an action the user clearly asked for or agreed to. Confirm what you are doing in your visible reply in plain words. If something essential is missing (whose profile, what the person is called), ask instead of guessing.
+Rules for actions: only emit an action the user clearly asked for or agreed to. If something essential is missing (whose profile, what the person is called), ask instead of guessing.
+
+Never say that something has been recorded, logged or updated. The app carries out each action after your reply and adds its own confirmation line for every record that succeeds; a record only exists once that line appears. Say what you are recording, keep the visible reply short, and put the action blocks at the very end of the reply.
 
 ### Logging across multiple profiles
 
@@ -281,7 +294,8 @@ Rules:
 - Specific information goes only to the relevant profile.
 - Follow-up tasks that apply to multiple profiles get a separate task on
   each profile.
-- After logging, confirm what went where.
+- In your visible reply, say what you are logging where, in the present
+  tense.
 - Do not ask "should I log this to both profiles?" If the person
   mentioned both names or said "the cats", they want both updated.
 
@@ -350,8 +364,8 @@ she picked up from the breeder and she'll get over it."
 }
 \`\`\`
 
-Confirm: "Logged a vet visit to Kiyomi's and Miyuu's records, both at
-5pm yesterday. Added a Monday follow-up on both. Miyuu's entry includes
+Visible reply: "Logging a vet visit to Kiyomi's and Miyuu's records, both
+at 5pm yesterday, with a Monday follow-up on both. Miyuu's entry includes
 the note about the sneezing."
 
 ### Medication logging from the dashboard
@@ -364,9 +378,17 @@ the ambiguity genuinely matters. If someone says "I took all my meds" and
 has a self-profile, resolve to that profile. If they say "gave Mum her
 morning tablets", resolve to the mother's profile. Use status
 "self_administered" when the person is logging their own medications and
-"given" when someone else administered them. Use exact medication names
-from the profile summary where you can see them; if you cannot see the
-medication list from here, use the name the person said.
+"given" when someone else administered them.
+
+Medication names must come from the profile's "Active medications" line
+in the summary below, spelled exactly as listed. Never guess or invent a
+medication name, even a common one; a name that is not on the list will
+not be recorded. "All my meds" means every listed medication scheduled
+for the relevant time of day, nothing more. If they mention a medication
+you cannot see on the list, record the ones you can and say which one is
+not on the list. If some doses were already recorded and the person
+corrects or adds to what they said, log only the doses that are still
+missing. Never record the same dose twice.
 
 ### When to go to the profile instead
 
@@ -433,7 +455,7 @@ export async function sendDashboardMessage(
     { role: 'user' as const, content: newUserMessage },
   ];
 
-  const { text: reply, tokensUsed } = await complete(systemPrompt, turns, 1024, 'chat');
+  const { text: reply, tokensUsed } = await complete(systemPrompt, turns, 4096, 'chat');
 
   await recordTokenUsage(account.id, conversationId, tokensUsed);
 

@@ -13,6 +13,8 @@ interface ProfileSummaryData {
   profile: CareProfile & { relationship: string | null };
   journeys: Array<{ name: string; phase_name: string | null }>;
   overdueReminders: Array<{ title: string; next_due_at: Date }>;
+  /** Every active medication, so "all my meds" can be resolved to real names. */
+  medications: Array<{ name: string; dose: string | null; schedule_times: string[] }>;
   overdueMedications: string[];
   staleQuestionCount: number;
   nextEvent: { title: string; next_due_at: Date } | null;
@@ -123,8 +125,8 @@ export async function gatherDashboardData(accountId: string): Promise<DashboardD
       .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
       .whereIn('m.care_profile_id', ids)
       .where('m.active', true)
-      .whereNotNull('m.schedule_times')
-      .select('m.care_profile_id', 'm.id', 'c.name as name', 'm.schedule_times'),
+      .select('m.care_profile_id', 'm.id', 'c.name as name', 'm.dose', 'm.schedule_times')
+      .orderBy('c.name', 'asc'),
     db('medication_administrations')
       .whereIn('care_profile_id', ids)
       .where('administered_at', '>=', startOfDay)
@@ -170,6 +172,17 @@ export async function gatherDashboardData(accountId: string): Promise<DashboardD
     now
   );
 
+  const medsMap = new Map<string, Array<{ name: string; dose: string | null; schedule_times: string[] }>>();
+  for (const m of meds as Array<{ care_profile_id: string; name: string; dose: string | null; schedule_times: unknown }>) {
+    const arr = medsMap.get(m.care_profile_id) ?? [];
+    arr.push({
+      name: m.name,
+      dose: m.dose,
+      schedule_times: Array.isArray(m.schedule_times) ? (m.schedule_times as string[]) : [],
+    });
+    medsMap.set(m.care_profile_id, arr);
+  }
+
   const staleMap = new Map<string, number>(
     (questionRows.rows as Array<{ care_profile_id: string; count: number }>).map((r) => [r.care_profile_id, r.count])
   );
@@ -194,6 +207,7 @@ export async function gatherDashboardData(accountId: string): Promise<DashboardD
       profile: p,
       journeys: journeyMap.get(p.id) ?? [],
       overdueReminders,
+      medications: medsMap.get(p.id) ?? [],
       overdueMedications,
       staleQuestionCount,
       nextEvent: ev ? { title: ev.title, next_due_at: ev.next_due_at } : null,
@@ -227,6 +241,16 @@ function profileBlock(s: ProfileSummaryData): string {
   if (s.overdueReminders.length > 0) {
     const top = s.overdueReminders.slice(0, 3).map((r) => `"${r.title}" was due ${fmtDate(r.next_due_at)}`);
     lines.push(`Overdue tasks: ${s.overdueReminders.length} (${top.join('; ')})`);
+  }
+  if (s.medications.length > 0) {
+    lines.push(
+      `Active medications: ${s.medications
+        .map(
+          (m) =>
+            `${m.name}${m.dose ? ` (dose ${m.dose}${m.schedule_times.length ? `, scheduled at ${m.schedule_times.join(', ')}` : ''})` : m.schedule_times.length ? ` (scheduled at ${m.schedule_times.join(', ')})` : ''}`
+        )
+        .join('; ')}`
+    );
   }
   if (s.overdueMedications.length > 0) {
     lines.push(`Medications with a dose not yet recorded today: ${s.overdueMedications.join(', ')}`);
