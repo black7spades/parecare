@@ -13,7 +13,7 @@ export const PLAN_LIMITS = {
 
 type FeatureKey = keyof typeof PLAN_LIMITS;
 
-function getEffectiveTier(account: NonNullable<Request['account']>): SubscriptionTier {
+export function getEffectiveTier(account: NonNullable<Request['account']>): SubscriptionTier {
   if (env.SELF_HOSTED) return 'professional';
   const { subscription_tier, subscription_status } = account;
   if (subscription_status === 'active' || subscription_status === 'trialing') {

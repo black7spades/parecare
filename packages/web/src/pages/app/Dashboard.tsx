@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow, format } from 'date-fns';
 import { api } from '../../api/client';
 import { useAuthStore } from '../../stores/auth';
+import { useAssistantStore } from '../../stores/assistant';
 import { Button } from '../../components/ui/Button';
 import { Avatar } from '../../components/ui/Avatar';
 import { POA_TYPES } from '../../lib/care';
@@ -56,6 +57,15 @@ export function Dashboard() {
     queryFn: () => api.get<{ profiles: ProfileSummary[] }>('/care-profiles/summary'),
   });
   const profiles = data?.profiles ?? [];
+
+  // What Pare would flag today: overdue tasks, unrecorded doses, stale
+  // questions. Drives the prompt line above the profile cards.
+  const { data: attentionData } = useQuery({
+    queryKey: ['pare-attention'],
+    queryFn: () => api.get<{ count: number }>('/ai/dashboard/attention'),
+    enabled: profiles.length > 0,
+  });
+  const attentionCount = attentionData?.count ?? 0;
 
   const pinMutation = useMutation({
     mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
@@ -134,23 +144,19 @@ export function Dashboard() {
       {isLoading ? (
         <p className="text-sm text-muted">Loading…</p>
       ) : profiles.length === 0 ? (
-        <div className="card text-center py-12">
-          {account?.can_create_care_profiles !== false ? (
-            <>
-              <p className="text-muted mb-4">No care profiles yet.</p>
-              <Link to="/app/profiles/new">
-                <Button>Create your first profile</Button>
-              </Link>
-            </>
-          ) : (
+        account?.can_create_care_profiles !== false ? (
+          <PareWelcomeCard />
+        ) : (
+          <div className="card text-center py-12">
             <p className="text-muted">
               No one has shared a care profile with you yet. When someone invites you to a care circle, the person
               will appear here.
             </p>
-          )}
-        </div>
+          </div>
+        )
       ) : (
         <>
+          {attentionCount > 0 ? <PareAttentionLine count={attentionCount} /> : null}
           <div className="flex flex-wrap items-center gap-2 text-sm">
             {profiles.length > 1 ? (
               <>
@@ -211,6 +217,78 @@ export function Dashboard() {
           })()}
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * The cold start welcome: no profiles yet, so Pare introduces itself and
+ * takes the first message right here. A proper full-width welcome, not a
+ * floating bubble. The form path stays available for people who prefer it.
+ */
+function PareWelcomeCard() {
+  const openWithMessage = useAssistantStore((s) => s.openWithMessage);
+  const [draft, setDraft] = useState('');
+
+  function submit() {
+    const message = draft.trim();
+    if (!message) return;
+    setDraft('');
+    openWithMessage(message);
+  }
+
+  return (
+    <div className="card py-8 px-6 sm:px-10">
+      <h2 className="text-lg font-semibold text-ink mb-2">Pare</h2>
+      <p className="text-sm text-ink max-w-2xl mb-5">
+        Welcome to PareCare. I am Pare, and I live here to help you keep track of everyone you look after. Tell me
+        who you want to start with and I will set things up.
+      </p>
+      <form
+        className="flex gap-2 max-w-2xl"
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+      >
+        <input
+          type="text"
+          aria-label="Talk to Pare"
+          placeholder="Talk to Pare"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          className="flex-1 rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+        <Button type="submit" disabled={!draft.trim()}>
+          Send
+        </Button>
+      </form>
+      <p className="text-xs text-muted mt-4">
+        Prefer to fill in a form yourself?{' '}
+        <Link to="/app/profiles/new" className="text-primary hover:underline">
+          Create a care profile directly
+        </Link>
+      </p>
+    </div>
+  );
+}
+
+/** The returning-user prompt line: only shown when something needs attention. */
+function PareAttentionLine({ count }: { count: number }) {
+  const openWithMessage = useAssistantStore((s) => s.openWithMessage);
+  return (
+    <div className="card py-3 px-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+      <span className="font-semibold text-ink">Pare:</span>
+      <span className="text-ink">
+        {count === 1 ? '1 thing needs attention today.' : `${count} things need attention today.`}
+      </span>
+      <button
+        type="button"
+        onClick={() => openWithMessage('What needs my attention today?')}
+        className="text-primary hover:underline font-medium"
+      >
+        Ask me about them
+      </button>
     </div>
   );
 }

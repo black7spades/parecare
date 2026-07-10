@@ -244,7 +244,8 @@ export interface Reminder {
 
 export interface AiConversation {
   id: string;
-  care_profile_id: string;
+  /** Null for account-wide dashboard conversations with Pare. */
+  care_profile_id: string | null;
   account_id: string;
   messages: Array<{ role: 'user' | 'assistant'; content: string; timestamp: string }>;
   tokens_used: number;
