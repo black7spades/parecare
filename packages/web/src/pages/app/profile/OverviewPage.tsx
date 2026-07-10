@@ -12,6 +12,7 @@ import { JourneysSection } from './JourneysSection';
 import { useProfile } from './ProfileLayout';
 import {
   LOG_ENTRY_TYPES,
+  POA_TYPES,
   entryTypeLabel,
   type CareLogEntry,
   type CircleMember,
@@ -98,14 +99,10 @@ export function OverviewPage() {
                 Manage care circle →
               </Link>
             </div>
+          ) : isOwner ? (
+            <SetPoaInline profileId={profile.id} members={circleData?.members ?? []} />
           ) : (
-            <p className="text-sm text-muted">
-              No power of attorney recorded yet.{' '}
-              <Link to="circle" className="text-primary hover:underline">
-                Set one in the care circle
-              </Link>
-              .
-            </p>
+            <p className="text-sm text-muted">No power of attorney recorded yet.</p>
           )}
           {profile.notes ? <p className="text-sm whitespace-pre-wrap border-t border-border pt-3">{profile.notes}</p> : null}
       </div>
@@ -163,6 +160,94 @@ export function OverviewPage() {
           </div>
         ) : null}
       </Modal>
+    </div>
+  );
+}
+
+/**
+ * Name a power of attorney right here, without leaving the overview. The
+ * user picks one of the people already in the care circle and the kind of
+ * authority they hold: two separate choices, so each stays its own data
+ * point. Activating it and finer edits still live on the care circle
+ * screen. Only shown to the profile owner, who is the one allowed to set it.
+ */
+function SetPoaInline({ profileId, members }: { profileId: string; members: CircleMember[] }) {
+  const queryClient = useQueryClient();
+  const [memberId, setMemberId] = useState('');
+  const [poaType, setPoaType] = useState<string>(POA_TYPES[0].value);
+  const [error, setError] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => api.patch(`/care-profiles/${profileId}/circle/${memberId}`, { poa_type: poaType }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['circle', profileId] });
+      setMemberId('');
+      setError('');
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'Could not set the power of attorney.'),
+  });
+
+  if (members.length === 0) {
+    return (
+      <p className="text-sm text-muted">
+        No power of attorney recorded yet. Add someone to the{' '}
+        <Link to="circle" className="text-primary hover:underline">
+          care circle
+        </Link>{' '}
+        first, then you can name them here.
+      </p>
+    );
+  }
+
+  const selectClass =
+    'rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
+
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-muted">No power of attorney recorded yet. Name one of the people in the care circle:</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-muted">Who</span>
+          <select
+            aria-label="Who holds power of attorney"
+            className={selectClass}
+            value={memberId}
+            onChange={(e) => setMemberId(e.target.value)}
+          >
+            <option value="">Choose a person</option>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.display_name}
+                {m.relationship ? ` — ${m.relationship}` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-muted">Kind of authority</span>
+          <select
+            aria-label="Kind of power of attorney"
+            className={selectClass}
+            value={poaType}
+            onChange={(e) => setPoaType(e.target.value)}
+          >
+            {POA_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Button
+          type="button"
+          disabled={!memberId || mutation.isPending}
+          loading={mutation.isPending}
+          onClick={() => mutation.mutate()}
+        >
+          Set
+        </Button>
+      </div>
+      {error ? <p className="text-sm text-red-600">{error}</p> : null}
     </div>
   );
 }
