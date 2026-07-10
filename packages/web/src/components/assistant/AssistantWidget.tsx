@@ -56,6 +56,66 @@ const SECTION_PATHS: Record<string, string> = {
   'memory-book': 'memory-book',
 };
 
+/**
+ * Where the user keeps Pare on screen: position, size and how see-through
+ * the window is. Saved per browser, so the window opens where they left
+ * it and never hides what they need to read behind it.
+ */
+interface WindowRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+const WINDOW_PREFS_KEY = 'parecare-pare-window';
+const MIN_WIDTH = 300;
+const MIN_HEIGHT = 360;
+const MIN_OPACITY = 40;
+/** Keep at least this much of the window header reachable on screen. */
+const EDGE_MARGIN = 48;
+
+function loadWindowPrefs(): { rect: WindowRect | null; opacity: number } {
+  try {
+    const raw = localStorage.getItem(WINDOW_PREFS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { rect?: WindowRect | null; opacity?: number };
+      const rect =
+        parsed.rect && [parsed.rect.x, parsed.rect.y, parsed.rect.width, parsed.rect.height].every((n) => typeof n === 'number' && Number.isFinite(n))
+          ? parsed.rect
+          : null;
+      const opacity =
+        typeof parsed.opacity === 'number' ? Math.min(100, Math.max(MIN_OPACITY, Math.round(parsed.opacity))) : 100;
+      return { rect, opacity };
+    }
+  } catch {
+    // Unreadable preferences fall back to the defaults.
+  }
+  return { rect: null, opacity: 100 };
+}
+
+function persistWindowPrefs(rect: WindowRect | null, opacity: number): void {
+  try {
+    localStorage.setItem(WINDOW_PREFS_KEY, JSON.stringify({ rect, opacity }));
+  } catch {
+    // Storage full or blocked; the window still works, it just will not remember.
+  }
+}
+
+/** The docked position the window starts in: right edge, below the top bar. */
+function defaultWindowRect(): WindowRect {
+  const width = Math.min(384, window.innerWidth - 16);
+  return { x: window.innerWidth - width, y: 56, width, height: window.innerHeight - 56 };
+}
+
+function clampWindowRect(r: WindowRect): WindowRect {
+  const width = Math.min(Math.max(r.width, MIN_WIDTH), window.innerWidth);
+  const height = Math.min(Math.max(r.height, MIN_HEIGHT), window.innerHeight);
+  const x = Math.min(Math.max(r.x, EDGE_MARGIN - width), window.innerWidth - EDGE_MARGIN);
+  const y = Math.min(Math.max(r.y, 0), window.innerHeight - EDGE_MARGIN);
+  return { x, y, width, height };
+}
+
 export function AssistantWidget() {
   const profileMatch = useMatch('/app/:profileId/*');
   const routeProfileId =
@@ -80,6 +140,84 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
   const bottomRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+
+  // The window is movable, resizable and can be made see-through on
+  // larger screens; on phones it stays a fixed bottom sheet. Preferences
+  // persist per browser.
+  const [rect, setRect] = useState<WindowRect | null>(() => loadWindowPrefs().rect);
+  const [opacity, setOpacity] = useState<number>(() => loadWindowPrefs().opacity);
+  const [hovering, setHovering] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 640px)').matches);
+  const rectRef = useRef(rect);
+  rectRef.current = rect;
+  const dragRef = useRef<{ pointerX: number; pointerY: number; rect: WindowRect } | null>(null);
+  const resizeRef = useRef<{ pointerX: number; pointerY: number; rect: WindowRect } | null>(null);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 640px)');
+    const onChange = () => setIsDesktop(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  // Keep the window reachable when the browser window shrinks.
+  useEffect(() => {
+    const onResize = () => setRect((r) => (r ? clampWindowRect(r) : r));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  function beginDrag(e: React.PointerEvent<HTMLDivElement>) {
+    if (!isDesktop || (e.target as HTMLElement).closest('button, input')) return;
+    const current = rect ?? clampWindowRect(defaultWindowRect());
+    if (!rect) setRect(current);
+    dragRef.current = { pointerX: e.clientX, pointerY: e.clientY, rect: current };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+  function moveDrag(e: React.PointerEvent<HTMLDivElement>) {
+    const d = dragRef.current;
+    if (!d) return;
+    setRect(clampWindowRect({ ...d.rect, x: d.rect.x + e.clientX - d.pointerX, y: d.rect.y + e.clientY - d.pointerY }));
+  }
+  function endDrag() {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    persistWindowPrefs(rectRef.current, opacity);
+  }
+
+  function beginResize(e: React.PointerEvent<HTMLDivElement>) {
+    const current = rect ?? clampWindowRect(defaultWindowRect());
+    if (!rect) setRect(current);
+    resizeRef.current = { pointerX: e.clientX, pointerY: e.clientY, rect: current };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  function moveResize(e: React.PointerEvent<HTMLDivElement>) {
+    const d = resizeRef.current;
+    if (!d) return;
+    setRect({
+      ...d.rect,
+      width: Math.min(Math.max(d.rect.width + e.clientX - d.pointerX, MIN_WIDTH), window.innerWidth - d.rect.x),
+      height: Math.min(Math.max(d.rect.height + e.clientY - d.pointerY, MIN_HEIGHT), window.innerHeight - d.rect.y),
+    });
+  }
+  function endResize() {
+    if (!resizeRef.current) return;
+    resizeRef.current = null;
+    persistWindowPrefs(rectRef.current, opacity);
+  }
+
+  function resetWindow() {
+    setRect(null);
+    persistWindowPrefs(null, opacity);
+  }
+
+  function changeOpacity(value: number) {
+    setOpacity(value);
+    persistWindowPrefs(rectRef.current, value);
+  }
 
   // Dashboard talk is one account-wide thread (keyed by account, so a
   // login switch in the same tab never reuses someone else's thread);
@@ -224,9 +362,31 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
     );
   }
 
+  const windowRect = isDesktop ? (rect ?? clampWindowRect(defaultWindowRect())) : null;
+
   return (
-    <div className="fixed z-50 flex flex-col overflow-hidden bg-card border-border shadow-2xl inset-x-0 bottom-0 h-[75vh] rounded-t-2xl border-t sm:inset-x-auto sm:right-0 sm:top-14 sm:bottom-0 sm:h-auto sm:w-[24rem] sm:rounded-none sm:border-t-0 sm:border-l">
-      <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-border bg-surface-2 shrink-0">
+    <div
+      className={`fixed z-50 flex flex-col overflow-hidden bg-card border-border shadow-2xl transition-opacity ${
+        windowRect ? 'rounded-xl border' : 'inset-x-0 bottom-0 h-[75vh] rounded-t-2xl border-t'
+      }`}
+      style={{
+        opacity: hovering ? 1 : opacity / 100,
+        ...(windowRect
+          ? { left: windowRect.x, top: windowRect.y, width: windowRect.width, height: windowRect.height }
+          : {}),
+      }}
+      onPointerEnter={() => setHovering(true)}
+      onPointerLeave={() => setHovering(false)}
+    >
+      <div
+        className={`flex items-center justify-between gap-2 px-4 py-3 border-b border-border bg-surface-2 shrink-0 ${isDesktop ? 'cursor-move touch-none select-none' : ''}`}
+        onPointerDown={beginDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onDoubleClick={isDesktop ? resetWindow : undefined}
+        title={isDesktop ? 'Drag to move the window. Double-click to put it back.' : undefined}
+      >
         <div className="min-w-0">
           <p className="text-sm font-semibold text-ink truncate">Pare</p>
           <p className="text-xs text-muted truncate">
@@ -237,7 +397,17 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
                 : 'About this person only'}
           </p>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
+          <input
+            type="range"
+            min={MIN_OPACITY}
+            max={100}
+            value={opacity}
+            onChange={(e) => changeOpacity(Number(e.target.value))}
+            aria-label="Window transparency"
+            title="Make the window more or less see-through"
+            className="w-16 accent-primary cursor-pointer"
+          />
           {messages.length > 0 ? (
             <button
               type="button"
@@ -324,6 +494,23 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
           Send
         </button>
       </form>
+
+      {windowRect ? (
+        <div
+          onPointerDown={beginResize}
+          onPointerMove={moveResize}
+          onPointerUp={endResize}
+          onPointerCancel={endResize}
+          title="Drag to resize the window"
+          aria-hidden
+          className="absolute bottom-0 right-0 w-5 h-5 cursor-se-resize touch-none text-muted hover:text-ink"
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <line x1="17" y1="9" x2="9" y2="17" />
+            <line x1="17" y1="14" x2="14" y2="17" />
+          </svg>
+        </div>
+      ) : null}
     </div>
   );
 }
