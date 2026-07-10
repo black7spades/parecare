@@ -202,10 +202,18 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
   const [pins, plans, poa, activity, events, journeyRows] = await Promise.all([
     db('care_profile_pins').where({ account_id: accountId }).whereIn('care_profile_id', ids).select('care_profile_id'),
     db('care_plans').whereIn('care_profile_id', ids).select('care_profile_id', 'gp_phone', 'emergency_contacts'),
-    db('care_circle_members')
-      .whereIn('care_profile_id', ids)
-      .whereNotNull('poa_type')
-      .select('care_profile_id', 'display_name', 'poa_type', 'poa_activated'),
+    // Power of attorney can be held by a person in the care circle or by an
+    // organisation in the providers list (e.g. a law firm). Gather both.
+    Promise.all([
+      db('care_circle_members')
+        .whereIn('care_profile_id', ids)
+        .whereNotNull('poa_type')
+        .select('care_profile_id', 'display_name', 'poa_type', 'poa_activated'),
+      db('providers')
+        .whereIn('care_profile_id', ids)
+        .whereNotNull('poa_type')
+        .select('care_profile_id', 'name as display_name', 'poa_type', 'poa_activated'),
+    ]).then(([members, orgs]) => [...members, ...orgs]),
     db.raw(
       `SELECT DISTINCT ON (a.care_profile_id) a.care_profile_id, a.action, a.entity_type, a.summary, a.created_at,
               acc.display_name as actor_name

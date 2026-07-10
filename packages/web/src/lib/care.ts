@@ -262,6 +262,8 @@ export interface Provider {
   email: string | null;
   address: string | null;
   notes: string | null;
+  poa_type: string | null;
+  poa_activated: boolean;
 }
 
 export interface Task {

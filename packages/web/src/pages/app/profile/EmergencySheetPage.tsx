@@ -31,8 +31,17 @@ export function EmergencySheetPage() {
   });
 
   const plan = planData?.plan;
-  const poaHolders = (circleData?.members ?? []).filter((m) => m.poa_type);
   const providers = providerData?.providers ?? [];
+  // A power of attorney holder can be a person in the care circle or an
+  // organisation such as a law firm; paramedics need to see either.
+  const poaHolders: Array<{ key: string; name: string; poa_type: string | null; poa_activated: boolean; contact: string | null }> = [
+    ...(circleData?.members ?? [])
+      .filter((m) => m.poa_type)
+      .map((m) => ({ key: m.id, name: m.display_name, poa_type: m.poa_type, poa_activated: m.poa_activated, contact: m.invited_email })),
+    ...providers
+      .filter((p) => p.poa_type)
+      .map((p) => ({ key: p.id, name: p.name, poa_type: p.poa_type, poa_activated: p.poa_activated, contact: p.phone ?? p.email ?? null })),
+  ];
   const asArray = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
   const meds = asArray<{ name: string; dose?: string; frequency?: string }>(plan?.medications);
   const allergies = allergyData?.allergies ?? [];
@@ -96,12 +105,12 @@ export function EmergencySheetPage() {
           {poaHolders.length === 0 ? (
             <Empty />
           ) : (
-            poaHolders.map((m) => (
-              <p key={m.id} className="text-sm flex items-center gap-2">
-                <span className="font-medium">{m.display_name}</span>
-                <span>· {poaLabel(m.poa_type)}</span>
-                <PoaBadge type={m.poa_type} activated={m.poa_activated} />
-                {m.invited_email ? <span className="text-muted">{m.invited_email}</span> : null}
+            poaHolders.map((h) => (
+              <p key={h.key} className="text-sm flex items-center gap-2">
+                <span className="font-medium">{h.name}</span>
+                <span>· {poaLabel(h.poa_type)}</span>
+                <PoaBadge type={h.poa_type} activated={h.poa_activated} />
+                {h.contact ? <span className="text-muted">{h.contact}</span> : null}
               </p>
             ))
           )}

@@ -226,6 +226,8 @@ export interface Provider {
   address: string | null;
   primary_contact_member_id: string | null;
   notes: string | null;
+  poa_type: string | null;
+  poa_activated: boolean;
   created_at: string | Date;
 }
 

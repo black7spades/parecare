@@ -14,8 +14,10 @@ import {
   LOG_ENTRY_TYPES,
   POA_TYPES,
   entryTypeLabel,
+  providerTypeLabel,
   type CareLogEntry,
   type CircleMember,
+  type Provider,
 } from '../../../lib/care';
 
 export function OverviewPage() {
@@ -28,7 +30,22 @@ export function OverviewPage() {
     queryKey: ['circle', profile.id],
     queryFn: () => api.get<{ members: CircleMember[] }>(`/care-profiles/${profile.id}/circle`),
   });
-  const poaHolders = (circleData?.members ?? []).filter((m) => m.poa_type);
+  const { data: providersData } = useQuery({
+    queryKey: ['providers', profile.id],
+    queryFn: () => api.get<{ providers: Provider[] }>(`/care-profiles/${profile.id}/providers`),
+  });
+  const members = circleData?.members ?? [];
+  const providers = providersData?.providers ?? [];
+  // Power of attorney can be held by a person in the care circle or by an
+  // organisation in the providers list (e.g. a law firm). Show both together.
+  const poaHolders: PoaHolder[] = [
+    ...members
+      .filter((m) => m.poa_type)
+      .map((m) => ({ key: m.id, name: m.display_name, sublabel: m.relationship, poa_type: m.poa_type, poa_activated: m.poa_activated })),
+    ...providers
+      .filter((p) => p.poa_type)
+      .map((p) => ({ key: p.id, name: p.name, sublabel: providerTypeLabel(p.provider_type), poa_type: p.poa_type, poa_activated: p.poa_activated })),
+  ];
 
   const [confirmText, setConfirmText] = useState('');
   const [deleteError, setDeleteError] = useState('');
@@ -89,18 +106,16 @@ export function OverviewPage() {
             />
           ) : poaHolders.length > 0 ? (
             <div className="flex flex-wrap items-center gap-3">
-              {poaHolders.map((m) => (
-                <span key={m.id} className="flex items-center gap-2 text-sm text-ink">
-                  <span className="font-medium">{m.display_name}</span>
-                  <PoaBadge type={m.poa_type} activated={m.poa_activated} />
+              {poaHolders.map((h) => (
+                <span key={h.key} className="flex items-center gap-2 text-sm text-ink">
+                  <span className="font-medium">{h.name}</span>
+                  <PoaBadge type={h.poa_type} activated={h.poa_activated} />
                 </span>
               ))}
-              <Link to="circle" className="text-xs text-primary hover:underline">
-                Manage care circle →
-              </Link>
+              {isOwner ? <SetPoaInline profileId={profile.id} members={members} providers={providers} compact /> : null}
             </div>
           ) : isOwner ? (
-            <SetPoaInline profileId={profile.id} members={circleData?.members ?? []} />
+            <SetPoaInline profileId={profile.id} members={members} providers={providers} />
           ) : (
             <p className="text-sm text-muted">No power of attorney recorded yet.</p>
           )}
@@ -164,38 +179,83 @@ export function OverviewPage() {
   );
 }
 
+/** A power of attorney holder, whether a person in the circle or an organisation. */
+interface PoaHolder {
+  key: string;
+  name: string;
+  sublabel: string | null;
+  poa_type: string | null;
+  poa_activated: boolean;
+}
+
 /**
  * Name a power of attorney right here, without leaving the overview. The
- * user picks one of the people already in the care circle and the kind of
- * authority they hold: two separate choices, so each stays its own data
- * point. Activating it and finer edits still live on the care circle
- * screen. Only shown to the profile owner, who is the one allowed to set it.
+ * user picks whoever holds it, from the people already in the care circle
+ * or the organisations in the providers list (a law firm can hold enduring
+ * or financial power of attorney), and the kind of authority they hold:
+ * two separate choices, so each stays its own data point. Activating it and
+ * finer edits still live on the care circle and provider screens. Only
+ * shown to the profile owner, who is the one allowed to set it.
+ *
+ * In compact mode it collapses to a single "Name another" toggle, so an
+ * existing holder list is not crowded by the full form.
  */
-function SetPoaInline({ profileId, members }: { profileId: string; members: CircleMember[] }) {
+function SetPoaInline({
+  profileId,
+  members,
+  providers,
+  compact = false,
+}: {
+  profileId: string;
+  members: CircleMember[];
+  providers: Provider[];
+  compact?: boolean;
+}) {
   const queryClient = useQueryClient();
-  const [memberId, setMemberId] = useState('');
+  // The selected holder is encoded as "member:<id>" or "provider:<id>" so
+  // one dropdown can offer both people and organisations.
+  const [holder, setHolder] = useState('');
   const [poaType, setPoaType] = useState<string>(POA_TYPES[0].value);
   const [error, setError] = useState('');
+  const [expanded, setExpanded] = useState(!compact);
 
   const mutation = useMutation({
-    mutationFn: () => api.patch(`/care-profiles/${profileId}/circle/${memberId}`, { poa_type: poaType }),
+    mutationFn: () => {
+      const [source, id] = holder.split(':');
+      const path = source === 'provider' ? 'providers' : 'circle';
+      return api.patch(`/care-profiles/${profileId}/${path}/${id}`, { poa_type: poaType });
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['circle', profileId] });
-      setMemberId('');
+      void queryClient.invalidateQueries({ queryKey: ['providers', profileId] });
+      setHolder('');
       setError('');
+      if (compact) setExpanded(false);
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not set the power of attorney.'),
   });
 
-  if (members.length === 0) {
+  if (members.length === 0 && providers.length === 0) {
     return (
       <p className="text-sm text-muted">
         No power of attorney recorded yet. Add someone to the{' '}
         <Link to="circle" className="text-primary hover:underline">
           care circle
         </Link>{' '}
+        or a firm to the{' '}
+        <Link to="providers" className="text-primary hover:underline">
+          providers
+        </Link>{' '}
         first, then you can name them here.
       </p>
+    );
+  }
+
+  if (compact && !expanded) {
+    return (
+      <button type="button" onClick={() => setExpanded(true)} className="text-xs text-primary hover:underline">
+        Name another
+      </button>
     );
   }
 
@@ -204,23 +264,38 @@ function SetPoaInline({ profileId, members }: { profileId: string; members: Circ
 
   return (
     <div className="space-y-2">
-      <p className="text-sm text-muted">No power of attorney recorded yet. Name one of the people in the care circle:</p>
+      {!compact ? (
+        <p className="text-sm text-muted">No power of attorney recorded yet. Name whoever holds it:</p>
+      ) : null}
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1">
           <span className="text-xs text-muted">Who</span>
           <select
             aria-label="Who holds power of attorney"
             className={selectClass}
-            value={memberId}
-            onChange={(e) => setMemberId(e.target.value)}
+            value={holder}
+            onChange={(e) => setHolder(e.target.value)}
           >
-            <option value="">Choose a person</option>
-            {members.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.display_name}
-                {m.relationship ? ` — ${m.relationship}` : ''}
-              </option>
-            ))}
+            <option value="">Choose a person or organisation</option>
+            {members.length > 0 ? (
+              <optgroup label="People in the care circle">
+                {members.map((m) => (
+                  <option key={m.id} value={`member:${m.id}`}>
+                    {m.display_name}
+                    {m.relationship ? ` — ${m.relationship}` : ''}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
+            {providers.length > 0 ? (
+              <optgroup label="Organisations">
+                {providers.map((p) => (
+                  <option key={p.id} value={`provider:${p.id}`}>
+                    {p.name} — {providerTypeLabel(p.provider_type)}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
           </select>
         </label>
         <label className="flex flex-col gap-1">
@@ -238,14 +313,14 @@ function SetPoaInline({ profileId, members }: { profileId: string; members: Circ
             ))}
           </select>
         </label>
-        <Button
-          type="button"
-          disabled={!memberId || mutation.isPending}
-          loading={mutation.isPending}
-          onClick={() => mutation.mutate()}
-        >
+        <Button type="button" disabled={!holder || mutation.isPending} loading={mutation.isPending} onClick={() => mutation.mutate()}>
           Set
         </Button>
+        {compact ? (
+          <Button type="button" variant="ghost" onClick={() => setExpanded(false)}>
+            Cancel
+          </Button>
+        ) : null}
       </div>
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
     </div>
