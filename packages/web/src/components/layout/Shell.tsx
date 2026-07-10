@@ -7,6 +7,7 @@ import { UpgradePrompt } from '../UpgradePrompt';
 import { AssistantWidget } from '../assistant/AssistantWidget';
 import { ThemeToggle } from '../ThemeToggle';
 import { AvatarMenu } from './AvatarMenu';
+import { Clock } from './Clock';
 import { Avatar } from '../ui/Avatar';
 import { PROFILE_TABS } from '../../pages/app/profile/tabs';
 import { api } from '../../api/client';
@@ -152,6 +153,7 @@ export function Shell() {
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
           <TierBadge />
+          <Clock />
           <ThemeToggle />
           <AvatarMenu />
         </div>
