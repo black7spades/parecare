@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -7,7 +7,7 @@ import {
 } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
-import { Input } from '../../../components/ui/Input';
+import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { MED_STATUSES, medStatusDescription, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
 import { C64_PALETTE, contrastText } from '../../../components/ui/Avatar';
@@ -375,7 +375,51 @@ function MonthGrid({ meds, days, admins, now, onPickDay }: {
   );
 }
 
-// Full record: chronological, filterable, cursor-paginated, archive-aware.
+// Outcomes that stand on their own; anything else needs an explanatory note.
+const statusNeedsNote = (s: string): boolean => !['given', 'self_administered'].includes(s);
+
+// How the record can be grouped for collapsing: by day, month or year.
+type GroupBy = 'day' | 'month' | 'year';
+const GROUP_KEY_FMT: Record<GroupBy, string> = { day: 'yyyy-MM-dd', month: 'yyyy-MM', year: 'yyyy' };
+const GROUP_LABEL_FMT: Record<GroupBy, string> = { day: 'EEEE d MMMM yyyy', month: 'MMMM yyyy', year: 'yyyy' };
+
+// A datetime-local string for an instant, in the viewer's own timezone.
+function toLocalInput(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function csvCell(v: string): string {
+  return /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+// Export the given records to CSV. Every data point is its own column, and
+// the date and time of a dose are two columns, never one.
+function exportAdminsCsv(rows: MedicationAdministration[]): void {
+  const headers = ['Date', 'Time', 'Medication', 'Dose', 'Route', 'Given by', 'Outcome', 'Notes'];
+  const cells = rows.map((a) => [
+    format(new Date(a.administered_at), 'yyyy-MM-dd'),
+    format(new Date(a.administered_at), 'HH:mm'),
+    a.medication_name,
+    a.dose_given ?? '',
+    a.route_given ?? '',
+    a.administered_by_name ?? '',
+    statusLabel(a.status),
+    a.notes ?? '',
+  ]);
+  const body = [headers, ...cells].map((r) => r.map(csvCell).join(',')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([body], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `medication-record-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Full record: chronological, filterable, cursor-paginated, archive-aware,
+// and editable. Records can be selected to edit their date, time or outcome in
+// bulk, individually, or export the selection to a spreadsheet.
 function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister: boolean }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
@@ -385,6 +429,12 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
   const [cursor, setCursor] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<MedicationAdministration | null>(null);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [editing, setEditing] = useState<MedicationAdministration | null>(null);
+  const [bulkEditing, setBulkEditing] = useState(false);
+  const [groupBy, setGroupBy] = useState<GroupBy>('day');
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const params = (c: string | null) => {
     const qs = new URLSearchParams({ limit: '50' });
@@ -404,6 +454,7 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
       setPages([res.administrations]);
       setCursor(res.nextCursor);
       setDone(res.nextCursor === null);
+      setSelected(new Set());
       return res;
     },
   });
@@ -417,19 +468,77 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
     setDone(res.nextCursor === null);
   };
 
+  const afterChange = () => {
+    void refetch();
+    void queryClient.invalidateQueries({ queryKey: ['med-chart', profileId] });
+    void queryClient.invalidateQueries({ queryKey: ['medications', profileId] });
+    void queryClient.invalidateQueries({ queryKey: ['calendar-events', profileId] });
+  };
+
   // Deleting a mistaken dose also gives its supply back on the server.
   const deleteDose = useMutation({
     mutationFn: (id: string) => api.delete(`/care-profiles/${profileId}/medications/administrations/${id}`),
-    onSuccess: () => {
-      setPendingDelete(null);
-      void refetch();
-      void queryClient.invalidateQueries({ queryKey: ['med-chart', profileId] });
-      void queryClient.invalidateQueries({ queryKey: ['medications', profileId] });
-      void queryClient.invalidateQueries({ queryKey: ['calendar-events', profileId] });
-    },
+    onSuccess: () => { setPendingDelete(null); afterChange(); },
+  });
+
+  const bulkDelete = useMutation({
+    mutationFn: (ids: string[]) => api.post<{ deleted: number }>(`/care-profiles/${profileId}/medications/administrations/bulk`, { action: 'delete', ids }),
+    onSuccess: () => { setConfirmBulkDelete(false); setSelected(new Set()); afterChange(); },
   });
 
   const rows = pages.flat();
+  const isArchived = (a: MedicationAdministration) => (a as { archived?: boolean }).archived === true;
+  // Only live (non-archived) records can be selected, edited or removed.
+  const selectableIds = rows.filter((a) => !isArchived(a)).map((a) => a.id);
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+  const selectedRows = rows.filter((a) => selected.has(a.id));
+
+  const toggle = (id: string) => setSelected((prev) => {
+    const n = new Set(prev);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
+  });
+  const toggleAll = () => setSelected((prev) => {
+    const n = new Set(prev);
+    if (allSelected) selectableIds.forEach((id) => n.delete(id));
+    else selectableIds.forEach((id) => n.add(id));
+    return n;
+  });
+
+  // Split the ordered rows into consecutive groups by the chosen period.
+  const groups = useMemo(() => {
+    const out: { key: string; label: string; rows: MedicationAdministration[] }[] = [];
+    for (const a of rows) {
+      const d = new Date(a.administered_at);
+      const key = format(d, GROUP_KEY_FMT[groupBy]);
+      const last = out[out.length - 1];
+      if (last && last.key === key) last.rows.push(a);
+      else out.push({ key, label: format(d, GROUP_LABEL_FMT[groupBy]), rows: [a] });
+    }
+    return out;
+  }, [rows, groupBy]);
+
+  const toggleCollapsed = (key: string) => setCollapsed((prev) => {
+    const n = new Set(prev);
+    if (n.has(key)) n.delete(key); else n.add(key);
+    return n;
+  });
+  const collapseAll = () => setCollapsed(new Set(groups.map((g) => g.key)));
+  const expandAll = () => setCollapsed(new Set());
+  const groupSelectable = (g: { rows: MedicationAdministration[] }) => g.rows.filter((a) => !isArchived(a)).map((a) => a.id);
+  const groupAllSelected = (g: { rows: MedicationAdministration[] }) => {
+    const ids = groupSelectable(g);
+    return ids.length > 0 && ids.every((id) => selected.has(id));
+  };
+  const toggleGroup = (g: { rows: MedicationAdministration[] }) => setSelected((prev) => {
+    const n = new Set(prev);
+    const ids = groupSelectable(g);
+    if (ids.every((id) => n.has(id))) ids.forEach((id) => n.delete(id));
+    else ids.forEach((id) => n.add(id));
+    return n;
+  });
+
+  const colCount = 6 + (canAdminister ? 2 : 0);
 
   return (
     <div className="space-y-3">
@@ -447,10 +556,38 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
         </label>
         <Button size="sm" variant="secondary" onClick={() => void refetch()}>Apply</Button>
       </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted">Group by</span>
+        <div className="inline-flex rounded-md border border-border overflow-hidden">
+          {(['day', 'month', 'year'] as GroupBy[]).map((g) => (
+            <button key={g} type="button" onClick={() => { setGroupBy(g); setCollapsed(new Set()); }} className={`px-3 py-1.5 text-sm capitalize ${groupBy === g ? 'bg-primary text-white' : 'bg-card text-muted hover:text-ink'}`}>{g}</button>
+          ))}
+        </div>
+        <Button size="sm" variant="secondary" onClick={collapseAll}>Collapse all</Button>
+        <Button size="sm" variant="secondary" onClick={expandAll}>Expand all</Button>
+      </div>
+
+      {canAdminister && selectedRows.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary-100 bg-primary-50 px-3 py-2">
+          <span className="text-sm text-ink font-medium">{selectedRows.length} selected</span>
+          <Button size="sm" variant="secondary" onClick={() => setBulkEditing(true)}>Edit selected</Button>
+          <Button size="sm" variant="secondary" onClick={() => exportAdminsCsv(selectedRows)}>Export to CSV</Button>
+          <button type="button" className="text-xs text-primary hover:underline" onClick={() => setSelected(new Set())}>Clear selection</button>
+          <Button size="sm" variant="danger" className="ml-auto" onClick={() => setConfirmBulkDelete(true)}>Remove selected</Button>
+        </div>
+      ) : null}
+
       <div className="card p-0 overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted border-b border-border">
+              {canAdminister ? (
+                <th className="px-4 py-3 w-8">
+                  <input type="checkbox" aria-label="Select all" className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    checked={allSelected} onChange={toggleAll} disabled={selectableIds.length === 0} />
+                </th>
+              ) : null}
               <th className="px-4 py-3 font-medium">When</th>
               <th className="px-4 py-3 font-medium">Medication</th>
               <th className="px-4 py-3 font-medium">Dose</th>
@@ -462,44 +599,80 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr><td colSpan={canAdminister ? 7 : 6} className="px-4 py-8 text-center text-muted">{isFetching ? 'Loading…' : 'No administrations recorded yet.'}</td></tr>
-            ) : rows.map((a) => {
-              const archived = (a as { archived?: boolean }).archived;
+              <tr><td colSpan={colCount} className="px-4 py-8 text-center text-muted">{isFetching ? 'Loading…' : 'No administrations recorded yet.'}</td></tr>
+            ) : groups.map((g) => {
+              const isCollapsed = collapsed.has(g.key);
               return (
-              <tr key={a.id} className="border-b border-border last:border-0 align-top group">
-                <td className="px-4 py-3 whitespace-nowrap text-muted">
-                  {format(new Date(a.administered_at), 'd MMM yyyy, HH:mm')}
-                  {archived ? <span className="ml-1 badge bg-surface-2 text-muted text-[10px]">archived</span> : null}
-                </td>
-                <td className="px-4 py-3">
-                  <div className="text-ink">{a.medication_name}</div>
-                  {a.notes ? <div className="text-xs text-muted">{a.notes}</div> : null}
-                </td>
-                <td className="px-4 py-3 text-muted">{a.dose_given || '—'}</td>
-                <td className="px-4 py-3 text-muted">{a.route_given || '—'}</td>
-                <td className="px-4 py-3 text-muted whitespace-nowrap">{a.administered_by_name ?? '—'}</td>
-                <td className="px-4 py-3"><span className="badge text-xs font-medium" style={swatch(statusColorFor(a.status))} title={medStatusDescription(a.status)}>{statusLabel(a.status)}</span></td>
-                {canAdminister ? (
-                  <td className="px-4 py-3 text-right whitespace-nowrap">
-                    {archived ? (
-                      <span className="text-xs text-muted" title="Archived records are a permanent history and cannot be changed.">—</span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="text-xs text-muted hover:text-red-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
-                        onClick={() => setPendingDelete(a)}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </td>
-                ) : null}
-              </tr>
+                <Fragment key={g.key}>
+                  <tr className="bg-surface border-b border-border">
+                    <td colSpan={colCount} className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <button type="button" onClick={() => toggleCollapsed(g.key)} aria-expanded={!isCollapsed} aria-label={isCollapsed ? `Expand ${g.label}` : `Collapse ${g.label}`} className="text-muted hover:text-ink">
+                          <span className={`inline-block transition-transform ${isCollapsed ? '' : 'rotate-90'}`} aria-hidden>▶</span>
+                        </button>
+                        {canAdminister && groupSelectable(g).length > 0 ? (
+                          <input type="checkbox" aria-label={`Select all in ${g.label}`} className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                            checked={groupAllSelected(g)} onChange={() => toggleGroup(g)} />
+                        ) : null}
+                        <span className="font-medium text-ink">{g.label}</span>
+                        <span className="text-xs text-muted">{g.rows.length} record{g.rows.length === 1 ? '' : 's'}</span>
+                      </div>
+                    </td>
+                  </tr>
+                  {isCollapsed ? null : g.rows.map((a) => {
+                    const archived = isArchived(a);
+                    return (
+                    <tr key={a.id} className="border-b border-border last:border-0 align-top group">
+                      {canAdminister ? (
+                        <td className="px-4 py-3">
+                          {archived ? null : (
+                            <input type="checkbox" aria-label={`Select ${a.medication_name} on ${format(new Date(a.administered_at), 'd MMM yyyy, HH:mm')}`}
+                              className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                              checked={selected.has(a.id)} onChange={() => toggle(a.id)} />
+                          )}
+                        </td>
+                      ) : null}
+                      <td className="px-4 py-3 whitespace-nowrap text-muted">
+                        {format(new Date(a.administered_at), 'd MMM yyyy, HH:mm')}
+                        {archived ? <span className="ml-1 badge bg-surface-2 text-muted text-[10px]">archived</span> : null}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-ink">{a.medication_name}</div>
+                        {a.notes ? <div className="text-xs text-muted">{a.notes}</div> : null}
+                      </td>
+                      <td className="px-4 py-3 text-muted">{a.dose_given || '—'}</td>
+                      <td className="px-4 py-3 text-muted">{a.route_given || '—'}</td>
+                      <td className="px-4 py-3 text-muted whitespace-nowrap">{a.administered_by_name ?? '—'}</td>
+                      <td className="px-4 py-3"><span className="badge text-xs font-medium" style={swatch(statusColorFor(a.status))} title={medStatusDescription(a.status)}>{statusLabel(a.status)}</span></td>
+                      {canAdminister ? (
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          {archived ? (
+                            <span className="text-xs text-muted" title="Archived records are a permanent history and cannot be changed.">—</span>
+                          ) : (
+                            <span className="inline-flex gap-3">
+                              <button type="button" className="text-xs text-muted hover:text-primary" onClick={() => setEditing(a)}>Edit</button>
+                              <button type="button" className="text-xs text-muted hover:text-red-600" onClick={() => setPendingDelete(a)}>Remove</button>
+                            </span>
+                          )}
+                        </td>
+                      ) : null}
+                    </tr>
+                    );
+                  })}
+                </Fragment>
               );
             })}
           </tbody>
         </table>
       </div>
+
+      {editing ? (
+        <EditAdminModal profileId={profileId} admin={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); afterChange(); }} />
+      ) : null}
+      {bulkEditing ? (
+        <BulkEditAdminModal profileId={profileId} ids={selectedRows.map((a) => a.id)} count={selectedRows.length}
+          onClose={() => setBulkEditing(false)} onSaved={() => { setBulkEditing(false); setSelected(new Set()); afterChange(); }} />
+      ) : null}
 
       <Modal open={pendingDelete !== null} onClose={() => setPendingDelete(null)} title="Remove this dose record">
         <p className="text-sm text-muted mb-4">
@@ -515,11 +688,148 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
           </Button>
         </div>
       </Modal>
+
+      <Modal open={confirmBulkDelete} onClose={() => setConfirmBulkDelete(false)} title="Remove selected records">
+        <p className="text-sm text-muted mb-4">
+          Remove <span className="font-medium text-ink">{selectedRows.length}</span> selected
+          record{selectedRows.length === 1 ? '' : 's'}? Any that were given have their supply added back. This cannot be undone.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmBulkDelete(false)}>Cancel</Button>
+          <Button variant="danger" loading={bulkDelete.isPending} onClick={() => bulkDelete.mutate(selectedRows.map((a) => a.id))}>
+            Remove {selectedRows.length}
+          </Button>
+        </div>
+      </Modal>
+
       {!done && rows.length > 0 ? (
         <div className="text-center">
           <Button size="sm" variant="secondary" onClick={() => void loadMore()}>Load older</Button>
         </div>
       ) : null}
     </div>
+  );
+}
+
+// Correct one record's date, time and outcome. The note becomes required when
+// the outcome is not simply "given" or "self-administered".
+function EditAdminModal({ profileId, admin, onClose, onSaved }: { profileId: string; admin: MedicationAdministration; onClose: () => void; onSaved: () => void }) {
+  const [when, setWhen] = useState(toLocalInput(admin.administered_at));
+  const [status, setStatus] = useState(admin.status);
+  const [notes, setNotes] = useState(admin.notes ?? '');
+  const [error, setError] = useState('');
+  const maxWhen = toLocalInput(new Date().toISOString());
+  const notesRequired = statusNeedsNote(status);
+
+  const mutation = useMutation({
+    mutationFn: () => api.patch(`/care-profiles/${profileId}/medications/administrations/${admin.id}`, {
+      administered_at: new Date(when).toISOString(),
+      status,
+      notes: notes.trim() || null,
+    }),
+    onSuccess: onSaved,
+    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
+  });
+
+  const submit = () => {
+    if (when > maxWhen) { setError('You cannot log a dose in the future.'); return; }
+    if (notesRequired && !notes.trim()) {
+      setError(`A note is required when the outcome is "${statusLabel(status)}".`);
+      return;
+    }
+    setError('');
+    mutation.mutate();
+  };
+
+  return (
+    <Modal open onClose={onClose} title={`Edit record · ${admin.medication_name}`}>
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <div>
+          <label htmlFor="edit-when" className="block text-sm font-medium text-ink mb-1">Date and time</label>
+          <input id="edit-when" type="datetime-local" className={`${SELECT} w-full`} value={when} max={maxWhen} onChange={(e) => setWhen(e.target.value)} required />
+        </div>
+        <div>
+          <label htmlFor="edit-status" className="block text-sm font-medium text-ink mb-1">Outcome</label>
+          <select id="edit-status" className={`${SELECT} w-full`} value={status} onChange={(e) => setStatus(e.target.value)}>
+            {MED_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+          <p className="mt-1 text-xs text-muted">{medStatusDescription(status)}</p>
+        </div>
+        <Textarea label={notesRequired ? 'Notes (required)' : 'Notes'} value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
+          placeholder={notesRequired ? 'Explain why the dose was not given as prescribed' : 'Anything worth recording'} />
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={mutation.isPending}>Save changes</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// Apply the same date, time and/or outcome to every selected record. Only the
+// fields you switch on are changed; the rest are left as they are.
+function BulkEditAdminModal({ profileId, ids, count, onClose, onSaved }: { profileId: string; ids: string[]; count: number; onClose: () => void; onSaved: () => void }) {
+  const [applyWhen, setApplyWhen] = useState(false);
+  const [when, setWhen] = useState(toLocalInput(new Date().toISOString()));
+  const [status, setStatus] = useState('');
+  const [notes, setNotes] = useState('');
+  const [error, setError] = useState('');
+  const maxWhen = toLocalInput(new Date().toISOString());
+  const notesRequired = status !== '' && statusNeedsNote(status);
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const body: Record<string, unknown> = { action: 'update', ids };
+      if (applyWhen) body['administered_at'] = new Date(when).toISOString();
+      if (status) body['status'] = status;
+      if (notesRequired) body['notes'] = notes.trim();
+      return api.post(`/care-profiles/${profileId}/medications/administrations/bulk`, body);
+    },
+    onSuccess: onSaved,
+    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
+  });
+
+  const submit = () => {
+    if (!applyWhen && !status) { setError('Choose a date and time, an outcome, or both to change.'); return; }
+    if (applyWhen && when > maxWhen) { setError('You cannot log a dose in the future.'); return; }
+    if (notesRequired && !notes.trim()) {
+      setError(`A note is required when the outcome is "${statusLabel(status)}".`);
+      return;
+    }
+    setError('');
+    mutation.mutate();
+  };
+
+  return (
+    <Modal open onClose={onClose} title={`Edit ${count} record${count === 1 ? '' : 's'}`}>
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <p className="text-sm text-muted">Only the fields you switch on are changed. Everything else is left as it is.</p>
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-ink mb-1">
+            <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary" checked={applyWhen} onChange={(e) => setApplyWhen(e.target.checked)} />
+            Set date and time
+          </label>
+          <input type="datetime-local" className={`${SELECT} w-full`} value={when} max={maxWhen} disabled={!applyWhen} onChange={(e) => setWhen(e.target.value)} />
+        </div>
+        <div>
+          <label htmlFor="bulk-status" className="block text-sm font-medium text-ink mb-1">Set outcome</label>
+          <select id="bulk-status" className={`${SELECT} w-full`} value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="">Leave unchanged</option>
+            {MED_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+          {status ? <p className="mt-1 text-xs text-muted">{medStatusDescription(status)}</p> : null}
+        </div>
+        {notesRequired ? (
+          <Textarea label="Notes (required)" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
+            placeholder="Explain why the dose was not given as prescribed. This note is applied to each selected record." />
+        ) : null}
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={mutation.isPending}>Apply to {count}</Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

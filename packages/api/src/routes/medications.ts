@@ -7,6 +7,7 @@ import { requireProfileOwner } from '../middleware/permissions';
 import { exportRecords, importRecords, type PortDescriptor, type PortFormat } from '../services/dataPort';
 import { resolveCatalogueId } from './medicationCatalogue';
 import { getMarRetentionMonths } from '../config/settings';
+import { perDoseDrawdown } from '../services/medicationSupply';
 
 export const medicationsRouter = Router({ mergeParams: true });
 
@@ -534,26 +535,6 @@ const GIVEN = new Set(['given', 'self_administered']);
 const FUTURE_SKEW_MS = 60 * 1000;
 const isFutureTime = (s?: string | null): boolean => !!s && new Date(s).getTime() > Date.now() + FUTURE_SKEW_MS;
 
-// Forms measured by volume (a liquid, a cream) dose and stock by volume:
-// 5 mL from a 200 mL bottle. Countable forms (tablets) dose and stock by
-// count. Supply is drawn down in whichever unit the form actually uses.
-const MEASURED_FORMS = new Set(['liquid', 'cream', 'ointment', 'drops']);
-
-function isMeasuredForm(form: string | null | undefined): boolean {
-  return MEASURED_FORMS.has(String(form ?? '').toLowerCase());
-}
-
-// How much one dose removes from supply: the dose volume for measured
-// forms (units × mL), or the unit count for countable ones.
-function perDoseDrawdown(med: { form: string | null; units_per_dose: unknown; dose_amount: unknown }): number {
-  const units = Number(med.units_per_dose) > 0 ? Number(med.units_per_dose) : 1;
-  if (isMeasuredForm(med.form)) {
-    const volume = parseFloat(String(med.dose_amount ?? '').replace(/[^0-9.]/g, ''));
-    return units * (Number.isFinite(volume) && volume > 0 ? volume : 1);
-  }
-  return units;
-}
-
 // A given dose draws down the remaining supply, never below zero.
 async function drawDownSupply(
   medId: string,
@@ -693,4 +674,152 @@ medicationsRouter.delete('/administrations/:adminId', requireAuth, async (req, r
   }
   await db('medication_administrations').where({ id: admin.id }).delete();
   res.json({ message: 'Dose record removed.' });
+});
+
+// One administration in the same shape the log returns, for edit responses.
+function adminLogRow(profileId: string, adminId: string) {
+  return db('medication_administrations as a')
+    .join('medications as m', 'a.medication_id', 'm.id')
+    .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
+    .where({ 'a.id': adminId, 'a.care_profile_id': profileId })
+    .select(
+      'a.id', 'a.medication_id', 'a.care_profile_id', 'c.name as medication_name',
+      'a.administered_at', 'a.scheduled_for', 'a.administered_by_name', 'a.status',
+      'a.dose_given', 'a.route_given', 'a.notes',
+      'a.right_patient', 'a.right_medication', 'a.right_dose', 'a.right_route', 'a.right_time', 'a.right_documentation',
+      db.raw('false as archived')
+    )
+    .first();
+}
+
+// Moving a dose between a given and a not-given outcome moves its supply too:
+// a dose that is no longer given is handed back, a dose that becomes given is
+// counted down, so the units-on-hand stay honest after a correction.
+async function reconcileSupplyForStatus(oldStatus: string, newStatus: string, medicationId: string): Promise<void> {
+  const wasGiven = GIVEN.has(oldStatus);
+  const nowGiven = GIVEN.has(newStatus);
+  if (wasGiven === nowGiven) return;
+  const med = await medSelect().where('m.id', medicationId).first();
+  if (!med) return;
+  if (wasGiven && !nowGiven) await restoreSupply(med, 1);
+  else await drawDownSupply(med.id, 1, med);
+}
+
+// Fields the record can be corrected on: when it happened, the outcome, and
+// the note. Each is its own data point, edited on its own.
+const adminEditSchema = z.object({
+  administered_at: z.string().optional(),
+  status: z.enum(['given', 'refused', 'omitted', 'held', 'self_administered']).optional(),
+  notes: z.string().optional().nullable(),
+});
+
+// Build the update patch (and validate the note rule) for one administration
+// against its current row. Returns the column changes, or an error code.
+function buildAdminEdit(
+  data: z.infer<typeof adminEditSchema>,
+  current: { status: string; notes: string | null }
+): { ok: true; update: Record<string, unknown> } | { ok: false; code: 'FUTURE_TIME' | 'NOTE_REQUIRED' } {
+  if (isFutureTime(data.administered_at)) return { ok: false, code: 'FUTURE_TIME' };
+  const update: Record<string, unknown> = {};
+  if (data.administered_at !== undefined) update['administered_at'] = new Date(data.administered_at);
+  if (data.notes !== undefined) update['notes'] = data.notes?.trim() ? data.notes.trim() : null;
+  if (data.status !== undefined) {
+    update['status'] = data.status;
+    // A not-given outcome still needs its reason; use the new note if one was
+    // supplied, otherwise the note already on the record.
+    if (!NOTE_OPTIONAL.has(data.status)) {
+      const note = data.notes !== undefined ? data.notes : current.notes;
+      if (!note?.trim()) return { ok: false, code: 'NOTE_REQUIRED' };
+    }
+  }
+  return { ok: true, update };
+}
+
+const NOTE_REQUIRED_MSG = 'A note is required when the outcome is not "given" or "self-administered".';
+
+// Correct a single dose record: its time, outcome or note. A change of outcome
+// reconciles supply, and archived history stays immutable.
+medicationsRouter.patch('/administrations/:adminId', requireAuth, async (req, res) => {
+  const admin = await db('medication_administrations')
+    .where({ id: req.params['adminId'], care_profile_id: req.params['id'] })
+    .first();
+  if (!admin) {
+    res.status(404).json({ error: 'That dose record was not found, or has been archived and cannot be changed.', code: 'NOT_FOUND' });
+    return;
+  }
+  const parsed = adminEditSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const built = buildAdminEdit(parsed.data, admin);
+  if (!built.ok) {
+    if (built.code === 'FUTURE_TIME') res.status(400).json({ error: 'You cannot log a dose in the future.', code: 'FUTURE_TIME' });
+    else res.status(400).json({ error: NOTE_REQUIRED_MSG, code: 'NOTE_REQUIRED' });
+    return;
+  }
+  if (Object.keys(built.update).length > 0) {
+    await db('medication_administrations').where({ id: admin.id }).update(built.update);
+  }
+  if (parsed.data.status !== undefined) await reconcileSupplyForStatus(admin.status, parsed.data.status, admin.medication_id);
+  res.json({ administration: await adminLogRow(req.params['id']!, admin.id) });
+});
+
+// Bulk correction or removal across selected records. Update applies the same
+// time and/or outcome to every selected dose; delete removes them and hands
+// back the supply of any that were given. Archived rows are never touched.
+const adminBulkSchema = z
+  .object({
+    action: z.enum(['update', 'delete']),
+    ids: z.array(z.string().uuid()).min(1).max(500),
+    administered_at: z.string().optional(),
+    status: z.enum(['given', 'refused', 'omitted', 'held', 'self_administered']).optional(),
+    notes: z.string().optional().nullable(),
+  })
+  .refine(
+    (v) => v.action !== 'update' || v.administered_at !== undefined || v.status !== undefined || v.notes !== undefined,
+    { message: 'Choose at least one field to change.' }
+  );
+
+medicationsRouter.post('/administrations/bulk', requireAuth, async (req, res) => {
+  const parsed = adminBulkSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const records = await db('medication_administrations')
+    .where('care_profile_id', req.params['id'])
+    .whereIn('id', parsed.data.ids);
+
+  if (parsed.data.action === 'delete') {
+    for (const admin of records) {
+      if (GIVEN.has(admin.status)) {
+        const med = await medSelect().where('m.id', admin.medication_id).first();
+        if (med) await restoreSupply(med, 1);
+      }
+    }
+    const deleted = await db('medication_administrations')
+      .where('care_profile_id', req.params['id'])
+      .whereIn('id', records.map((r) => r.id))
+      .delete();
+    res.json({ deleted });
+    return;
+  }
+
+  // Update: validate the note rule against each record before touching any.
+  const edits: { id: string; oldStatus: string; medicationId: string; update: Record<string, unknown> }[] = [];
+  for (const admin of records) {
+    const built = buildAdminEdit(parsed.data, admin);
+    if (!built.ok) {
+      if (built.code === 'FUTURE_TIME') res.status(400).json({ error: 'You cannot log a dose in the future.', code: 'FUTURE_TIME' });
+      else res.status(400).json({ error: NOTE_REQUIRED_MSG, code: 'NOTE_REQUIRED' });
+      return;
+    }
+    edits.push({ id: admin.id, oldStatus: admin.status, medicationId: admin.medication_id, update: built.update });
+  }
+  for (const e of edits) {
+    if (Object.keys(e.update).length > 0) await db('medication_administrations').where({ id: e.id }).update(e.update);
+    if (parsed.data.status !== undefined) await reconcileSupplyForStatus(e.oldStatus, parsed.data.status, e.medicationId);
+  }
+  res.json({ updated: edits.length });
 });
