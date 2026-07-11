@@ -67,11 +67,151 @@ const addTaskSchema = z.object({
   repeat: z.enum(['once', 'daily', 'weekly', 'monthly']).default('once'),
 });
 
+const completeTaskSchema = z.object({
+  type: z.literal('complete_task'),
+  title: z.string().min(1).max(255),
+});
+
+const CARE_PHASES = [
+  'early_concern',
+  'home_with_support',
+  'increased_dependency',
+  'transition_to_residential',
+  'residential_ongoing',
+  'end_of_life',
+] as const;
+
+const PROVIDER_TYPES = [
+  'gp',
+  'specialist',
+  'pharmacy',
+  'care_facility',
+  'allied_health',
+  'legal',
+  'financial',
+  'social_worker',
+  'other',
+] as const;
+
+const addMedicationSchema = z.object({
+  type: z.literal('add_medication'),
+  medication_name: z.string().min(1).max(255),
+  dose: z.string().max(255).optional().nullable(),
+  route: z.string().max(100).optional().nullable(),
+  form: z.string().max(100).optional().nullable(),
+  frequency: z.string().max(255).optional().nullable(),
+  schedule_times: z.array(z.string().regex(/^\d{2}:\d{2}$/)).max(12).optional().nullable(),
+  instructions: z.string().optional().nullable(),
+  supply: z.number().nonnegative().optional().nullable(),
+  with_food: z.boolean().optional(),
+  as_needed: z.boolean().optional(),
+});
+
+const updateMedicationSchema = z.object({
+  type: z.literal('update_medication'),
+  medication_name: z.string().min(1).max(255),
+  dose: z.string().max(255).optional().nullable(),
+  route: z.string().max(100).optional().nullable(),
+  frequency: z.string().max(255).optional().nullable(),
+  schedule_times: z.array(z.string().regex(/^\d{2}:\d{2}$/)).max(12).optional().nullable(),
+  instructions: z.string().optional().nullable(),
+  supply: z.number().nonnegative().optional().nullable(),
+});
+
+const stopMedicationSchema = z.object({
+  type: z.literal('stop_medication'),
+  medication_name: z.string().min(1).max(255),
+});
+
+const addAllergySchema = z.object({
+  type: z.literal('add_allergy'),
+  substance: z.string().min(1).max(255),
+  reaction: z.string().optional().nullable(),
+});
+
+const removeAllergySchema = z.object({
+  type: z.literal('remove_allergy'),
+  substance: z.string().min(1).max(255),
+});
+
+const addConditionSchema = z.object({
+  type: z.literal('add_condition'),
+  name: z.string().min(1).max(255),
+  notes: z.string().optional().nullable(),
+});
+
+const removeConditionSchema = z.object({
+  type: z.literal('remove_condition'),
+  name: z.string().min(1).max(255),
+});
+
+const raiseQuestionSchema = z.object({
+  type: z.literal('raise_question'),
+  title: z.string().min(1).max(255),
+  body: z.string().optional().nullable(),
+});
+
+const resolveQuestionSchema = z.object({
+  type: z.literal('resolve_question'),
+  title: z.string().min(1).max(255),
+  resolution: z.string().optional().nullable(),
+});
+
+const setCarePhaseSchema = z.object({
+  type: z.literal('set_care_phase'),
+  phase: z.enum(CARE_PHASES),
+});
+
+const addProviderSchema = z.object({
+  type: z.literal('add_provider'),
+  provider_type: z.enum(PROVIDER_TYPES),
+  name: z.string().min(1).max(255),
+  organisation: z.string().max(255).optional().nullable(),
+  phone: z.string().max(50).optional().nullable(),
+  email: z.string().max(255).optional().nullable(),
+  notes: z.string().optional().nullable(),
+});
+
+const updateCarePlanSchema = z.object({
+  type: z.literal('update_care_plan'),
+  dietary_requirements: z.array(z.string()).max(50).optional().nullable(),
+  mobility_aids: z.array(z.string()).max(50).optional().nullable(),
+  communication_preferences: z.string().optional().nullable(),
+  advance_care_directive: z.boolean().optional().nullable(),
+  advance_care_directive_location: z.string().optional().nullable(),
+  gp_name: z.string().max(255).optional().nullable(),
+  gp_practice: z.string().max(255).optional().nullable(),
+  gp_phone: z.string().max(50).optional().nullable(),
+});
+
+const updateProfileSchema = z.object({
+  type: z.literal('update_profile'),
+  preferred_name: z.string().max(100).optional().nullable(),
+  pronouns: z.string().max(50).optional().nullable(),
+  primary_language: z.string().max(100).optional().nullable(),
+  notes: z.string().optional().nullable(),
+  date_of_birth: z.string().optional().nullable(),
+});
+
 export const actionSchema = z.discriminatedUnion('type', [
   logEventSchema,
   recordMedicationSchema,
   recordMedicationBatchSchema,
   addTaskSchema,
+  completeTaskSchema,
+  addMedicationSchema,
+  updateMedicationSchema,
+  stopMedicationSchema,
+  addAllergySchema,
+  removeAllergySchema,
+  addConditionSchema,
+  removeConditionSchema,
+  raiseQuestionSchema,
+  resolveQuestionSchema,
+  setCarePhaseSchema,
+  addProviderSchema,
+  updateCarePlanSchema,
+  updateProfileSchema,
 ]);
 export type AssistantAction = z.infer<typeof actionSchema>;
 
@@ -129,10 +269,31 @@ const crossProfileMedicationSchema = z.object({
     .max(20),
 });
 
+/**
+ * The general dashboard action: run any single-profile action against a
+ * named profile. This is what lets Pare do, from one conversation, anything
+ * that can be done by hand on a person's record: change a medication
+ * schedule, add an allergy, resolve a question, move a care phase, and so
+ * on, without a bespoke cross-profile wrapper for each.
+ */
+const profileActionsSchema = z.object({
+  type: z.literal('profile_actions'),
+  entries: z
+    .array(
+      z.object({
+        profile_name: z.string().min(1),
+        action: actionSchema,
+      })
+    )
+    .min(1)
+    .max(20),
+});
+
 export const crossProfileActionSchema = z.discriminatedUnion('type', [
   crossProfileLogSchema,
   crossProfileTaskSchema,
   crossProfileMedicationSchema,
+  profileActionsSchema,
 ]);
 export type CrossProfileAction = z.infer<typeof crossProfileActionSchema>;
 
@@ -322,6 +483,184 @@ async function executeOne(
       await audit(profileId, account.id, 'reminders', action.title);
       return `Added the task "${action.title}" due ${formatInZone(due, timeZone)}.`;
     }
+    case 'complete_task': {
+      const task = await db('reminders')
+        .where({ care_profile_id: profileId, completed: false })
+        .whereRaw('lower(title) = lower(?)', [action.title.trim()])
+        .orderBy('next_due_at', 'asc')
+        .first();
+      if (!task) return `Could not find an open task called "${action.title}".`;
+      await db('reminders').where({ id: task.id }).update({ completed: true });
+      await audit(profileId, account.id, 'reminders', `completed ${task.title}`);
+      return `Marked the task "${task.title}" as done.`;
+    }
+    case 'add_medication': {
+      const name = action.medication_name.trim();
+      let cat = await db('medication_catalogue').whereRaw('lower(name) = lower(?)', [name]).first();
+      if (!cat) {
+        [cat] = await db('medication_catalogue')
+          .insert({ name, form: action.form ?? null, created_by_account_id: account.id })
+          .returning('*');
+      }
+      await db('medications').insert({
+        care_profile_id: profileId,
+        medication_catalogue_id: cat.id,
+        dose: action.dose ?? null,
+        route: action.route ?? null,
+        frequency: action.frequency ?? null,
+        schedule_times: action.schedule_times ? JSON.stringify(action.schedule_times) : null,
+        instructions: action.instructions ?? null,
+        supply: action.supply ?? null,
+        supply_remaining: action.supply ?? null,
+        with_food: action.with_food ?? false,
+        as_needed: action.as_needed ?? false,
+        active: true,
+      });
+      await audit(profileId, account.id, 'medications', `added ${name}`);
+      return `Added ${name}${action.dose ? ` ${action.dose}` : ''} to the medication list.`;
+    }
+    case 'update_medication': {
+      const med = await db('medications as m')
+        .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
+        .where({ 'm.care_profile_id': profileId, 'm.active': true })
+        .whereRaw('lower(c.name) = lower(?)', [action.medication_name.trim()])
+        .select('m.*', 'c.name as name')
+        .first();
+      if (!med) return `Could not find an active medication called "${action.medication_name}".`;
+      const patch: Record<string, unknown> = { updated_at: db.fn.now() };
+      if (action.dose !== undefined) patch['dose'] = action.dose;
+      if (action.route !== undefined) patch['route'] = action.route;
+      if (action.frequency !== undefined) patch['frequency'] = action.frequency;
+      if (action.schedule_times !== undefined)
+        patch['schedule_times'] = action.schedule_times ? JSON.stringify(action.schedule_times) : null;
+      if (action.instructions !== undefined) patch['instructions'] = action.instructions;
+      if (action.supply !== undefined) {
+        patch['supply'] = action.supply;
+        patch['supply_remaining'] = action.supply;
+      }
+      await db('medications').where({ id: med.id }).update(patch);
+      await audit(profileId, account.id, 'medications', `updated ${med.name}`);
+      const when = action.schedule_times ? ` Scheduled at ${action.schedule_times.join(', ')}.` : '';
+      return `Updated ${med.name}.${when}`;
+    }
+    case 'stop_medication': {
+      const med = await db('medications as m')
+        .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
+        .where({ 'm.care_profile_id': profileId, 'm.active': true })
+        .whereRaw('lower(c.name) = lower(?)', [action.medication_name.trim()])
+        .select('m.id', 'c.name as name')
+        .first();
+      if (!med) return `Could not find an active medication called "${action.medication_name}".`;
+      await db('medications').where({ id: med.id }).update({ active: false, updated_at: db.fn.now() });
+      await audit(profileId, account.id, 'medications', `stopped ${med.name}`);
+      return `Stopped ${med.name}. It is no longer on the active medication list.`;
+    }
+    case 'add_allergy': {
+      await db('allergies').insert({
+        care_profile_id: profileId,
+        substance: action.substance.trim(),
+        reaction: action.reaction ?? null,
+      });
+      await audit(profileId, account.id, 'allergies', `added allergy ${action.substance}`);
+      return `Recorded an allergy to ${action.substance}${action.reaction ? ` (${action.reaction})` : ''}.`;
+    }
+    case 'remove_allergy': {
+      const n = await db('allergies')
+        .where({ care_profile_id: profileId })
+        .whereRaw('lower(substance) = lower(?)', [action.substance.trim()])
+        .del();
+      if (!n) return `No allergy to "${action.substance}" was on the record.`;
+      await audit(profileId, account.id, 'allergies', `removed allergy ${action.substance}`);
+      return `Removed the allergy to ${action.substance}.`;
+    }
+    case 'add_condition': {
+      await db('medical_conditions').insert({
+        care_profile_id: profileId,
+        name: action.name.trim(),
+        notes: action.notes ?? null,
+      });
+      await audit(profileId, account.id, 'conditions', `added condition ${action.name}`);
+      return `Added the medical condition ${action.name}.`;
+    }
+    case 'remove_condition': {
+      const n = await db('medical_conditions')
+        .where({ care_profile_id: profileId })
+        .whereRaw('lower(name) = lower(?)', [action.name.trim()])
+        .del();
+      if (!n) return `No condition called "${action.name}" was on the record.`;
+      await audit(profileId, account.id, 'conditions', `removed condition ${action.name}`);
+      return `Removed the condition ${action.name}.`;
+    }
+    case 'raise_question': {
+      await db('open_questions').insert({
+        care_profile_id: profileId,
+        title: action.title.trim(),
+        body: action.body ?? null,
+        status: 'open',
+      });
+      await audit(profileId, account.id, 'questions', `raised ${action.title}`);
+      return `Raised the question "${action.title}" for the care circle.`;
+    }
+    case 'resolve_question': {
+      const q = await db('open_questions')
+        .where({ care_profile_id: profileId, status: 'open' })
+        .whereRaw('lower(title) = lower(?)', [action.title.trim()])
+        .first();
+      if (!q) return `Could not find an open question called "${action.title}".`;
+      await db('open_questions')
+        .where({ id: q.id })
+        .update({ status: 'resolved', resolution: action.resolution ?? null, resolved_at: db.fn.now() });
+      await audit(profileId, account.id, 'questions', `resolved ${q.title}`);
+      return `Marked the question "${q.title}" as resolved.`;
+    }
+    case 'set_care_phase': {
+      await db('care_profiles').where({ id: profileId }).update({ current_phase: action.phase, updated_at: db.fn.now() });
+      await audit(profileId, account.id, 'care_profiles', `phase set to ${action.phase}`);
+      return `Set the care phase to ${action.phase.replace(/_/g, ' ')}.`;
+    }
+    case 'add_provider': {
+      await db('providers').insert({
+        care_profile_id: profileId,
+        provider_type: action.provider_type,
+        name: action.name.trim(),
+        organisation: action.organisation ?? null,
+        phone: action.phone ?? null,
+        email: action.email ?? null,
+        notes: action.notes ?? null,
+      });
+      await audit(profileId, account.id, 'providers', `added provider ${action.name}`);
+      return `Added ${action.name} to the providers list.`;
+    }
+    case 'update_care_plan': {
+      // updated_by references a care circle member, not an account, so use
+      // the acting member when there is one (owners act without a membership).
+      const fields: Record<string, unknown> = { updated_at: db.fn.now(), updated_by: access.member?.id ?? null };
+      if (action.dietary_requirements !== undefined) fields['dietary_requirements'] = action.dietary_requirements ?? [];
+      if (action.mobility_aids !== undefined) fields['mobility_aids'] = action.mobility_aids ?? [];
+      if (action.communication_preferences !== undefined) fields['communication_preferences'] = action.communication_preferences;
+      if (action.advance_care_directive !== undefined) fields['advance_care_directive'] = action.advance_care_directive ?? false;
+      if (action.advance_care_directive_location !== undefined)
+        fields['advance_care_directive_location'] = action.advance_care_directive_location;
+      if (action.gp_name !== undefined) fields['gp_name'] = action.gp_name;
+      if (action.gp_practice !== undefined) fields['gp_practice'] = action.gp_practice;
+      if (action.gp_phone !== undefined) fields['gp_phone'] = action.gp_phone;
+      const existing = await db('care_plans').where({ care_profile_id: profileId }).first();
+      if (existing) await db('care_plans').where({ care_profile_id: profileId }).update(fields);
+      else await db('care_plans').insert({ care_profile_id: profileId, ...fields });
+      await audit(profileId, account.id, 'care_plans', 'updated care plan');
+      return `Updated the care plan.`;
+    }
+    case 'update_profile': {
+      const fields: Record<string, unknown> = { updated_at: db.fn.now() };
+      if (action.preferred_name !== undefined) fields['preferred_name'] = action.preferred_name;
+      if (action.pronouns !== undefined) fields['pronouns'] = action.pronouns;
+      if (action.primary_language !== undefined) fields['primary_language'] = action.primary_language;
+      if (action.notes !== undefined) fields['notes'] = action.notes;
+      if (action.date_of_birth !== undefined) fields['date_of_birth'] = action.date_of_birth || null;
+      await db('care_profiles').where({ id: profileId }).update(fields);
+      await audit(profileId, account.id, 'care_profiles', 'updated profile details');
+      return `Updated the profile details.`;
+    }
   }
 }
 
@@ -441,15 +780,19 @@ function toSingleProfileAction(action: CrossProfileAction, entry: CrossProfileAc
     const e = entry as z.infer<typeof crossProfileTaskSchema>['entries'][number];
     return { type: 'add_task', title: e.title, body: e.body, due_at: e.due_at, repeat: e.repeat };
   }
-  const e = entry as z.infer<typeof crossProfileMedicationSchema>['entries'][number];
-  return {
-    type: 'record_medication',
-    medication_name: e.medication_name,
-    status: e.status,
-    dose_given: e.dose_given,
-    notes: e.notes,
-    administered_at: e.administered_at,
-  };
+  if (action.type === 'cross_profile_medications') {
+    const e = entry as z.infer<typeof crossProfileMedicationSchema>['entries'][number];
+    return {
+      type: 'record_medication',
+      medication_name: e.medication_name,
+      status: e.status,
+      dose_given: e.dose_given,
+      notes: e.notes,
+      administered_at: e.administered_at,
+    };
+  }
+  // profile_actions: the entry already carries a full single-profile action.
+  return (entry as z.infer<typeof profileActionsSchema>['entries'][number]).action;
 }
 
 /**

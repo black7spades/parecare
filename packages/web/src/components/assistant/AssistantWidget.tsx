@@ -123,12 +123,18 @@ export function AssistantWidget() {
     profileMatch?.params.profileId && profileMatch.params.profileId !== 'profiles'
       ? profileMatch.params.profileId
       : null;
-  const mode: 'dashboard' | 'profile' = routeProfileId ? 'profile' : 'dashboard';
 
-  return <AssistantPanel mode={mode} profileId={routeProfileId} />;
+  return <AssistantPanel profileId={routeProfileId} />;
 }
 
-function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; profileId: string | null }) {
+/**
+ * One Pare, one conversation. It follows the user everywhere: the same
+ * thread on the Homeboard and inside any profile, so a chat never goes
+ * blank when they move around. When a profile is open Pare is handed that
+ * person's full record and can act on them directly, while still seeing
+ * everyone in the account's care.
+ */
+function AssistantPanel({ profileId }: { profileId: string | null }) {
   const open = useAssistantStore((s) => s.open);
   const setOpen = useAssistantStore((s) => s.setOpen);
   const pendingMessage = useAssistantStore((s) => s.pendingMessage);
@@ -220,12 +226,13 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
     persistWindowPrefs(rectRef.current, value);
   }
 
-  // Dashboard talk is one account-wide thread (keyed by account, so a
-  // login switch in the same tab never reuses someone else's thread);
-  // each profile has its own.
+  // One account-wide thread, keyed by account so a login switch in the same
+  // tab never reuses someone else's thread. The same conversation is used
+  // on the Homeboard and inside every profile, so it never resets as the
+  // user navigates.
   const accountId = useAuthStore((s) => s.account?.id);
-  const convScope = mode === 'dashboard' ? `dashboard-${accountId ?? 'anon'}` : profileId!;
-  const apiBase = mode === 'dashboard' ? '/ai/dashboard' : `/care-profiles/${profileId}/ai`;
+  const convScope = `pare-${accountId ?? 'anon'}`;
+  const apiBase = '/ai/dashboard';
 
   // Follow the route: switching between dashboard and a profile resumes
   // today's conversation for that scope, kept on the server so it
@@ -258,7 +265,7 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
   const { data: profileData } = useQuery({
     queryKey: ['care-profile', profileId],
     queryFn: () => api.get<{ profile: CareProfile }>(`/care-profiles/${profileId}`),
-    enabled: mode === 'profile' && !!profileId && open,
+    enabled: !!profileId && open,
   });
   const profile = profileData?.profile;
   const personName = profile?.preferred_name ?? profile?.first_name ?? profile?.full_name ?? null;
@@ -293,14 +300,15 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
         return created.conversation.id;
       };
       const conversation = convId ?? (await startConversation());
+      const body = { content, timezone: browserTimeZone(), current_profile_id: profileId ?? undefined };
       try {
-        return await api.post<SendResponse>(`${apiBase}/conversations/${conversation}/messages`, { content, timezone: browserTimeZone() });
+        return await api.post<SendResponse>(`${apiBase}/conversations/${conversation}/messages`, body);
       } catch (err) {
         // A resumed conversation can go stale (different login, deleted
         // record); start a fresh one instead of losing the message.
         if (err instanceof ApiError && err.status === 404 && conversation === convId) {
           const fresh = await startConversation();
-          return api.post<SendResponse>(`${apiBase}/conversations/${fresh}/messages`, { content });
+          return api.post<SendResponse>(`${apiBase}/conversations/${fresh}/messages`, body);
         }
         throw err;
       }
@@ -394,11 +402,7 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
         <div className="min-w-0">
           <p className="text-sm font-semibold text-ink truncate">Pare</p>
           <p className="text-xs text-muted truncate">
-            {mode === 'dashboard'
-              ? 'Everyone in your care'
-              : personName
-                ? `About ${personName} only`
-                : 'About this person only'}
+            {personName ? `Viewing ${personName} · everyone in your care` : 'Everyone in your care'}
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -438,9 +442,9 @@ function AssistantPanel({ mode, profileId }: { mode: 'dashboard' | 'profile'; pr
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {messages.length === 0 && !pendingReply ? (
           <p className="text-sm text-muted text-center mt-6 px-4">
-            {mode === 'dashboard'
-              ? 'Ask what needs attention, tell me what happened so I can log it for everyone involved, or ask me to take you anywhere in the app.'
-              : `Ask anything about ${personName ?? 'this person'}, or tell me something to log, like the medications you took, a seizure, an appointment or a task.`}
+            {personName
+              ? `Ask anything about ${personName}, tell me what happened so I can log it, or ask me to do or change something anywhere in your care.`
+              : 'Ask what needs attention, tell me what happened so I can log it for anyone, or ask me to take you anywhere in the app.'}
           </p>
         ) : null}
         {messages.map((m, i) => (
