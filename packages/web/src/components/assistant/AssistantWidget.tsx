@@ -57,6 +57,14 @@ interface TaskConfirmation {
 }
 
 const CONFIRM_RE = /```parecare-confirm\s*([\s\S]*?)```/g;
+const SUGGEST_ADD_RE = /```parecare-suggest-add\s*([\s\S]*?)```/g;
+
+interface SuggestAdd {
+  name: string;
+  kind: 'provider' | 'contact';
+  label: string;
+  profile_name: string;
+}
 
 // Pull any confirm directives out of an assistant message, returning the text
 // to show and the confirmations to render as buttons.
@@ -74,6 +82,20 @@ function parseConfirms(content: string): { text: string; confirms: TaskConfirmat
     })
     .trim();
   return { text, confirms };
+}
+
+function parseSuggestAdds(content: string): { text: string; suggests: SuggestAdd[] } {
+  const suggests: SuggestAdd[] = [];
+  const text = content
+    .replace(SUGGEST_ADD_RE, (_m, json: string) => {
+      try {
+        const parsed = JSON.parse(json.trim());
+        if (parsed?.name && parsed?.label) suggests.push(parsed);
+      } catch {}
+      return '';
+    })
+    .trim();
+  return { text, suggests };
 }
 
 function ConfirmCard({ c, done, pending, onConfirm }: { c: TaskConfirmation; done: boolean; pending: boolean; onConfirm: () => void }) {
@@ -100,6 +122,22 @@ function ConfirmCard({ c, done, pending, onConfirm }: { c: TaskConfirmation; don
         </div>
       </div>
     </div>
+  );
+}
+
+function SuggestAddChip({ s, onSend }: { s: SuggestAdd; onSend: (msg: string) => void }) {
+  const msg =
+    s.kind === 'provider'
+      ? `Add ${s.name} as a ${s.label} provider for ${s.profile_name}`
+      : `Add ${s.name} as a ${s.label} to ${s.profile_name}'s care circle`;
+  return (
+    <button
+      type="button"
+      onClick={() => onSend(msg)}
+      className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
+    >
+      <span className="text-sm leading-none">+</span> Add {s.name} as a {s.label}
+    </button>
   );
 }
 
@@ -532,12 +570,20 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
               </div>
             );
           }
-          const { text, confirms } = parseConfirms(m.content);
+          const { text: afterConfirms, confirms } = parseConfirms(m.content);
+          const { text, suggests } = parseSuggestAdds(afterConfirms);
           return (
             <div key={i} className="space-y-2">
               {text ? (
                 <div className="flex justify-start">
                   <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap bg-surface-2 text-ink">{text}</div>
+                </div>
+              ) : null}
+              {suggests.length > 0 ? (
+                <div className="flex flex-wrap gap-2 pl-1">
+                  {suggests.map((s, j) => (
+                    <SuggestAddChip key={j} s={s} onSend={(msg) => sendMutation.mutate({ content: msg })} />
+                  ))}
                 </div>
               ) : null}
               {confirms.map((c) => (

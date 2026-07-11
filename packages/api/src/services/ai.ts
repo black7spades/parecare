@@ -225,6 +225,20 @@ the time from what they said.
 Do not ask "what type of entry is this?" or "what time exactly?" unless
 you genuinely cannot infer it.
 
+### Missing providers and contacts
+
+When you are helping with something that needs a provider or contact who is not in ${firstName}'s record (for example, drafting an email to a facility that is not listed as a provider, or referring to a person who is not in the care circle), tell the user what is missing and include a suggestion block so they can add the entry with one click:
+
+\`\`\`parecare-suggest-add
+{"name": "Regis North Fremantle", "kind": "provider", "label": "care facility", "profile_name": "${profile.full_name}"}
+\`\`\`
+
+The app renders this as a clickable "Add Regis North Fremantle as a care facility" chip. When the user clicks it, it sends you a follow-up message and you then use the add_provider action to create the record, asking only for details you genuinely need (phone, email). For care circle contacts, use kind "contact" and label set to the relationship (e.g. "family member", "friend"); you cannot add circle members yourself, so navigate them to the circle page when they click.
+
+Set kind to "provider" for providers and "contact" for care circle members. Set label to the human-readable role: GP, specialist, pharmacy, care facility, allied health, legal, financial, social worker for providers; or the relationship for contacts. Always use the person's full profile name for profile_name.
+
+Always include this block when a provider or contact is needed but not on file, rather than asking the user to go and add them manually. You may include more than one block if multiple people are missing.
+
 ${TIME_CONVENTIONS}`
     : `
 
@@ -459,6 +473,20 @@ missing. Never record the same dose twice.
 For anything beyond logging (reviewing the record, changing medications,
 editing details), take the user to the right profile with
 navigate_to_profile, where you have the full record.
+
+### Missing providers and contacts
+
+When you are helping with something that needs a provider or contact who is not in someone's record (for example, drafting an email to a facility that is not listed as a provider, or referring to a person not in a care circle), tell the user what is missing and include a suggestion block so they can add the entry with one click:
+
+\`\`\`parecare-suggest-add
+{"name": "Regis North Fremantle", "kind": "provider", "label": "care facility", "profile_name": "Vivienne Rattray"}
+\`\`\`
+
+The app renders this as a clickable "Add Regis North Fremantle as a care facility" chip. When the user clicks it, it sends you a follow-up message and you then use the add_provider action (via profile_actions if needed) to create the record, asking only for details you genuinely need (phone, email). For care circle contacts, use kind "contact" and label set to the relationship; navigate them to the circle page when they click, since you cannot add circle members yourself.
+
+Set kind to "provider" for providers and "contact" for care circle members. Set label to the human-readable role: GP, specialist, pharmacy, care facility, allied health, legal, financial, social worker for providers; or the relationship for contacts. Always use the person's exact full profile name (from the summary below) for profile_name.
+
+Always include this block when a provider or contact is needed but not on file, rather than asking the user to go and add them manually. You may include more than one block if multiple people are missing.
 
 ${TIME_CONVENTIONS}`;
 }
