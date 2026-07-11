@@ -303,3 +303,59 @@ export async function countAttentionItems(accountId: string): Promise<number> {
   const data = await gatherDashboardData(accountId);
   return data.attentionCount;
 }
+
+/** One pressing thing, tied to the profile and section where it can be dealt with. */
+export interface AttentionItem {
+  profile_id: string;
+  profile_name: string;
+  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question';
+  label: string;
+  detail: string | null;
+  section: 'tasks' | 'medications' | 'questions';
+}
+
+/**
+ * The actual things needing attention across everyone, so the Homeboard can
+ * list them itself instead of sending the user to the assistant to find out.
+ */
+export async function gatherAttentionItems(accountId: string, timeZone?: string | null): Promise<AttentionItem[]> {
+  const data = await gatherDashboardData(accountId);
+  const items: AttentionItem[] = [];
+  for (const s of data.profiles) {
+    const name = s.profile.preferred_name ?? s.profile.full_name;
+    for (const r of s.overdueReminders) {
+      items.push({
+        profile_id: s.profile.id,
+        profile_name: name,
+        kind: 'overdue_task',
+        label: r.title,
+        detail: `was due ${fmtDate(r.next_due_at, timeZone)}`,
+        section: 'tasks',
+      });
+    }
+    if (s.overdueMedications.length > 0) {
+      items.push({
+        profile_id: s.profile.id,
+        profile_name: name,
+        kind: 'unrecorded_dose',
+        label: s.overdueMedications.length === 1 ? 'A dose is not yet recorded today' : 'Doses are not yet recorded today',
+        detail: s.overdueMedications.join(', '),
+        section: 'medications',
+      });
+    }
+    if (s.staleQuestionCount > 0) {
+      items.push({
+        profile_id: s.profile.id,
+        profile_name: name,
+        kind: 'stale_question',
+        label:
+          s.staleQuestionCount === 1
+            ? 'An open question has had no reply'
+            : `${s.staleQuestionCount} open questions have had no reply`,
+        detail: `nothing said for ${STALE_QUESTION_DAYS}+ days`,
+        section: 'questions',
+      });
+    }
+  }
+  return items;
+}

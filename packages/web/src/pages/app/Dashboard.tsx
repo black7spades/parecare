@@ -7,7 +7,17 @@ import { useAuthStore } from '../../stores/auth';
 import { useAssistantStore } from '../../stores/assistant';
 import { Button } from '../../components/ui/Button';
 import { Avatar } from '../../components/ui/Avatar';
+import { browserTimeZone } from '../../lib/datetime';
 import { POA_TYPES } from '../../lib/care';
+
+interface AttentionItem {
+  profile_id: string;
+  profile_name: string;
+  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question';
+  label: string;
+  detail: string | null;
+  section: 'tasks' | 'medications' | 'questions';
+}
 
 interface SummaryJourney {
   id: string;
@@ -58,14 +68,18 @@ export function Dashboard() {
   });
   const profiles = data?.profiles ?? [];
 
-  // What Pare would flag today: overdue tasks, unrecorded doses, stale
-  // questions. Drives the prompt line above the profile cards.
+  // What needs attention today: overdue tasks, unrecorded doses, stale
+  // questions. Listed in full above the profile cards, so the user never
+  // has to open the assistant to find out what is pressing.
   const { data: attentionData } = useQuery({
     queryKey: ['pare-attention'],
-    queryFn: () => api.get<{ count: number }>('/ai/dashboard/attention'),
+    queryFn: () =>
+      api.get<{ count: number; items: AttentionItem[] }>(
+        `/ai/dashboard/attention${browserTimeZone() ? `?tz=${encodeURIComponent(browserTimeZone()!)}` : ''}`
+      ),
     enabled: profiles.length > 0,
   });
-  const attentionCount = attentionData?.count ?? 0;
+  const attentionItems = attentionData?.items ?? [];
 
   const pinMutation = useMutation({
     mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
@@ -156,7 +170,7 @@ export function Dashboard() {
         )
       ) : (
         <>
-          {attentionCount > 0 ? <PareAttentionLine count={attentionCount} /> : null}
+          {attentionItems.length > 0 ? <AttentionPanel items={attentionItems} /> : null}
           <div className="flex flex-wrap items-center gap-2 text-sm">
             {profiles.length > 1 ? (
               <>
@@ -273,22 +287,64 @@ function PareWelcomeCard() {
   );
 }
 
-/** The returning-user prompt line: only shown when something needs attention. */
-function PareAttentionLine({ count }: { count: number }) {
+const ATTENTION_ICON: Record<AttentionItem['kind'], string> = {
+  overdue_task: '⏰',
+  unrecorded_dose: '💊',
+  stale_question: '❓',
+};
+
+/**
+ * The things needing attention today, listed in full so the user can see
+ * and act on each one without opening the assistant. Asking Pare stays
+ * available for anyone who prefers to talk it through.
+ */
+function AttentionPanel({ items }: { items: AttentionItem[] }) {
   const openWithMessage = useAssistantStore((s) => s.openWithMessage);
+  const [collapsed, setCollapsed] = useState(false);
   return (
-    <div className="card py-3 px-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-      <span className="font-semibold text-ink">Pare:</span>
-      <span className="text-ink">
-        {count === 1 ? '1 thing needs attention today.' : `${count} things need attention today.`}
-      </span>
-      <button
-        type="button"
-        onClick={() => openWithMessage('What needs my attention today?')}
-        className="text-primary hover:underline font-medium"
-      >
-        Ask me about them
-      </button>
+    <div className="card py-3 px-4">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+        <span className="font-semibold text-ink">Needs attention today</span>
+        <span className="text-muted">
+          {items.length === 1 ? '1 thing' : `${items.length} things`}
+        </span>
+        <div className="ml-auto flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => openWithMessage('What needs my attention today?')}
+            className="text-primary hover:underline font-medium"
+          >
+            Ask Pare
+          </button>
+          <button
+            type="button"
+            onClick={() => setCollapsed((v) => !v)}
+            className="text-muted hover:text-ink"
+            aria-expanded={!collapsed}
+          >
+            {collapsed ? 'Show' : 'Hide'}
+          </button>
+        </div>
+      </div>
+      {!collapsed ? (
+        <ul className="mt-2 divide-y divide-border">
+          {items.map((it, i) => (
+            <li key={i}>
+              <Link
+                to={`/app/${it.profile_id}/${it.section}`}
+                className="flex items-start gap-2 py-2 text-sm hover:bg-surface-2 -mx-2 px-2 rounded transition-colors"
+              >
+                <span aria-hidden className="mt-0.5">{ATTENTION_ICON[it.kind]}</span>
+                <span className="min-w-0">
+                  <span className="font-medium text-ink">{it.profile_name}</span>
+                  <span className="text-muted"> · {it.label}</span>
+                  {it.detail ? <span className="text-muted"> ({it.detail})</span> : null}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

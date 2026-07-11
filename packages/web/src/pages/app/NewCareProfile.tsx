@@ -28,7 +28,7 @@ export function NewCareProfile() {
             own, ask an administrator to enable it for your account.
           </p>
           <Link to="/app" className="text-primary text-sm hover:underline">
-            Back to dashboard
+            Back to homeboard
           </Link>
         </div>
       </div>

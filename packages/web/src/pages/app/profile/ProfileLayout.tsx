@@ -50,7 +50,7 @@ export function ProfileLayout() {
     return (
       <div className="card text-center py-12">
         <p className="text-muted mb-4">This care profile could not be found.</p>
-        <Button onClick={() => navigate('/app')}>Back to dashboard</Button>
+        <Button onClick={() => navigate('/app')}>Back to homeboard</Button>
       </div>
     );
   }
