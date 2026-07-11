@@ -216,6 +216,7 @@ const ENTITY_LABELS: Record<string, string> = {
   'memory-book': 'memory',
   'care-profiles': 'profile',
   ai: 'AI conversation',
+  treatments: 'treatment',
 };
 
 export const entityLabel = (type: string) => ENTITY_LABELS[type] ?? type;
@@ -338,12 +339,34 @@ export interface Allergy {
   reaction: string | null;
 }
 
-/** What they live with, tied to the medications that treat it. */
+/**
+ * How a condition stands right now, in plain language. Anyone can be
+ * afflicted with a temporary condition, so the lifecycle is explicit.
+ */
+export const CONDITION_STATUSES = [
+  { value: 'active', label: 'Active', description: 'Being experienced now.' },
+  { value: 'improving', label: 'Improving', description: 'On the mend and getting better.' },
+  { value: 'managed', label: 'Managed', description: 'Under control with treatment.' },
+  { value: 'resolved', label: 'Resolved', description: 'No longer present.' },
+] as const;
+
+export const conditionStatusLabel = (s: string) =>
+  CONDITION_STATUSES.find((x) => x.value === s)?.label ?? s;
+
+/** What they live with, tied to the medications and treatments that manage it. */
 export interface MedicalCondition {
   id: string;
   name: string;
   notes: string | null;
+  /** Expected to pass, rather than long-term. */
+  is_temporary: boolean;
+  status: string;
+  /** When it started, if known. */
+  started_on: string | null;
+  /** When it cleared, once resolved. */
+  resolved_on: string | null;
   medications: { name: string; active: boolean }[];
+  treatments?: { name: string; active: boolean }[];
 }
 
 export interface EmergencyContact {
@@ -510,6 +533,176 @@ export interface MedicationAdministration {
   right_time: boolean;
   right_documentation: boolean;
 }
+
+/**
+ * The kinds of treatment beyond medications, in plain language. A device
+ * covers machines like a CPAP unit or oxygen concentrator whose output is
+ * logged in whatever the machine reports.
+ */
+export const TREATMENT_CATEGORIES = [
+  { value: 'device', label: 'Device', description: 'A machine used regularly, like a CPAP unit or oxygen concentrator.' },
+  { value: 'therapy', label: 'Therapy', description: 'A session with or prescribed by a practitioner, like physiotherapy.' },
+  { value: 'exercise', label: 'Exercise', description: 'A prescribed movement or activity program.' },
+  { value: 'wound_care', label: 'Wound care', description: 'Dressing changes and wound checks.' },
+  { value: 'diet', label: 'Diet', description: 'A dietary program or restriction being followed.' },
+  { value: 'other', label: 'Other', description: 'Anything else done to manage a condition.' },
+] as const;
+
+export const treatmentCategoryLabel = (c: string) =>
+  TREATMENT_CATEGORIES.find((x) => x.value === c)?.label ?? c;
+
+/** The kinds of value a measure can record. */
+export const METRIC_VALUE_TYPES = [
+  { value: 'number', label: 'Number' },
+  { value: 'text', label: 'Text' },
+  { value: 'yes_no', label: 'Yes or no' },
+] as const;
+
+/**
+ * One thing a session of a treatment records, in the unit the device or
+ * therapy actually reports. Name and unit are two data points.
+ */
+export interface TreatmentMetric {
+  id: string;
+  treatment_id: string;
+  name: string;
+  unit: string | null;
+  value_type: 'number' | 'text' | 'yes_no';
+  sort_order: number;
+}
+
+/** A therapy or device treatment; medications are their own tranche. */
+export interface Treatment {
+  id: string;
+  care_profile_id: string;
+  name: string;
+  category: string;
+  medical_condition_id: string | null;
+  condition_name?: string | null;
+  instructions: string | null;
+  frequency: string | null;
+  schedule_times: string[] | null;
+  as_needed: boolean;
+  active: boolean;
+  metrics: TreatmentMetric[];
+  last_observed_at?: string | null;
+}
+
+/** One recorded reading within an observation. */
+export interface ObservationValue {
+  id: string;
+  observation_id: string;
+  treatment_metric_id: string;
+  value_number: number | null;
+  value_text: string | null;
+  value_boolean: boolean | null;
+  metric_name: string;
+  metric_unit: string | null;
+  metric_value_type: 'number' | 'text' | 'yes_no';
+}
+
+/** One logged session of a treatment, with its readings. */
+export interface Observation {
+  id: string;
+  care_profile_id: string;
+  treatment_id: string;
+  treatment_name?: string;
+  observed_at: string;
+  recorded_by_name: string | null;
+  source: 'manual' | 'device';
+  status: string;
+  notes: string | null;
+  values: ObservationValue[];
+}
+
+// Plain-language descriptions accompany every outcome, mirroring the MAR.
+export const OBSERVATION_STATUSES = [
+  { value: 'completed', label: 'Completed', description: 'The session happened in full.' },
+  { value: 'partial', label: 'Partly done', description: 'The session happened but was cut short or incomplete.' },
+  { value: 'skipped', label: 'Skipped', description: 'The session did not happen this time, for example the person was unwell or away.' },
+  { value: 'refused', label: 'Refused', description: 'The person did not want the session and declined it.' },
+] as const;
+
+export const observationStatusLabel = (s: string) =>
+  OBSERVATION_STATUSES.find((x) => x.value === s)?.label ?? s;
+export const observationStatusDescription = (s: string) =>
+  OBSERVATION_STATUSES.find((x) => x.value === s)?.description ?? '';
+
+/** A device's credentials for pushing readings; the secret shows once. */
+export interface DeviceKey {
+  id: string;
+  treatment_id: string;
+  name: string;
+  token_prefix: string;
+  active: boolean;
+  last_used_at: string | null;
+  created_at: string;
+}
+
+/**
+ * Ready-made treatment set-ups so common therapies start with the right
+ * measures. Every measure stays editable after picking one.
+ */
+export const TREATMENT_TEMPLATES: {
+  name: string;
+  category: string;
+  frequency: string;
+  metrics: { name: string; unit: string | null; value_type: 'number' | 'text' | 'yes_no' }[];
+}[] = [
+  {
+    name: 'CPAP therapy',
+    category: 'device',
+    frequency: 'Every night',
+    metrics: [
+      { name: 'Hours used', unit: 'hours', value_type: 'number' },
+      { name: 'Events per hour', unit: 'events', value_type: 'number' },
+      { name: 'Mask leak', unit: 'litres per minute', value_type: 'number' },
+    ],
+  },
+  {
+    name: 'Oxygen therapy',
+    category: 'device',
+    frequency: 'As directed',
+    metrics: [
+      { name: 'Flow rate', unit: 'litres per minute', value_type: 'number' },
+      { name: 'Hours used', unit: 'hours', value_type: 'number' },
+    ],
+  },
+  {
+    name: 'Blood glucose check',
+    category: 'device',
+    frequency: 'Before meals',
+    metrics: [{ name: 'Reading', unit: 'mmol/L', value_type: 'number' }],
+  },
+  {
+    name: 'Blood pressure check',
+    category: 'device',
+    frequency: 'Every morning',
+    metrics: [
+      { name: 'Top number when the heart beats', unit: 'mmHg', value_type: 'number' },
+      { name: 'Bottom number between beats', unit: 'mmHg', value_type: 'number' },
+      { name: 'Pulse', unit: 'beats per minute', value_type: 'number' },
+    ],
+  },
+  {
+    name: 'Physiotherapy exercises',
+    category: 'exercise',
+    frequency: 'Twice a day',
+    metrics: [
+      { name: 'Time spent', unit: 'minutes', value_type: 'number' },
+      { name: 'Pain level from 0 to 10', unit: null, value_type: 'number' },
+    ],
+  },
+  {
+    name: 'Wound dressing change',
+    category: 'wound_care',
+    frequency: 'Every second day',
+    metrics: [
+      { name: 'Healing well', unit: null, value_type: 'yes_no' },
+      { name: 'Appearance', unit: null, value_type: 'text' },
+    ],
+  },
+];
 
 export interface CarePlan {
   conditions: string[];

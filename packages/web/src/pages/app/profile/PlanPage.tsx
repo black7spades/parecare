@@ -5,6 +5,8 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { useProfile } from './ProfileLayout';
+import { Modal } from '../../../components/ui/Modal';
+import { CONDITION_STATUSES, conditionStatusLabel } from '../../../lib/care';
 import type { Allergy, CarePlan, EmergencyContact, MedicalCondition, Medication } from '../../../lib/care';
 
 const EMPTY_PLAN: CarePlan = {
@@ -272,6 +274,7 @@ function AllergiesSection({ profileId }: { profileId: string }) {
 function ConditionsSection({ profileId }: { profileId: string }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
+  const [editing, setEditing] = useState<MedicalCondition | null>(null);
 
   const { data } = useQuery({
     queryKey: ['conditions', profileId],
@@ -297,12 +300,20 @@ function ConditionsSection({ profileId }: { profileId: string }) {
     if (name.trim()) addMutation.mutate();
   };
 
+  // Everything managing this condition, medications and other treatments alike:
+  // one list of the same kind of value.
+  const managedBy = (c: MedicalCondition): string => {
+    const names = [...c.medications.map((m) => m.name), ...(c.treatments ?? []).map((t) => t.name)];
+    return names.length > 0 ? `Managed with ${names.join(', ')}` : '';
+  };
+
   return (
     <div className="card space-y-3">
       <div>
         <h3 className="text-sm font-semibold text-ink">Medical conditions</h3>
         <p className="text-sm text-muted">
-          Conditions being lived with. Tie medications to a condition on the Medications page and the link shows here.
+          Conditions being lived with or passing through. Some conditions are temporary, so each carries its own
+          status. Tie medications and treatments to a condition on the Treatments page and the link shows here.
           Saves straight away.
         </p>
       </div>
@@ -311,11 +322,20 @@ function ConditionsSection({ profileId }: { profileId: string }) {
           {conditions.map((c) => (
             <li key={c.id} className="flex items-start gap-2 group">
               <span className="badge bg-surface-2 text-ink text-xs shrink-0">{c.name}</span>
-              <span className="text-sm text-muted flex-1">
-                {c.medications.length > 0
-                  ? `Treated with ${c.medications.map((m) => m.name).join(', ')}`
-                  : ''}
-              </span>
+              {c.status && c.status !== 'active' ? (
+                <span className="badge bg-surface-2 text-muted text-xs shrink-0">{conditionStatusLabel(c.status)}</span>
+              ) : null}
+              {c.is_temporary ? (
+                <span className="badge bg-surface-2 text-muted text-xs shrink-0" title="Expected to pass rather than long-term">Temporary</span>
+              ) : null}
+              <span className="text-sm text-muted flex-1">{managedBy(c)}</span>
+              <button
+                type="button"
+                className="text-primary text-sm px-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity hover:underline"
+                onClick={() => setEditing(c)}
+              >
+                Edit
+              </button>
               <button
                 type="button"
                 aria-label={`Remove ${c.name}`}
@@ -330,6 +350,14 @@ function ConditionsSection({ profileId }: { profileId: string }) {
       ) : (
         <p className="text-sm text-muted">No conditions recorded.</p>
       )}
+      {editing ? (
+        <ConditionEditModal
+          profileId={profileId}
+          condition={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); invalidate(); }}
+        />
+      ) : null}
       <div className="flex gap-2">
         <div className="flex-1">
           <Input
@@ -350,6 +378,78 @@ function ConditionsSection({ profileId }: { profileId: string }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * A condition's lifecycle: whether it is expected to pass, how it stands
+ * now, and when it started and cleared. One fact per field.
+ */
+function ConditionEditModal({ profileId, condition, onClose, onSaved }: {
+  profileId: string;
+  condition: MedicalCondition;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(condition.name);
+  const [isTemporary, setIsTemporary] = useState(condition.is_temporary ?? false);
+  const [status, setStatus] = useState(condition.status ?? 'active');
+  const [startedOn, setStartedOn] = useState(condition.started_on ?? '');
+  const [resolvedOn, setResolvedOn] = useState(condition.resolved_on ?? '');
+  const [notes, setNotes] = useState(condition.notes ?? '');
+  const [error, setError] = useState('');
+
+  const selectClass = 'block w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
+
+  const mutation = useMutation({
+    mutationFn: () => api.patch(`/care-profiles/${profileId}/conditions/${condition.id}`, {
+      name: name.trim(),
+      is_temporary: isTemporary,
+      status,
+      started_on: startedOn || null,
+      resolved_on: status === 'resolved' ? resolvedOn || null : null,
+      notes: notes.trim() || null,
+    }),
+    onSuccess: onSaved,
+    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
+  });
+
+  // Not a <form>: this modal renders inside the care plan's form, and a
+  // nested form is invalid HTML. The save button drives the mutation.
+  return (
+    <Modal open onClose={onClose} title="Edit condition">
+      <div className="space-y-4">
+        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
+        <label className="inline-flex items-center gap-1.5 text-sm text-ink">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+            checked={isTemporary}
+            onChange={(e) => setIsTemporary(e.target.checked)}
+          />
+          Temporary: expected to pass rather than long-term
+        </label>
+        <div>
+          <label htmlFor="condition-status" className="block text-sm font-medium text-ink mb-1">Status</label>
+          <select id="condition-status" className={selectClass} value={status} onChange={(e) => setStatus(e.target.value)}>
+            {CONDITION_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+          <p className="mt-1 text-xs text-muted">{CONDITION_STATUSES.find((s) => s.value === status)?.description}</p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input label="Started on" type="date" value={startedOn} onChange={(e) => setStartedOn(e.target.value)} />
+          {status === 'resolved' ? (
+            <Input label="Resolved on" type="date" value={resolvedOn} onChange={(e) => setResolvedOn(e.target.value)} />
+          ) : null}
+        </div>
+        <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Anything worth knowing about this condition" />
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="button" loading={mutation.isPending} disabled={!name.trim()} onClick={() => mutation.mutate()}>Save</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

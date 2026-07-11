@@ -87,6 +87,8 @@ export const router = createBrowserRouter([
           { path: 'circle', element: <CirclePage /> },
           { path: 'plan', element: <PlanPage /> },
           { path: 'medications', element: <MedicationsPage /> },
+          // The section is named Treatments; both paths land on the same page
+          { path: 'treatments', element: <MedicationsPage /> },
           { path: 'tasks', element: <TasksPage /> },
           { path: 'calendar', element: <CalendarPage /> },
           { path: 'messages', element: <MessagesPage /> },

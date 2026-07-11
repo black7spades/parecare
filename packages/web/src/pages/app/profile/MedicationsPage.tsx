@@ -22,6 +22,7 @@ import {
   type MedicationRecord,
 } from '../../../lib/care';
 import { MedicationMar } from './MedicationMar';
+import { TreatmentsSection } from './TreatmentsSection';
 
 // Domain sort/filter helpers for the reusable data view.
 const earliestTime = (m: MedicationRecord): number => {
@@ -260,6 +261,10 @@ export function MedicationsPage() {
         <p className="text-sm text-muted">Log each dose against {careName} and review the history. Doses colour instantly as you record them.</p>
       </div>
       <MedicationMar profileId={profile.id} personName={profile.full_name} canAdminister={canEdit} />
+
+      <div className="border-t border-border pt-6">
+        <TreatmentsSection profileId={profile.id} careName={careName} canManage={canManageMeds} canLog={canAdminister} />
+      </div>
 
       {addOpen ? <MedicationForm profileId={profile.id} selfCare={selfCare} onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); invalidate(); }} /> : null}
       {editing ? <MedicationForm profileId={profile.id} med={editing} selfCare={selfCare} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} /> : null}

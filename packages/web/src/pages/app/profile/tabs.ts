@@ -4,7 +4,7 @@ export const PROFILE_TABS: { to: string; label: string; end?: boolean }[] = [
   { to: '', label: 'Overview', end: true },
   { to: 'circle', label: 'Care circle' },
   { to: 'plan', label: 'Care plan' },
-  { to: 'medications', label: 'Medications' },
+  { to: 'medications', label: 'Treatments' },
   { to: 'tasks', label: 'Tasks' },
   { to: 'calendar', label: 'Calendar' },
   { to: 'messages', label: 'Messages' },

@@ -25,6 +25,8 @@ import { memoryBookRouter } from './routes/memoryBook';
 import { calendarRouter, icsRouter } from './routes/calendar';
 import { medicationsRouter } from './routes/medications';
 import { medicationCatalogueRouter } from './routes/medicationCatalogue';
+import { treatmentsRouter } from './routes/treatments';
+import { deviceRouter } from './routes/deviceIngest';
 import { lifeStagesRouter } from './routes/lifeStages';
 import { allergiesRouter, conditionsRouter } from './routes/healthFacts';
 import { journeyTemplatesRouter } from './routes/journeyTemplates';
@@ -108,6 +110,7 @@ v1.use('/care-profiles/:id/documents', ...profileAccess, documentsRouter);
 v1.use('/care-profiles/:id/providers', ...profileAccess, providersRouter);
 v1.use('/care-profiles/:id/reminders', ...profileAccess, remindersRouter);
 v1.use('/care-profiles/:id/medications', ...profileAccess, medicationsRouter);
+v1.use('/care-profiles/:id/treatments', ...profileAccess, treatmentsRouter);
 v1.use('/care-profiles/:id/ai', ...profileAccess, aiRouter);
 v1.use('/care-profiles/:id/messages', ...profileAccess, messagesRouter);
 v1.use('/care-profiles/:id/memory-book', ...profileAccess, memoryBookRouter);
@@ -115,6 +118,9 @@ v1.use('/care-profiles/:id/activity', ...profileAccess, activityRouter);
 v1.use('/care-profiles/:id/calendar', ...profileAccess, calendarRouter);
 // Public: token-authenticated read-only calendar feed for Google/Outlook
 v1.use('/calendar', icsRouter);
+// Public: device-key-authenticated ingestion, so machines (CPAP units,
+// meter bridges) push their own readings straight into the observation log.
+v1.use('/device', deviceRouter);
 
 v1.get('/health', (_req, res) => res.json({ ok: true }));
 
