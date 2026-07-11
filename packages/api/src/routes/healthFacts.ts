@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
+import { resolveConditionCatalogueId } from './conditionCatalogue';
 
 /**
  * Structured health facts on a care profile: allergies (what they must
@@ -137,8 +138,11 @@ conditionsRouter.post('/', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
+  // Every recorded condition joins the shared catalogue, so a name typed
+  // once is suggested to everyone from then on.
+  const catalogueId = await resolveConditionCatalogueId(parsed.data.name, req.account!.id);
   const [condition] = await db('medical_conditions')
-    .insert({ care_profile_id: req.params['id'], ...parsed.data })
+    .insert({ care_profile_id: req.params['id'], ...parsed.data, condition_catalogue_id: catalogueId })
     .returning('*');
   res.status(201).json({ condition: serializeCondition(condition) });
 });
@@ -149,9 +153,17 @@ conditionsRouter.patch('/:conditionId', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
+  // A rename re-links the catalogue entry so suggestions follow the new name.
+  const catalogueId = parsed.data.name
+    ? await resolveConditionCatalogueId(parsed.data.name, req.account!.id)
+    : undefined;
   const [condition] = await db('medical_conditions')
     .where({ id: req.params['conditionId'], care_profile_id: req.params['id'] })
-    .update({ ...parsed.data, updated_at: db.fn.now() })
+    .update({
+      ...parsed.data,
+      ...(catalogueId ? { condition_catalogue_id: catalogueId } : {}),
+      updated_at: db.fn.now(),
+    })
     .returning('*');
   if (!condition) {
     res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });

@@ -5,7 +5,8 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Avatar } from '../../../components/ui/Avatar';
 import { EditProfileModal } from './EditProfileModal';
-import { SELF_RELATIONSHIP, type AccessLevel, type CareProfile, type PhaseHistoryEntry } from '../../../lib/care';
+import { format } from 'date-fns';
+import { SELF_RELATIONSHIP, ageFrom, type AccessLevel, type CareProfile, type PhaseHistoryEntry } from '../../../lib/care';
 
 export interface ProfileContext {
   profile: CareProfile;
@@ -55,6 +56,7 @@ export function ProfileLayout() {
     );
   }
   const profile = data.profile;
+  const age = ageFrom(profile.date_of_birth);
   const access: AccessLevel = data.access ?? 'owner';
   const relationship = data.relationship?.trim() || null;
   const isSelf = relationship === SELF_RELATIONSHIP;
@@ -86,11 +88,26 @@ export function ProfileLayout() {
             size={52}
           />
           <div className="min-w-0">
-            <h1 className="text-xl font-semibold text-ink truncate">{profile.full_name}</h1>
+            <h1 className="text-xl font-semibold text-ink truncate">
+              {profile.full_name}
+              {age !== null ? (
+                <span
+                  className="text-muted font-normal"
+                  title={profile.date_of_birth ? `Born ${format(new Date(profile.date_of_birth), 'd MMM yyyy')}` : undefined}
+                >
+                  {' · '}
+                  {age}
+                </span>
+              ) : null}
+            </h1>
             <p className="text-sm text-muted">
               {[
                 isSelf ? 'Your own care' : relationship ? `Your ${relationship}` : null,
                 profile.preferred_name ? `Known as ${profile.preferred_name}` : null,
+                profile.kind === 'pet' ? profile.breed : null,
+                profile.pronouns,
+                profile.date_of_birth ? `Born ${format(new Date(profile.date_of_birth), 'd MMM yyyy')}` : null,
+                profile.kind === 'pet' ? null : profile.primary_language,
               ]
                 .filter(Boolean)
                 .join(' · ')}

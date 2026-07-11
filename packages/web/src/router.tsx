@@ -8,6 +8,7 @@ import { Dashboard } from './pages/app/Dashboard';
 import { NewCareProfile } from './pages/app/NewCareProfile';
 import { ProfileLayout } from './pages/app/profile/ProfileLayout';
 import { OverviewPage } from './pages/app/profile/OverviewPage';
+import { JourneyPage } from './pages/app/profile/JourneyPage';
 import { CirclePage } from './pages/app/profile/CirclePage';
 import { PlanPage } from './pages/app/profile/PlanPage';
 import { MedicationsPage } from './pages/app/profile/MedicationsPage';
@@ -84,6 +85,7 @@ export const router = createBrowserRouter([
           { index: true, element: <OverviewPage /> },
           // Legacy path from before the tabbed layout
           { path: 'dashboard', element: <OverviewPage /> },
+          { path: 'journey', element: <JourneyPage /> },
           { path: 'circle', element: <CirclePage /> },
           { path: 'plan', element: <PlanPage /> },
           { path: 'medications', element: <MedicationsPage /> },

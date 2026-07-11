@@ -100,6 +100,21 @@ export interface CareProfile {
   contact_phone?: string | null;
   contact_phone_type?: 'home' | 'mobile' | null;
   contact_email?: string | null;
+  /** Resolved from contact_account_id when the contact is a platform user. */
+  contact_account_name?: string | null;
+  contact_account_email?: string | null;
+}
+
+/** Whole years lived, from the date of birth to today. */
+export function ageFrom(dateOfBirth: string | null | undefined): number | null {
+  if (!dateOfBirth) return null;
+  const born = new Date(dateOfBirth);
+  if (Number.isNaN(born.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - born.getFullYear();
+  const monthDiff = now.getMonth() - born.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < born.getDate())) age -= 1;
+  return age >= 0 ? age : null;
 }
 
 export interface ChecklistItem {
@@ -177,6 +192,8 @@ export interface CircleMember {
   id: string;
   account_id: string | null;
   invited_email: string | null;
+  /** The linked account's email, for showing a POA holder's contact details. */
+  account_email?: string | null;
   display_name: string;
   role: string;
   relationship: string | null;

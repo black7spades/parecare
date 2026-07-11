@@ -1,27 +1,26 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
 import { api } from '../../../api/client';
+import { browserTimeZone } from '../../../lib/datetime';
 import { Button } from '../../../components/ui/Button';
-import { Input, Textarea } from '../../../components/ui/Input';
+import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
 import { RelationshipSelect } from '../../../components/RelationshipSelect';
-import { JourneysSection } from './JourneysSection';
+import { ConditionsSection } from './ConditionsSection';
+import { CareLogSection } from './CareLogSection';
 import { useProfile } from './ProfileLayout';
 import {
-  LOG_ENTRY_TYPES,
   POA_TYPES,
-  entryTypeLabel,
   providerTypeLabel,
-  type CareLogEntry,
+  type CareProfile,
   type CircleMember,
   type Provider,
 } from '../../../lib/care';
 
 export function OverviewPage() {
-  const { profile, careName, relationship, isOwner } = useProfile();
+  const { profile, relationship, isOwner, canEdit } = useProfile();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -41,10 +40,28 @@ export function OverviewPage() {
   const poaHolders: PoaHolder[] = [
     ...members
       .filter((m) => m.poa_type)
-      .map((m) => ({ key: m.id, name: m.display_name, sublabel: m.relationship, poa_type: m.poa_type, poa_activated: m.poa_activated })),
+      .map((m) => ({
+        key: m.id,
+        name: m.display_name,
+        sublabel: m.relationship,
+        poa_type: m.poa_type,
+        poa_activated: m.poa_activated,
+        phone: null,
+        email: m.account_email ?? m.invited_email,
+        address: null,
+      })),
     ...providers
       .filter((p) => p.poa_type)
-      .map((p) => ({ key: p.id, name: p.name, sublabel: providerTypeLabel(p.provider_type), poa_type: p.poa_type, poa_activated: p.poa_activated })),
+      .map((p) => ({
+        key: p.id,
+        name: p.name,
+        sublabel: providerTypeLabel(p.provider_type),
+        poa_type: p.poa_type,
+        poa_activated: p.poa_activated,
+        phone: p.phone,
+        email: p.email,
+        address: p.address,
+      })),
   ];
 
   const [confirmText, setConfirmText] = useState('');
@@ -76,53 +93,51 @@ export function OverviewPage() {
   };
 
   const isPet = profile.kind === 'pet';
-  const detailLine = [
-    isPet ? profile.breed : null,
-    profile.pronouns,
-    profile.date_of_birth ? `Born ${format(new Date(profile.date_of_birth), 'd MMM yyyy')}` : null,
-    isPet ? null : profile.primary_language,
-  ]
-    .filter(Boolean)
-    .join(' · ');
 
   return (
     <div className="space-y-6">
-      <JourneysSection
-        profileId={profile.id}
-        careName={careName}
-        dateOfBirth={profile.date_of_birth}
-        dueDate={profile.due_date}
-      />
-
+      {/* Who they are: relationship, power of attorney, contacts, conditions. */}
       <div className="card space-y-3">
-          {detailLine ? <p className="text-sm text-muted">{detailLine}</p> : null}
-          <RelationshipRow profileId={profile.id} relationship={relationship} isOwner={isOwner} />
-          {isPet ? (
-            <PetDetails
-              species={profile.species}
-              breed={profile.breed}
-              desexed={profile.desexed}
-              microchip={profile.microchip_number}
-            />
-          ) : poaHolders.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-3">
-              {poaHolders.map((h) => (
-                <span key={h.key} className="flex items-center gap-2 text-sm text-ink">
-                  <span className="font-medium">{h.name}</span>
-                  <PoaBadge type={h.poa_type} activated={h.poa_activated} />
-                </span>
-              ))}
-              {isOwner ? <SetPoaInline profileId={profile.id} members={members} providers={providers} compact /> : null}
-            </div>
-          ) : isOwner ? (
-            <SetPoaInline profileId={profile.id} members={members} providers={providers} />
-          ) : (
-            <p className="text-sm text-muted">No power of attorney recorded yet.</p>
-          )}
-          {profile.notes ? <p className="text-sm whitespace-pre-wrap border-t border-border pt-3">{profile.notes}</p> : null}
+        <RelationshipRow profileId={profile.id} relationship={relationship} isOwner={isOwner} />
+        {isPet ? (
+          <PetDetails
+            species={profile.species}
+            breed={profile.breed}
+            desexed={profile.desexed}
+            microchip={profile.microchip_number}
+          />
+        ) : poaHolders.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-3">
+            {poaHolders.map((h) => (
+              <PoaHolderChip key={h.key} holder={h} />
+            ))}
+            {isOwner ? <SetPoaInline profileId={profile.id} members={members} providers={providers} compact /> : null}
+          </div>
+        ) : isOwner ? (
+          <SetPoaInline profileId={profile.id} members={members} providers={providers} />
+        ) : (
+          <p className="text-sm text-muted">No power of attorney recorded yet.</p>
+        )}
+        <ProfileContact profile={profile} />
+        <ConditionsSection profileId={profile.id} canEdit={canEdit} />
       </div>
 
-      <CareLog profileId={profile.id} />
+      <ProfileAttention profileId={profile.id} />
+
+      <CareLogSection profileId={profile.id} canEdit={canEdit} />
+
+      {/* The journey itself lives on its own page and feeds this one. */}
+      <div className="card flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-ink">Care journey</h2>
+          <p className="text-sm text-muted">The journeys, their phases and milestones live on their own page.</p>
+        </div>
+        <Link to="journey">
+          <Button variant="secondary" size="sm">
+            Open care journey
+          </Button>
+        </Link>
+      </div>
 
       <div className="pt-4 border-t border-border">
         <Button variant="ghost" size="sm" onClick={() => setArchiveOpen(true)}>
@@ -186,6 +201,130 @@ interface PoaHolder {
   sublabel: string | null;
   poa_type: string | null;
   poa_activated: boolean;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+}
+
+/**
+ * A named power-of-attorney holder. Hovering or focusing reveals their
+ * contact details, so whoever needs to reach them can do so from right
+ * here without opening the circle or providers page.
+ */
+function PoaHolderChip({ holder }: { holder: PoaHolder }) {
+  const hasContact = !!(holder.phone || holder.email || holder.address);
+  return (
+    <span className="relative group inline-flex" tabIndex={hasContact ? 0 : undefined}>
+      <span className="flex items-center gap-2 text-sm text-ink cursor-default">
+        <span className="font-medium">{holder.name}</span>
+        <PoaBadge type={holder.poa_type} activated={holder.poa_activated} />
+      </span>
+      {hasContact ? (
+        <span className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden w-64 rounded-md border border-border bg-card p-3 shadow-lg group-hover:block group-focus-within:block">
+          <span className="block text-sm font-medium text-ink">{holder.name}</span>
+          {holder.sublabel ? <span className="block text-xs text-muted">{holder.sublabel}</span> : null}
+          <span className="mt-1.5 block space-y-0.5">
+            {holder.phone ? (
+              <span className="block text-sm text-ink">
+                <span className="text-muted">Phone: </span>
+                {holder.phone}
+              </span>
+            ) : null}
+            {holder.email ? (
+              <span className="block text-sm text-ink">
+                <span className="text-muted">Email: </span>
+                {holder.email}
+              </span>
+            ) : null}
+            {holder.address ? (
+              <span className="block text-sm text-ink">
+                <span className="text-muted">Address: </span>
+                {holder.address}
+              </span>
+            ) : null}
+          </span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** Who to contact about this person, shown fact by fact. */
+function ProfileContact({ profile }: { profile: CareProfile }) {
+  if (!profile.contact_kind) return null;
+  const rows: { label: string; value: string }[] = [];
+  if (profile.contact_kind === 'self') {
+    rows.push({ label: 'Contact', value: 'Themselves' });
+    if (profile.contact_phone) rows.push({ label: 'Phone', value: profile.contact_phone });
+    if (profile.contact_phone_type) rows.push({ label: 'Phone type', value: profile.contact_phone_type === 'mobile' ? 'Mobile' : 'Home' });
+    if (profile.contact_email) rows.push({ label: 'Email', value: profile.contact_email });
+  } else if (profile.contact_kind === 'user') {
+    if (profile.contact_account_name) rows.push({ label: 'Contact', value: profile.contact_account_name });
+    if (profile.contact_account_email) rows.push({ label: 'Email', value: profile.contact_account_email });
+  } else {
+    if (profile.contact_name) rows.push({ label: 'Contact', value: profile.contact_name });
+    if (profile.contact_relationship) rows.push({ label: 'Relationship', value: profile.contact_relationship });
+    if (profile.contact_phone) rows.push({ label: 'Phone', value: profile.contact_phone });
+    if (profile.contact_phone_type) rows.push({ label: 'Phone type', value: profile.contact_phone_type === 'mobile' ? 'Mobile' : 'Home' });
+    if (profile.contact_email) rows.push({ label: 'Email', value: profile.contact_email });
+  }
+  if (rows.length === 0) return null;
+  return (
+    <dl className="grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-2 border-t border-border pt-3">
+      {rows.map((r) => (
+        <div key={r.label} className="flex gap-2">
+          <dt className="w-24 shrink-0 text-muted">{r.label}</dt>
+          <dd className="min-w-0 flex-1 text-ink">{r.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** One pressing thing for this person, from the account-wide attention feed. */
+interface AttentionItem {
+  profile_id: string;
+  profile_name: string;
+  kind: string;
+  label: string;
+  detail: string | null;
+  section: string;
+  key: string;
+  urgent: boolean;
+  dismissible: boolean;
+}
+
+/**
+ * This person's own "needs attention today": the account-wide feed
+ * narrowed to them, right under their profile details.
+ */
+function ProfileAttention({ profileId }: { profileId: string }) {
+  const tz = browserTimeZone();
+  const { data } = useQuery({
+    queryKey: ['pare-attention'],
+    queryFn: () => api.get<{ count: number; items: AttentionItem[] }>(`/ai/dashboard/attention${tz ? `?tz=${encodeURIComponent(tz)}` : ''}`),
+  });
+  const items = (data?.items ?? []).filter((i) => i.profile_id === profileId);
+
+  return (
+    <div className="card py-3 px-4">
+      <p className="text-sm font-semibold text-ink">Needs attention today</p>
+      {items.length === 0 ? (
+        <p className="mt-1 text-sm text-muted">Nothing needs attention right now.</p>
+      ) : (
+        <ul className="mt-2 divide-y divide-border">
+          {items.map((it) => (
+            <li key={it.key} className={`py-2 -mx-2 px-2 rounded ${it.urgent ? 'border-l-2 border-red-500 bg-red-50 dark:bg-red-900/10' : ''}`}>
+              <Link to={it.section} className="block text-sm hover:underline">
+                <span className={it.urgent ? 'text-red-700 dark:text-red-300 font-medium' : 'text-ink font-medium'}>{it.label}</span>
+                {it.detail ? <span className={it.urgent ? 'text-red-700 dark:text-red-300' : 'text-muted'}> · {it.detail}</span> : null}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -356,100 +495,6 @@ function PetDetails({
   );
 }
 
-function CareLog({ profileId }: { profileId: string }) {
-  const queryClient = useQueryClient();
-  const [entryType, setEntryType] = useState('observation');
-  const [title, setTitle] = useState('');
-  const [body, setBody] = useState('');
-  const [formError, setFormError] = useState('');
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['care-log', profileId],
-    queryFn: () => api.get<{ entries: CareLogEntry[]; total: number }>(`/care-profiles/${profileId}/log`),
-  });
-  const entries = data?.entries ?? [];
-
-  const addMutation = useMutation({
-    mutationFn: () =>
-      api.post(`/care-profiles/${profileId}/log`, {
-        entry_type: entryType,
-        title: title.trim() || null,
-        body: body.trim(),
-      }),
-    onSuccess: () => {
-      setTitle('');
-      setBody('');
-      setFormError('');
-      void queryClient.invalidateQueries({ queryKey: ['care-log', profileId] });
-    },
-    onError: (err) => setFormError(err instanceof Error ? err.message : 'Failed to add entry'),
-  });
-
-  return (
-    <div className="card">
-      <h2 className="text-base font-semibold text-ink mb-4">Care log</h2>
-
-      <form
-        className="space-y-3 mb-6"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (body.trim()) addMutation.mutate();
-        }}
-      >
-        <div className="flex gap-2">
-          <select
-            aria-label="Entry type"
-            className="rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-            value={entryType}
-            onChange={(e) => setEntryType(e.target.value)}
-          >
-            {LOG_ENTRY_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-          <div className="flex-1">
-            <Input placeholder="Title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />
-          </div>
-        </div>
-        <Textarea
-          placeholder="What happened?"
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          rows={2}
-          required
-        />
-        {formError ? <p className="text-sm text-red-600">{formError}</p> : null}
-        <div className="flex justify-end">
-          <Button type="submit" size="sm" loading={addMutation.isPending} disabled={!body.trim()}>
-            Add entry
-          </Button>
-        </div>
-      </form>
-
-      {isLoading ? (
-        <p className="text-sm text-muted">Loading…</p>
-      ) : entries.length === 0 ? (
-        <p className="text-sm text-muted">No entries yet. Log visits, calls, and decisions so the whole family stays up to date.</p>
-      ) : (
-        <ul className="space-y-4">
-          {entries.map((entry) => (
-            <li key={entry.id} className="border-b border-border last:border-0 pb-4 last:pb-0">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="badge bg-primary-50 text-primary text-xs">{entryTypeLabel(entry.entry_type)}</span>
-                <span className="text-xs text-muted">{format(new Date(entry.occurred_at), 'd MMM yyyy, HH:mm')}</span>
-              </div>
-              {entry.title ? <p className="text-sm font-medium text-ink">{entry.title}</p> : null}
-              <p className="text-sm text-ink whitespace-pre-wrap">{entry.body}</p>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 /** Shows and edits what THIS viewer calls the person ("Your Oma"). */
 function RelationshipRow({
   profileId,
@@ -515,4 +560,3 @@ function RelationshipRow({
     </div>
   );
 }
-
