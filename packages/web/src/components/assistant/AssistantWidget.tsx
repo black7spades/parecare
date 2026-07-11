@@ -367,7 +367,7 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
   }, [messages.length, pendingReply, open]);
 
   const sendMutation = useMutation({
-    mutationFn: async (content: string) => {
+    mutationFn: async ({ content, contextProfileId }: { content: string; contextProfileId?: string | null }) => {
       const startConversation = async () => {
         const created = await api.post<{ conversation: { id: string } }>(`${apiBase}/conversations`);
         queryClient.setQueryData(['assistant-current', convScope], { conversation: created.conversation });
@@ -375,7 +375,9 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
         return created.conversation.id;
       };
       const conversation = convId ?? (await startConversation());
-      const body = { content, timezone: browserTimeZone(), current_profile_id: profileId ?? undefined };
+      // A message queued for a specific person (e.g. from the Homeboard) carries
+      // that profile, so Pare gets their full record even with none open.
+      const body = { content, timezone: browserTimeZone(), current_profile_id: (contextProfileId ?? profileId) ?? undefined };
       try {
         return await api.post<SendResponse>(`${apiBase}/conversations/${conversation}/messages`, body);
       } catch (err) {
@@ -388,7 +390,7 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
         throw err;
       }
     },
-    onMutate: (content) => {
+    onMutate: ({ content }) => {
       setPendingReply(content);
       setError('');
     },
@@ -416,8 +418,8 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
   // attention prompt) is sent as soon as we are open, resumed and idle.
   useEffect(() => {
     if (open && pendingMessage && resumeReady && !sendMutation.isPending) {
-      const message = consumePendingMessage();
-      if (message) sendMutation.mutate(message);
+      const { message, contextProfileId } = consumePendingMessage();
+      if (message) sendMutation.mutate({ content: message, contextProfileId });
     }
   }, [open, pendingMessage, resumeReady, sendMutation, consumePendingMessage]);
 
@@ -430,7 +432,7 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
 
   function send() {
     const content = draft.trim();
-    if (content && resumeReady && !sendMutation.isPending) sendMutation.mutate(content);
+    if (content && resumeReady && !sendMutation.isPending) sendMutation.mutate({ content });
   }
 
   if (!open) {

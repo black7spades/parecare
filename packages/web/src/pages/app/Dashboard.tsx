@@ -337,21 +337,23 @@ const ATTENTION_ICON: Record<AttentionItem['kind'], string> = {
  */
 function itemBrief(it: AttentionItem): string {
   const who = it.profile_name;
+  const useRecord = `First look through ${who}'s record you have been given — providers and their contact details, the care plan, recent notes and related tasks — and use what is there. `;
   switch (it.kind) {
     case 'overdue_task':
-      return `Let's do this together for ${who}: "${it.label}"${it.detail ? ` (${it.detail})` : ''}. `
-        + `If it needs an email or message, draft it ready to send using their contacts and providers if you have them, and tell me exactly who to send it to. `
+      return `Let's do this for ${who}: "${it.label}"${it.detail ? ` (${it.detail})` : ''}. ${useRecord}`
+        + `If it needs an email or message, write the actual draft here now (a clear subject and body) addressed to the right provider or contact from the record. `
+        + `Only if something essential is genuinely not on file (like a missing email address) ask me for just that. Do not say you are drafting without showing the draft. `
         + `Do not mark the task complete yourself; once it is sent, offer me a confirm button to mark it done.`;
     case 'out_of_stock':
-      return `${who} has run out of ${it.detail ?? 'a medication'}. Let's sort out a repeat together: `
-        + `draft a request to the pharmacy or prescriber ready to send, and tell me who to send it to. `
-        + `Do not change anything yourself; once it is arranged, ask me whether to update the supply.`;
+      return `${who} has run out of ${it.detail ?? 'a medication'}. ${useRecord}`
+        + `Write the actual repeat request here now (a clear subject and body) addressed to their pharmacy or prescriber from the record. `
+        + `Only ask me for a detail if it is genuinely missing. Do not change anything yourself; once it is arranged, ask me whether to update the supply.`;
     case 'unrecorded_dose':
-      return `Let's record the doses due for ${who}${it.detail ? `: ${it.detail}` : ''}. Walk me through logging each one.`;
+      return `Let's record the doses due for ${who}${it.detail ? `: ${it.detail}` : ''}. Check the record and walk me through logging each one.`;
     case 'stale_question':
-      return `Let's follow up the open question(s) for ${who} that have had no reply. Help me chase an answer and draft any message needed.`;
+      return `Let's follow up the open question(s) for ${who} that have had no reply. ${useRecord}Draft the actual message to chase an answer here now.`;
     default:
-      return `Help me deal with this for ${who}: ${it.label}.`;
+      return `Help me deal with this for ${who}: ${it.label}. ${useRecord}`;
   }
 }
 
@@ -427,13 +429,6 @@ function AttentionPanel({ items }: { items: AttentionItem[] }) {
                 </span>
               </Link>
               <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => openWithMessage(itemBrief(it))}
-                  className="rounded-md border border-primary/40 text-primary px-2 py-1 text-xs font-medium hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors whitespace-nowrap"
-                >
-                  Let's do it together
-                </button>
                 {it.dismissible ? (
                   <button
                     type="button"
@@ -443,6 +438,13 @@ function AttentionPanel({ items }: { items: AttentionItem[] }) {
                     Dismiss
                   </button>
                 ) : null}
+                <button
+                  type="button"
+                  onClick={() => openWithMessage(itemBrief(it), it.profile_id)}
+                  className="rounded-md border border-primary/40 text-primary px-2 py-1 text-xs font-medium hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors whitespace-nowrap"
+                >
+                  Let's do it
+                </button>
               </div>
             </li>
           ))}
