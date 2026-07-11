@@ -341,7 +341,7 @@ function itemBrief(it: AttentionItem): string {
     case 'overdue_task':
       return `Let's do this together for ${who}: "${it.label}"${it.detail ? ` (${it.detail})` : ''}. `
         + `If it needs an email or message, draft it ready to send using their contacts and providers if you have them, and tell me exactly who to send it to. `
-        + `Do not mark the task complete yourself; once it is sent, ask me whether I want to tick it off.`;
+        + `Do not mark the task complete yourself; once it is sent, offer me a confirm button to mark it done.`;
     case 'out_of_stock':
       return `${who} has run out of ${it.detail ?? 'a medication'}. Let's sort out a repeat together: `
         + `draft a request to the pharmacy or prescriber ready to send, and tell me who to send it to. `

@@ -42,6 +42,67 @@ interface SendResponse {
   client_actions?: ClientAction[];
 }
 
+/**
+ * A task completion Pare has proposed. It rides along inside the stored
+ * assistant message as a fenced parecare-confirm block, so the confirm button
+ * stays put when the conversation reloads. Pare never completes a task; only
+ * the person clicking the button does.
+ */
+interface TaskConfirmation {
+  kind: 'complete_task';
+  profile_id: string;
+  reminder_id: string;
+  title: string;
+  profile_name: string;
+}
+
+const CONFIRM_RE = /```parecare-confirm\s*([\s\S]*?)```/g;
+
+// Pull any confirm directives out of an assistant message, returning the text
+// to show and the confirmations to render as buttons.
+function parseConfirms(content: string): { text: string; confirms: TaskConfirmation[] } {
+  const confirms: TaskConfirmation[] = [];
+  const text = content
+    .replace(CONFIRM_RE, (_m, json: string) => {
+      try {
+        const parsed = JSON.parse(json.trim());
+        if (parsed?.kind === 'complete_task' && parsed.reminder_id && parsed.profile_id) confirms.push(parsed);
+      } catch {
+        // A malformed directive is simply dropped rather than shown raw.
+      }
+      return '';
+    })
+    .trim();
+  return { text, confirms };
+}
+
+function ConfirmCard({ c, done, pending, onConfirm }: { c: TaskConfirmation; done: boolean; pending: boolean; onConfirm: () => void }) {
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[85%] rounded-lg border border-border bg-card px-3 py-2 text-sm">
+        <p className="text-ink">
+          Mark <span className="font-medium">“{c.title}”</span> complete for {c.profile_name}?
+        </p>
+        <p className="text-xs text-muted mt-0.5">Nothing is marked done until you confirm here.</p>
+        <div className="mt-2">
+          {done ? (
+            <span className="text-xs font-medium text-primary">Marked done ✓</span>
+          ) : (
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={pending}
+              className="rounded-md bg-primary text-white px-3 py-1.5 text-xs font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
+            >
+              {pending ? 'Marking…' : 'Mark done'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Where each of Pare's navigation sections lives in the app. */
 const SECTION_PATHS: Record<string, string> = {
   overview: '',
@@ -147,6 +208,20 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+
+  // Completing a task Pare proposed happens only when the person clicks the
+  // confirm button; Pare itself never marks anything done.
+  const [confirmedTasks, setConfirmedTasks] = useState<Set<string>>(new Set());
+  const completeTask = useMutation({
+    mutationFn: (c: TaskConfirmation) => api.patch(`/care-profiles/${c.profile_id}/reminders/${c.reminder_id}`, { completed: true }),
+    onSuccess: (_data, c) => {
+      setConfirmedTasks((prev) => new Set(prev).add(c.reminder_id));
+      void queryClient.invalidateQueries({ queryKey: ['tasks', c.profile_id] });
+      void queryClient.invalidateQueries({ queryKey: ['pare-attention'] });
+      void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
+      void queryClient.invalidateQueries({ queryKey: ['calendar-events', c.profile_id] });
+    },
+  });
 
   // The window is movable, resizable and can be made see-through on
   // larger screens; on phones it stays a fixed bottom sheet. Preferences
@@ -447,17 +522,34 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
               : 'Ask what needs attention, tell me what happened so I can log it for anyone, or ask me to take you anywhere in the app.'}
           </p>
         ) : null}
-        {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div
-              className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
-                m.role === 'user' ? 'bg-primary text-white' : 'bg-surface-2 text-ink'
-              }`}
-            >
-              {m.content}
+        {messages.map((m, i) => {
+          if (m.role === 'user') {
+            return (
+              <div key={i} className="flex justify-end">
+                <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap bg-primary text-white">{m.content}</div>
+              </div>
+            );
+          }
+          const { text, confirms } = parseConfirms(m.content);
+          return (
+            <div key={i} className="space-y-2">
+              {text ? (
+                <div className="flex justify-start">
+                  <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap bg-surface-2 text-ink">{text}</div>
+                </div>
+              ) : null}
+              {confirms.map((c) => (
+                <ConfirmCard
+                  key={c.reminder_id}
+                  c={c}
+                  done={confirmedTasks.has(c.reminder_id)}
+                  pending={completeTask.isPending && completeTask.variables?.reminder_id === c.reminder_id}
+                  onConfirm={() => completeTask.mutate(c)}
+                />
+              ))}
             </div>
-          </div>
-        ))}
+          );
+        })}
         {pendingReply ? (
           <>
             <div className="flex justify-end">
