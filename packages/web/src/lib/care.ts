@@ -282,6 +282,8 @@ export interface Task {
   next_due_at: string;
   assigned_to: string | null;
   completed: boolean;
+  completed_at: string | null;
+  completed_by_name: string | null;
 }
 
 export interface ChatMessage {

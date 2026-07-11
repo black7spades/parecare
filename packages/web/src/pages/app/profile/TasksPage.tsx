@@ -5,6 +5,8 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { useProfile } from './ProfileLayout';
+import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
+import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
 import type { CareProfile, CircleMember, Task } from '../../../lib/care';
 
 interface FanOutResult {
@@ -19,8 +21,20 @@ const REPEAT_LABELS: Record<Task['reminder_type'], string> = {
   monthly: 'Monthly',
 };
 
+const isOverdue = (t: Task): boolean => !t.completed && new Date(t.next_due_at) < new Date();
+const dueValue = (t: Task): number => new Date(t.next_due_at).getTime();
+const doneValue = (t: Task): number => (t.completed_at ? new Date(t.completed_at).getTime() : 0);
+const byTitle = (a: Task, b: Task) => a.title.localeCompare(b.title);
+
+const TASK_SORTS: DataSort<Task>[] = [
+  { key: 'default', label: 'Open first, then by due', compare: (a, b) => (Number(a.completed) - Number(b.completed)) || (dueValue(a) - dueValue(b)) || byTitle(a, b) },
+  { key: 'due', label: 'By due date', compare: (a, b) => (dueValue(a) - dueValue(b)) || byTitle(a, b) },
+  { key: 'completed', label: 'Recently completed', compare: (a, b) => (doneValue(b) - doneValue(a)) || (dueValue(a) - dueValue(b)) },
+  { key: 'title', label: 'By task (A–Z)', compare: byTitle },
+];
+
 export function TasksPage() {
-  const { profile } = useProfile();
+  const { profile, canEdit } = useProfile();
   const queryClient = useQueryClient();
   const [error, setError] = useState('');
 
@@ -34,9 +48,10 @@ export function TasksPage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [note, setNote] = useState('');
 
+  // The whole record, open and completed, so nothing disappears when ticked off.
   const { data, isLoading } = useQuery({
     queryKey: ['tasks', profile.id],
-    queryFn: () => api.get<{ reminders: Task[] }>(`/care-profiles/${profile.id}/reminders`),
+    queryFn: () => api.get<{ reminders: Task[] }>(`/care-profiles/${profile.id}/reminders?status=all`),
   });
   const tasks = data?.reminders ?? [];
 
@@ -65,6 +80,7 @@ export function TasksPage() {
       void queryClient.invalidateQueries({ queryKey: ['calendar-events', id] });
     }
     void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
+    void queryClient.invalidateQueries({ queryKey: ['pare-attention'] });
   };
 
   const resetForm = () => {
@@ -110,8 +126,9 @@ export function TasksPage() {
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to create task'),
   });
 
-  const completeMutation = useMutation({
-    mutationFn: (id: string) => api.patch(`/care-profiles/${profile.id}/reminders/${id}`, { completed: true }),
+  const setDone = useMutation({
+    mutationFn: ({ id, completed }: { id: string; completed: boolean }) =>
+      api.patch(`/care-profiles/${profile.id}/reminders/${id}`, { completed }),
     onSuccess: () => invalidate(),
   });
 
@@ -120,57 +137,160 @@ export function TasksPage() {
     onSuccess: () => invalidate(),
   });
 
-  const overdue = (t: Task) => new Date(t.next_due_at) < new Date();
+  const bulk = useMutation({
+    mutationFn: (action: 'complete' | 'reopen' | 'delete') =>
+      api.post(`/care-profiles/${profile.id}/reminders/bulk`, { action, ids: dv.selectedRows.map((t) => t.id) }),
+    onSuccess: () => { dv.clearSelection(); invalidate(); },
+  });
+
+  const statusFilter: DataFilter<Task> = {
+    key: 'status',
+    label: 'Status',
+    options: [
+      { value: 'open', label: 'Open' },
+      { value: 'overdue', label: 'Overdue' },
+      { value: 'completed', label: 'Completed' },
+    ],
+    match: (t, v) => (v === 'completed' ? t.completed : v === 'overdue' ? isOverdue(t) : !t.completed),
+  };
+  const assigneeFilter: DataFilter<Task> = {
+    key: 'assignee',
+    label: 'Assigned to',
+    options: [{ value: '__unassigned__', label: 'Unassigned' }, ...members.map((m) => ({ value: m.id, label: m.display_name }))],
+    match: (t, v) => (v === '__unassigned__' ? !t.assigned_to : t.assigned_to === v),
+  };
+  const repeatFilter: DataFilter<Task> = {
+    key: 'repeat',
+    label: 'Repeat',
+    options: (['once', 'daily', 'weekly', 'monthly'] as Task['reminder_type'][]).map((r) => ({ value: r, label: REPEAT_LABELS[r] })),
+    match: (t, v) => t.reminder_type === v,
+  };
+
+  const dv = useDataView<Task>({
+    rows: tasks,
+    getId: (t) => t.id,
+    searchText: (t) => [t.title, t.body, memberName(t.assigned_to), t.completed_by_name].filter(Boolean).join(' '),
+    sorts: TASK_SORTS,
+    filters: [statusFilter, assigneeFilter, repeatFilter],
+  });
+
+  const bulkActions: ToolbarBulkAction[] = canEdit
+    ? [
+        { key: 'complete', label: 'Mark done', onRun: () => bulk.mutate('complete') },
+        { key: 'reopen', label: 'Reopen', onRun: () => bulk.mutate('reopen') },
+        { key: 'delete', label: 'Delete', destructive: true, onRun: () => bulk.mutate('delete') },
+      ]
+    : [];
+
+  const openCount = tasks.filter((t) => !t.completed).length;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_20rem] items-start">
-      <div className="card">
-        <h2 className="text-base font-semibold text-ink mb-4">Open tasks</h2>
-        {isLoading ? (
-          <p className="text-sm text-muted">Loading…</p>
-        ) : tasks.length === 0 ? (
-          <p className="text-sm text-muted">
-            Nothing outstanding. Tasks appear here and on the calendar. Assign them so nothing falls on one person.
-          </p>
-        ) : (
-          <ul className="space-y-3">
-            {tasks.map((t) => (
-              <li key={t.id} className="flex items-start gap-3 group border-b border-border last:border-0 pb-3 last:pb-0">
-                <input
-                  type="checkbox"
-                  aria-label={`Complete ${t.title}`}
-                  className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                  checked={false}
-                  onChange={() => completeMutation.mutate(t.id)}
-                />
-                <div className="flex-1">
-                  <p className="text-sm text-ink font-medium">{t.title}</p>
-                  {t.body ? <p className="text-xs text-muted">{t.body}</p> : null}
-                  <div className="flex flex-wrap items-center gap-2 mt-1">
-                    <span className={`text-xs ${overdue(t) ? 'text-red-600 font-medium' : 'text-muted'}`}>
-                      {overdue(t) ? 'Overdue · ' : 'Due '}
-                      {format(new Date(t.next_due_at), 'EEE d MMM, HH:mm')}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-ink">Tasks</h2>
+          <span className="text-xs text-muted">{openCount} open · {tasks.length} in the record</span>
+        </div>
+
+        <DataToolbar
+          search={dv.search}
+          onSearch={dv.setSearch}
+          searchPlaceholder="Search tasks, notes or people…"
+          sorts={TASK_SORTS.map((s) => ({ key: s.key, label: s.label }))}
+          sortKey={dv.sortKey}
+          onSort={dv.setSortKey}
+          filters={[statusFilter, assigneeFilter, repeatFilter].map((f) => ({ key: f.key, label: f.label, options: f.options }))}
+          filterValues={dv.filterValues}
+          onFilter={dv.setFilter}
+          selectedCount={dv.selectedRows.length}
+          bulkActions={bulkActions}
+          onClearSelection={dv.clearSelection}
+        />
+
+        <div className="card p-0 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-muted border-b border-border">
+                {canEdit ? (
+                  <th className="px-3 py-3 w-8">
+                    <input type="checkbox" aria-label="Select all" className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                      checked={dv.allSelected} onChange={dv.toggleAll} />
+                  </th>
+                ) : null}
+                <th className="px-2 py-3 w-8" aria-label="Done" />
+                <th className="px-3 py-3 font-medium">Task</th>
+                <th className="px-3 py-3 font-medium">Due</th>
+                <th className="px-3 py-3 font-medium">Repeat</th>
+                <th className="px-3 py-3 font-medium">Assigned to</th>
+                <th className="px-3 py-3 font-medium">Status</th>
+                {canEdit ? <th className="px-3 py-3 font-medium text-right">Actions</th> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                <tr><td colSpan={canEdit ? 8 : 6} className="px-3 py-8 text-center text-muted">Loading…</td></tr>
+              ) : dv.view.length === 0 ? (
+                <tr><td colSpan={canEdit ? 8 : 6} className="px-3 py-8 text-center text-muted">
+                  {tasks.length === 0 ? 'No tasks yet. Add one on the right; assign it so nothing falls on one person.' : 'No tasks match your search or filters.'}
+                </td></tr>
+              ) : dv.view.map((t) => (
+                <tr key={t.id} className={`border-b border-border last:border-0 align-top group ${t.completed ? 'opacity-60' : ''}`}>
+                  {canEdit ? (
+                    <td className="px-3 py-3">
+                      <input type="checkbox" aria-label={`Select ${t.title}`} className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                        checked={dv.selected.has(t.id)} onChange={() => dv.toggle(t.id)} />
+                    </td>
+                  ) : null}
+                  <td className="px-2 py-3">
+                    <input
+                      type="checkbox"
+                      aria-label={t.completed ? `Reopen ${t.title}` : `Mark ${t.title} done`}
+                      className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary disabled:opacity-50"
+                      checked={t.completed}
+                      disabled={!canEdit || setDone.isPending}
+                      onChange={() => setDone.mutate({ id: t.id, completed: !t.completed })}
+                    />
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className={`text-ink font-medium ${t.completed ? 'line-through' : ''}`}>{t.title}</div>
+                    {t.body ? <div className="text-xs text-muted">{t.body}</div> : null}
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    <span className={isOverdue(t) ? 'text-red-600 font-medium' : 'text-muted'}>
+                      {format(new Date(t.next_due_at), 'd MMM yyyy, HH:mm')}
                     </span>
-                    {t.reminder_type !== 'once' ? (
-                      <span className="badge bg-surface-2 text-muted text-xs">{REPEAT_LABELS[t.reminder_type]}</span>
-                    ) : null}
-                    {t.assigned_to && memberName(t.assigned_to) ? (
-                      <span className="badge bg-primary-50 text-primary text-xs">{memberName(t.assigned_to)}</span>
-                    ) : null}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  aria-label={`Delete ${t.title}`}
-                  className="text-muted hover:text-red-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-sm px-1"
-                  onClick={() => deleteMutation.mutate(t.id)}
-                >
-                  ✕
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+                  </td>
+                  <td className="px-3 py-3 text-muted">{t.reminder_type === 'once' ? '—' : REPEAT_LABELS[t.reminder_type]}</td>
+                  <td className="px-3 py-3 text-muted">{memberName(t.assigned_to) ?? '—'}</td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {t.completed ? (
+                      <span className="text-muted">
+                        Done{t.completed_at ? ` ${format(new Date(t.completed_at), 'd MMM yyyy')}` : ''}
+                        {t.completed_by_name ? ` · ${t.completed_by_name}` : ''}
+                      </span>
+                    ) : isOverdue(t) ? (
+                      <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">Overdue</span>
+                    ) : (
+                      <span className="text-muted">Open</span>
+                    )}
+                  </td>
+                  {canEdit ? (
+                    <td className="px-3 py-3 text-right whitespace-nowrap">
+                      <button
+                        type="button"
+                        aria-label={`Delete ${t.title}`}
+                        className="text-xs text-muted hover:text-red-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                        onClick={() => deleteMutation.mutate(t.id)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  ) : null}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <form

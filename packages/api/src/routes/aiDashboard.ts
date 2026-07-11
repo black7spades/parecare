@@ -174,10 +174,14 @@ aiDashboardRouter.post(
     // cross-profile logging resolves each named profile and writes to it.
     const { cleanedReply, actions, parseErrors } = extractDashboardActions(result.reply);
     const { single, cross } = splitDashboardActions(actions);
-    const { outcomes, clientActions } = await executeDashboardActions(single, req.account!);
+    const { outcomes, clientActions, confirmations } = await executeDashboardActions(single, req.account!);
     const crossOutcomes = await executeCrossProfileActions(cross, req.account!, timeZone);
     const allOutcomes = [...outcomes, ...crossOutcomes, ...parseErrors];
-    const finalReply = [cleanedReply, ...allOutcomes.map((o) => `✔ ${o}`)].filter(Boolean).join('\n\n');
+    // Proposed completions are stored in the reply as confirm directives, so
+    // the button stays put when the conversation is reloaded. The app renders
+    // them; only the person's click completes the task.
+    const confirmBlocks = confirmations.map((c) => `\n\n\`\`\`parecare-confirm\n${JSON.stringify(c)}\n\`\`\``).join('');
+    const finalReply = [cleanedReply, ...allOutcomes.map((o) => `✔ ${o}`)].filter(Boolean).join('\n\n') + confirmBlocks;
 
     const updatedMessages = [
       ...messages,

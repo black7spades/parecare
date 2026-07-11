@@ -68,11 +68,6 @@ const addTaskSchema = z.object({
   repeat: z.enum(['once', 'daily', 'weekly', 'monthly']).default('once'),
 });
 
-const completeTaskSchema = z.object({
-  type: z.literal('complete_task'),
-  title: z.string().min(1).max(255),
-});
-
 const CARE_PHASES = [
   'early_concern',
   'home_with_support',
@@ -152,12 +147,6 @@ const raiseQuestionSchema = z.object({
   body: z.string().optional().nullable(),
 });
 
-const resolveQuestionSchema = z.object({
-  type: z.literal('resolve_question'),
-  title: z.string().min(1).max(255),
-  resolution: z.string().optional().nullable(),
-});
-
 const setCarePhaseSchema = z.object({
   type: z.literal('set_care_phase'),
   phase: z.enum(CARE_PHASES),
@@ -199,7 +188,6 @@ export const actionSchema = z.discriminatedUnion('type', [
   recordMedicationSchema,
   recordMedicationBatchSchema,
   addTaskSchema,
-  completeTaskSchema,
   addMedicationSchema,
   updateMedicationSchema,
   stopMedicationSchema,
@@ -208,7 +196,6 @@ export const actionSchema = z.discriminatedUnion('type', [
   addConditionSchema,
   removeConditionSchema,
   raiseQuestionSchema,
-  resolveQuestionSchema,
   setCarePhaseSchema,
   addProviderSchema,
   updateCarePlanSchema,
@@ -481,17 +468,6 @@ async function executeOne(
       await audit(profileId, account.id, 'reminders', action.title);
       return `Added the task "${action.title}" due ${formatInZone(due, timeZone)}.`;
     }
-    case 'complete_task': {
-      const task = await db('reminders')
-        .where({ care_profile_id: profileId, completed: false })
-        .whereRaw('lower(title) = lower(?)', [action.title.trim()])
-        .orderBy('next_due_at', 'asc')
-        .first();
-      if (!task) return `Could not find an open task called "${action.title}".`;
-      await db('reminders').where({ id: task.id }).update({ completed: true });
-      await audit(profileId, account.id, 'reminders', `completed ${task.title}`);
-      return `Marked the task "${task.title}" as done.`;
-    }
     case 'add_medication': {
       const name = action.medication_name.trim();
       let cat = await db('medication_catalogue').whereRaw('lower(name) = lower(?)', [name]).first();
@@ -598,18 +574,6 @@ async function executeOne(
       });
       await audit(profileId, account.id, 'questions', `raised ${action.title}`);
       return `Raised the question "${action.title}" for the care circle.`;
-    }
-    case 'resolve_question': {
-      const q = await db('open_questions')
-        .where({ care_profile_id: profileId, status: 'open' })
-        .whereRaw('lower(title) = lower(?)', [action.title.trim()])
-        .first();
-      if (!q) return `Could not find an open question called "${action.title}".`;
-      await db('open_questions')
-        .where({ id: q.id })
-        .update({ status: 'resolved', resolution: action.resolution ?? null, resolved_at: db.fn.now() });
-      await audit(profileId, account.id, 'questions', `resolved ${q.title}`);
-      return `Marked the question "${q.title}" as resolved.`;
     }
     case 'set_care_phase': {
       await db('care_profiles').where({ id: profileId }).update({ current_phase: action.phase, updated_at: db.fn.now() });

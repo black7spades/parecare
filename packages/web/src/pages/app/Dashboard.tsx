@@ -340,10 +340,12 @@ function itemBrief(it: AttentionItem): string {
   switch (it.kind) {
     case 'overdue_task':
       return `Let's do this together for ${who}: "${it.label}"${it.detail ? ` (${it.detail})` : ''}. `
-        + `If it needs an email or message, draft it ready to send using their contacts and providers if you have them, tell me exactly who to send it to, and once it is handled help me mark the task done.`;
+        + `If it needs an email or message, draft it ready to send using their contacts and providers if you have them, and tell me exactly who to send it to. `
+        + `Do not mark the task complete yourself; once it is sent, offer me a confirm button to mark it done.`;
     case 'out_of_stock':
       return `${who} has run out of ${it.detail ?? 'a medication'}. Let's sort out a repeat together: `
-        + `draft a request to the pharmacy or prescriber ready to send, tell me who to send it to, and once it is arranged help me update the supply so this clears.`;
+        + `draft a request to the pharmacy or prescriber ready to send, and tell me who to send it to. `
+        + `Do not change anything yourself; once it is arranged, ask me whether to update the supply.`;
     case 'unrecorded_dose':
       return `Let's record the doses due for ${who}${it.detail ? `: ${it.detail}` : ''}. Walk me through logging each one.`;
     case 'stale_question':

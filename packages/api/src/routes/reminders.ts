@@ -16,10 +16,18 @@ const reminderSchema = z.object({
   assigned_to: z.string().uuid().optional().nullable(),
 });
 
+// The full task record. status filters to open, done or all (default open,
+// so existing callers are unchanged); completed tasks carry when they were
+// done and who did it, so nothing disappears when it is ticked off.
 remindersRouter.get('/', requireAuth, async (req, res) => {
-  const reminders = await db<Reminder>('reminders')
-    .where({ care_profile_id: req.params['id'], completed: false })
-    .orderBy('next_due_at', 'asc');
+  const status = String(req.query['status'] ?? 'open');
+  const query = db('reminders as r')
+    .leftJoin('accounts as a', 'r.completed_by_account_id', 'a.id')
+    .where('r.care_profile_id', req.params['id'])
+    .select('r.*', 'a.display_name as completed_by_name');
+  if (status === 'open') query.where('r.completed', false);
+  else if (status === 'done') query.where('r.completed', true);
+  const reminders = await query.orderBy('r.completed', 'asc').orderBy('r.next_due_at', 'asc');
   res.json({ reminders });
 });
 
@@ -100,9 +108,19 @@ remindersRouter.patch('/:reminderId', requireAuth, async (req, res) => {
     return;
   }
 
+  // Completing stamps who did it and when; reopening clears that record.
+  const update: Record<string, unknown> = { ...parsed.data };
+  if (parsed.data.completed === true) {
+    update['completed_at'] = db.fn.now();
+    update['completed_by_account_id'] = req.account!.id;
+  } else if (parsed.data.completed === false) {
+    update['completed_at'] = null;
+    update['completed_by_account_id'] = null;
+  }
+
   const [reminder] = await db<Reminder>('reminders')
     .where({ id: req.params['reminderId'], care_profile_id: req.params['id'] })
-    .update(parsed.data)
+    .update(update)
     .returning('*');
 
   if (!reminder) {
@@ -110,6 +128,33 @@ remindersRouter.patch('/:reminderId', requireAuth, async (req, res) => {
     return;
   }
   res.json({ reminder });
+});
+
+// Complete, reopen or delete several tasks at once, scoped to this profile.
+const bulkSchema = z.object({
+  action: z.enum(['complete', 'reopen', 'delete']),
+  ids: z.array(z.string().uuid()).min(1).max(500),
+});
+
+remindersRouter.post('/bulk', requireAuth, async (req, res) => {
+  const parsed = bulkSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const scope = db('reminders').where({ care_profile_id: req.params['id'] }).whereIn('id', parsed.data.ids);
+  if (parsed.data.action === 'delete') {
+    const deleted = await scope.del();
+    res.json({ deleted });
+    return;
+  }
+  const completing = parsed.data.action === 'complete';
+  const updated = await scope.update({
+    completed: completing,
+    completed_at: completing ? db.fn.now() : null,
+    completed_by_account_id: completing ? req.account!.id : null,
+  });
+  res.json({ updated });
 });
 
 remindersRouter.delete('/:reminderId', requireAuth, async (req, res) => {
