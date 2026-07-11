@@ -249,6 +249,8 @@ export interface Reminder {
   next_due_at: string | Date;
   rrule: string | null;
   completed: boolean;
+  completed_at: string | Date | null;
+  completed_by_account_id: string | null;
   created_at: string | Date;
 }
 
