@@ -37,7 +37,7 @@ function NotFound() {
       <h1 className="text-lg font-semibold text-ink mb-2">Page not found</h1>
       <p className="text-sm text-muted mb-4">That page doesn't exist (or hasn't been built yet).</p>
       <a href="/app" className="text-primary text-sm hover:underline">
-        Back to dashboard
+        Back to homeboard
       </a>
     </div>
   );

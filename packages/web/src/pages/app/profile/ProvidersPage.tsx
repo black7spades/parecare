@@ -4,7 +4,8 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
-import { PROVIDER_TYPES, providerTypeLabel, type Provider } from '../../../lib/care';
+import { PoaBadge } from '../../../components/PoaBadge';
+import { PROVIDER_TYPES, POA_TYPES, providerTypeLabel, type Provider } from '../../../lib/care';
 import { useProfile } from './ProfileLayout';
 
 export function ProvidersPage() {
@@ -61,7 +62,10 @@ export function ProvidersPage() {
                   <h3 className="text-sm font-semibold text-ink">{p.name}</h3>
                   {p.organisation ? <p className="text-xs text-muted">{p.organisation}</p> : null}
                 </div>
-                <span className="badge bg-surface-2 text-muted text-xs">{providerTypeLabel(p.provider_type)}</span>
+                <div className="flex flex-col items-end gap-1">
+                  <span className="badge bg-surface-2 text-muted text-xs">{providerTypeLabel(p.provider_type)}</span>
+                  {p.poa_type ? <PoaBadge type={p.poa_type} activated={p.poa_activated} /> : null}
+                </div>
               </div>
               <div className="mt-2 space-y-1 text-sm">
                 {p.phone ? (
@@ -149,6 +153,8 @@ function ProviderEditor({
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
   const [notes, setNotes] = useState('');
+  const [poaType, setPoaType] = useState('');
+  const [poaActivated, setPoaActivated] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -159,6 +165,8 @@ function ProviderEditor({
     setEmail(provider?.email ?? '');
     setAddress(provider?.address ?? '');
     setNotes(provider?.notes ?? '');
+    setPoaType(provider?.poa_type ?? '');
+    setPoaActivated(provider?.poa_activated ?? false);
     setError('');
   }, [provider, open]);
 
@@ -172,6 +180,8 @@ function ProviderEditor({
         email: email.trim() || null,
         address: address.trim() || null,
         notes: notes.trim() || null,
+        poa_type: poaType || null,
+        poa_activated: poaType ? poaActivated : false,
       };
       return provider
         ? api.patch(`/care-profiles/${profileId}/providers/${provider.id}`, body)
@@ -216,6 +226,49 @@ function ProviderEditor({
         </div>
         <Input label="Address" value={address} onChange={(e) => setAddress(e.target.value)} />
         <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+        <div className="rounded-md border border-border p-3 space-y-3">
+          <label className="flex items-center gap-2 text-sm font-medium text-ink">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+              checked={poaType !== ''}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  setPoaType('enduring');
+                } else {
+                  setPoaType('');
+                  setPoaActivated(false);
+                }
+              }}
+            />
+            Holds power of attorney
+          </label>
+          {poaType !== '' ? (
+            <>
+              <select
+                aria-label="Power of attorney type"
+                className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                value={poaType}
+                onChange={(e) => setPoaType(e.target.value)}
+              >
+                {POA_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+              <label className="flex items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                  checked={poaActivated}
+                  onChange={(e) => setPoaActivated(e.target.checked)}
+                />
+                Activated (in effect now)
+              </label>
+            </>
+          ) : null}
+        </div>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>

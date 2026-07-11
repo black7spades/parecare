@@ -6,7 +6,7 @@ import { requireAccountRight } from '../middleware/accountRights';
 import { requireFeature } from '../middleware/subscriptionGate';
 import { sendDashboardMessage } from '../services/ai';
 import type { ChatMessage } from '../services/ai';
-import { buildDashboardContext, countAttentionItems } from '../services/aiDashboardContext';
+import { buildDashboardContext, countAttentionItems, gatherAttentionItems } from '../services/aiDashboardContext';
 import { extractDashboardActions, splitDashboardActions, executeDashboardActions } from '../services/aiDashboardActions';
 import { executeCrossProfileActions } from '../services/aiActions';
 import type { AiConversation } from '../types';
@@ -20,10 +20,15 @@ import type { AiConversation } from '../types';
  */
 export const aiDashboardRouter = Router();
 
-/** How many things need attention across everyone, for the dashboard prompt line. */
+/**
+ * What needs attention across everyone, listed so the Homeboard can show
+ * the items itself. Also returns the count for backwards compatibility. The
+ * optional tz query param renders due times on the user's own clock.
+ */
 aiDashboardRouter.get('/attention', requireAuth, async (req, res) => {
-  const count = await countAttentionItems(req.account!.id);
-  res.json({ count });
+  const tz = typeof req.query['tz'] === 'string' ? req.query['tz'] : null;
+  const items = await gatherAttentionItems(req.account!.id, tz);
+  res.json({ count: items.length, items });
 });
 
 aiDashboardRouter.get('/conversations', requireAuth, async (req, res) => {

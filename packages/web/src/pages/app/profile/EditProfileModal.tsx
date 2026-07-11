@@ -6,6 +6,7 @@ import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { AvatarEditor } from '../../../components/ui/AvatarEditor';
 import { Avatar } from '../../../components/ui/Avatar';
+import { ContactDetails, contactPayload, emptyContact, type ContactValue } from '../../../components/ContactDetails';
 import { PET_SPECIES, type CareProfile } from '../../../lib/care';
 
 /** Edit the person or pet in care, and their photo. Shown only to those with edit access. */
@@ -33,6 +34,7 @@ export function EditProfileModal({
   const [breed, setBreed] = useState('');
   const [desexed, setDesexed] = useState(false);
   const [microchip, setMicrochip] = useState('');
+  const [contact, setContact] = useState<ContactValue>(emptyContact);
   const [error, setError] = useState('');
   const [photoOpen, setPhotoOpen] = useState(false);
   const [photoError, setPhotoError] = useState('');
@@ -52,6 +54,15 @@ export function EditProfileModal({
     setBreed(profile.breed ?? '');
     setDesexed(!!profile.desexed);
     setMicrochip(profile.microchip_number ?? '');
+    setContact({
+      kind: profile.contact_kind ?? '',
+      account_id: profile.contact_account_id ?? '',
+      name: profile.contact_name ?? '',
+      relationship: profile.contact_relationship ?? '',
+      phone: profile.contact_phone ?? '',
+      phone_type: profile.contact_phone_type ?? 'mobile',
+      email: profile.contact_email ?? '',
+    });
     setError('');
   }, [open, profile]);
 
@@ -78,6 +89,7 @@ export function EditProfileModal({
               desexed,
               microchip_number: microchip.trim() || null,
               notes: notes.trim() || null,
+              ...contactPayload(contact),
             }
           : {
               title: title.trim() || null,
@@ -89,6 +101,7 @@ export function EditProfileModal({
               date_of_birth: dob || null,
               pronouns: pronouns.trim() || null,
               notes: notes.trim() || null,
+              ...contactPayload(contact),
             }
       ),
     onSuccess: () => {
@@ -235,6 +248,7 @@ export function EditProfileModal({
             <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
           </>
         )}
+        <ContactDetails value={contact} onChange={setContact} />
         <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">

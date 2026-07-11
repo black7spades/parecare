@@ -114,7 +114,7 @@ export function Shell() {
   ) : (
     <>
       <NavLink to="/app" end className={navLinkClass}>
-        Dashboard
+        Homeboard
       </NavLink>
       {pinned.length > 0 ? (
         <>

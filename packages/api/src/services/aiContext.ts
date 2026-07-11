@@ -224,7 +224,12 @@ export async function buildProfileContext(
   if (providers.length) {
     sections.push(
       `## Providers\n` +
-        providers.map((p) => `- ${p.name} (${p.provider_type})${line(['', p.organisation, p.phone, p.email]) ? `: ${line([p.organisation, p.phone, p.email])}` : ''}`).join('\n')
+        providers
+          .map(
+            (p) =>
+              `- ${p.name} (${p.provider_type})${line(['', p.organisation, p.phone, p.email]) ? `: ${line([p.organisation, p.phone, p.email])}` : ''}${p.poa_type ? `; holds ${p.poa_type} power of attorney${p.poa_activated ? ' (activated)' : ''}` : ''}`
+          )
+          .join('\n')
     );
   }
 

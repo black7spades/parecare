@@ -97,6 +97,14 @@ export interface CareProfile {
   photo_color: string | null;
   notes: string | null;
   owner_relationship: string | null;
+  /** Who to contact about this person: 'self', 'user' (a platform account) or 'contact'. */
+  contact_kind: 'self' | 'user' | 'contact' | null;
+  contact_account_id: string | null;
+  contact_name: string | null;
+  contact_relationship: string | null;
+  contact_phone: string | null;
+  contact_phone_type: 'home' | 'mobile' | null;
+  contact_email: string | null;
   archived: boolean;
   ics_token: string;
   created_at: Date;
@@ -226,6 +234,8 @@ export interface Provider {
   address: string | null;
   primary_contact_member_id: string | null;
   notes: string | null;
+  poa_type: string | null;
+  poa_activated: boolean;
   created_at: string | Date;
 }
 

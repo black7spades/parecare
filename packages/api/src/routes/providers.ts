@@ -24,6 +24,10 @@ const providerSchema = z.object({
   email: z.string().email().optional().nullable(),
   address: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
+  // An organisation (typically a legal or financial firm) can hold power of
+  // attorney, exactly like a person in the care circle.
+  poa_type: z.enum(['enduring', 'medical', 'financial', 'guardianship']).optional().nullable(),
+  poa_activated: z.boolean().optional(),
 });
 
 providersRouter.get('/', requireAuth, async (req, res) => {

@@ -92,6 +92,14 @@ export interface CareProfile {
   photo_url: string | null;
   photo_color: string | null;
   notes: string | null;
+  /** Who to contact about this person: themselves, a platform user, or a new contact. */
+  contact_kind?: 'self' | 'user' | 'contact' | null;
+  contact_account_id?: string | null;
+  contact_name?: string | null;
+  contact_relationship?: string | null;
+  contact_phone?: string | null;
+  contact_phone_type?: 'home' | 'mobile' | null;
+  contact_email?: string | null;
 }
 
 export interface ChecklistItem {
@@ -262,6 +270,8 @@ export interface Provider {
   email: string | null;
   address: string | null;
   notes: string | null;
+  poa_type: string | null;
+  poa_activated: boolean;
 }
 
 export interface Task {
