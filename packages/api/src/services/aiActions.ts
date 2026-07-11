@@ -162,6 +162,16 @@ const addProviderSchema = z.object({
   notes: z.string().optional().nullable(),
 });
 
+const updateProviderSchema = z.object({
+  type: z.literal('update_provider'),
+  name: z.string().min(1).max(255),
+  provider_type: z.enum(PROVIDER_TYPES).optional(),
+  organisation: z.string().max(255).optional().nullable(),
+  phone: z.string().max(50).optional().nullable(),
+  email: z.string().max(255).optional().nullable(),
+  notes: z.string().optional().nullable(),
+});
+
 const updateCarePlanSchema = z.object({
   type: z.literal('update_care_plan'),
   dietary_requirements: z.array(z.string()).max(50).optional().nullable(),
@@ -198,6 +208,7 @@ export const actionSchema = z.discriminatedUnion('type', [
   raiseQuestionSchema,
   setCarePhaseSchema,
   addProviderSchema,
+  updateProviderSchema,
   updateCarePlanSchema,
   updateProfileSchema,
 ]);
@@ -304,11 +315,16 @@ export function extractActionBlocks<T>(reply: string, schema: z.ZodType<T, z.Zod
   const parseErrors: string[] = [];
   let cleanedReply = reply.replace(ACTION_BLOCK_RE, (_whole, json: string) => {
     try {
-      const parsed = schema.safeParse(JSON.parse(json));
+      const raw = JSON.parse(json);
+      const parsed = schema.safeParse(raw);
       if (parsed.success) actions.push(parsed.data);
-      else parseErrors.push('The assistant suggested an action that was not valid, so it was not carried out.');
+      else {
+        const attempted = String(raw?.type ?? raw?.action ?? '').replace(/_/g, ' ') || 'unknown';
+        console.warn('Assistant action validation failed:', attempted, parsed.error.format());
+        parseErrors.push(`Pare tried to ${attempted} but that action could not be validated, so it was not carried out.`);
+      }
     } catch {
-      parseErrors.push('The assistant suggested an action that could not be read, so it was not carried out.');
+      parseErrors.push('Pare suggested an action that could not be read, so it was not carried out.');
     }
     return '';
   });
@@ -592,6 +608,23 @@ async function executeOne(
       });
       await audit(profileId, account.id, 'providers', `added provider ${action.name}`);
       return `Added ${action.name} to the providers list.`;
+    }
+    case 'update_provider': {
+      const provider = await db('providers')
+        .where({ care_profile_id: profileId })
+        .whereRaw('lower(name) = lower(?)', [action.name.trim()])
+        .first();
+      if (!provider) return `Could not find a provider called "${action.name}" on this profile.`;
+      const updates: Record<string, unknown> = {};
+      if (action.provider_type) updates.provider_type = action.provider_type;
+      if (action.organisation !== undefined) updates.organisation = action.organisation;
+      if (action.phone !== undefined) updates.phone = action.phone;
+      if (action.email !== undefined) updates.email = action.email;
+      if (action.notes !== undefined) updates.notes = action.notes;
+      if (Object.keys(updates).length === 0) return `No changes to make to ${action.name}.`;
+      await db('providers').where({ id: provider.id }).update(updates);
+      await audit(profileId, account.id, 'providers', `updated provider ${action.name}`);
+      return `Updated ${action.name}'s details.`;
     }
     case 'update_care_plan': {
       // updated_by references a care circle member, not an account, so use
