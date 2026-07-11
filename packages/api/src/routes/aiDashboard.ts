@@ -33,6 +33,25 @@ aiDashboardRouter.get('/attention', requireAuth, async (req, res) => {
   res.json({ count: items.length, items });
 });
 
+/**
+ * Acknowledge a "needs attention" item and set it aside, so it stops showing
+ * on this account's Homeboard. Only dismissible items reach here (the web app
+ * gates the control behind an "are you sure?" confirm). A restock clears the
+ * dismissal elsewhere, so an out-of-stock alert can recur.
+ */
+aiDashboardRouter.post('/attention/dismiss', requireAuth, async (req, res) => {
+  const parsed = z.object({ key: z.string().min(1).max(255) }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  await db('attention_dismissals')
+    .insert({ account_id: req.account!.id, item_key: parsed.data.key })
+    .onConflict(['account_id', 'item_key'])
+    .ignore();
+  res.json({ dismissed: true });
+});
+
 aiDashboardRouter.get('/conversations', requireAuth, async (req, res) => {
   const conversations = await db<AiConversation>('ai_conversations')
     .where({ account_id: req.account!.id })
