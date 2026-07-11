@@ -67,6 +67,20 @@ allergiesRouter.delete('/:allergyId', requireAuth, async (req, res) => {
 
 export const conditionsRouter = Router({ mergeParams: true });
 
+// A plain date as YYYY-MM-DD, without a timezone shift, for the two
+// lifecycle dates on a condition.
+const dateOrNull = (v: unknown): string | null => {
+  if (!v) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  const s = String(v);
+  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
+};
+const serializeCondition = <T extends Record<string, unknown>>(c: T): T => ({
+  ...c,
+  started_on: dateOrNull(c['started_on']),
+  resolved_on: dateOrNull(c['resolved_on']),
+});
+
 conditionsRouter.get('/', requireAuth, async (req, res) => {
   const conditions = await db('medical_conditions')
     .where({ care_profile_id: req.params['id'] })
@@ -83,8 +97,25 @@ conditionsRouter.get('/', requireAuth, async (req, res) => {
     arr.push({ name: m.name, active: m.active });
     medsByCondition.set(m.medical_condition_id, arr);
   }
+  // And the other treatments managing each condition, the same way.
+  const treatments = await db('treatments')
+    .where({ care_profile_id: req.params['id'] })
+    .whereNotNull('medical_condition_id')
+    .select('medical_condition_id', 'name', 'active');
+  const treatmentsByCondition = new Map<string, Array<{ name: string; active: boolean }>>();
+  for (const t of treatments) {
+    const arr = treatmentsByCondition.get(t.medical_condition_id) ?? [];
+    arr.push({ name: t.name, active: t.active });
+    treatmentsByCondition.set(t.medical_condition_id, arr);
+  }
   res.json({
-    conditions: conditions.map((c) => ({ ...c, medications: medsByCondition.get(c.id) ?? [] })),
+    conditions: conditions.map((c) =>
+      serializeCondition({
+        ...c,
+        medications: medsByCondition.get(c.id) ?? [],
+        treatments: treatmentsByCondition.get(c.id) ?? [],
+      })
+    ),
   });
 });
 
@@ -92,6 +123,12 @@ const conditionSchema = z.object({
   name: z.string().min(1).max(255),
   notes: z.string().max(2000).optional().nullable(),
   sort_order: z.number().int().optional(),
+  // A condition's lifecycle, one fact per field: whether it is expected to
+  // pass, how it stands now, and when it started and cleared.
+  is_temporary: z.boolean().optional(),
+  status: z.enum(['active', 'improving', 'managed', 'resolved']).optional(),
+  started_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  resolved_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
 });
 
 conditionsRouter.post('/', requireAuth, async (req, res) => {
@@ -103,7 +140,7 @@ conditionsRouter.post('/', requireAuth, async (req, res) => {
   const [condition] = await db('medical_conditions')
     .insert({ care_profile_id: req.params['id'], ...parsed.data })
     .returning('*');
-  res.status(201).json({ condition });
+  res.status(201).json({ condition: serializeCondition(condition) });
 });
 
 conditionsRouter.patch('/:conditionId', requireAuth, async (req, res) => {
@@ -120,7 +157,7 @@ conditionsRouter.patch('/:conditionId', requireAuth, async (req, res) => {
     res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });
     return;
   }
-  res.json({ condition });
+  res.json({ condition: serializeCondition(condition) });
 });
 
 conditionsRouter.delete('/:conditionId', requireAuth, async (req, res) => {

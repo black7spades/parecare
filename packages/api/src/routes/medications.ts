@@ -65,8 +65,9 @@ function splitDose(dose: string | null | undefined): { dose_amount: string | nul
 }
 
 // Resolve a free-typed condition name to an existing condition on this
-// profile, creating one if it is new. Empty clears the tie.
-async function resolveConditionId(name: string | null | undefined, profileId: string): Promise<string | null> {
+// profile, creating one if it is new. Empty clears the tie. Shared with
+// treatments, which tie to conditions the same way.
+export async function resolveConditionId(name: string | null | undefined, profileId: string): Promise<string | null> {
   const trimmed = (name ?? '').trim();
   if (!trimmed) return null;
   const existing = await db('medical_conditions')
