@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/Button';
 import { PET_SPECIES, petRelationshipFor, type CareProfile, type ProfileKind } from '../../lib/care';
 import { matchingLifeStages, type JourneyTemplateSummary, type LifeStage } from '../../lib/journeys';
 import { RelationshipSelect } from '../../components/RelationshipSelect';
+import { ContactDetails, contactPayload, emptyContact, type ContactValue } from '../../components/ContactDetails';
 import { useAuthStore } from '../../stores/auth';
 
 /** Pet journeys are marked by a `pet-` slug so each side can tell them apart. */
@@ -104,6 +105,7 @@ function PersonForm({ onBack }: { onBack: () => void }) {
   const [pronouns, setPronouns] = useState('');
   const [language, setLanguage] = useState('');
   const [notes, setNotes] = useState('');
+  const [contact, setContact] = useState<ContactValue>(emptyContact);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const navigate = useNavigate();
@@ -134,6 +136,7 @@ function PersonForm({ onBack }: { onBack: () => void }) {
         primary_language: language || null,
         notes: notes || null,
         journey_template_ids: journeyIds,
+        ...contactPayload(contact),
       });
       await queryClient.invalidateQueries({ queryKey: ['care-profiles'] });
       navigate(`/app/${data.profile.id}`);
@@ -191,6 +194,7 @@ function PersonForm({ onBack }: { onBack: () => void }) {
         <JourneyPicker dateOfBirth={dateOfBirth} dueDate={dueDate} selected={journeyIds} onChange={setJourneyIds} />
         <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
         <Input label="Primary language" value={language} onChange={(e) => setLanguage(e.target.value)} />
+        <ContactDetails value={contact} onChange={setContact} />
         <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
@@ -228,6 +232,7 @@ function PetForm({ onBack }: { onBack: () => void }) {
   // Once the carer edits the relationship, stop overwriting it from species.
   const [relationshipTouched, setRelationshipTouched] = useState(false);
   const [notes, setNotes] = useState('');
+  const [contact, setContact] = useState<ContactValue>(emptyContact);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const navigate = useNavigate();
@@ -256,6 +261,7 @@ function PetForm({ onBack }: { onBack: () => void }) {
         notes: notes || null,
         // Only the pet journeys chosen here; never the human ageing journey.
         journey_template_ids: journeyIds,
+        ...contactPayload(contact),
       });
       await queryClient.invalidateQueries({ queryKey: ['care-profiles'] });
       navigate(`/app/${data.profile.id}`);
@@ -343,6 +349,7 @@ function PetForm({ onBack }: { onBack: () => void }) {
           <span className="text-xs text-muted">neutered or spayed</span>
         </label>
         <PetJourneyPicker selected={journeyIds} onChange={setJourneyIds} />
+        <ContactDetails value={contact} onChange={setContact} />
         <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">

@@ -137,6 +137,15 @@ const profileSchema = z.object({
   photo_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().nullable(),
   // Expected babies get a profile before birth.
   due_date: z.string().optional().nullable(),
+  // Who to contact about this person: themselves, an existing platform user,
+  // or a new contact. Each fact is its own field.
+  contact_kind: z.enum(['self', 'user', 'contact']).optional().nullable(),
+  contact_account_id: z.string().uuid().optional().nullable(),
+  contact_name: z.string().max(255).optional().nullable(),
+  contact_relationship: z.string().max(100).optional().nullable(),
+  contact_phone: z.string().max(50).optional().nullable(),
+  contact_phone_type: z.enum(['home', 'mobile']).optional().nullable(),
+  contact_email: z.string().email().optional().nullable(),
 });
 
 careProfilesRouter.get('/', requireAuth, async (req, res) => {
@@ -166,6 +175,38 @@ careProfilesRouter.get('/', requireAuth, async (req, res) => {
       })),
     ],
   });
+});
+
+/**
+ * Platform users this account already knows, to pick as a profile's
+ * contact. That is anyone in the care circle of a profile they own, and
+ * the owner of any profile shared with them: people they are genuinely
+ * connected to, never the whole user table.
+ */
+careProfilesRouter.get('/contactable-users', requireAuth, async (req, res) => {
+  const accountId = req.account!.id;
+  const rows = await db('accounts')
+    .whereNot('accounts.id', accountId)
+    .where((qb) => {
+      qb.whereIn(
+        'accounts.id',
+        db('care_circle_members')
+          .join('care_profiles', 'care_profiles.id', 'care_circle_members.care_profile_id')
+          .where('care_profiles.account_id', accountId)
+          .whereNotNull('care_circle_members.account_id')
+          .select('care_circle_members.account_id')
+      ).orWhereIn(
+        'accounts.id',
+        db('care_profiles')
+          .join('care_circle_members', 'care_profiles.id', 'care_circle_members.care_profile_id')
+          .where('care_circle_members.account_id', accountId)
+          .where('care_circle_members.invite_accepted', true)
+          .select('care_profiles.account_id')
+      );
+    })
+    .distinct('accounts.id', 'accounts.display_name', 'accounts.email')
+    .orderBy('accounts.display_name', 'asc');
+  res.json({ users: rows });
 });
 
 // Glanceable dashboard data: contacts, POA holders, last activity, next event.
@@ -239,6 +280,15 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
     ),
   ]);
 
+  // For profiles whose contact is an existing user, pull that user's email.
+  const contactAccountIds = [
+    ...new Set(profiles.map((p) => (p as CareProfile).contact_account_id).filter((v): v is string => !!v)),
+  ];
+  const contactAccounts = contactAccountIds.length
+    ? await db('accounts').whereIn('id', contactAccountIds).select('id', 'display_name', 'email')
+    : [];
+  const contactAccountMap = new Map(contactAccounts.map((a) => [a.id, a]));
+
   const pinSet = new Set(pins.map((p: { care_profile_id: string }) => p.care_profile_id));
   const planMap = new Map(plans.map((p: { care_profile_id: string }) => [p.care_profile_id, p]));
   const poaMap = new Map<string, Array<Record<string, unknown>>>();
@@ -259,6 +309,18 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
   const result = profiles.map((p) => {
     const plan = planMap.get(p.id) as { gp_phone?: string; emergency_contacts?: unknown } | undefined;
     const contacts = Array.isArray(plan?.emergency_contacts) ? (plan!.emergency_contacts as Array<{ phone?: string }>) : [];
+    // The named contact leads; a linked user supplies their email; the GP
+    // and emergency contact remain the fallback for a phone.
+    const cp = p as CareProfile;
+    const linked = cp.contact_account_id ? contactAccountMap.get(cp.contact_account_id) : undefined;
+    const primaryPhone = cp.contact_phone || plan?.gp_phone || contacts[0]?.phone || null;
+    const primaryEmail = cp.contact_email || linked?.email || null;
+    const contactName =
+      cp.contact_kind === 'self'
+        ? p.full_name
+        : cp.contact_kind === 'user'
+          ? linked?.display_name ?? null
+          : cp.contact_name ?? null;
     return {
       id: p.id,
       kind: p.kind,
@@ -273,7 +335,10 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
       photo_color: p.photo_color,
       date_of_birth: p.date_of_birth,
       pinned: pinSet.has(p.id),
-      primary_phone: plan?.gp_phone || contacts[0]?.phone || null,
+      contact_name: contactName,
+      contact_relationship: cp.contact_relationship ?? null,
+      primary_email: primaryEmail,
+      primary_phone: primaryPhone,
       poa_holders: (poaMap.get(p.id) ?? []).map((m) => ({
         display_name: m['display_name'],
         poa_type: m['poa_type'],

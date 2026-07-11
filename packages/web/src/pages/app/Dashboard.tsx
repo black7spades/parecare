@@ -40,6 +40,9 @@ interface ProfileSummary {
   photo_color: string | null;
   date_of_birth: string | null;
   pinned: boolean;
+  contact_name: string | null;
+  contact_relationship: string | null;
+  primary_email: string | null;
   primary_phone: string | null;
   poa_holders: { display_name: string; poa_type: string | null; poa_activated: boolean }[];
   last_activity: { action: string; entity_type: string; summary: string | null; created_at: string; actor_name: string | null } | null;
@@ -61,6 +64,8 @@ export function Dashboard() {
   const [journeyFilter, setJourneyFilter] = useState('');
   const [poaOnly, setPoaOnly] = useState(false);
   const [view, setView] = useState<'cards' | 'table'>('cards');
+  // Ids whose card is collapsed to just photo, name and contact details.
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
 
   const { data, isLoading } = useQuery({
     queryKey: ['care-profiles-summary'],
@@ -201,7 +206,20 @@ export function Dashboard() {
                 </label>
               </>
             ) : null}
-            <div className="ml-auto">{viewToggle}</div>
+            <div className="ml-auto flex items-center gap-2">
+              {view === 'cards' ? (
+                <button
+                  type="button"
+                  className="text-xs text-muted hover:text-ink px-2 py-1 rounded-md hover:bg-surface-2 transition-colors"
+                  onClick={() =>
+                    setCollapsedIds((prev) => (prev.size >= shown.length ? new Set() : new Set(shown.map((p) => p.id))))
+                  }
+                >
+                  {collapsedIds.size >= shown.length && shown.length > 0 ? 'Expand all' : 'Collapse all'}
+                </button>
+              ) : null}
+              {viewToggle}
+            </div>
           </div>
 
           {(() => {
@@ -220,7 +238,20 @@ export function Dashboard() {
                 {view === 'cards' ? (
                   <div className="grid gap-4 sm:grid-cols-2">
                     {g.list.map((p) => (
-                      <ProfileCard key={p.id} profile={p} onTogglePin={() => togglePin(p)} />
+                      <ProfileCard
+                        key={p.id}
+                        profile={p}
+                        collapsed={collapsedIds.has(p.id)}
+                        onToggleCollapse={() =>
+                          setCollapsedIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(p.id)) next.delete(p.id);
+                            else next.add(p.id);
+                            return next;
+                          })
+                        }
+                        onTogglePin={() => togglePin(p)}
+                      />
                     ))}
                   </div>
                 ) : (
@@ -349,24 +380,67 @@ function AttentionPanel({ items }: { items: AttentionItem[] }) {
   );
 }
 
-function ProfileCard({ profile: p, onTogglePin }: { profile: ProfileSummary; onTogglePin: () => void }) {
+const ContactRows = ({ p }: { p: ProfileSummary }) => (
+  <>
+    {p.primary_phone ? (
+      <Row label="Phone">
+        <a href={`tel:${p.primary_phone}`} className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
+          {p.primary_phone}
+        </a>
+      </Row>
+    ) : null}
+    {p.primary_email ? (
+      <Row label="Email">
+        <a href={`mailto:${p.primary_email}`} className="text-primary hover:underline truncate" onClick={(e) => e.stopPropagation()}>
+          {p.primary_email}
+        </a>
+      </Row>
+    ) : null}
+  </>
+);
+
+function ProfileCard({
+  profile: p,
+  collapsed,
+  onToggleCollapse,
+  onTogglePin,
+}: {
+  profile: ProfileSummary;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  onTogglePin: () => void;
+}) {
   const activePoa = p.poa_holders.filter((h) => h.poa_activated);
   const showPoa = activePoa.length > 0 ? activePoa : p.poa_holders;
 
   return (
     <div className="card relative hover:border-primary transition-colors">
-      <button
-        type="button"
-        aria-label={p.pinned ? 'Unpin' : 'Pin to quick access'}
-        onClick={onTogglePin}
-        className={`absolute top-3 right-3 text-lg leading-none ${p.pinned ? 'text-primary' : 'text-muted hover:text-primary'}`}
-        title={p.pinned ? 'Pinned' : 'Pin to quick access'}
-      >
-        {p.pinned ? '★' : '☆'}
-      </button>
+      <div className="absolute top-3 right-3 flex items-center gap-2">
+        <button
+          type="button"
+          aria-label={collapsed ? 'Expand card' : 'Collapse card'}
+          aria-expanded={!collapsed}
+          onClick={onToggleCollapse}
+          className="text-muted hover:text-ink leading-none"
+          title={collapsed ? 'Expand' : 'Collapse'}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={collapsed ? '' : 'rotate-180'}>
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          aria-label={p.pinned ? 'Unpin' : 'Pin to quick access'}
+          onClick={onTogglePin}
+          className={`text-lg leading-none ${p.pinned ? 'text-primary' : 'text-muted hover:text-primary'}`}
+          title={p.pinned ? 'Pinned' : 'Pin to quick access'}
+        >
+          {p.pinned ? '★' : '☆'}
+        </button>
+      </div>
 
       <Link to={`/app/${p.id}`} className="block">
-        <div className="flex items-start gap-3 pr-6">
+        <div className="flex items-start gap-3 pr-14">
           <Avatar accountId={p.id} name={p.full_name} avatarUrl={p.photo_url} color={p.photo_color} fetchPath={`/care-profiles/${p.id}/photo`} size={44} />
           <div className="min-w-0 flex-1">
             <h3 className="mb-0.5 truncate">{p.full_name}</h3>
@@ -375,35 +449,38 @@ function ProfileCard({ profile: p, onTogglePin }: { profile: ProfileSummary; onT
                 {[p.relationship ? `Your ${p.relationship}` : null, p.preferred_name ? `Known as ${p.preferred_name}` : null].filter(Boolean).join(' · ')}
               </p>
             ) : null}
-            <span className="mt-1 flex flex-wrap gap-1">
-              {p.kind === 'pet' && (p.species || p.breed) ? (
-                <span className="badge bg-surface-2 text-muted text-xs">
-                  {[p.species, p.breed].filter(Boolean).join(' · ')}
-                </span>
-              ) : null}
-              {p.journeys.length > 0
-                ? p.journeys.map((j) => (
-                    <span key={j.id} className="badge bg-surface-2 text-muted text-xs">
-                      {j.name}
-                      {j.phase_name ? ` · ${j.phase_name}` : ''}
-                    </span>
-                  ))
-                : p.kind !== 'pet' || (!p.species && !p.breed) ? (
-                    <span className="badge bg-surface-2 text-muted text-xs">No journey underway</span>
-                  ) : null}
-            </span>
+            {!collapsed ? (
+              <span className="mt-1 flex flex-wrap gap-1">
+                {p.kind === 'pet' && (p.species || p.breed) ? (
+                  <span className="badge bg-surface-2 text-muted text-xs">
+                    {[p.species, p.breed].filter(Boolean).join(' · ')}
+                  </span>
+                ) : null}
+                {p.journeys.length > 0
+                  ? p.journeys.map((j) => (
+                      <span key={j.id} className="badge bg-surface-2 text-muted text-xs">
+                        {j.name}
+                        {j.phase_name ? ` · ${j.phase_name}` : ''}
+                      </span>
+                    ))
+                  : p.kind !== 'pet' || (!p.species && !p.breed) ? (
+                      <span className="badge bg-surface-2 text-muted text-xs">No journey underway</span>
+                    ) : null}
+              </span>
+            ) : null}
           </div>
         </div>
       </Link>
 
+      {collapsed ? (
+        (p.primary_phone || p.primary_email) ? (
+          <dl className="mt-3 space-y-1.5 text-xs">
+            <ContactRows p={p} />
+          </dl>
+        ) : null
+      ) : (
       <dl className="mt-3 space-y-1.5 text-xs">
-        {p.primary_phone ? (
-          <Row label="Contact">
-            <a href={`tel:${p.primary_phone}`} className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
-              {p.primary_phone}
-            </a>
-          </Row>
-        ) : null}
+        <ContactRows p={p} />
         {showPoa.length > 0 ? (
           <Row label="POA / executor">
             <span className="text-ink">
@@ -428,6 +505,7 @@ function ProfileCard({ profile: p, onTogglePin }: { profile: ProfileSummary; onT
           </Row>
         ) : null}
       </dl>
+      )}
     </div>
   );
 }
