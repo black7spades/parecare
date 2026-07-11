@@ -553,7 +553,29 @@ careProfilesRouter.get('/:id', requireAuth, async (req, res) => {
 
   const canEditProfile = isAdmin || isOwner || membershipCanEdit;
   const canManageEditors = isAdmin || isOwner;
-  res.json({ profile, access, relationship, phase_history: phaseHistory, can_edit_profile: canEditProfile, can_manage_editors: canManageEditors });
+
+  // When the contact is an existing platform user, resolve their name and
+  // email so the overview can show who to reach without another lookup.
+  let contactAccount: { display_name: string; email: string } | undefined;
+  if (profile.contact_kind === 'user' && profile.contact_account_id) {
+    contactAccount = await db('accounts')
+      .where({ id: profile.contact_account_id })
+      .select('display_name', 'email')
+      .first();
+  }
+
+  res.json({
+    profile: {
+      ...profile,
+      contact_account_name: contactAccount?.display_name ?? null,
+      contact_account_email: contactAccount?.email ?? null,
+    },
+    access,
+    relationship,
+    phase_history: phaseHistory,
+    can_edit_profile: canEditProfile,
+    can_manage_editors: canManageEditors,
+  });
 });
 
 const updateProfileSchema = profileSchema.partial();

@@ -100,7 +100,6 @@ export function EditProfileModal({
               preferred_name: preferredName.trim() || null,
               date_of_birth: dob || null,
               pronouns: pronouns.trim() || null,
-              notes: notes.trim() || null,
               ...contactPayload(contact),
             }
       ),
@@ -249,7 +248,13 @@ export function EditProfileModal({
           </>
         )}
         <ContactDetails value={contact} onChange={setContact} />
-        <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+        {isPet ? (
+          <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+        ) : (
+          <p className="text-xs text-muted">
+            Health conditions are recorded on the overview page, where typing offers suggestions from a shared list.
+          </p>
+        )}
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>

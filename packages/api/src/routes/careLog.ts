@@ -24,22 +24,34 @@ const entrySchema = z.object({
 
 careLogRouter.get('/', requireAuth, async (req, res) => {
   const page = Number(req.query['page'] ?? 1);
-  const limit = Math.min(Number(req.query['limit'] ?? 20), 100);
+  const limit = Math.min(Number(req.query['limit'] ?? 20), 500);
   const offset = (page - 1) * limit;
+  // Filters: entry types (comma-separated), free-text search over title and
+  // body, and an occurred-at date range. Sort runs oldest or newest first.
+  const types = String(req.query['types'] ?? '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+  const q = String(req.query['q'] ?? '').trim();
+  const from = String(req.query['from'] ?? '').trim();
+  const to = String(req.query['to'] ?? '').trim();
+  const sort = req.query['sort'] === 'asc' ? 'asc' : 'desc';
+
+  const filtered = () => {
+    let query = db<CareLogEntry>('care_log_entries').where({ care_profile_id: req.params['id'] });
+    if (types.length > 0) query = query.whereIn('entry_type', types);
+    if (q) query = query.where((qb) => qb.whereILike('title', `%${q}%`).orWhereILike('body', `%${q}%`));
+    if (/^\d{4}-\d{2}-\d{2}$/.test(from)) query = query.where('occurred_at', '>=', from);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(to)) query = query.where('occurred_at', '<', `${to}T23:59:59.999Z`);
+    return query;
+  };
 
   const [entries, countResult] = await Promise.all([
-    db<CareLogEntry>('care_log_entries')
-      .where({ care_profile_id: req.params['id'] })
-      .orderBy('occurred_at', 'desc')
-      .limit(limit)
-      .offset(offset),
-    db('care_log_entries')
-      .where({ care_profile_id: req.params['id'] })
-      .count('id as count')
-      .first(),
+    filtered().orderBy('occurred_at', sort).limit(limit).offset(offset),
+    filtered().count<{ count: string }[]>('id as count'),
   ]);
 
-  res.json({ entries, total: Number(countResult?.count ?? 0), page, limit });
+  res.json({ entries, total: Number(countResult[0]?.count ?? 0), page, limit });
 });
 
 careLogRouter.post('/', requireAuth, async (req, res) => {
@@ -54,6 +66,37 @@ careLogRouter.post('/', requireAuth, async (req, res) => {
     .returning('*');
 
   res.status(201).json({ entry });
+});
+
+// Bulk edit: apply the same change (e.g. a new entry type) to many entries
+// in one go. Only fields in the patch are touched.
+careLogRouter.post('/bulk-update', requireAuth, async (req, res) => {
+  const parsed = z
+    .object({ ids: z.array(z.string().uuid()).min(1).max(500), patch: entrySchema.partial() })
+    .safeParse(req.body);
+  if (!parsed.success || Object.keys(parsed.data.patch).length === 0) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const updated = await db('care_log_entries')
+    .whereIn('id', parsed.data.ids)
+    .where({ care_profile_id: req.params['id'] })
+    .update(parsed.data.patch);
+  res.json({ updated });
+});
+
+// Bulk delete: remove many entries in one go.
+careLogRouter.post('/bulk-delete', requireAuth, async (req, res) => {
+  const parsed = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const deleted = await db('care_log_entries')
+    .whereIn('id', parsed.data.ids)
+    .where({ care_profile_id: req.params['id'] })
+    .delete();
+  res.json({ deleted });
 });
 
 careLogRouter.get('/:entryId', requireAuth, async (req, res) => {

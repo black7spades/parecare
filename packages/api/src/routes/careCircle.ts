@@ -22,9 +22,13 @@ const memberSchema = z.object({
 });
 
 careCircleRouter.get('/', requireAuth, async (req, res) => {
-  const members = await db<CareCircleMember>('care_circle_members')
+  // The linked account's email rides along so a power-of-attorney holder's
+  // contact details can be shown where the appointment is displayed.
+  const members = await db<CareCircleMember & { account_email: string | null }>('care_circle_members')
+    .leftJoin('accounts', 'care_circle_members.account_id', 'accounts.id')
     .where({ care_profile_id: req.params['id'] })
-    .orderBy('created_at', 'asc');
+    .orderBy('care_circle_members.created_at', 'asc')
+    .select('care_circle_members.*', 'accounts.email as account_email');
 
   // Owners and admins also see each pending invite's link and expiry so an
   // invitation never depends on email delivery working.

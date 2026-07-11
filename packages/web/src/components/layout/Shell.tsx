@@ -6,6 +6,7 @@ import { useSubscriptionStore } from '../../stores/subscription';
 import { UpgradePrompt } from '../UpgradePrompt';
 import { AssistantWidget } from '../assistant/AssistantWidget';
 import { ThemeToggle } from '../ThemeToggle';
+import { NotificationsBell } from './NotificationsBell';
 import { AvatarMenu } from './AvatarMenu';
 import { Clock } from './Clock';
 import { Avatar } from '../ui/Avatar';
@@ -154,7 +155,7 @@ export function Shell() {
         <div className="flex items-center gap-2 sm:gap-3">
           <TierBadge />
           <Clock />
-          <ThemeToggle />
+          <NotificationsBell />
           <AvatarMenu />
         </div>
       </header>
@@ -163,6 +164,9 @@ export function Shell() {
         {/* Desktop sidebar */}
         <nav className="hidden lg:flex w-56 shrink-0 bg-card border-r border-border flex-col py-5 px-4 overflow-y-auto">
           <div className="flex-1 space-y-1">{sidebarNav}</div>
+          <div className="pt-4 mt-4 border-t border-border px-3">
+            <ThemeToggle />
+          </div>
         </nav>
 
         {/* Mobile slide-in drawer */}
@@ -187,6 +191,9 @@ export function Shell() {
                 </button>
               </div>
               <div className="flex-1 space-y-1">{sidebarNav}</div>
+              <div className="pt-4 mt-4 border-t border-border px-3">
+                <ThemeToggle />
+              </div>
             </nav>
           </div>
         ) : null}

@@ -29,6 +29,8 @@ import { treatmentsRouter } from './routes/treatments';
 import { deviceRouter } from './routes/deviceIngest';
 import { lifeStagesRouter } from './routes/lifeStages';
 import { allergiesRouter, conditionsRouter } from './routes/healthFacts';
+import { conditionCatalogueRouter } from './routes/conditionCatalogue';
+import { notificationsRouter } from './routes/notifications';
 import { journeyTemplatesRouter } from './routes/journeyTemplates';
 import { journeysRouter } from './routes/journeys';
 import { startReminderScheduler } from './services/scheduler';
@@ -83,6 +85,12 @@ v1.use('/subscriptions', subscriptionsRouter);
 // Shared, instance-wide medication catalogue (read for all; add for admins;
 // edit/delete for super admins).
 v1.use('/medication-catalogue', medicationCatalogueRouter);
+// Shared condition catalogue: read for everyone signed in; grows implicitly
+// as people record conditions that are not in it yet.
+v1.use('/condition-catalogue', conditionCatalogueRouter);
+// The notification bell: everything new across every profile the account
+// can see, with per-item read state.
+v1.use('/notifications', notificationsRouter);
 // The care journey library: life stages and journey templates. Read for
 // everyone signed in; shaped by admins.
 v1.use('/life-stages', lifeStagesRouter);
