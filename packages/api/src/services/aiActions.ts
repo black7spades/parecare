@@ -3,6 +3,7 @@ import { db } from '../config/database';
 import type { Account, CareAccess, CareCircleMember, CareProfile } from '../types';
 import { parseZonedTime, formatInZone } from '../lib/timezone';
 import { matchProfileNames, type NameCandidate } from '../lib/nameMatch';
+import { perDoseDrawdown } from './medicationSupply';
 
 /**
  * Actions the assistant can carry out on the user's behalf: logging a care
@@ -361,11 +362,6 @@ async function audit(profileId: string, accountId: string, entityType: string, s
 
 const GIVEN = new Set(['given', 'self_administered']);
 
-function doseAmount(dose: string | null | undefined): number {
-  const n = parseFloat(String(dose ?? '').replace(/[^0-9.]/g, ''));
-  return Number.isFinite(n) ? n : 0;
-}
-
 interface MedicationEntry {
   medication_name: string;
   status: (typeof MEDICATION_STATUSES)[number];
@@ -389,7 +385,7 @@ async function recordOneMedication(
     .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
     .where({ 'm.care_profile_id': profileId, 'm.active': true })
     .whereRaw('lower(c.name) = lower(?)', [entry.medication_name.trim()])
-    .select('m.*', 'c.name as name')
+    .select('m.*', 'c.name as name', 'c.form as form')
     .first();
   if (!med) {
     return `Could not record the dose: no active medication called "${entry.medication_name}" is on the list.`;
@@ -418,7 +414,9 @@ async function recordOneMedication(
     right_time: false,
   });
   if (GIVEN.has(entry.status)) {
-    const amount = doseAmount(entry.dose_given ?? med.dose);
+    // Draw supply down by units taken each time; the dose volume only counts
+    // for measured, liquid-style forms. Shared with the REST record path.
+    const amount = perDoseDrawdown(med);
     if (amount > 0) {
       await db('medications')
         .where({ id: med.id })

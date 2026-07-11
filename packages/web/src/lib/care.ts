@@ -411,7 +411,7 @@ export const MED_TYPES: { value: string; plural: string; defaultRoute: string; c
   { value: 'Liquid', plural: 'Doses', defaultRoute: 'By mouth', container: 'bottle', measured: true },
   { value: 'Wafer', plural: 'Wafers', defaultRoute: 'By mouth', container: 'pack', measured: false },
   { value: 'Powder', plural: 'Sachets', defaultRoute: 'By mouth', container: 'box', measured: false },
-  { value: 'Injection', plural: 'Injections', defaultRoute: 'Injection under the skin', container: 'box', measured: false },
+  { value: 'Injection', plural: 'Injections', defaultRoute: 'Injection under the skin', container: 'box', measured: true },
   { value: 'Patch', plural: 'Patches', defaultRoute: 'Skin patch', container: 'pack', measured: false },
   { value: 'Cream', plural: 'Applications', defaultRoute: 'On the skin', container: 'tube', measured: true },
   { value: 'Ointment', plural: 'Applications', defaultRoute: 'On the skin', container: 'tube', measured: true },
