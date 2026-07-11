@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import type { Account, CareAccess, CareCircleMember, CareProfile } from '../types';
 import { parseZonedTime, formatInZone } from '../lib/timezone';
+import { matchProfileNames, type NameCandidate } from '../lib/nameMatch';
 
 /**
  * Actions the assistant can carry out on the user's behalf: logging a care
@@ -355,17 +356,12 @@ interface ResolvedProfile {
   access: CareAccess;
 }
 
-/**
- * Find the one care profile the account can reach whose name matches what
- * the user called it. Matches case-insensitively against the full name
- * first, then the preferred name, then the first name. Anything other than
- * exactly one match returns null: guessing between two Kiyomis would put
- * care records on the wrong person.
- */
-export async function resolveProfileByName(name: string, accountId: string): Promise<ResolvedProfile | null> {
-  const needle = name.trim().toLowerCase();
-  if (!needle) return null;
+interface NameCandidateRow extends NameCandidate {
+  membership: CareCircleMember | null;
+}
 
+/** Every care profile the account can reach, with the name parts needed to match on. */
+async function reachableProfiles(accountId: string): Promise<NameCandidateRow[]> {
   const [owned, shared] = await Promise.all([
     db<CareProfile>('care_profiles').where({ account_id: accountId, archived: false }),
     db('care_profiles')
@@ -381,41 +377,58 @@ export async function resolveProfileByName(name: string, accountId: string): Pro
         'care_profiles.full_name',
         'care_profiles.preferred_name',
         'care_profiles.first_name',
+        'care_profiles.middle_name',
+        'care_profiles.last_name',
         db.raw('row_to_json(care_circle_members.*) as membership')
       ),
   ]);
-
-  interface Candidate {
-    id: string;
-    full_name: string;
-    preferred_name: string | null;
-    first_name: string | null;
-    membership: CareCircleMember | null;
-  }
-  const candidates: Candidate[] = [
+  return [
     ...owned.map((p) => ({
       id: p.id,
       full_name: p.full_name,
       preferred_name: p.preferred_name,
       first_name: p.first_name,
+      middle_name: p.middle_name,
+      last_name: p.last_name,
       membership: null,
     })),
-    ...(shared as Array<Candidate & { membership: CareCircleMember }>),
+    ...(shared as NameCandidateRow[]),
   ];
+}
 
-  const matchField = (field: 'full_name' | 'preferred_name' | 'first_name') =>
-    candidates.filter((c) => (c[field] ?? '').trim().toLowerCase() === needle);
-
-  const matches = [matchField('full_name'), matchField('preferred_name'), matchField('first_name')].find(
-    (m) => m.length > 0
-  );
-  if (!matches || matches.length !== 1) return null;
-
-  const hit = matches[0]!;
-  const access: CareAccess = hit.membership
-    ? { level: hit.membership.permission === 'viewer' ? 'viewer' : 'contributor', member: hit.membership }
+function accessFor(membership: CareCircleMember | null): CareAccess {
+  return membership
+    ? { level: membership.permission === 'viewer' ? 'viewer' : 'contributor', member: membership }
     : { level: 'owner', member: null };
-  return { profileId: hit.id, name: hit.full_name, access };
+}
+
+/**
+ * Find the one care profile the account can reach that the spoken name
+ * identifies, using fuzzy matching so "Chris Rattray" resolves to "Mr
+ * Christian Paul Rattray". Anything other than exactly one match returns
+ * null: several matches means the assistant must ask which person, and no
+ * match means it should say so rather than guess.
+ */
+export async function resolveProfileByName(name: string, accountId: string): Promise<ResolvedProfile | null> {
+  if (!name.trim()) return null;
+  const candidates = await reachableProfiles(accountId);
+  const matchedIds = matchProfileNames(name, candidates);
+  if (matchedIds.length !== 1) return null;
+  const hit = candidates.find((c) => c.id === matchedIds[0])!;
+  return { profileId: hit.id, name: hit.full_name, access: accessFor(hit.membership) };
+}
+
+/**
+ * The names of every profile whose surname (or other name word) could be
+ * what the user meant, for the assistant to offer as a short choice when a
+ * name is ambiguous. Narrowed to the same fuzzy candidates, so it never
+ * suggests an unrelated profile.
+ */
+export async function candidateProfileNames(name: string, accountId: string): Promise<string[]> {
+  if (!name.trim()) return [];
+  const candidates = await reachableProfiles(accountId);
+  const matchedIds = new Set(matchProfileNames(name, candidates));
+  return candidates.filter((c) => matchedIds.has(c.id)).map((c) => c.full_name);
 }
 
 /** Map one cross-profile entry onto the matching single-profile action. */
@@ -463,9 +476,20 @@ export async function executeCrossProfileActions(
       }
       const target = resolved.get(key)!;
       if (!target) {
-        results.push(
-          `${entry.profile_name}: nothing was recorded, because no single profile in your care matches that name.`
-        );
+        // Say whether nothing matched or several did, and name the narrowed
+        // candidates, so the assistant can ask rather than guess.
+        const candidates = await candidateProfileNames(entry.profile_name, account.id);
+        if (candidates.length > 1) {
+          results.push(
+            `${entry.profile_name}: nothing was recorded, because that could be more than one person: ${candidates.join(
+              ' or '
+            )}. Tell me which one.`
+          );
+        } else {
+          results.push(
+            `${entry.profile_name}: nothing was recorded, because no one in your care matches that name.`
+          );
+        }
         continue;
       }
       if (target.access.level === 'viewer') {
