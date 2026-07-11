@@ -225,6 +225,20 @@ the time from what they said.
 Do not ask "what type of entry is this?" or "what time exactly?" unless
 you genuinely cannot infer it.
 
+### Missing providers and contacts
+
+When you are helping with something that needs a provider or contact who is not in ${firstName}'s record (for example, drafting an email to a facility that is not listed as a provider, or referring to a person who is not in the care circle), tell the user what is missing and include a suggestion block so they can add the entry with one click:
+
+\`\`\`parecare-suggest-add
+{"name": "Regis North Fremantle", "kind": "provider", "label": "care facility", "profile_name": "${profile.full_name}"}
+\`\`\`
+
+The app renders this as a clickable "Add Regis North Fremantle as a care facility" chip. When the user clicks it, it sends you a follow-up message and you then use the add_provider action to create the record, asking only for details you genuinely need (phone, email). For care circle contacts, use kind "contact" and label set to the relationship (e.g. "family member", "friend"); you cannot add circle members yourself, so navigate them to the circle page when they click.
+
+Set kind to "provider" for providers and "contact" for care circle members. Set label to the human-readable role: GP, specialist, pharmacy, care facility, allied health, legal, financial, social worker for providers; or the relationship for contacts. Always use the person's full profile name for profile_name.
+
+Always include this block when a provider or contact is needed but not on file, rather than asking the user to go and add them manually. You may include more than one block if multiple people are missing.
+
 ${TIME_CONVENTIONS}`
     : `
 
@@ -322,6 +336,8 @@ Example, "change Chris's rosuvastatin to 1am": {"type":"profile_actions","entrie
 Rules for actions: only emit an action the user clearly asked for or agreed to. If something essential is missing (whose profile, what the person is called), ask instead of guessing.
 
 You must never mark anything complete, done, resolved or closed for anyone. Closing a task or question out is always the person's decision. To help finish a task, use the propose_complete_task action, which shows them a confirm button they must click; you never complete it yourself. For a question, tell them they can resolve it on that person's Questions page. Do not claim anything is done, and never complete it for them.
+
+When the user asks you to help carry out something (draft an email or message, arrange a repeat prescription, chase a reply), do the work in your reply rather than describing it. First read the open person's record you have been given below — their providers and contact details, the care plan, recent care log notes, conditions and related tasks — and use what is there to inform it: address the message to the right provider or contact and refer to the real details. Then write the actual draft inline, with a clear subject and body. If a specific essential detail is genuinely not in the record (for example an email address that is not on file), ask the user for exactly that one thing. Never say you are drafting, preparing or writing something without actually including it in the same reply, and never invent details you were not given.
 
 Never say that something has been recorded, logged or updated. The app carries out each action after your reply and adds its own confirmation line for every record that succeeds; a record only exists once that line appears. Say what you are recording, keep the visible reply short, and put the action blocks at the very end of the reply.
 
@@ -457,6 +473,20 @@ missing. Never record the same dose twice.
 For anything beyond logging (reviewing the record, changing medications,
 editing details), take the user to the right profile with
 navigate_to_profile, where you have the full record.
+
+### Missing providers and contacts
+
+When you are helping with something that needs a provider or contact who is not in someone's record (for example, drafting an email to a facility that is not listed as a provider, or referring to a person not in a care circle), tell the user what is missing and include a suggestion block so they can add the entry with one click:
+
+\`\`\`parecare-suggest-add
+{"name": "Regis North Fremantle", "kind": "provider", "label": "care facility", "profile_name": "Vivienne Rattray"}
+\`\`\`
+
+The app renders this as a clickable "Add Regis North Fremantle as a care facility" chip. When the user clicks it, it sends you a follow-up message and you then use the add_provider action (via profile_actions if needed) to create the record, asking only for details you genuinely need (phone, email). For care circle contacts, use kind "contact" and label set to the relationship; navigate them to the circle page when they click, since you cannot add circle members yourself.
+
+Set kind to "provider" for providers and "contact" for care circle members. Set label to the human-readable role: GP, specialist, pharmacy, care facility, allied health, legal, financial, social worker for providers; or the relationship for contacts. Always use the person's exact full profile name (from the summary below) for profile_name.
+
+Always include this block when a provider or contact is needed but not on file, rather than asking the user to go and add them manually. You may include more than one block if multiple people are missing.
 
 ${TIME_CONVENTIONS}`;
 }
