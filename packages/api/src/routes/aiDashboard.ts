@@ -7,9 +7,11 @@ import { requireFeature } from '../middleware/subscriptionGate';
 import { sendDashboardMessage } from '../services/ai';
 import type { ChatMessage } from '../services/ai';
 import { buildDashboardContext, countAttentionItems, gatherAttentionItems } from '../services/aiDashboardContext';
+import { buildProfileContext } from '../services/aiContext';
 import { extractDashboardActions, splitDashboardActions, executeDashboardActions } from '../services/aiDashboardActions';
 import { executeCrossProfileActions } from '../services/aiActions';
-import type { AiConversation } from '../types';
+import { getCareAccess } from '../middleware/subscriptionGate';
+import type { AiConversation, CareProfile } from '../types';
 
 /**
  * Pare on the dashboard: an account-wide conversation that can see a
@@ -90,7 +92,14 @@ aiDashboardRouter.post(
   requireAccountRight('can_use_ai'),
   requireFeature('ai_access'),
   async (req, res) => {
-    const schema = z.object({ content: z.string().min(1).max(4000), timezone: z.string().max(64).optional() });
+    const schema = z.object({
+      content: z.string().min(1).max(4000),
+      timezone: z.string().max(64).optional(),
+      // The profile the user is currently viewing, so one conversation can
+      // follow them from the Homeboard into a profile and back without ever
+      // going blank, with that person's full record to hand.
+      current_profile_id: z.string().uuid().optional(),
+    });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
@@ -107,7 +116,23 @@ aiDashboardRouter.post(
       return;
     }
 
-    const { context, profileCount } = await buildDashboardContext(req.account!, timeZone);
+    const { context: dashboardContext, profileCount } = await buildDashboardContext(req.account!, timeZone);
+
+    // If the user is viewing a profile, add that person's full record and
+    // note it is open, so Pare can answer in detail and act on them directly
+    // while still seeing everyone else.
+    let context = dashboardContext;
+    if (parsed.data.current_profile_id) {
+      const access = await getCareAccess(req.account!, parsed.data.current_profile_id);
+      const profile = access
+        ? await db<CareProfile>('care_profiles').where({ id: parsed.data.current_profile_id }).first()
+        : null;
+      if (access && profile) {
+        const full = await buildProfileContext(profile, access, timeZone);
+        context = `${dashboardContext}\n\n## Currently open profile\nThe user is viewing ${profile.full_name}'s profile right now. When they say "log this", "record that" or otherwise do not name anyone, they mean ${profile.full_name}. Here is ${profile.full_name}'s full record:\n\n${full}`;
+      }
+    }
+
     const messages = conversation.messages as ChatMessage[];
 
     let result: { reply: string; tokensUsed: number };
