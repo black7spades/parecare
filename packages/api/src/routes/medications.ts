@@ -392,6 +392,11 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner, async (req,
     res.status(404).json({ error: 'Medication not found', code: 'NOT_FOUND' });
     return;
   }
+  // Restocking clears any "out of stock" acknowledgement, so the urgent alert
+  // recurs if this medication runs out again later.
+  if (parsed.data.supply_remaining != null && parsed.data.supply_remaining > 0) {
+    await db('attention_dismissals').where({ item_key: `out_of_stock:${req.params['medId']}` }).delete();
+  }
   res.json({ medication: serializeMed(await medWithName((med as { id: string }).id)) });
 });
 

@@ -17,6 +17,8 @@ interface ProfileSummaryData {
   /** Every active medication, so "all my meds" can be resolved to real names. */
   medications: Array<{ name: string; dose: string | null; schedule_times: string[] }>;
   overdueMedications: string[];
+  /** Active medications whose remaining supply has reached zero. */
+  outOfStockMedications: Array<{ id: string; name: string }>;
   staleQuestionCount: number;
   nextEvent: { title: string; next_due_at: Date } | null;
   lastLog: { entry_type: string; title: string | null; body: string; occurred_at: Date } | null;
@@ -126,7 +128,7 @@ export async function gatherDashboardData(accountId: string): Promise<DashboardD
       .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
       .whereIn('m.care_profile_id', ids)
       .where('m.active', true)
-      .select('m.care_profile_id', 'm.id', 'c.name as name', 'm.dose', 'm.schedule_times')
+      .select('m.care_profile_id', 'm.id', 'c.name as name', 'm.dose', 'm.schedule_times', 'm.supply_remaining')
       .orderBy('c.name', 'asc'),
     db('medication_administrations')
       .whereIn('care_profile_id', ids)
@@ -174,7 +176,8 @@ export async function gatherDashboardData(accountId: string): Promise<DashboardD
   );
 
   const medsMap = new Map<string, Array<{ name: string; dose: string | null; schedule_times: string[] }>>();
-  for (const m of meds as Array<{ care_profile_id: string; name: string; dose: string | null; schedule_times: unknown }>) {
+  const outOfStockMap = new Map<string, Array<{ id: string; name: string }>>();
+  for (const m of meds as Array<{ care_profile_id: string; id: string; name: string; dose: string | null; schedule_times: unknown; supply_remaining: string | number | null }>) {
     const arr = medsMap.get(m.care_profile_id) ?? [];
     arr.push({
       name: m.name,
@@ -182,6 +185,13 @@ export async function gatherDashboardData(accountId: string): Promise<DashboardD
       schedule_times: Array.isArray(m.schedule_times) ? (m.schedule_times as string[]) : [],
     });
     medsMap.set(m.care_profile_id, arr);
+    // Supply is tracked only when a number is set; zero or below means a
+    // repeat is needed before the next dose.
+    if (m.supply_remaining !== null && m.supply_remaining !== undefined && Number(m.supply_remaining) <= 0) {
+      const out = outOfStockMap.get(m.care_profile_id) ?? [];
+      out.push({ id: m.id, name: m.name });
+      outOfStockMap.set(m.care_profile_id, out);
+    }
   }
 
   const staleMap = new Map<string, number>(
@@ -200,8 +210,9 @@ export async function gatherDashboardData(accountId: string): Promise<DashboardD
   const summaries: ProfileSummaryData[] = profiles.map((p) => {
     const overdueReminders = overdueMap.get(p.id) ?? [];
     const overdueMedications = overdueMedMap.get(p.id) ?? [];
+    const outOfStockMedications = outOfStockMap.get(p.id) ?? [];
     const staleQuestionCount = staleMap.get(p.id) ?? 0;
-    attentionCount += overdueReminders.length + overdueMedications.length + staleQuestionCount;
+    attentionCount += overdueReminders.length + overdueMedications.length + outOfStockMedications.length + staleQuestionCount;
     const ev = eventMap.get(p.id);
     const lg = logMap.get(p.id);
     return {
@@ -210,6 +221,7 @@ export async function gatherDashboardData(accountId: string): Promise<DashboardD
       overdueReminders,
       medications: medsMap.get(p.id) ?? [],
       overdueMedications,
+      outOfStockMedications,
       staleQuestionCount,
       nextEvent: ev ? { title: ev.title, next_due_at: ev.next_due_at } : null,
       lastLog: lg ? { entry_type: lg.entry_type, title: lg.title, body: lg.body, occurred_at: lg.occurred_at } : null,
@@ -255,6 +267,9 @@ function profileBlock(s: ProfileSummaryData, timeZone?: string | null): string {
   }
   if (s.overdueMedications.length > 0) {
     lines.push(`Medications with a dose not yet recorded today: ${s.overdueMedications.join(', ')}`);
+  }
+  if (s.outOfStockMedications.length > 0) {
+    lines.push(`Medications out of stock (a repeat is needed): ${s.outOfStockMedications.map((m) => m.name).join(', ')}`);
   }
   if (s.staleQuestionCount > 0) {
     lines.push(`Open questions with no response in ${STALE_QUESTION_DAYS}+ days: ${s.staleQuestionCount}`);
@@ -308,21 +323,51 @@ export async function countAttentionItems(accountId: string): Promise<number> {
 export interface AttentionItem {
   profile_id: string;
   profile_name: string;
-  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question';
+  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock';
   label: string;
   detail: string | null;
   section: 'tasks' | 'medications' | 'questions';
+  /** A stable identifier for this item, for React keys and for dismissal. */
+  key: string;
+  /** Pressing enough to lead the list and stand out. */
+  urgent: boolean;
+  /** Can be acknowledged and set aside (behind an "are you sure?" confirm). */
+  dismissible: boolean;
+}
+
+/** Item keys an account has acknowledged and set aside. */
+async function getDismissedKeys(accountId: string): Promise<Set<string>> {
+  const rows = await db('attention_dismissals').where({ account_id: accountId }).select('item_key');
+  return new Set(rows.map((r) => (r as { item_key: string }).item_key));
 }
 
 /**
  * The actual things needing attention across everyone, so the Homeboard can
  * list them itself instead of sending the user to the assistant to find out.
+ * Urgent items (an out-of-stock medication) lead the list; anything the
+ * account has dismissed is left out.
  */
 export async function gatherAttentionItems(accountId: string, timeZone?: string | null): Promise<AttentionItem[]> {
-  const data = await gatherDashboardData(accountId);
+  const [data, dismissed] = await Promise.all([gatherDashboardData(accountId), getDismissedKeys(accountId)]);
   const items: AttentionItem[] = [];
   for (const s of data.profiles) {
     const name = s.profile.preferred_name ?? s.profile.full_name;
+    // An out-of-stock medication is urgent: without a repeat the next dose
+    // cannot be given. Each medication is its own item so it can be set aside
+    // on its own once a repeat is arranged.
+    for (const m of s.outOfStockMedications) {
+      items.push({
+        profile_id: s.profile.id,
+        profile_name: name,
+        kind: 'out_of_stock',
+        label: 'Out of stock',
+        detail: m.name,
+        section: 'medications',
+        key: `out_of_stock:${m.id}`,
+        urgent: true,
+        dismissible: true,
+      });
+    }
     for (const r of s.overdueReminders) {
       items.push({
         profile_id: s.profile.id,
@@ -331,6 +376,9 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
         label: r.title,
         detail: `was due ${fmtDate(r.next_due_at, timeZone)}`,
         section: 'tasks',
+        key: `overdue_task:${s.profile.id}:${new Date(r.next_due_at).toISOString()}:${r.title}`,
+        urgent: false,
+        dismissible: false,
       });
     }
     if (s.overdueMedications.length > 0) {
@@ -341,6 +389,9 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
         label: s.overdueMedications.length === 1 ? 'A dose is not yet recorded today' : 'Doses are not yet recorded today',
         detail: s.overdueMedications.join(', '),
         section: 'medications',
+        key: `unrecorded_dose:${s.profile.id}`,
+        urgent: false,
+        dismissible: false,
       });
     }
     if (s.staleQuestionCount > 0) {
@@ -354,8 +405,13 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
             : `${s.staleQuestionCount} open questions have had no reply`,
         detail: `nothing said for ${STALE_QUESTION_DAYS}+ days`,
         section: 'questions',
+        key: `stale_question:${s.profile.id}`,
+        urgent: false,
+        dismissible: false,
       });
     }
   }
-  return items;
+  // Drop anything already acknowledged, then lead with the urgent items.
+  // Array sort is stable, so the per-profile order is otherwise preserved.
+  return items.filter((i) => !dismissed.has(i.key)).sort((a, b) => Number(b.urgent) - Number(a.urgent));
 }

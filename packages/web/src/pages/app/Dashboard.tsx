@@ -6,6 +6,7 @@ import { api } from '../../api/client';
 import { useAuthStore } from '../../stores/auth';
 import { useAssistantStore } from '../../stores/assistant';
 import { Button } from '../../components/ui/Button';
+import { Modal } from '../../components/ui/Modal';
 import { Avatar } from '../../components/ui/Avatar';
 import { browserTimeZone } from '../../lib/datetime';
 import { POA_TYPES } from '../../lib/care';
@@ -13,10 +14,13 @@ import { POA_TYPES } from '../../lib/care';
 interface AttentionItem {
   profile_id: string;
   profile_name: string;
-  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question';
+  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock';
   label: string;
   detail: string | null;
   section: 'tasks' | 'medications' | 'questions';
+  key: string;
+  urgent: boolean;
+  dismissible: boolean;
 }
 
 interface SummaryJourney {
@@ -322,16 +326,54 @@ const ATTENTION_ICON: Record<AttentionItem['kind'], string> = {
   overdue_task: '⏰',
   unrecorded_dose: '💊',
   stale_question: '❓',
+  out_of_stock: '📦',
 };
 
 /**
+ * A precise brief handed to Pare when the user asks to deal with an item
+ * together: what it is, who it is for, and the annoying steps to carry out,
+ * so Pare drafts the message, gives a ready-to-send version and helps close
+ * the item out.
+ */
+function itemBrief(it: AttentionItem): string {
+  const who = it.profile_name;
+  switch (it.kind) {
+    case 'overdue_task':
+      return `Let's do this together for ${who}: "${it.label}"${it.detail ? ` (${it.detail})` : ''}. `
+        + `If it needs an email or message, draft it ready to send using their contacts and providers if you have them, tell me exactly who to send it to, and once it is handled help me mark the task done.`;
+    case 'out_of_stock':
+      return `${who} has run out of ${it.detail ?? 'a medication'}. Let's sort out a repeat together: `
+        + `draft a request to the pharmacy or prescriber ready to send, tell me who to send it to, and once it is arranged help me update the supply so this clears.`;
+    case 'unrecorded_dose':
+      return `Let's record the doses due for ${who}${it.detail ? `: ${it.detail}` : ''}. Walk me through logging each one.`;
+    case 'stale_question':
+      return `Let's follow up the open question(s) for ${who} that have had no reply. Help me chase an answer and draft any message needed.`;
+    default:
+      return `Help me deal with this for ${who}: ${it.label}.`;
+  }
+}
+
+/**
  * The things needing attention today, listed in full so the user can see
- * and act on each one without opening the assistant. Asking Pare stays
- * available for anyone who prefers to talk it through.
+ * and act on each one without opening the assistant. Urgent items lead and
+ * stand out; every item offers to be done together with Pare, and an
+ * out-of-stock alert can be set aside behind an "are you sure?" confirm.
+ * Asking Pare stays available for anyone who prefers to talk it through.
  */
 function AttentionPanel({ items }: { items: AttentionItem[] }) {
   const openWithMessage = useAssistantStore((s) => s.openWithMessage);
+  const queryClient = useQueryClient();
   const [collapsed, setCollapsed] = useState(false);
+  const [confirmDismiss, setConfirmDismiss] = useState<AttentionItem | null>(null);
+
+  const dismiss = useMutation({
+    mutationFn: (key: string) => api.post('/ai/dashboard/attention/dismiss', { key }),
+    onSuccess: () => {
+      setConfirmDismiss(null);
+      void queryClient.invalidateQueries({ queryKey: ['pare-attention'] });
+    },
+  });
+
   return (
     <div className="card py-3 px-4">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
@@ -359,23 +401,68 @@ function AttentionPanel({ items }: { items: AttentionItem[] }) {
       </div>
       {!collapsed ? (
         <ul className="mt-2 divide-y divide-border">
-          {items.map((it, i) => (
-            <li key={i}>
+          {items.map((it) => (
+            <li
+              key={it.key}
+              className={`flex flex-wrap items-start gap-x-3 gap-y-2 py-2 -mx-2 px-2 rounded ${
+                it.urgent ? 'border-l-2 border-red-500 bg-red-50 dark:bg-red-900/10' : ''
+              }`}
+            >
               <Link
                 to={`/app/${it.profile_id}/${it.section}`}
-                className="flex items-start gap-2 py-2 text-sm hover:bg-surface-2 -mx-2 px-2 rounded transition-colors"
+                className="flex items-start gap-2 min-w-0 flex-1 text-sm hover:underline"
               >
                 <span aria-hidden className="mt-0.5">{ATTENTION_ICON[it.kind]}</span>
                 <span className="min-w-0">
                   <span className="font-medium text-ink">{it.profile_name}</span>
-                  <span className="text-muted"> · {it.label}</span>
-                  {it.detail ? <span className="text-muted"> ({it.detail})</span> : null}
+                  <span className={it.urgent ? 'text-red-700 dark:text-red-300' : 'text-muted'}> · {it.label}</span>
+                  {it.detail ? <span className={it.urgent ? 'text-red-700 dark:text-red-300' : 'text-muted'}> ({it.detail})</span> : null}
+                  {it.urgent ? (
+                    <span className="ml-2 align-middle rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">
+                      Urgent
+                    </span>
+                  ) : null}
                 </span>
               </Link>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => openWithMessage(itemBrief(it))}
+                  className="rounded-md border border-primary/40 text-primary px-2 py-1 text-xs font-medium hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors whitespace-nowrap"
+                >
+                  Let's do it together
+                </button>
+                {it.dismissible ? (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDismiss(it)}
+                    className="text-xs text-muted hover:text-ink whitespace-nowrap"
+                  >
+                    Dismiss
+                  </button>
+                ) : null}
+              </div>
             </li>
           ))}
         </ul>
       ) : null}
+
+      <Modal open={confirmDismiss !== null} onClose={() => setConfirmDismiss(null)} title="Dismiss this alert">
+        <p className="text-sm text-muted mb-4">
+          Set aside{' '}
+          <span className="font-medium text-ink">
+            {confirmDismiss?.detail ?? confirmDismiss?.label}
+          </span>{' '}
+          for <span className="font-medium text-ink">{confirmDismiss?.profile_name}</span>? This is an urgent item.
+          It will stop showing here until the medication is restocked, so only dismiss it if you have the repeat in hand.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmDismiss(null)}>Cancel</Button>
+          <Button variant="danger" loading={dismiss.isPending} onClick={() => confirmDismiss && dismiss.mutate(confirmDismiss.key)}>
+            Yes, dismiss
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }
