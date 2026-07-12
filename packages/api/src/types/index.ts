@@ -33,6 +33,10 @@ export interface Account {
   can_invite_members: boolean;
   can_use_ai: boolean;
   can_export_data: boolean;
+  /** IANA zone the browser last reported, for on-their-clock calculations. */
+  timezone: string | null;
+  /** Per-kind notification choices; a kind is on unless switched off. */
+  notification_prefs: Record<string, unknown>;
   created_at: string | Date;
   updated_at: string | Date;
 }

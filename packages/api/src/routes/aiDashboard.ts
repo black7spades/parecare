@@ -28,7 +28,7 @@ export const aiDashboardRouter = Router();
  * optional tz query param renders due times on the user's own clock.
  */
 aiDashboardRouter.get('/attention', requireAuth, async (req, res) => {
-  const tz = typeof req.query['tz'] === 'string' ? req.query['tz'] : null;
+  const tz = typeof req.query['tz'] === 'string' ? req.query['tz'] : (req.account!.timezone ?? null);
   const items = await gatherAttentionItems(req.account!.id, tz);
   res.json({ count: items.length, items });
 });

@@ -420,6 +420,8 @@ export interface MedicationRecord {
   supply_remaining: number | null;
   /** When a repeat prescription is next due. */
   repeats_due: string | null;
+  /** Dangerous to miss: overdue and out-of-stock alerts are urgent. */
+  critical: boolean;
   active: boolean;
 }
 

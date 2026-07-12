@@ -60,6 +60,9 @@ export function AvatarMenu() {
           <button type="button" role="menuitem" className={item} onClick={() => go('/account/settings')}>
             Settings
           </button>
+          <button type="button" role="menuitem" className={item} onClick={() => go('/account/notifications')}>
+            Notifications
+          </button>
           <button type="button" role="menuitem" className={item} onClick={() => go('/account/subscription')}>
             Subscription
           </button>

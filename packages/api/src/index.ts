@@ -32,6 +32,9 @@ import { allergiesRouter, conditionsRouter } from './routes/healthFacts';
 import { conditionCatalogueRouter } from './routes/conditionCatalogue';
 import { optionCatalogueRouter } from './routes/optionCatalogue';
 import { notificationsRouter } from './routes/notifications';
+import { apiKeysRouter } from './routes/apiKeys';
+import { initWebPush } from './services/webpush';
+import { startNotificationScheduler } from './services/notifier';
 import { journeyTemplatesRouter } from './routes/journeyTemplates';
 import { journeysRouter } from './routes/journeys';
 import { startReminderScheduler } from './services/scheduler';
@@ -96,6 +99,8 @@ v1.use('/option-catalogue', optionCatalogueRouter);
 // The notification bell: everything new across every profile the account
 // can see, with per-item read state.
 v1.use('/notifications', notificationsRouter);
+// Personal access tokens for bots and outside apps.
+v1.use('/account/api-keys', apiKeysRouter);
 // The care journey library: life stages and journey templates. Read for
 // everyone signed in; shaped by admins.
 v1.use('/life-stages', lifeStagesRouter);
@@ -150,8 +155,10 @@ async function start(): Promise<void> {
     await seedSettingsFromEnv();
     await loadSettings();
     await subscribeSettingsInvalidation();
+    await initWebPush();
     startReminderScheduler();
     startMarArchiveScheduler();
+    startNotificationScheduler();
     app.listen(env.PORT, () => {
       console.log(`PareCare API running on port ${env.PORT}`);
     });

@@ -102,3 +102,26 @@ export async function sendTestEmail(toEmail: string): Promise<void> {
     html: '<p>This is a test email from PareCare. Your SMTP settings are working.</p>',
   });
 }
+
+/**
+ * A notification bundle: one email carrying one or many notification
+ * lines, each with its deep link. Used for instant urgent alerts and for
+ * digests alike.
+ */
+export async function sendNotificationEmail(
+  toEmail: string,
+  subject: string,
+  lines: Array<{ text: string; url: string }>
+): Promise<void> {
+  const cfg = getEmailConfig();
+  if (!cfg.smtpHost) throw new Error('Email is not configured. Set the SMTP details in the admin settings.');
+
+  const transport = getTransport();
+  await transport.sendMail({
+    from: cfg.from,
+    to: toEmail,
+    subject,
+    text: lines.map((l) => `- ${l.text}\n  ${l.url}`).join('\n'),
+    html: `<ul>${lines.map((l) => `<li>${l.text} <a href="${l.url}">Open</a></li>`).join('')}</ul>`,
+  });
+}

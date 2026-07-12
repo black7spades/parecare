@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 import { api } from '../../api/client';
+import { browserTimeZone } from '../../lib/datetime';
 
 /**
  * The notification bell. Counts everything new across every care profile
@@ -83,9 +84,12 @@ export function NotificationsBell() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  // The browser's zone rides along so "a scheduled time has passed today"
+  // is judged on the user's clock, not the server's.
+  const tz = browserTimeZone();
   const { data } = useQuery({
     queryKey: ['notifications'],
-    queryFn: () => api.get<{ items: NotificationItem[]; unread: number }>('/notifications'),
+    queryFn: () => api.get<{ items: NotificationItem[]; unread: number }>(`/notifications${tz ? `?tz=${encodeURIComponent(tz)}` : ''}`),
     refetchInterval: 60_000,
   });
   const items = data?.items ?? [];
@@ -138,17 +142,29 @@ export function NotificationsBell() {
 
       {open ? (
         <div className="absolute right-0 mt-2 w-80 sm:w-96 max-h-[70vh] overflow-y-auto rounded-lg border border-border bg-card shadow-xl z-50">
-          <div className="flex items-center justify-between px-4 py-2 border-b border-border sticky top-0 bg-card">
+          <div className="flex items-center justify-between gap-3 px-4 py-2 border-b border-border sticky top-0 bg-card">
             <span className="text-sm font-semibold text-ink">Notifications</span>
-            {unread > 0 ? (
+            <span className="flex items-center gap-3">
+              {unread > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => markAllRead.mutate()}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Mark all read
+                </button>
+              ) : null}
               <button
                 type="button"
-                onClick={() => markAllRead.mutate()}
-                className="text-xs text-primary hover:underline"
+                onClick={() => {
+                  setOpen(false);
+                  navigate('/account/notifications');
+                }}
+                className="text-xs text-muted hover:text-ink"
               >
-                Mark all read
+                Settings
               </button>
-            ) : null}
+            </span>
           </div>
           {items.length === 0 ? (
             <p className="px-4 py-6 text-sm text-muted">Nothing new. Anything added anywhere in your care circles will show up here.</p>
