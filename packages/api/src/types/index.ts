@@ -228,18 +228,25 @@ export interface Document {
 
 export interface Provider {
   id: string;
-  care_profile_id: string;
+  account_id: string;
   provider_type: string;
   name: string;
   organisation: string | null;
   phone: string | null;
   email: string | null;
   address: string | null;
-  primary_contact_member_id: string | null;
   booking_link: string | null;
   directions_link: string | null;
+  created_at: string | Date;
+}
+
+export interface CareProfileProvider {
+  id: string;
+  care_profile_id: string;
+  provider_id: string;
   poa_type: string | null;
   poa_activated: boolean;
+  primary_contact_member_id: string | null;
   created_at: string | Date;
 }
 

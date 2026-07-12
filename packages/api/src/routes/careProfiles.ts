@@ -244,11 +244,12 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
     db('care_profile_pins').where({ account_id: accountId }).whereIn('care_profile_id', ids).select('care_profile_id'),
     db('care_plans').whereIn('care_profile_id', ids).select('care_profile_id', 'emergency_contacts'),
     // The GP lives in providers; their phone backs up the named contact's.
-    db('providers')
-      .whereIn('care_profile_id', ids)
-      .where({ provider_type: 'gp' })
-      .whereNotNull('phone')
-      .select('care_profile_id', 'phone'),
+    db('care_profile_providers as cpp')
+      .join('providers as p', 'cpp.provider_id', 'p.id')
+      .whereIn('cpp.care_profile_id', ids)
+      .where({ 'p.provider_type': 'gp' })
+      .whereNotNull('p.phone')
+      .select('cpp.care_profile_id', 'p.phone'),
     // Power of attorney can be held by a person in the care circle or by an
     // organisation in the providers list (e.g. a law firm). Gather both.
     Promise.all([
@@ -256,10 +257,11 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
         .whereIn('care_profile_id', ids)
         .whereNotNull('poa_type')
         .select('care_profile_id', 'display_name', 'poa_type', 'poa_activated'),
-      db('providers')
-        .whereIn('care_profile_id', ids)
-        .whereNotNull('poa_type')
-        .select('care_profile_id', 'name as display_name', 'poa_type', 'poa_activated'),
+      db('care_profile_providers as cpp')
+        .join('providers as p', 'cpp.provider_id', 'p.id')
+        .whereIn('cpp.care_profile_id', ids)
+        .whereNotNull('cpp.poa_type')
+        .select('cpp.care_profile_id', 'p.name as display_name', 'cpp.poa_type', 'cpp.poa_activated'),
     ]).then(([members, orgs]) => [...members, ...orgs]),
     db.raw(
       `SELECT DISTINCT ON (a.care_profile_id) a.care_profile_id, a.action, a.entity_type, a.summary, a.created_at,
