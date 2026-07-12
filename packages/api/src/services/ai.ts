@@ -147,8 +147,8 @@ You can do anything here that can be done by hand on this person's record. The a
 - {"type": "add_condition", "name": required, "notes": optional} and {"type": "remove_condition", "name": required}
 - {"type": "raise_question", "title": required, "body": optional}
 - {"type": "set_care_phase", "phase": one of early_concern | home_with_support | increased_dependency | transition_to_residential | residential_ongoing | end_of_life}
-- {"type": "add_provider", "provider_type": one of gp | specialist | pharmacy | care_facility | allied_health | legal | financial | social_worker | other, "name": required, "organisation": optional, "phone": optional, "email": optional, "notes": optional}
-- {"type": "update_provider", "name": exact provider name from the record, then any of "provider_type", "organisation", "phone", "email", "notes"} to update an existing provider's details (e.g. adding an email address)
+- {"type": "add_provider", "provider_type": one of gp | specialist | pharmacy | care_facility | allied_health | legal | financial | social_worker | other, "name": required, "organisation": optional, "phone": optional, "email": optional, "booking_link": optional URL, "directions_link": optional URL}
+- {"type": "update_provider", "name": exact provider name from the record, then any of "provider_type", "organisation", "phone", "email", "booking_link", "directions_link"} to update an existing provider's details (e.g. adding an email address)
 - {"type": "update_care_plan", any of "dietary_requirements" (array), "mobility_aids" (array), "communication_needs" (array), "advance_care_directive" (boolean), "advance_care_directive_location"} — the GP is a provider; use the provider actions to change it
 - {"type": "update_profile", any of "preferred_name", "pronouns", "primary_language", "notes", "date_of_birth"}
 
@@ -328,8 +328,8 @@ The profile_actions action is how you do anything else on a person's record: cha
 - {"type": "add_condition", "name", "notes"?} and {"type": "remove_condition", "name"}
 - {"type": "raise_question", "title", "body"?}
 - {"type": "set_care_phase", "phase": early_concern | home_with_support | increased_dependency | transition_to_residential | residential_ongoing | end_of_life}
-- {"type": "add_provider", "provider_type": gp | specialist | pharmacy | care_facility | allied_health | legal | financial | social_worker | other, "name", "organisation"?, "phone"?, "email"?, "notes"?}
-- {"type": "update_provider", "name": exact provider name from the record, then any of "provider_type", "organisation", "phone", "email", "notes"} to update an existing provider's details
+- {"type": "add_provider", "provider_type": gp | specialist | pharmacy | care_facility | allied_health | legal | financial | social_worker | other, "name", "organisation"?, "phone"?, "email"?, "booking_link"?, "directions_link"?}
+- {"type": "update_provider", "name": exact provider name from the record, then any of "provider_type", "organisation", "phone", "email", "booking_link", "directions_link"} to update an existing provider's details
 - {"type": "update_care_plan", any of "dietary_requirements" (array), "mobility_aids" (array), "communication_needs" (array), "advance_care_directive" (boolean), "advance_care_directive_location"} — the GP is a provider; use the provider actions to change it
 - {"type": "update_profile", any of "preferred_name", "pronouns", "primary_language", "notes", "date_of_birth"}
 
