@@ -11,6 +11,10 @@ import { requireAuth } from '../middleware/auth';
  *   and delete under every profile section. The viewer's own actions are
  *   left out (you were there), as are AI conversations (private).
  * - Medication supply: a prescription running low or out.
+ * - Overdue doses: a scheduled medication time has passed today with no
+ *   dose recorded. These are priority items: they lead the feed, and as
+ *   further scheduled times pass unrecorded the alert comes back even if
+ *   an earlier one was read.
  *
  * Read state is per account and per item, so the badge counts only what
  * this person has not yet seen.
@@ -23,7 +27,7 @@ const MAX_ITEMS = 50;
 export interface NotificationItem {
   /** Stable identifier, also used to record the read. */
   key: string;
-  kind: 'activity' | 'supply_low' | 'supply_out';
+  kind: 'activity' | 'supply_low' | 'supply_out' | 'dose_overdue';
   profile_id: string;
   profile_name: string;
   actor_name: string | null;
@@ -31,8 +35,12 @@ export interface NotificationItem {
   /** Audit entity type (messages, log, documents, …) for the deep link. */
   entity_type: string | null;
   summary: string | null;
-  /** Medication name for supply alerts. */
+  /** Medication name for supply and overdue-dose alerts. */
   medication_name: string | null;
+  /** Overdue-dose alerts: how many of today's passed times lack a record. */
+  missed_count: number | null;
+  /** Pressing enough to lead the feed and stand out. */
+  urgent: boolean;
   created_at: string;
   read: boolean;
 }
@@ -67,7 +75,10 @@ async function gatherNotifications(accountId: string): Promise<NotificationItem[
   const nameById = new Map(profiles.map((p) => [p.id, p.name]));
   const horizon = new Date(Date.now() - HORIZON_DAYS * 24 * 60 * 60 * 1000);
 
-  const [auditRows, medRows, readRows] = await Promise.all([
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const [auditRows, medRows, adminRows, readRows] = await Promise.all([
     db('audit_log')
       .leftJoin('accounts', 'audit_log.actor_account_id', 'accounts.id')
       .whereIn('audit_log.care_profile_id', profileIds)
@@ -90,12 +101,18 @@ async function gatherNotifications(accountId: string): Promise<NotificationItem[
       .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
       .whereIn('m.care_profile_id', profileIds)
       .where('m.active', true)
-      .whereNotNull('m.supply_remaining')
-      .select('m.id', 'm.care_profile_id', 'm.supply', 'm.supply_remaining', 'm.updated_at', 'c.name'),
+      .select('m.id', 'm.care_profile_id', 'm.supply', 'm.supply_remaining', 'm.schedule_times', 'm.updated_at', 'c.name'),
+    db('medication_administrations')
+      .whereIn('care_profile_id', profileIds)
+      .where('administered_at', '>=', startOfDay)
+      .groupBy('medication_id')
+      .select('medication_id')
+      .count('id as count'),
     db('notification_reads').where({ account_id: accountId }).select('item_key'),
   ]);
 
   const read = new Set(readRows.map((r) => (r as { item_key: string }).item_key));
+  const adminCounts = new Map(adminRows.map((r) => [String(r.medication_id), Number(r.count)]));
   const items: NotificationItem[] = [];
 
   for (const row of auditRows) {
@@ -110,39 +127,86 @@ async function gatherNotifications(accountId: string): Promise<NotificationItem[
       entity_type: row.entity_type,
       summary: row.summary ?? null,
       medication_name: null,
+      missed_count: null,
+      urgent: false,
       created_at: new Date(row.created_at).toISOString(),
       read: read.has(key),
     });
   }
 
+  // A medication is overdue when scheduled times have passed today and
+  // fewer doses were recorded than times passed (same rule as the
+  // needs-attention feed).
+  const nowHm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const today = `${startOfDay.getFullYear()}-${String(startOfDay.getMonth() + 1).padStart(2, '0')}-${String(startOfDay.getDate()).padStart(2, '0')}`;
+
   for (const m of medRows) {
-    const remaining = Number(m.supply_remaining);
-    if (!Number.isFinite(remaining)) continue;
-    const total = Number(m.supply);
-    // Low means five or fewer doses left, or under a fifth of the supply.
-    const lowThreshold = Number.isFinite(total) && total > 0 ? Math.max(5, total * 0.2) : 5;
-    const out = remaining <= 0;
-    if (!out && remaining > lowThreshold) continue;
-    // The remaining count is part of the key, so a restock (or a further
-    // drop) surfaces the alert again even after it was read.
-    const key = `${out ? 'supply_out' : 'supply_low'}:${m.id}:${remaining}`;
-    items.push({
-      key,
-      kind: out ? 'supply_out' : 'supply_low',
-      profile_id: m.care_profile_id,
-      profile_name: nameById.get(m.care_profile_id) ?? 'Unknown',
-      actor_name: null,
-      action: null,
-      entity_type: 'medications',
-      summary: null,
-      medication_name: m.name,
-      created_at: new Date(m.updated_at ?? Date.now()).toISOString(),
-      read: read.has(key),
-    });
+    if (m.supply_remaining !== null && m.supply_remaining !== undefined) {
+      const remaining = Number(m.supply_remaining);
+      const total = Number(m.supply);
+      // Low means five or fewer doses left, or under a fifth of the supply.
+      const lowThreshold = Number.isFinite(total) && total > 0 ? Math.max(5, total * 0.2) : 5;
+      const out = remaining <= 0;
+      if (out || remaining <= lowThreshold) {
+        // The remaining count is part of the key, so a restock (or a further
+        // drop) surfaces the alert again even after it was read.
+        const key = `${out ? 'supply_out' : 'supply_low'}:${m.id}:${remaining}`;
+        items.push({
+          key,
+          kind: out ? 'supply_out' : 'supply_low',
+          profile_id: m.care_profile_id,
+          profile_name: nameById.get(m.care_profile_id) ?? 'Unknown',
+          actor_name: null,
+          action: null,
+          entity_type: 'medications',
+          summary: null,
+          medication_name: m.name,
+          missed_count: null,
+          urgent: out,
+          created_at: new Date(m.updated_at ?? Date.now()).toISOString(),
+          read: read.has(key),
+        });
+      }
+    }
+
+    const times = Array.isArray(m.schedule_times) ? (m.schedule_times as string[]) : [];
+    const passed = times.filter((t) => typeof t === 'string' && t <= nowHm).sort();
+    const recorded = adminCounts.get(String(m.id)) ?? 0;
+    if (passed.length > 0 && recorded < passed.length) {
+      const missed = passed.length - recorded;
+      // Keyed by day and by how many times have passed, so each further
+      // missed time raises the alert again even if the last one was read.
+      const key = `dose_overdue:${m.id}:${today}:${passed.length}`;
+      const lastPassed = passed[passed.length - 1];
+      const [hh, mm] = lastPassed.split(':').map(Number);
+      const occurredAt = new Date(startOfDay.getFullYear(), startOfDay.getMonth(), startOfDay.getDate(), hh, mm);
+      items.push({
+        key,
+        kind: 'dose_overdue',
+        profile_id: m.care_profile_id,
+        profile_name: nameById.get(m.care_profile_id) ?? 'Unknown',
+        actor_name: null,
+        action: null,
+        entity_type: 'medications',
+        summary: null,
+        medication_name: m.name,
+        missed_count: missed,
+        urgent: true,
+        created_at: occurredAt.toISOString(),
+        read: read.has(key),
+      });
+    }
   }
 
+  // Priority items lead: an unread urgent alert outranks everything, then
+  // urgency, then recency.
   return items
-    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+    .sort(
+      (a, b) =>
+        Number(b.urgent && !b.read) - Number(a.urgent && !a.read) ||
+        Number(b.urgent) - Number(a.urgent) ||
+        (a.created_at < b.created_at ? 1 : -1)
+    )
     .slice(0, MAX_ITEMS);
 }
 

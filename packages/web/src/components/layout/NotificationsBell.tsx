@@ -13,7 +13,7 @@ import { api } from '../../api/client';
 
 interface NotificationItem {
   key: string;
-  kind: 'activity' | 'supply_low' | 'supply_out';
+  kind: 'activity' | 'supply_low' | 'supply_out' | 'dose_overdue';
   profile_id: string;
   profile_name: string;
   actor_name: string | null;
@@ -21,6 +21,8 @@ interface NotificationItem {
   entity_type: string | null;
   summary: string | null;
   medication_name: string | null;
+  missed_count: number | null;
+  urgent: boolean;
   created_at: string;
   read: boolean;
 }
@@ -48,6 +50,12 @@ const ENTITY_TARGETS: Record<string, { page: string; noun: string }> = {
 const VERBS: Record<string, string> = { created: 'added', updated: 'updated', deleted: 'removed' };
 
 function itemText(item: NotificationItem): string {
+  if (item.kind === 'dose_overdue') {
+    const n = item.missed_count ?? 1;
+    return n === 1
+      ? `${item.profile_name}'s dose of ${item.medication_name} is due and not yet recorded.`
+      : `${item.profile_name} has ${n} doses of ${item.medication_name} due and not yet recorded today.`;
+  }
   if (item.kind === 'supply_out') {
     return `${item.profile_name}'s prescription for ${item.medication_name} is out of stock.`;
   }
@@ -162,6 +170,11 @@ export function NotificationsBell() {
                     )}
                     <span className="min-w-0">
                       <span className={`block text-sm ${item.kind !== 'activity' ? 'text-red-700 dark:text-red-300' : 'text-ink'}`}>
+                        {item.urgent ? (
+                          <span className="mr-1.5 align-middle rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">
+                            Urgent
+                          </span>
+                        ) : null}
                         {itemText(item)}
                       </span>
                       <span className="block text-xs text-muted mt-0.5">
