@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -9,7 +9,7 @@ import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { Avatar } from '../../components/ui/Avatar';
 import { browserTimeZone } from '../../lib/datetime';
-import { POA_TYPES } from '../../lib/care';
+import { POA_TYPES, providerTypeLabel, type Provider } from '../../lib/care';
 
 interface AttentionItem {
   profile_id: string;
@@ -68,8 +68,10 @@ export function Dashboard() {
   const [journeyFilter, setJourneyFilter] = useState('');
   const [poaOnly, setPoaOnly] = useState(false);
   const [view, setView] = useState<'cards' | 'table'>('cards');
-  // Ids whose card is collapsed to just photo, name and contact details.
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
+  const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(new Set());
+  const [bulkLinkOpen, setBulkLinkOpen] = useState(false);
+  const canEdit = account?.role === 'admin' || account?.role === 'super_admin';
 
   const { data, isLoading } = useQuery({
     queryKey: ['care-profiles-summary'],
@@ -226,6 +228,22 @@ export function Dashboard() {
             </div>
           </div>
 
+          {canEdit && selectedProfileIds.size > 0 ? (
+            <div className="flex items-center gap-3 px-4 py-2.5 bg-primary-50 dark:bg-primary-900/20 border border-primary/30 rounded-lg text-sm">
+              <span className="font-medium text-ink">{selectedProfileIds.size} selected</span>
+              <Button size="sm" onClick={() => setBulkLinkOpen(true)}>
+                Link provider
+              </Button>
+              <button
+                type="button"
+                className="ml-auto text-xs text-muted hover:text-ink"
+                onClick={() => setSelectedProfileIds(new Set())}
+              >
+                Clear selection
+              </button>
+            </div>
+          ) : null}
+
           {(() => {
             const people = shown.filter((p) => p.kind !== 'pet');
             const pets = shown.filter((p) => p.kind === 'pet');
@@ -235,6 +253,12 @@ export function Dashboard() {
               { key: 'pets', heading: 'Pets', list: pets },
             ].filter((g) => g.list.length > 0);
             const togglePin = (p: ProfileSummary) => pinMutation.mutate({ id: p.id, pinned: p.pinned });
+            const toggleProfile = (id: string) =>
+              setSelectedProfileIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(id)) next.delete(id); else next.add(id);
+                return next;
+              });
 
             return groups.map((g) => (
               <div key={g.key} className="space-y-3">
@@ -255,15 +279,43 @@ export function Dashboard() {
                           })
                         }
                         onTogglePin={() => togglePin(p)}
+                        selectable={canEdit}
+                        selected={selectedProfileIds.has(p.id)}
+                        onToggleSelect={() => toggleProfile(p.id)}
                       />
                     ))}
                   </div>
                 ) : (
-                  <ProfileTable profiles={g.list} onTogglePin={togglePin} />
+                  <ProfileTable
+                    profiles={g.list}
+                    onTogglePin={togglePin}
+                    selectable={canEdit}
+                    selectedIds={selectedProfileIds}
+                    onToggleSelect={toggleProfile}
+                    onToggleAll={(ids) =>
+                      setSelectedProfileIds((prev) => {
+                        const allSelected = ids.every((id) => prev.has(id));
+                        const next = new Set(prev);
+                        if (allSelected) ids.forEach((id) => next.delete(id));
+                        else ids.forEach((id) => next.add(id));
+                        return next;
+                      })
+                    }
+                  />
                 )}
               </div>
             ));
           })()}
+
+          <BulkLinkProviderPicker
+            open={bulkLinkOpen}
+            profileIds={[...selectedProfileIds]}
+            onClose={() => setBulkLinkOpen(false)}
+            onLinked={() => {
+              setBulkLinkOpen(false);
+              setSelectedProfileIds(new Set());
+            }}
+          />
         </>
       )}
     </div>
@@ -495,18 +547,33 @@ function ProfileCard({
   collapsed,
   onToggleCollapse,
   onTogglePin,
+  selectable,
+  selected,
+  onToggleSelect,
 }: {
   profile: ProfileSummary;
   collapsed: boolean;
   onToggleCollapse: () => void;
   onTogglePin: () => void;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const activePoa = p.poa_holders.filter((h) => h.poa_activated);
   const showPoa = activePoa.length > 0 ? activePoa : p.poa_holders;
 
   return (
-    <div className="card relative hover:border-primary transition-colors">
+    <div className={`card relative hover:border-primary transition-colors ${selected ? 'ring-2 ring-primary/40' : ''}`}>
       <div className="absolute top-3 right-3 flex items-center gap-2">
+        {selectable ? (
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+            checked={!!selected}
+            onChange={onToggleSelect}
+            aria-label={`Select ${p.full_name}`}
+          />
+        ) : null}
         <button
           type="button"
           aria-label={collapsed ? 'Expand card' : 'Collapse card'}
@@ -601,13 +668,38 @@ function ProfileCard({
   );
 }
 
-/** The same people as a spreadsheet: one row each, one fact per column. */
-function ProfileTable({ profiles, onTogglePin }: { profiles: ProfileSummary[]; onTogglePin: (p: ProfileSummary) => void }) {
+function ProfileTable({
+  profiles,
+  onTogglePin,
+  selectable,
+  selectedIds,
+  onToggleSelect,
+  onToggleAll,
+}: {
+  profiles: ProfileSummary[];
+  onTogglePin: (p: ProfileSummary) => void;
+  selectable?: boolean;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (id: string) => void;
+  onToggleAll?: (ids: string[]) => void;
+}) {
+  const allSelected = selectable && profiles.length > 0 && profiles.every((p) => selectedIds?.has(p.id));
   return (
     <div className="card p-0 overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="border-b border-border">
           <tr className="text-left text-xs text-muted">
+            {selectable ? (
+              <th className="px-3 py-2 w-8">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                  checked={!!allSelected}
+                  onChange={() => onToggleAll?.(profiles.map((p) => p.id))}
+                  aria-label="Select all"
+                />
+              </th>
+            ) : null}
             <th className="px-3 py-2 w-8" aria-label="Pinned" />
             <th className="px-3 py-2 font-medium">Name</th>
             <th className="px-3 py-2 font-medium">Relationship</th>
@@ -620,7 +712,18 @@ function ProfileTable({ profiles, onTogglePin }: { profiles: ProfileSummary[]; o
           {profiles.map((p) => {
             const j = firstJourney(p);
             return (
-              <tr key={p.id} className="border-b border-border last:border-0 align-top">
+              <tr key={p.id} className={`border-b border-border last:border-0 align-top ${selectedIds?.has(p.id) ? 'bg-primary-50/50 dark:bg-primary-900/10' : ''}`}>
+                {selectable ? (
+                  <td className="px-3 py-2">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                      checked={!!selectedIds?.has(p.id)}
+                      onChange={() => onToggleSelect?.(p.id)}
+                      aria-label={`Select ${p.full_name}`}
+                    />
+                  </td>
+                ) : null}
                 <td className="px-3 py-2">
                   <button
                     type="button"
@@ -652,6 +755,110 @@ function ProfileTable({ profiles, onTogglePin }: { profiles: ProfileSummary[]; o
         </tbody>
       </table>
     </div>
+  );
+}
+
+interface DirectoryProvider extends Provider {
+  account_id: string;
+  linked_profiles: { profile_id: string; profile_name: string }[] | null;
+}
+
+function BulkLinkProviderPicker({
+  open,
+  profileIds,
+  onClose,
+  onLinked,
+}: {
+  open: boolean;
+  profileIds: string[];
+  onClose: () => void;
+  onLinked: () => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['directory-providers'],
+    queryFn: () => api.get<{ providers: DirectoryProvider[] }>('/directory/providers'),
+    enabled: open,
+  });
+  const providers = data?.providers ?? [];
+
+  useEffect(() => {
+    if (open) {
+      setSearch('');
+      setSelectedProvider(null);
+    }
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return providers;
+    const q = search.toLowerCase();
+    return providers.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.organisation?.toLowerCase().includes(q) ||
+        providerTypeLabel(p.provider_type).toLowerCase().includes(q)
+    );
+  }, [providers, search]);
+
+  const linkMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/directory/providers/${selectedProvider}/bulk-link`, { profile_ids: profileIds }),
+    onSuccess: onLinked,
+  });
+
+  if (!open) return null;
+
+  return (
+    <Modal open onClose={onClose} title="Link provider to selected profiles">
+      <p className="text-sm text-muted mb-3">
+        Choose a provider to link to the {profileIds.length} selected profile{profileIds.length !== 1 ? 's' : ''}.
+      </p>
+      <input
+        type="text"
+        placeholder="Search providers…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary mb-3"
+      />
+      {isLoading ? (
+        <p className="text-sm text-muted py-4 text-center">Loading…</p>
+      ) : filtered.length === 0 ? (
+        <p className="text-sm text-muted py-4 text-center">
+          {providers.length === 0 ? 'No providers in the directory yet.' : 'No providers match your search.'}
+        </p>
+      ) : (
+        <div className="max-h-64 overflow-y-auto -mx-1">
+          {filtered.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                selectedProvider === p.id
+                  ? 'bg-primary-50 dark:bg-primary-900/20 ring-1 ring-primary/30'
+                  : 'hover:bg-surface-2'
+              }`}
+              onClick={() => setSelectedProvider(p.id)}
+            >
+              <span className="font-medium text-ink">{p.name}</span>
+              {p.organisation ? <span className="text-muted"> · {p.organisation}</span> : null}
+              <span className="block text-xs text-muted">{providerTypeLabel(p.provider_type)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex justify-end gap-2 mt-4">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button
+          disabled={!selectedProvider}
+          loading={linkMutation.isPending}
+          onClick={() => selectedProvider && linkMutation.mutate()}
+        >
+          Link to {profileIds.length} profile{profileIds.length !== 1 ? 's' : ''}
+        </Button>
+      </div>
+    </Modal>
   );
 }
 

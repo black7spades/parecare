@@ -55,7 +55,7 @@ export function Shell() {
   // profile's sections. Exclude the "profiles/new" route.
   const profileMatch = useMatch('/app/:profileId/*');
   const profileId =
-    profileMatch?.params.profileId && profileMatch.params.profileId !== 'profiles'
+    profileMatch?.params.profileId && profileMatch.params.profileId !== 'profiles' && profileMatch.params.profileId !== 'directory'
       ? profileMatch.params.profileId
       : null;
 
@@ -116,6 +116,10 @@ export function Shell() {
     <>
       <NavLink to="/app" end className={navLinkClass}>
         Homeboard
+      </NavLink>
+      <div className="pt-4 pb-1 px-3 text-[11px] font-medium uppercase tracking-wide text-muted">Directory</div>
+      <NavLink to="/app/directory/providers" className={navLinkClass}>
+        Providers
       </NavLink>
       {pinned.length > 0 ? (
         <>
