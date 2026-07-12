@@ -722,15 +722,10 @@ export const TREATMENT_TEMPLATES: {
 ];
 
 export interface CarePlan {
-  conditions: string[];
-  medications: Medication[];
   dietary_requirements: string[];
   mobility_aids: string[];
-  communication_preferences: string | null;
+  communication_needs: string[];
   advance_care_directive: boolean;
   advance_care_directive_location: string | null;
-  gp_name: string | null;
-  gp_practice: string | null;
-  gp_phone: string | null;
   emergency_contacts: EmergencyContact[];
 }

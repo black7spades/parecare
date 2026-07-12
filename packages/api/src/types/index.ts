@@ -162,16 +162,15 @@ export interface CareLogEntry {
 export interface CarePlan {
   id: string;
   care_profile_id: string;
+  /** Legacy: conditions live in medical_conditions since 032; never written. */
   conditions: string[];
+  /** Legacy: medications live in the medications table since 022; never written. */
   medications: Record<string, unknown>[];
   dietary_requirements: string[];
   mobility_aids: string[];
-  communication_preferences: string | null;
+  communication_needs: string[];
   advance_care_directive: boolean;
   advance_care_directive_location: string | null;
-  gp_name: string | null;
-  gp_practice: string | null;
-  gp_phone: string | null;
   emergency_contacts: Record<string, unknown>[];
   updated_by: string | null;
   updated_at: string | Date;

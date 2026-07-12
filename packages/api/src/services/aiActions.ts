@@ -176,12 +176,11 @@ const updateCarePlanSchema = z.object({
   type: z.literal('update_care_plan'),
   dietary_requirements: z.array(z.string()).max(50).optional().nullable(),
   mobility_aids: z.array(z.string()).max(50).optional().nullable(),
-  communication_preferences: z.string().optional().nullable(),
+  // A list of discrete needs; the GP lives in providers (use the provider
+  // actions to change it).
+  communication_needs: z.array(z.string()).max(50).optional().nullable(),
   advance_care_directive: z.boolean().optional().nullable(),
   advance_care_directive_location: z.string().optional().nullable(),
-  gp_name: z.string().max(255).optional().nullable(),
-  gp_practice: z.string().max(255).optional().nullable(),
-  gp_phone: z.string().max(50).optional().nullable(),
 });
 
 const updateProfileSchema = z.object({
@@ -632,13 +631,10 @@ async function executeOne(
       const fields: Record<string, unknown> = { updated_at: db.fn.now(), updated_by: access.member?.id ?? null };
       if (action.dietary_requirements !== undefined) fields['dietary_requirements'] = action.dietary_requirements ?? [];
       if (action.mobility_aids !== undefined) fields['mobility_aids'] = action.mobility_aids ?? [];
-      if (action.communication_preferences !== undefined) fields['communication_preferences'] = action.communication_preferences;
+      if (action.communication_needs !== undefined) fields['communication_needs'] = JSON.stringify(action.communication_needs ?? []);
       if (action.advance_care_directive !== undefined) fields['advance_care_directive'] = action.advance_care_directive ?? false;
       if (action.advance_care_directive_location !== undefined)
         fields['advance_care_directive_location'] = action.advance_care_directive_location;
-      if (action.gp_name !== undefined) fields['gp_name'] = action.gp_name;
-      if (action.gp_practice !== undefined) fields['gp_practice'] = action.gp_practice;
-      if (action.gp_phone !== undefined) fields['gp_phone'] = action.gp_phone;
       const existing = await db('care_plans').where({ care_profile_id: profileId }).first();
       if (existing) await db('care_plans').where({ care_profile_id: profileId }).update(fields);
       else await db('care_plans').insert({ care_profile_id: profileId, ...fields });

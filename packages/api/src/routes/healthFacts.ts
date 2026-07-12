@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { resolveConditionCatalogueId } from './conditionCatalogue';
+import { resolveOptions } from './optionCatalogue';
 
 /**
  * Structured health facts on a care profile: allergies (what they must
@@ -35,6 +36,12 @@ allergiesRouter.post('/', requireAuth, async (req, res) => {
   const [allergy] = await db('allergies')
     .insert({ care_profile_id: req.params['id'], ...parsed.data })
     .returning('*');
+  // The substance and reaction join the shared lists so they are offered
+  // as suggestions to everyone from now on.
+  await Promise.all([
+    resolveOptions('allergen', [parsed.data.substance], req.account!.id),
+    resolveOptions('allergy_reaction', [parsed.data.reaction], req.account!.id),
+  ]);
   res.status(201).json({ allergy });
 });
 
@@ -52,6 +59,10 @@ allergiesRouter.patch('/:allergyId', requireAuth, async (req, res) => {
     res.status(404).json({ error: 'Allergy not found', code: 'NOT_FOUND' });
     return;
   }
+  await Promise.all([
+    resolveOptions('allergen', [parsed.data.substance], req.account!.id),
+    resolveOptions('allergy_reaction', [parsed.data.reaction], req.account!.id),
+  ]);
   res.json({ allergy });
 });
 

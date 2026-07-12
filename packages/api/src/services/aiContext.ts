@@ -151,9 +151,10 @@ export async function buildProfileContext(
           ? `Dietary requirements: ${plan.dietary_requirements.join('; ')}`
           : null,
         Array.isArray(plan.mobility_aids) && plan.mobility_aids.length ? `Mobility aids: ${plan.mobility_aids.join('; ')}` : null,
-        plan.communication_preferences ? `Communication preferences: ${plan.communication_preferences}` : null,
+        Array.isArray(plan.communication_needs) && plan.communication_needs.length
+          ? `Communication needs: ${plan.communication_needs.join('; ')}`
+          : null,
         `Advance care directive: ${plan.advance_care_directive ? `yes${plan.advance_care_directive_location ? `, kept at ${plan.advance_care_directive_location}` : ''}` : 'no'}`,
-        plan.gp_name ? `GP: ${line([plan.gp_name, plan.gp_practice, plan.gp_phone])}` : null,
         contacts.length
           ? `Emergency contacts: ${contacts
               .map((c: { name?: string; relationship?: string; phone?: string }) => line([c.name, c.relationship, c.phone]))
