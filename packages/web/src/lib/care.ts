@@ -287,7 +287,8 @@ export interface Provider {
   phone: string | null;
   email: string | null;
   address: string | null;
-  notes: string | null;
+  booking_link: string | null;
+  directions_link: string | null;
   poa_type: string | null;
   poa_activated: boolean;
 }

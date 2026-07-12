@@ -159,7 +159,8 @@ const addProviderSchema = z.object({
   organisation: z.string().max(255).optional().nullable(),
   phone: z.string().max(50).optional().nullable(),
   email: z.string().max(255).optional().nullable(),
-  notes: z.string().optional().nullable(),
+  booking_link: z.string().url().optional().nullable(),
+  directions_link: z.string().url().optional().nullable(),
 });
 
 const updateProviderSchema = z.object({
@@ -169,7 +170,8 @@ const updateProviderSchema = z.object({
   organisation: z.string().max(255).optional().nullable(),
   phone: z.string().max(50).optional().nullable(),
   email: z.string().max(255).optional().nullable(),
-  notes: z.string().optional().nullable(),
+  booking_link: z.string().url().optional().nullable(),
+  directions_link: z.string().url().optional().nullable(),
 });
 
 const updateCarePlanSchema = z.object({
@@ -603,7 +605,8 @@ async function executeOne(
         organisation: action.organisation ?? null,
         phone: action.phone ?? null,
         email: action.email ?? null,
-        notes: action.notes ?? null,
+        booking_link: action.booking_link ?? null,
+        directions_link: action.directions_link ?? null,
       });
       await audit(profileId, account.id, 'providers', `added provider ${action.name}`);
       return `Added ${action.name} to the providers list.`;
@@ -619,7 +622,8 @@ async function executeOne(
       if (action.organisation !== undefined) updates.organisation = action.organisation;
       if (action.phone !== undefined) updates.phone = action.phone;
       if (action.email !== undefined) updates.email = action.email;
-      if (action.notes !== undefined) updates.notes = action.notes;
+      if (action.booking_link !== undefined) updates.booking_link = action.booking_link;
+      if (action.directions_link !== undefined) updates.directions_link = action.directions_link;
       if (Object.keys(updates).length === 0) return `No changes to make to ${action.name}.`;
       await db('providers').where({ id: provider.id }).update(updates);
       await audit(profileId, account.id, 'providers', `updated provider ${action.name}`);

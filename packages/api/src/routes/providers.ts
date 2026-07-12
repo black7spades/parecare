@@ -23,7 +23,8 @@ const providerSchema = z.object({
   phone: z.string().max(50).optional().nullable(),
   email: z.string().email().optional().nullable(),
   address: z.string().optional().nullable(),
-  notes: z.string().optional().nullable(),
+  booking_link: z.string().url().optional().nullable(),
+  directions_link: z.string().url().optional().nullable(),
   // An organisation (typically a legal or financial firm) can hold power of
   // attorney, exactly like a person in the care circle.
   poa_type: z.enum(['enduring', 'medical', 'financial', 'guardianship']).optional().nullable(),

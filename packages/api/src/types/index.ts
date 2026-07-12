@@ -236,7 +236,8 @@ export interface Provider {
   email: string | null;
   address: string | null;
   primary_contact_member_id: string | null;
-  notes: string | null;
+  booking_link: string | null;
+  directions_link: string | null;
   poa_type: string | null;
   poa_activated: boolean;
   created_at: string | Date;
