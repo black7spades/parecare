@@ -118,6 +118,12 @@ export function Shell() {
         Homeboard
       </NavLink>
       <div className="pt-4 pb-1 px-3 text-[11px] font-medium uppercase tracking-wide text-muted">Directory</div>
+      <NavLink to="/app/directory/people" className={navLinkClass}>
+        People
+      </NavLink>
+      <NavLink to="/app/directory/pets" className={navLinkClass}>
+        Pets
+      </NavLink>
       <NavLink to="/app/directory/providers" className={navLinkClass}>
         Providers
       </NavLink>
