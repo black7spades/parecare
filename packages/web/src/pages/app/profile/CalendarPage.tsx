@@ -15,10 +15,25 @@ import {
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
+import { Modal } from '../../../components/ui/Modal';
 import { useProfile } from './ProfileLayout';
 import type { Task } from '../../../lib/care';
 
 type CalendarEvent = Task & { kind?: string; medication_id?: string };
+
+type MedicationStatus = 'given' | 'missed' | 'upcoming';
+
+function medicationStatus(e: CalendarEvent): MedicationStatus {
+  if (e.completed) return 'given';
+  return new Date(e.next_due_at).getTime() < Date.now() ? 'missed' : 'upcoming';
+}
+
+// Medication doses reflect the MAR: green given, red missed, amber upcoming.
+const MED_STATUS_CLASSES: Record<MedicationStatus, string> = {
+  given: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200',
+  missed: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200',
+  upcoming: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
+};
 
 export function CalendarPage() {
   const { profile, canEdit } = useProfile();
@@ -46,6 +61,8 @@ export function CalendarPage() {
     for (let d = gridStart; d <= gridEnd; d = addDays(d, 1)) list.push(d);
     return list;
   }, [gridStart.getTime(), gridEnd.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
   const [copied, setCopied] = useState(false);
   const copyFeed = async () => {
@@ -83,55 +100,94 @@ export function CalendarPage() {
         </div>
         <div className="grid grid-cols-7 border-t border-l border-border">
           {days.map((day) => {
-            const dayEvents = events.filter((e) => isSameDay(new Date(e.next_due_at), day));
+            const dayEvents = events
+              .filter((e) => isSameDay(new Date(e.next_due_at), day))
+              .sort((a, b) => new Date(a.next_due_at).getTime() - new Date(b.next_due_at).getTime());
             const today = isSameDay(day, new Date());
-            return (
-              <div
-                key={day.toISOString()}
-                className={`min-h-[3.5rem] sm:min-h-[5.5rem] border-r border-b border-border p-1 sm:p-1.5 ${
-                  isSameMonth(day, month) ? 'bg-card' : 'bg-surface'
+            const cellClasses = `min-h-[3.5rem] sm:min-h-[5.5rem] border-r border-b border-border p-1 sm:p-1.5 ${
+              isSameMonth(day, month) ? 'bg-card' : 'bg-surface'
+            }`;
+            const dayNumber = (
+              <span
+                className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-xs ${
+                  today ? 'bg-primary text-white font-medium' : 'text-muted'
                 }`}
               >
-                <span
-                  className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-xs ${
-                    today ? 'bg-primary text-white font-medium' : 'text-muted'
-                  }`}
-                >
-                  {format(day, 'd')}
-                </span>
+                {format(day, 'd')}
+              </span>
+            );
+            if (dayEvents.length === 0) {
+              return (
+                <div key={day.toISOString()} className={cellClasses}>
+                  {dayNumber}
+                </div>
+              );
+            }
+
+            // Days with many medication doses collapse them into one pill so
+            // appointments and tasks stay visible. Clicking the day shows
+            // everything expanded.
+            const medEvents = dayEvents.filter((e) => e.kind === 'medication');
+            const collapseMeds = medEvents.length >= 2;
+            const listed = collapseMeds ? dayEvents.filter((e) => e.kind !== 'medication') : dayEvents;
+            const shown = listed.slice(0, collapseMeds ? 2 : 3);
+            const hiddenCount = listed.length - shown.length;
+            const anyMissed = medEvents.some((e) => medicationStatus(e) === 'missed');
+            const allGiven = medEvents.length > 0 && medEvents.every((e) => e.completed);
+            return (
+              <button
+                key={day.toISOString()}
+                type="button"
+                onClick={() => setSelectedDay(day)}
+                title={`View all events on ${format(day, 'd MMMM')}`}
+                className={`${cellClasses} block w-full text-left cursor-pointer transition-colors hover:bg-surface-2`}
+              >
+                {dayNumber}
                 <div className="mt-1 space-y-1">
-                  {dayEvents.slice(0, 3).map((e) => {
+                  {shown.map((e) => {
                     const isMed = e.kind === 'medication';
-                    const past = new Date(e.next_due_at).getTime() < Date.now();
-                    // Medication doses reflect the MAR: green given, red missed,
-                    // amber upcoming. Other completed tasks stay muted.
-                    const cls = e.completed
-                      ? isMed
-                        ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200'
-                        : 'bg-surface-2 text-muted line-through'
-                      : isMed && past
-                        ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200'
-                        : isMed
-                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'
-                          : 'bg-primary-50 text-primary';
+                    const cls = isMed
+                      ? MED_STATUS_CLASSES[medicationStatus(e)]
+                      : e.completed
+                        ? 'bg-surface-2 text-muted line-through'
+                        : 'bg-primary-50 text-primary';
                     return (
                       <div
                         key={e.id}
-                        title={`${format(new Date(e.next_due_at), 'HH:mm')} ${e.title}${isMed ? (e.completed ? ' — given' : past ? ' — missed' : '') : ''}`}
+                        title={`${format(new Date(e.next_due_at), 'HH:mm')} ${e.title}${isMed ? `, ${medicationStatus(e)}` : ''}`}
                         className={`truncate rounded px-1.5 py-0.5 text-[11px] leading-tight ${cls}`}
                       >
                         {format(new Date(e.next_due_at), 'HH:mm')} {e.title}
                       </div>
                     );
                   })}
-                  {dayEvents.length > 3 ? (
-                    <div className="text-[11px] text-muted px-1.5">+{dayEvents.length - 3} more</div>
+                  {collapseMeds ? (
+                    <div
+                      title={medEvents
+                        .map((e) => `${format(new Date(e.next_due_at), 'HH:mm')} ${e.title}, ${medicationStatus(e)}`)
+                        .join('\n')}
+                      className={`truncate rounded px-1.5 py-0.5 text-[11px] leading-tight font-medium ${
+                        MED_STATUS_CLASSES[anyMissed ? 'missed' : allGiven ? 'given' : 'upcoming']
+                      }`}
+                    >
+                      {medEvents.length} medication doses
+                    </div>
                   ) : null}
+                  {hiddenCount > 0 ? <div className="text-[11px] text-muted px-1.5">+{hiddenCount} more</div> : null}
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
+        {selectedDay ? (
+          <DayEventsModal
+            day={selectedDay}
+            events={events
+              .filter((e) => isSameDay(new Date(e.next_due_at), selectedDay))
+              .sort((a, b) => new Date(a.next_due_at).getTime() - new Date(b.next_due_at).getTime())}
+            onClose={() => setSelectedDay(null)}
+          />
+        ) : null}
         {canEdit ? <QuickAddAppointment profileId={profile.id} /> : null}
         <p className="text-xs text-muted mt-3">
           Tasks and appointments from the{' '}
@@ -181,6 +237,45 @@ export function CalendarPage() {
         )}
       </div>
     </div>
+  );
+}
+
+/** Every event for one day, fully expanded, with a plain-language status. */
+function DayEventsModal({ day, events, onClose }: { day: Date; events: CalendarEvent[]; onClose: () => void }) {
+  return (
+    <Modal open onClose={onClose} title={format(day, 'EEEE d MMMM yyyy')}>
+      {events.length === 0 ? (
+        <p className="text-sm text-muted">Nothing scheduled on this day.</p>
+      ) : (
+        <ul className="space-y-2">
+          {events.map((e) => {
+            const isMed = e.kind === 'medication';
+            const status = isMed ? medicationStatus(e) : e.completed ? 'completed' : null;
+            const chipCls = isMed
+              ? MED_STATUS_CLASSES[medicationStatus(e)]
+              : 'bg-surface-2 text-muted';
+            return (
+              <li key={e.id} className="flex items-start gap-3 rounded-md border border-border px-3 py-2">
+                <span className="text-sm font-medium text-ink tabular-nums">
+                  {format(new Date(e.next_due_at), 'HH:mm')}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm text-ink ${!isMed && e.completed ? 'line-through text-muted' : ''}`}>
+                    {e.title}
+                  </p>
+                  {e.body ? <p className="text-xs text-muted mt-0.5">{e.body}</p> : null}
+                </div>
+                {status ? (
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium capitalize ${chipCls}`}>
+                    {status}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Modal>
   );
 }
 
