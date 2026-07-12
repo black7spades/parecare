@@ -240,9 +240,15 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
     return;
   }
 
-  const [pins, plans, poa, activity, events, journeyRows] = await Promise.all([
+  const [pins, plans, gpProviders, poa, activity, events, journeyRows] = await Promise.all([
     db('care_profile_pins').where({ account_id: accountId }).whereIn('care_profile_id', ids).select('care_profile_id'),
-    db('care_plans').whereIn('care_profile_id', ids).select('care_profile_id', 'gp_phone', 'emergency_contacts'),
+    db('care_plans').whereIn('care_profile_id', ids).select('care_profile_id', 'emergency_contacts'),
+    // The GP lives in providers; their phone backs up the named contact's.
+    db('providers')
+      .whereIn('care_profile_id', ids)
+      .where({ provider_type: 'gp' })
+      .whereNotNull('phone')
+      .select('care_profile_id', 'phone'),
     // Power of attorney can be held by a person in the care circle or by an
     // organisation in the providers list (e.g. a law firm). Gather both.
     Promise.all([
@@ -291,6 +297,10 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
 
   const pinSet = new Set(pins.map((p: { care_profile_id: string }) => p.care_profile_id));
   const planMap = new Map(plans.map((p: { care_profile_id: string }) => [p.care_profile_id, p]));
+  const gpPhoneMap = new Map<string, string>();
+  for (const g of gpProviders as Array<{ care_profile_id: string; phone: string }>) {
+    if (!gpPhoneMap.has(g.care_profile_id)) gpPhoneMap.set(g.care_profile_id, g.phone);
+  }
   const poaMap = new Map<string, Array<Record<string, unknown>>>();
   for (const m of poa as Array<{ care_profile_id: string }>) {
     const arr = poaMap.get(m.care_profile_id) ?? [];
@@ -307,13 +317,13 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
   }
 
   const result = profiles.map((p) => {
-    const plan = planMap.get(p.id) as { gp_phone?: string; emergency_contacts?: unknown } | undefined;
+    const plan = planMap.get(p.id) as { emergency_contacts?: unknown } | undefined;
     const contacts = Array.isArray(plan?.emergency_contacts) ? (plan!.emergency_contacts as Array<{ phone?: string }>) : [];
     // The named contact leads; a linked user supplies their email; the GP
     // and emergency contact remain the fallback for a phone.
     const cp = p as CareProfile;
     const linked = cp.contact_account_id ? contactAccountMap.get(cp.contact_account_id) : undefined;
-    const primaryPhone = cp.contact_phone || plan?.gp_phone || contacts[0]?.phone || null;
+    const primaryPhone = cp.contact_phone || gpPhoneMap.get(p.id) || contacts[0]?.phone || null;
     const primaryEmail = cp.contact_email || linked?.email || null;
     const contactName =
       cp.contact_kind === 'self'

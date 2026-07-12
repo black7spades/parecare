@@ -30,6 +30,7 @@ import { deviceRouter } from './routes/deviceIngest';
 import { lifeStagesRouter } from './routes/lifeStages';
 import { allergiesRouter, conditionsRouter } from './routes/healthFacts';
 import { conditionCatalogueRouter } from './routes/conditionCatalogue';
+import { optionCatalogueRouter } from './routes/optionCatalogue';
 import { notificationsRouter } from './routes/notifications';
 import { journeyTemplatesRouter } from './routes/journeyTemplates';
 import { journeysRouter } from './routes/journeys';
@@ -88,6 +89,10 @@ v1.use('/medication-catalogue', medicationCatalogueRouter);
 // Shared condition catalogue: read for everyone signed in; grows implicitly
 // as people record conditions that are not in it yet.
 v1.use('/condition-catalogue', conditionCatalogueRouter);
+// Shared option lists (allergens, dietary requirements, mobility aids, …)
+// backing the dropdowns that replaced free-text boxes. Read for everyone
+// signed in; grows implicitly as people save unlisted values.
+v1.use('/option-catalogue', optionCatalogueRouter);
 // The notification bell: everything new across every profile the account
 // can see, with per-item read state.
 v1.use('/notifications', notificationsRouter);

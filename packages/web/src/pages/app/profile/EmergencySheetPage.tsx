@@ -4,7 +4,7 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { PoaBadge } from '../../../components/PoaBadge';
 import { useProfile } from './ProfileLayout';
-import { poaLabel, providerTypeLabel, type Allergy, type CarePlan, type CircleMember, type MedicalCondition, type Provider } from '../../../lib/care';
+import { poaLabel, providerTypeLabel, type Allergy, type CarePlan, type CircleMember, type MedicalCondition, type MedicationRecord, type Provider } from '../../../lib/care';
 
 export function EmergencySheetPage() {
   const { profile } = useProfile();
@@ -29,9 +29,14 @@ export function EmergencySheetPage() {
     queryKey: ['providers', profile.id],
     queryFn: () => api.get<{ providers: Provider[] }>(`/care-profiles/${profile.id}/providers`),
   });
+  const { data: medData } = useQuery({
+    queryKey: ['medications', profile.id],
+    queryFn: () => api.get<{ medications: MedicationRecord[] }>(`/care-profiles/${profile.id}/medications`),
+  });
 
   const plan = planData?.plan;
   const providers = providerData?.providers ?? [];
+  const gps = providers.filter((p) => p.provider_type === 'gp');
   // A power of attorney holder can be a person in the care circle or an
   // organisation such as a law firm; paramedics need to see either.
   const poaHolders: Array<{ key: string; name: string; poa_type: string | null; poa_activated: boolean; contact: string | null }> = [
@@ -43,7 +48,7 @@ export function EmergencySheetPage() {
       .map((p) => ({ key: p.id, name: p.name, poa_type: p.poa_type, poa_activated: p.poa_activated, contact: p.phone ?? p.email ?? null })),
   ];
   const asArray = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
-  const meds = asArray<{ name: string; dose?: string; frequency?: string }>(plan?.medications);
+  const meds = (medData?.medications ?? []).filter((m) => m.active);
   const allergies = allergyData?.allergies ?? [];
   const conditions = conditionData?.conditions ?? [];
   const contacts = asArray<{ name: string; relationship?: string; phone: string }>(plan?.emergency_contacts);
@@ -126,11 +131,13 @@ export function EmergencySheetPage() {
           ) : (
             <table className="w-full text-sm">
               <tbody>
-                {meds.map((m, i) => (
-                  <tr key={i}>
+                {meds.map((m) => (
+                  <tr key={m.id}>
                     <td className="py-0.5 font-medium">{m.name}</td>
                     <td className="py-0.5">{m.dose ?? ''}</td>
-                    <td className="py-0.5">{m.frequency ?? ''}</td>
+                    <td className="py-0.5">
+                      {m.as_needed ? 'As needed' : m.schedule_times?.length ? m.schedule_times.join(', ') : m.frequency ?? ''}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -147,20 +154,22 @@ export function EmergencySheetPage() {
         ) : null}
 
         <Section title="GP">
-          {plan?.gp_name || plan?.gp_phone ? (
-            <p className="text-sm">
-              <span className="font-medium">{plan?.gp_name}</span>
-              {plan?.gp_practice ? ` · ${plan.gp_practice}` : ''}
-              {plan?.gp_phone ? ` · ${plan.gp_phone}` : ''}
-            </p>
+          {gps.length > 0 ? (
+            gps.map((gp) => (
+              <p key={gp.id} className="text-sm">
+                <span className="font-medium">{gp.name}</span>
+                {gp.organisation ? ` · ${gp.organisation}` : ''}
+                {gp.phone ? ` · ${gp.phone}` : ''}
+              </p>
+            ))
           ) : (
             <Empty />
           )}
         </Section>
 
-        {providers.length > 0 ? (
+        {providers.filter((p) => p.provider_type !== 'gp').length > 0 ? (
           <Section title="Other providers">
-            {providers.slice(0, 6).map((p) => (
+            {providers.filter((p) => p.provider_type !== 'gp').slice(0, 6).map((p) => (
               <p key={p.id} className="text-sm">
                 <span className="font-medium">{p.name}</span> ({providerTypeLabel(p.provider_type)})
                 {p.phone ? ` · ${p.phone}` : ''}
@@ -169,9 +178,9 @@ export function EmergencySheetPage() {
           </Section>
         ) : null}
 
-        {plan?.communication_preferences ? (
+        {asArray<string>(plan?.communication_needs).length > 0 ? (
           <Section title="Communication">
-            <p className="text-sm">{plan.communication_preferences}</p>
+            <p className="text-sm">{asArray<string>(plan?.communication_needs).join(' · ')}</p>
           </Section>
         ) : null}
 
