@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
+import { CatalogueCombo } from '../../../components/CatalogueCombo';
+import type { MedicalCondition } from '../../../lib/care';
 import { Modal } from '../../../components/ui/Modal';
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
@@ -252,13 +254,7 @@ export function EditProfileModal({
         {isPet ? (
           <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         ) : (
-          <p className="text-xs text-muted">
-            Health conditions are recorded on the{' '}
-            <Link to={`/app/${profile.id}`} onClick={onClose} className="text-primary hover:underline">
-              overview page
-            </Link>
-            , where typing offers suggestions from a shared list.
-          </p>
+          <ConditionsInlineEditor profileId={profile.id} onNavigate={onClose} />
         )}
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
@@ -281,5 +277,64 @@ export function EditProfileModal({
         saving={photoMutation.isPending || colorMutation.isPending || removePhotoMutation.isPending}
       />
     </Modal>
+  );
+}
+
+/**
+ * Conditions edited right inside the profile modal: chips with a
+ * catalogue-backed dropdown, saving each add and remove straight away.
+ * The full lifecycle of each condition lives on the care plan.
+ */
+function ConditionsInlineEditor({ profileId, onNavigate }: { profileId: string; onNavigate: () => void }) {
+  const queryClient = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ['conditions', profileId],
+    queryFn: () => api.get<{ conditions: MedicalCondition[] }>(`/care-profiles/${profileId}/conditions`),
+  });
+  const conditions = data?.conditions ?? [];
+  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['conditions', profileId] });
+
+  const addMutation = useMutation({
+    mutationFn: (name: string) => api.post(`/care-profiles/${profileId}/conditions`, { name }),
+    onSuccess: invalidate,
+  });
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/care-profiles/${profileId}/conditions/${id}`),
+    onSuccess: invalidate,
+  });
+
+  return (
+    <div>
+      <span className="block text-sm font-medium text-ink mb-1">Conditions</span>
+      <div className="flex flex-wrap items-center gap-2">
+        {conditions.map((c) => (
+          <span key={c.id} className="badge bg-surface-2 text-ink text-xs flex items-center gap-1">
+            {c.name}
+            <button
+              type="button"
+              aria-label={`Remove ${c.name}`}
+              className="text-muted hover:text-red-600"
+              onClick={() => removeMutation.mutate(c.id)}
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+        <CatalogueCombo
+          endpoint="/condition-catalogue"
+          ariaLabel="Add a condition"
+          placeholder={conditions.length === 0 ? 'Add a condition, e.g. Autism' : 'Add another…'}
+          exclude={conditions.map((c) => c.name)}
+          onPick={(name) => addMutation.mutate(name)}
+        />
+      </div>
+      <p className="mt-1 text-xs text-muted">
+        Saves straight away. Status and dates live on the{' '}
+        <Link to={`/app/${profileId}/plan`} onClick={onNavigate} className="text-primary hover:underline">
+          care plan
+        </Link>
+        .
+      </p>
+    </div>
   );
 }

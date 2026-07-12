@@ -203,7 +203,7 @@ export function PlanPage() {
         open={open.gp}
         onToggle={toggle}
       >
-        <GpTable profileId={profile.id} />
+        <GpTable profileId={profile.id} canEdit={canEdit} />
       </Section>
 
       <Section
@@ -790,52 +790,145 @@ function MedicationsTables({ profileId }: { profileId: string }) {
   );
 }
 
-/** The GP, surfaced from the providers list where they are managed. */
-function GpTable({ profileId }: { profileId: string }) {
+/**
+ * The GP lives in the providers table, but is added and corrected right
+ * here: a row of structured fields writes a GP provider without leaving
+ * the page. The Providers page remains the home for everything else about
+ * them.
+ */
+function GpTable({ profileId, canEdit }: { profileId: string; canEdit: boolean }) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState('');
+  const [practice, setPractice] = useState('');
+  const [phone, setPhone] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [edit, setEdit] = useState({ name: '', organisation: '', phone: '' });
+
   const { data } = useQuery({
     queryKey: ['providers', profileId],
     queryFn: () => api.get<{ providers: Provider[] }>(`/care-profiles/${profileId}/providers`),
   });
   const gps = (data?.providers ?? []).filter((p) => p.provider_type === 'gp');
+  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['providers', profileId] });
+
+  const addMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/care-profiles/${profileId}/providers`, {
+        provider_type: 'gp',
+        name: name.trim(),
+        organisation: practice.trim() || null,
+        phone: phone.trim() || null,
+      }),
+    onSuccess: () => {
+      setName('');
+      setPractice('');
+      setPhone('');
+      invalidate();
+    },
+  });
+  const updateMutation = useMutation({
+    mutationFn: (id: string) =>
+      api.patch(`/care-profiles/${profileId}/providers/${id}`, {
+        name: edit.name.trim(),
+        organisation: edit.organisation.trim() || null,
+        phone: edit.phone.trim() || null,
+      }),
+    onSuccess: () => {
+      setEditingId(null);
+      invalidate();
+    },
+  });
 
   return (
     <div className="space-y-2">
       {gps.length === 0 ? (
-        <p className="text-sm text-muted">
-          No GP recorded.{' '}
-          <Link to="../providers" className="text-primary hover:underline">
-            Add one on the Providers page.
-          </Link>
-        </p>
+        <p className="text-sm text-muted">No GP recorded.</p>
       ) : (
-        <>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="py-1.5 pr-3 text-left font-medium text-muted">Name</th>
-                  <th className="py-1.5 pr-3 text-left font-medium text-muted">Practice</th>
-                  <th className="py-1.5 pr-3 text-left font-medium text-muted">Phone</th>
-                  <th className="py-1.5 pr-3 text-left font-medium text-muted">Email</th>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="py-1.5 pr-3 text-left font-medium text-muted">Name</th>
+                <th className="py-1.5 pr-3 text-left font-medium text-muted">Practice</th>
+                <th className="py-1.5 pr-3 text-left font-medium text-muted">Phone</th>
+                <th className="py-1.5 pr-3 text-left font-medium text-muted">Email</th>
+                {canEdit ? <th className="py-1.5 w-20" /> : null}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {gps.map((p) => (
+                <tr key={p.id}>
+                  {editingId === p.id ? (
+                    <>
+                      <td className="py-2 pr-3">
+                        <Input aria-label="GP name" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} className="w-36" />
+                      </td>
+                      <td className="py-2 pr-3">
+                        <Input aria-label="GP practice" value={edit.organisation} onChange={(e) => setEdit({ ...edit, organisation: e.target.value })} className="w-36" />
+                      </td>
+                      <td className="py-2 pr-3">
+                        <Input aria-label="GP phone" type="tel" value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} className="w-32" />
+                      </td>
+                      <td className="py-2 pr-3 text-ink">{p.email ?? ''}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="py-2 pr-3 font-medium text-ink">{p.name}</td>
+                      <td className="py-2 pr-3 text-ink">{p.organisation ?? ''}</td>
+                      <td className="py-2 pr-3 text-ink whitespace-nowrap">{p.phone ?? ''}</td>
+                      <td className="py-2 pr-3 text-ink">{p.email ?? ''}</td>
+                    </>
+                  )}
+                  {canEdit ? (
+                    <td className="py-2 text-right whitespace-nowrap">
+                      {editingId === p.id ? (
+                        <>
+                          <button
+                            type="button"
+                            className="text-xs text-primary hover:underline mr-2"
+                            onClick={() => edit.name.trim() && updateMutation.mutate(p.id)}
+                          >
+                            Save
+                          </button>
+                          <button type="button" className="text-xs text-muted hover:underline" onClick={() => setEditingId(null)}>
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          className="text-xs text-primary hover:underline"
+                          onClick={() => {
+                            setEditingId(p.id);
+                            setEdit({ name: p.name, organisation: p.organisation ?? '', phone: p.phone ?? '' });
+                          }}
+                        >
+                          Edit
+                        </button>
+                      )}
+                    </td>
+                  ) : null}
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {gps.map((p) => (
-                  <tr key={p.id}>
-                    <td className="py-2 pr-3 font-medium text-ink">{p.name}</td>
-                    <td className="py-2 pr-3 text-ink">{p.organisation ?? ''}</td>
-                    <td className="py-2 pr-3 text-ink whitespace-nowrap">{p.phone ?? ''}</td>
-                    <td className="py-2 pr-3 text-ink">{p.email ?? ''}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <Link to="../providers" className="text-xs text-primary hover:underline">
-            Manage on the Providers page
-          </Link>
-        </>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
+      {canEdit ? (
+        <div className="flex flex-wrap items-end gap-2">
+          <Input aria-label="GP name" placeholder={gps.length === 0 ? 'GP name' : 'Another GP'} value={name} onChange={(e) => setName(e.target.value)} className="w-40" />
+          <Input aria-label="GP practice" placeholder="Practice" value={practice} onChange={(e) => setPractice(e.target.value)} className="w-40" />
+          <Input aria-label="GP phone" type="tel" placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-36" />
+          <Button type="button" variant="secondary" size="sm" disabled={!name.trim()} loading={addMutation.isPending} onClick={() => addMutation.mutate()}>
+            Add GP
+          </Button>
+        </div>
+      ) : null}
+      {gps.length > 0 ? (
+        <Link to="../providers" className="text-xs text-primary hover:underline">
+          Everything else about them is on the Providers page
+        </Link>
+      ) : null}
     </div>
   );
 }
@@ -903,13 +996,57 @@ function DirectiveSection({
           ))}
         </ul>
       ) : (
-        <p className="text-sm text-muted">
-          No directive document on file.{' '}
-          <Link to="../documents" className="text-primary hover:underline">
-            Upload it in Documents.
-          </Link>
-        </p>
+        <p className="text-sm text-muted">No directive document on file.</p>
       )}
+      {canEdit ? <DirectiveUpload profileId={profileId} /> : null}
+    </div>
+  );
+}
+
+/**
+ * Upload the directive right here. The file lands in Documents under the
+ * advance care directive category, exactly as if it were uploaded there.
+ */
+function DirectiveUpload({ profileId }: { profileId: string }) {
+  const queryClient = useQueryClient();
+  const [file, setFile] = useState<File | null>(null);
+  const [error, setError] = useState('');
+
+  const uploadMutation = useMutation({
+    mutationFn: () => {
+      const form = new FormData();
+      form.append('file', file!);
+      form.append('category', 'advance_care_directive');
+      form.append('label', file!.name);
+      return api.upload(`/care-profiles/${profileId}/documents`, form);
+    },
+    onSuccess: () => {
+      setFile(null);
+      setError('');
+      void queryClient.invalidateQueries({ queryKey: ['documents', profileId] });
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'Upload failed'),
+  });
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <input
+        type="file"
+        aria-label="Upload the advance care directive"
+        className="text-sm text-muted file:mr-2 file:rounded-md file:border file:border-border file:bg-card file:px-3 file:py-1.5 file:text-sm file:text-ink file:cursor-pointer"
+        onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+      />
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        disabled={!file}
+        loading={uploadMutation.isPending}
+        onClick={() => uploadMutation.mutate()}
+      >
+        Upload directive
+      </Button>
+      {error ? <p className="text-sm text-red-600 w-full">{error}</p> : null}
     </div>
   );
 }
@@ -932,6 +1069,7 @@ function EmergencyContactsTable({
   canEdit: boolean;
 }) {
   const [who, setWho] = useState('');
+  const [customName, setCustomName] = useState('');
   const [relationship, setRelationship] = useState('');
   const [phone, setPhone] = useState('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -953,6 +1091,12 @@ function EmergencyContactsTable({
 
   const pickWho = (value: string) => {
     setWho(value);
+    if (value === 'other') {
+      setCustomName('');
+      setRelationship('');
+      setPhone('');
+      return;
+    }
     const [source, id] = value.split(':');
     if (source === 'member') {
       const m = members.find((x) => x.id === id);
@@ -966,6 +1110,7 @@ function EmergencyContactsTable({
   };
 
   const nameOf = (value: string): string => {
+    if (value === 'other') return customName.trim();
     const [source, id] = value.split(':');
     if (source === 'member') return members.find((x) => x.id === id)?.display_name ?? '';
     if (source === 'provider') return providers.find((x) => x.id === id)?.name ?? '';
@@ -977,6 +1122,7 @@ function EmergencyContactsTable({
     if (!name || !phone.trim()) return;
     onChange([...contacts, { name, relationship: relationship || undefined, phone: phone.trim() }]);
     setWho('');
+    setCustomName('');
     setRelationship('');
     setPhone('');
   };
@@ -1085,65 +1231,58 @@ function EmergencyContactsTable({
         </div>
       )}
       {canEdit ? (
-        members.length === 0 && providers.length === 0 ? (
-          <p className="text-sm text-muted">
-            Emergency contacts are picked from the{' '}
-            <Link to="../circle" className="text-primary hover:underline">
-              care circle
-            </Link>{' '}
-            and{' '}
-            <Link to="../providers" className="text-primary hover:underline">
-              providers
-            </Link>
-            . Add someone there first, then name them here.
-          </p>
-        ) : (
-          <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-muted">Who</span>
+            <select aria-label="Who to contact in an emergency" className={selectClass} value={who} onChange={(e) => pickWho(e.target.value)}>
+              <option value="">Choose who to call</option>
+              {members.length > 0 ? (
+                <optgroup label="People in the care circle">
+                  {members.map((m) => (
+                    <option key={m.id} value={`member:${m.id}`}>
+                      {m.display_name}
+                      {m.relationship ? ` — ${m.relationship}` : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              {providers.length > 0 ? (
+                <optgroup label="Providers">
+                  {providers.map((p) => (
+                    <option key={p.id} value={`provider:${p.id}`}>
+                      {p.name} — {providerTypeLabel(p.provider_type)}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              <option value="other">Someone not in PareCare</option>
+            </select>
+          </label>
+          {who === 'other' ? (
             <label className="flex flex-col gap-1">
-              <span className="text-xs text-muted">Who</span>
-              <select aria-label="Who to contact in an emergency" className={selectClass} value={who} onChange={(e) => pickWho(e.target.value)}>
-                <option value="">Choose a person or organisation</option>
-                {members.length > 0 ? (
-                  <optgroup label="People in the care circle">
-                    {members.map((m) => (
-                      <option key={m.id} value={`member:${m.id}`}>
-                        {m.display_name}
-                        {m.relationship ? ` — ${m.relationship}` : ''}
-                      </option>
-                    ))}
-                  </optgroup>
-                ) : null}
-                {providers.length > 0 ? (
-                  <optgroup label="Providers">
-                    {providers.map((p) => (
-                      <option key={p.id} value={`provider:${p.id}`}>
-                        {p.name} — {providerTypeLabel(p.provider_type)}
-                      </option>
-                    ))}
-                  </optgroup>
-                ) : null}
-              </select>
+              <span className="text-xs text-muted">Name</span>
+              <Input aria-label="Emergency contact name" value={customName} onChange={(e) => setCustomName(e.target.value)} className="w-40" />
             </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-muted">Relationship</span>
-              <select aria-label="Relationship to this person" className={selectClass} value={relationship} onChange={(e) => setRelationship(e.target.value)}>
-                <option value="">Prefer not to say</option>
-                {RELATIONSHIPS.filter((r) => r !== 'Myself').map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-muted">Phone</span>
-              <Input aria-label="Emergency contact phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-40" />
-            </label>
-            <Button type="button" variant="secondary" size="sm" disabled={!who || !phone.trim()} onClick={add}>
-              Add
-            </Button>
-          </div>
-        )
+          ) : null}
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-muted">Relationship</span>
+            <select aria-label="Relationship to this person" className={selectClass} value={relationship} onChange={(e) => setRelationship(e.target.value)}>
+              <option value="">Prefer not to say</option>
+              {RELATIONSHIPS.filter((r) => r !== 'Myself').map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-muted">Phone</span>
+            <Input aria-label="Emergency contact phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-40" />
+          </label>
+          <Button type="button" variant="secondary" size="sm" disabled={!nameOf(who) || !phone.trim()} onClick={add}>
+            Add
+          </Button>
+        </div>
       ) : null}
     </div>
   );

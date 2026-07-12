@@ -13,6 +13,7 @@ import { CareLogSection } from './CareLogSection';
 import { useProfile } from './ProfileLayout';
 import {
   POA_TYPES,
+  PROVIDER_TYPES,
   providerTypeLabel,
   type CareProfile,
   type CircleMember,
@@ -352,43 +353,47 @@ function SetPoaInline({
 }) {
   const queryClient = useQueryClient();
   // The selected holder is encoded as "member:<id>" or "provider:<id>" so
-  // one dropdown can offer both people and organisations.
+  // one dropdown can offer both people and organisations. "neworg" adds an
+  // organisation that is not on the providers list yet, right here.
   const [holder, setHolder] = useState('');
+  const [orgName, setOrgName] = useState('');
+  const [orgType, setOrgType] = useState('legal');
   const [poaType, setPoaType] = useState<string>(POA_TYPES[0].value);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState(!compact);
 
   const mutation = useMutation({
-    mutationFn: () => {
-      const [source, id] = holder.split(':');
-      const path = source === 'provider' ? 'providers' : 'circle';
+    mutationFn: async () => {
+      let path: string;
+      let id: string;
+      if (holder === 'neworg') {
+        // The organisation joins the providers list, then holds the POA:
+        // one step here, no trip to the Providers page.
+        const created = await api.post<{ provider: Provider }>(`/care-profiles/${profileId}/providers`, {
+          provider_type: orgType,
+          name: orgName.trim(),
+        });
+        path = 'providers';
+        id = created.provider.id;
+      } else {
+        const [source, holderId] = holder.split(':');
+        path = source === 'provider' ? 'providers' : 'circle';
+        id = holderId;
+      }
       return api.patch(`/care-profiles/${profileId}/${path}/${id}`, { poa_type: poaType });
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['circle', profileId] });
       void queryClient.invalidateQueries({ queryKey: ['providers', profileId] });
       setHolder('');
+      setOrgName('');
       setError('');
       if (compact) setExpanded(false);
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not set the power of attorney.'),
   });
 
-  if (members.length === 0 && providers.length === 0) {
-    return (
-      <p className="text-sm text-muted">
-        No power of attorney recorded yet. Add someone to the{' '}
-        <Link to="circle" className="text-primary hover:underline">
-          care circle
-        </Link>{' '}
-        or a firm to the{' '}
-        <Link to="providers" className="text-primary hover:underline">
-          providers
-        </Link>{' '}
-        first, then you can name them here.
-      </p>
-    );
-  }
+  const ready = holder === 'neworg' ? orgName.trim().length > 0 : !!holder;
 
   if (compact && !expanded) {
     return (
@@ -435,8 +440,33 @@ function SetPoaInline({
                 ))}
               </optgroup>
             ) : null}
+            <option value="neworg">An organisation not listed yet</option>
           </select>
         </label>
+        {holder === 'neworg' ? (
+          <>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-muted">Organisation name</span>
+              <Input
+                aria-label="Organisation name"
+                value={orgName}
+                onChange={(e) => setOrgName(e.target.value)}
+                placeholder="e.g. Smith and Co Lawyers"
+                className="w-52"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-muted">Kind of organisation</span>
+              <select aria-label="Kind of organisation" className={selectClass} value={orgType} onChange={(e) => setOrgType(e.target.value)}>
+                {PROVIDER_TYPES.filter((t) => t.value !== 'gp').map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        ) : null}
         <label className="flex flex-col gap-1">
           <span className="text-xs text-muted">Kind of authority</span>
           <select
@@ -452,7 +482,7 @@ function SetPoaInline({
             ))}
           </select>
         </label>
-        <Button type="button" disabled={!holder || mutation.isPending} loading={mutation.isPending} onClick={() => mutation.mutate()}>
+        <Button type="button" disabled={!ready || mutation.isPending} loading={mutation.isPending} onClick={() => mutation.mutate()}>
           Set
         </Button>
         {compact ? (
@@ -461,6 +491,15 @@ function SetPoaInline({
           </Button>
         ) : null}
       </div>
+      {members.length === 0 ? (
+        <p className="text-xs text-muted">
+          To name a person, first{' '}
+          <Link to="circle" className="text-primary hover:underline">
+            invite them to the care circle
+          </Link>
+          . Organisations can be added right here.
+        </p>
+      ) : null}
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
     </div>
   );
