@@ -22,6 +22,7 @@ import { QuestionsPage } from './pages/app/profile/QuestionsPage';
 import { ProvidersPage } from './pages/app/profile/ProvidersPage';
 import { ActivityPage } from './pages/app/profile/ActivityPage';
 import { AiPage } from './pages/app/profile/AiPage';
+import { DirectoryProvidersPage } from './pages/app/DirectoryProvidersPage';
 import { InvitePage } from './pages/InvitePage';
 import { SubscriptionPage } from './pages/account/Subscription';
 import { AccountSettings } from './pages/account/Settings';
@@ -79,6 +80,7 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/app" replace /> },
       { path: 'app', element: <Dashboard /> },
       { path: 'app/profiles/new', element: <NewCareProfile /> },
+      { path: 'app/directory/providers', element: <DirectoryProvidersPage /> },
       {
         path: 'app/:profileId',
         element: <ProfileLayout />,
