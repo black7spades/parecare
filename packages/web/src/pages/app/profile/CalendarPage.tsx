@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   addDays,
   addMonths,
@@ -13,13 +14,14 @@ import {
 } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { Input } from '../../../components/ui/Input';
 import { useProfile } from './ProfileLayout';
 import type { Task } from '../../../lib/care';
 
 type CalendarEvent = Task & { kind?: string; medication_id?: string };
 
 export function CalendarPage() {
-  const { profile } = useProfile();
+  const { profile, canEdit } = useProfile();
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
 
   const gridStart = startOfWeek(startOfMonth(month), { weekStartsOn: 1 });
@@ -130,8 +132,13 @@ export function CalendarPage() {
             );
           })}
         </div>
+        {canEdit ? <QuickAddAppointment profileId={profile.id} /> : null}
         <p className="text-xs text-muted mt-3">
-          Tasks and appointments from the Tasks tab appear here automatically.
+          Tasks and appointments from the{' '}
+          <Link to="../tasks" className="text-primary hover:underline">
+            Tasks page
+          </Link>{' '}
+          appear here automatically.
         </p>
       </div>
 
@@ -173,6 +180,71 @@ export function CalendarPage() {
           <p className="text-sm text-muted">Loading feed link…</p>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Add an appointment without leaving the calendar. It is stored as a
+ * one-off task, exactly as if it were added on the Tasks page, so it
+ * shows up in both places and in subscribed calendar feeds.
+ */
+function QuickAddAppointment({ profileId }: { profileId: string }) {
+  const queryClient = useQueryClient();
+  const [title, setTitle] = useState('');
+  const [date, setDate] = useState('');
+  const [time, setTime] = useState('09:00');
+  const [error, setError] = useState('');
+
+  const addMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/care-profiles/${profileId}/reminders`, {
+        title: title.trim(),
+        reminder_type: 'once',
+        next_due_at: new Date(`${date}T${time}`).toISOString(),
+      }),
+    onSuccess: () => {
+      setTitle('');
+      setDate('');
+      setError('');
+      void queryClient.invalidateQueries({ queryKey: ['calendar-events', profileId] });
+      void queryClient.invalidateQueries({ queryKey: ['tasks', profileId] });
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to add appointment'),
+  });
+
+  return (
+    <div className="mt-4 pt-3 border-t border-border">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1 flex-1 min-w-[10rem]">
+          <span className="text-xs text-muted">Add an appointment</span>
+          <Input
+            aria-label="Appointment title"
+            placeholder="e.g. Physio with Sam"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-muted">Date</span>
+          <Input aria-label="Appointment date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-muted">Time</span>
+          <Input aria-label="Appointment time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+        </label>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={!title.trim() || !date || !time}
+          loading={addMutation.isPending}
+          onClick={() => addMutation.mutate()}
+        >
+          Add
+        </Button>
+      </div>
+      {error ? <p className="mt-1 text-sm text-red-600">{error}</p> : null}
     </div>
   );
 }

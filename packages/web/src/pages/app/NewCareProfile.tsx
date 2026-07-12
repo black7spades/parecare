@@ -106,7 +106,6 @@ function PersonForm({ onBack }: { onBack: () => void }) {
   const [relationship, setRelationship] = useState('');
   const [pronouns, setPronouns] = useState('');
   const [language, setLanguage] = useState('');
-  const [notes, setNotes] = useState('');
   const [contact, setContact] = useState<ContactValue>(emptyContact);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -136,7 +135,6 @@ function PersonForm({ onBack }: { onBack: () => void }) {
         owner_relationship: relationship.trim() || null,
         pronouns: pronouns || null,
         primary_language: language || null,
-        notes: notes || null,
         journey_template_ids: journeyIds,
         ...contactPayload(contact),
       });
@@ -202,7 +200,7 @@ function PersonForm({ onBack }: { onBack: () => void }) {
         <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
         <Input label="Primary language" value={language} onChange={(e) => setLanguage(e.target.value)} />
         <ContactDetails value={contact} onChange={setContact} />
-        <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+        <p className="text-xs text-muted">Health details like conditions and allergies come next, on their own step.</p>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Link to="/app">
