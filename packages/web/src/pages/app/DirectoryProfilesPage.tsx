@@ -218,18 +218,30 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
                     </>
                   )}
                   <td className="px-3 py-2">
-                    {p.contact_name ? (
+                    {p.contact_name || p.contact_phone || p.contact_email ? (
                       <span className="text-ink text-xs">
-                        {p.contact_name}
+                        {p.contact_name ? <span>{p.contact_name}</span> : null}
                         {p.contact_phone ? (
                           <>
-                            <br />
+                            {p.contact_name ? <br /> : null}
                             <a
                               href={`tel:${p.contact_phone}`}
                               className="text-primary hover:underline"
                               onClick={(e) => e.stopPropagation()}
                             >
                               {p.contact_phone}
+                            </a>
+                          </>
+                        ) : null}
+                        {p.contact_email ? (
+                          <>
+                            {p.contact_name || p.contact_phone ? <br /> : null}
+                            <a
+                              href={`mailto:${p.contact_email}`}
+                              className="text-primary hover:underline"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {p.contact_email}
                             </a>
                           </>
                         ) : null}

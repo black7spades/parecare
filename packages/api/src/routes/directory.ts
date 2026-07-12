@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { roleAtLeast } from '../middleware/requireRole';
-import type { Provider, ProfileKind } from '../types';
+import type { CareProfile, Provider, ProfileKind } from '../types';
 
 export const directoryRouter = Router();
 
@@ -22,6 +22,7 @@ function profilesEndpoint(kind: ProfileKind) {
     const columns = [
       'cp.id', 'cp.full_name', 'cp.preferred_name', 'cp.date_of_birth',
       'cp.current_phase', 'cp.photo_url', 'cp.photo_color',
+      'cp.contact_kind', 'cp.contact_account_id',
       'cp.contact_name', 'cp.contact_phone', 'cp.contact_email',
       'cp.owner_relationship',
       ...(kind === 'pet' ? ['cp.species', 'cp.breed', 'cp.desexed', 'cp.microchip_number'] as const : []),
@@ -56,7 +57,56 @@ function profilesEndpoint(kind: ProfileKind) {
         .groupBy('cp.id');
     }
 
-    const profiles = await query;
+    const rows = await query;
+    const ids = rows.map((r: { id: string }) => r.id);
+
+    // Resolve linked-account contacts (contact_kind = 'user')
+    const contactAccountIds = [
+      ...new Set(
+        rows
+          .map((r: CareProfile) => r.contact_account_id)
+          .filter((v: string | null): v is string => !!v),
+      ),
+    ];
+    const contactAccounts = contactAccountIds.length
+      ? await db('accounts').whereIn('id', contactAccountIds).select('id', 'display_name', 'email')
+      : [];
+    const contactAccountMap = new Map(contactAccounts.map((a: { id: string; display_name: string; email: string }) => [a.id, a]));
+
+    // GP phone fallback
+    const gpPhoneMap = new Map<string, string>();
+    if (ids.length > 0) {
+      const gpRows = await db('care_profile_providers as cpp')
+        .join('providers as p', 'cpp.provider_id', 'p.id')
+        .whereIn('cpp.care_profile_id', ids)
+        .where({ 'p.provider_type': 'gp' })
+        .whereNotNull('p.phone')
+        .select('cpp.care_profile_id', 'p.phone');
+      for (const g of gpRows as Array<{ care_profile_id: string; phone: string }>) {
+        if (!gpPhoneMap.has(g.care_profile_id)) gpPhoneMap.set(g.care_profile_id, g.phone);
+      }
+    }
+
+    const profiles = rows.map((p: CareProfile) => {
+      const linked = p.contact_account_id ? contactAccountMap.get(p.contact_account_id) : undefined;
+      const contactName =
+        p.contact_kind === 'self'
+          ? p.full_name
+          : p.contact_kind === 'user'
+            ? linked?.display_name ?? null
+            : p.contact_name ?? null;
+      const contactPhone = p.contact_phone || gpPhoneMap.get(p.id) || null;
+      const contactEmail = p.contact_email || linked?.email || null;
+
+      const { contact_kind, contact_account_id, ...rest } = p;
+      return {
+        ...rest,
+        contact_name: contactName,
+        contact_phone: contactPhone,
+        contact_email: contactEmail,
+      };
+    });
+
     const canEdit = roleAtLeast(account.role, 'admin');
     res.json({ profiles, can_edit: canEdit });
   };
