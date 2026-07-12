@@ -598,23 +598,31 @@ async function executeOne(
       return `Set the care phase to ${action.phase.replace(/_/g, ' ')}.`;
     }
     case 'add_provider': {
-      await db('providers').insert({
+      const [provider] = await db('providers')
+        .insert({
+          account_id: account.id,
+          provider_type: action.provider_type,
+          name: action.name.trim(),
+          organisation: action.organisation ?? null,
+          phone: action.phone ?? null,
+          email: action.email ?? null,
+          booking_link: action.booking_link ?? null,
+          directions_link: action.directions_link ?? null,
+        })
+        .returning('id');
+      await db('care_profile_providers').insert({
         care_profile_id: profileId,
-        provider_type: action.provider_type,
-        name: action.name.trim(),
-        organisation: action.organisation ?? null,
-        phone: action.phone ?? null,
-        email: action.email ?? null,
-        booking_link: action.booking_link ?? null,
-        directions_link: action.directions_link ?? null,
+        provider_id: provider.id,
       });
       await audit(profileId, account.id, 'providers', `added provider ${action.name}`);
       return `Added ${action.name} to the providers list.`;
     }
     case 'update_provider': {
-      const provider = await db('providers')
-        .where({ care_profile_id: profileId })
-        .whereRaw('lower(name) = lower(?)', [action.name.trim()])
+      const provider = await db('care_profile_providers as cpp')
+        .join('providers as p', 'cpp.provider_id', 'p.id')
+        .where({ 'cpp.care_profile_id': profileId })
+        .whereRaw('lower(p.name) = lower(?)', [action.name.trim()])
+        .select('p.id')
         .first();
       if (!provider) return `Could not find a provider called "${action.name}" on this profile.`;
       const updates: Record<string, unknown> = {};

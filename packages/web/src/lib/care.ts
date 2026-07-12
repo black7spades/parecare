@@ -291,6 +291,7 @@ export interface Provider {
   directions_link: string | null;
   poa_type: string | null;
   poa_activated: boolean;
+  linked?: boolean;
 }
 
 export interface Task {

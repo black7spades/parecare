@@ -72,7 +72,12 @@ export async function buildProfileContext(
       .orderBy('next_due_at', 'asc')
       .limit(MAX_LIST),
     db('care_circle_members').where({ care_profile_id: profileId, invite_accepted: true }),
-    db('providers').where({ care_profile_id: profileId }).orderBy('name', 'asc').limit(MAX_LIST),
+    db('care_profile_providers as cpp')
+      .join('providers as p', 'cpp.provider_id', 'p.id')
+      .where({ 'cpp.care_profile_id': profileId })
+      .select('p.*', 'cpp.poa_type', 'cpp.poa_activated')
+      .orderBy('p.name', 'asc')
+      .limit(MAX_LIST),
     db('open_questions').where({ care_profile_id: profileId, status: 'open' }).orderBy('created_at', 'desc').limit(10),
     db('care_log_entries')
       .where({ care_profile_id: profileId })

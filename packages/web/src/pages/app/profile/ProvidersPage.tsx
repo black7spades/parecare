@@ -31,6 +31,7 @@ export function ProvidersPage() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<Provider | null>(null);
   const [removing, setRemoving] = useState<Provider | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['providers', profile.id],
@@ -73,14 +74,19 @@ export function ProvidersPage() {
           <p className="text-sm text-muted">Doctors, facilities and services involved in care, with contact details in one place.</p>
         </div>
         {canEdit ? (
-          <Button
-            onClick={() => {
-              setEditing(null);
-              setEditorOpen(true);
-            }}
-          >
-            Add provider
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setPickerOpen(true)}>
+              Link existing
+            </Button>
+            <Button
+              onClick={() => {
+                setEditing(null);
+                setEditorOpen(true);
+              }}
+            >
+              Add provider
+            </Button>
+          </div>
         ) : null}
       </div>
 
@@ -208,9 +214,19 @@ export function ProvidersPage() {
         }}
       />
 
+      <ProviderPicker
+        profileId={profile.id}
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onLinked={() => {
+          setPickerOpen(false);
+          invalidate();
+        }}
+      />
+
       <Modal open={removing !== null} onClose={() => setRemoving(null)} title="Remove provider">
         <p className="text-sm text-muted mb-4">
-          Remove <span className="font-medium text-ink">{removing?.name}</span> from the provider list?
+          Remove <span className="font-medium text-ink">{removing?.name}</span> from this profile? The provider stays in your account directory for other profiles.
         </p>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setRemoving(null)}>
@@ -222,6 +238,77 @@ export function ProvidersPage() {
         </div>
       </Modal>
     </div>
+  );
+}
+
+function ProviderPicker({
+  profileId,
+  open,
+  onClose,
+  onLinked,
+}: {
+  profileId: string;
+  open: boolean;
+  onClose: () => void;
+  onLinked: () => void;
+}) {
+  const [search, setSearch] = useState('');
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['provider-search', profileId],
+    queryFn: () => api.get<{ providers: (Provider & { linked: boolean })[] }>(`/providers/search?profile_id=${profileId}`),
+    enabled: open,
+  });
+  const allProviders = data?.providers ?? [];
+  const filtered = search
+    ? allProviders.filter((p) => `${p.name} ${p.organisation ?? ''}`.toLowerCase().includes(search.toLowerCase()))
+    : allProviders;
+
+  const linkMutation = useMutation({
+    mutationFn: (providerId: string) => api.post(`/care-profiles/${profileId}/providers`, { provider_id: providerId }),
+    onSuccess: onLinked,
+  });
+
+  if (!open) return null;
+  return (
+    <Modal open onClose={onClose} title="Link an existing provider">
+      <p className="text-sm text-muted mb-3">Pick a provider already in your account to link to this profile.</p>
+      <Input
+        placeholder="Filter providers…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        autoFocus
+      />
+      <div className="mt-3 max-h-64 overflow-y-auto space-y-1">
+        {isLoading ? (
+          <p className="text-sm text-muted py-4 text-center">Loading…</p>
+        ) : filtered.length === 0 ? (
+          <p className="text-sm text-muted py-4 text-center">
+            {allProviders.length === 0 ? 'No providers in your account yet.' : 'No providers match your filter.'}
+          </p>
+        ) : (
+          filtered.map((p) => (
+            <div key={p.id} className="flex items-center justify-between p-2 rounded-md hover:bg-surface-2">
+              <div>
+                <span className="text-sm font-medium text-ink">{p.name}</span>
+                {p.organisation ? <span className="text-xs text-muted ml-1">at {p.organisation}</span> : null}
+                <span className="ml-2 text-xs text-muted">{providerTypeLabel(p.provider_type)}</span>
+              </div>
+              {p.linked ? (
+                <span className="text-xs text-muted">Already linked</span>
+              ) : (
+                <Button size="sm" variant="secondary" loading={linkMutation.isPending} onClick={() => linkMutation.mutate(p.id)}>
+                  Link
+                </Button>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+      <div className="flex justify-end mt-4">
+        <Button variant="ghost" onClick={onClose}>Close</Button>
+      </div>
+    </Modal>
   );
 }
 
