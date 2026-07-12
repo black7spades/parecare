@@ -3,9 +3,67 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { roleAtLeast } from '../middleware/requireRole';
-import type { Provider } from '../types';
+import type { Provider, ProfileKind } from '../types';
 
 export const directoryRouter = Router();
+
+// ── Care profiles (people & pets) ─────────────────────────
+
+/**
+ * List care profiles of a given kind for the directory.
+ *   super_admin  => every profile of that kind in the system
+ *   admin        => profiles belonging to their account
+ *   user/viewer  => profiles they can access via care circle (read-only)
+ */
+function profilesEndpoint(kind: ProfileKind) {
+  return async (req: import('express').Request, res: import('express').Response) => {
+    const account = req.account!;
+
+    const columns = [
+      'cp.id', 'cp.full_name', 'cp.preferred_name', 'cp.date_of_birth',
+      'cp.current_phase', 'cp.photo_url', 'cp.photo_color',
+      'cp.contact_name', 'cp.contact_phone', 'cp.contact_email',
+      'cp.owner_relationship',
+      ...(kind === 'pet' ? ['cp.species', 'cp.breed', 'cp.desexed', 'cp.microchip_number'] as const : []),
+    ];
+
+    let query = db('care_profiles as cp')
+      .select(
+        ...columns,
+        db.raw(`(
+          SELECT json_agg(json_build_object(
+            'display_name', ccm.display_name,
+            'relationship', ccm.relationship,
+            'role', ccm.role
+          ) ORDER BY ccm.display_name)
+          FROM care_circle_members ccm
+          WHERE ccm.care_profile_id = cp.id AND ccm.invite_accepted = true
+        ) AS circle_members`),
+      )
+      .where('cp.kind', kind)
+      .where('cp.archived', false)
+      .orderBy('cp.full_name', 'asc');
+
+    if (roleAtLeast(account.role, 'super_admin')) {
+      // See everything
+    } else if (roleAtLeast(account.role, 'admin')) {
+      query = query.where('cp.account_id', account.id);
+    } else {
+      query = query
+        .join('care_circle_members as ccm2', 'ccm2.care_profile_id', 'cp.id')
+        .where('ccm2.account_id', account.id)
+        .where('ccm2.invite_accepted', true)
+        .groupBy('cp.id');
+    }
+
+    const profiles = await query;
+    const canEdit = roleAtLeast(account.role, 'admin');
+    res.json({ profiles, can_edit: canEdit });
+  };
+}
+
+directoryRouter.get('/people', requireAuth, profilesEndpoint('person'));
+directoryRouter.get('/pets', requireAuth, profilesEndpoint('pet'));
 
 const providerSchema = z.object({
   provider_type: z.enum([
