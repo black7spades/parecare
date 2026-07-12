@@ -345,6 +345,7 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
   const [type, setType] = useState(med?.form ?? '');
   const [route, setRoute] = useState(med?.route ?? '');
   const [withFood, setWithFood] = useState(med?.with_food ?? false);
+  const [critical, setCritical] = useState(med?.critical ?? false);
   // Times a day drives how many time fields show; 0 means as needed.
   const initialTimes = med?.schedule_times ?? [];
   const [perDay, setPerDay] = useState(med?.as_needed ? 0 : initialTimes.length || 1);
@@ -404,6 +405,7 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
         route: route || null,
         with_food: withFood,
         as_needed: asNeeded,
+        critical,
         schedule_times: asNeeded ? [] : slots.slice(0, perDay),
         supply: packSize.trim() === '' ? null : Number(packSize),
         supply_remaining: remaining.trim() === '' ? null : Number(remaining),
@@ -491,6 +493,21 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
           ) : (
             <p className="text-xs text-muted">Set to 0 for a medication taken only as needed.</p>
           )}
+          <label className="mt-3 flex items-start gap-2 text-sm text-ink">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+              checked={critical}
+              onChange={(e) => setCritical(e.target.checked)}
+            />
+            <span>
+              Dangerous to miss
+              <span className="block text-xs text-muted">
+                Some medications are harmful to stop suddenly. When ticked, an overdue dose or an empty supply raises an
+                urgent alert; otherwise it is a normal notification.
+              </span>
+            </span>
+          </label>
         </section>
 
         <section>

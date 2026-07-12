@@ -1,5 +1,5 @@
 import { db } from '../config/database';
-import { formatInZone } from '../lib/timezone';
+import { formatInZone, hmInZone, startOfDayInZone } from '../lib/timezone';
 import type { Account, CareProfile } from '../types';
 
 /**
@@ -68,9 +68,8 @@ async function accessibleProfiles(accountId: string): Promise<Array<CareProfile 
 function overdueMedNames(
   meds: Array<{ care_profile_id: string; id: string; name: string; schedule_times: unknown }>,
   adminCounts: Map<string, number>,
-  now: Date
+  nowHm: string
 ): Map<string, string[]> {
-  const nowHm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const byProfile = new Map<string, string[]>();
   for (const med of meds) {
     const times = Array.isArray(med.schedule_times) ? (med.schedule_times as string[]) : [];
@@ -86,13 +85,15 @@ function overdueMedNames(
   return byProfile;
 }
 
-export async function gatherDashboardData(accountId: string): Promise<DashboardData> {
+export async function gatherDashboardData(accountId: string, timeZone?: string | null): Promise<DashboardData> {
   const profiles = await accessibleProfiles(accountId);
   if (profiles.length === 0) return { profiles: [], attentionCount: 0 };
 
   const ids = profiles.map((p) => p.id);
   const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  // "Today" runs on the user's clock, not the server's, so a dose logged
+  // this morning in Melbourne counts against today even on a UTC server.
+  const startOfDay = startOfDayInZone(now, timeZone);
   const soon = new Date(now.getTime() + 48 * 3600 * 1000);
   const staleBefore = new Date(now.getTime() - STALE_QUESTION_DAYS * 24 * 3600 * 1000);
 
@@ -172,7 +173,7 @@ export async function gatherDashboardData(accountId: string): Promise<DashboardD
   const overdueMedMap = overdueMedNames(
     meds as Array<{ care_profile_id: string; id: string; name: string; schedule_times: unknown }>,
     adminCounts,
-    now
+    hmInZone(now, timeZone)
   );
 
   const medsMap = new Map<string, Array<{ name: string; dose: string | null; schedule_times: string[] }>>();
@@ -288,7 +289,7 @@ export async function buildDashboardContext(
   account: Account,
   timeZone?: string | null
 ): Promise<{ context: string; profileCount: number; attentionCount: number }> {
-  const data = await gatherDashboardData(account.id);
+  const data = await gatherDashboardData(account.id, timeZone);
   const now = new Date();
 
   const people = data.profiles.filter((s) => s.profile.kind !== 'pet').length;
@@ -348,7 +349,7 @@ async function getDismissedKeys(accountId: string): Promise<Set<string>> {
  * account has dismissed is left out.
  */
 export async function gatherAttentionItems(accountId: string, timeZone?: string | null): Promise<AttentionItem[]> {
-  const [data, dismissed] = await Promise.all([gatherDashboardData(accountId), getDismissedKeys(accountId)]);
+  const [data, dismissed] = await Promise.all([gatherDashboardData(accountId, timeZone), getDismissedKeys(accountId)]);
   const items: AttentionItem[] = [];
   for (const s of data.profiles) {
     const name = s.profile.preferred_name ?? s.profile.full_name;

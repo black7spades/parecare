@@ -46,6 +46,9 @@ const medSchema = z.object({
   // How many units are on hand now. Independently editable.
   supply_remaining: z.coerce.number().min(0).max(1e9).optional().nullable(),
   repeats_due: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  // Dangerous to miss (stopping suddenly is harmful): overdue and
+  // out-of-stock alerts for this medication are urgent.
+  critical: z.boolean().optional(),
   active: z.boolean().optional(),
 });
 
@@ -315,6 +318,7 @@ async function medFieldsFrom(data: z.infer<typeof medSchema> | Partial<z.infer<t
   if ('as_needed' in data) fields['as_needed'] = data.as_needed ?? false;
   if ('frequency' in data) fields['frequency'] = data.frequency ?? null;
   if ('repeats_due' in data) fields['repeats_due'] = data.repeats_due ?? null;
+  if ('critical' in data) fields['critical'] = data.critical ?? false;
   if ('active' in data) fields['active'] = data.active ?? true;
 
   // Dose amount and measure are the source of truth; dose is composed.

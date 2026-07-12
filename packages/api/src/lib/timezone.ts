@@ -103,6 +103,35 @@ export function nowInZone(timeZone: string | null | undefined): string {
   return `${map.weekday} ${map.day} ${map.month} ${map.year}, ${map.hour}:${map.minute} (${zone})`;
 }
 
+/**
+ * The wall-clock HH:MM in the user's zone for a given instant. Without a
+ * usable zone it falls back to the server's clock, matching the fallback
+ * in startOfDayInZone.
+ */
+export function hmInZone(instant: Date, timeZone: string | null | undefined): string {
+  if (!isValidTimeZone(timeZone)) {
+    return `${String(instant.getHours()).padStart(2, '0')}:${String(instant.getMinutes()).padStart(2, '0')}`;
+  }
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(instant);
+  const map: Record<string, string> = {};
+  for (const p of parts) map[p.type] = p.value;
+  return `${map.hour}:${map.minute}`;
+}
+
+/** The UTC instant of local midnight in the user's zone, for "today" queries. */
+export function startOfDayInZone(instant: Date, timeZone: string | null | undefined): Date {
+  if (isValidTimeZone(timeZone)) {
+    const midnight = parseZonedTime(`${dateInZone(instant, timeZone)}T00:00:00`, timeZone);
+    if (midnight) return midnight;
+  }
+  return new Date(instant.getFullYear(), instant.getMonth(), instant.getDate());
+}
+
 /** The calendar date (YYYY-MM-DD) in the user's zone for a given instant. */
 export function dateInZone(instant: Date, timeZone: string | null | undefined): string {
   const zone = isValidTimeZone(timeZone) ? timeZone : 'UTC';
