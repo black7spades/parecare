@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
@@ -78,7 +79,12 @@ export function EmergencySheetPage() {
 
         <Section title="Allergies, do not give">
           {allergies.length === 0 ? (
-            <p className="text-sm">No known allergies recorded.</p>
+            <p className="text-sm">
+              No known allergies recorded.{' '}
+              <Link to="../plan" className="text-primary hover:underline print:hidden">
+                Record them on the care plan
+              </Link>
+            </p>
           ) : (
             <table className="w-full text-sm">
               <tbody>
@@ -95,7 +101,7 @@ export function EmergencySheetPage() {
 
         <Section title="Emergency contacts">
           {contacts.length === 0 ? (
-            <Empty />
+            <Empty to="../plan" action="Add them on the care plan" />
           ) : (
             contacts.map((c, i) => (
               <p key={i} className="text-sm">
@@ -108,7 +114,7 @@ export function EmergencySheetPage() {
 
         <Section title="Power of attorney">
           {poaHolders.length === 0 ? (
-            <Empty />
+            <Empty to=".." action="Name a holder on the overview" />
           ) : (
             poaHolders.map((h) => (
               <p key={h.key} className="text-sm flex items-center gap-2">
@@ -122,12 +128,16 @@ export function EmergencySheetPage() {
         </Section>
 
         <Section title="Medical conditions">
-          {conditions.length === 0 ? <Empty /> : <p className="text-sm">{conditions.map((c) => c.name).join(' · ')}</p>}
+          {conditions.length === 0 ? (
+            <Empty to=".." action="Record them on the overview" />
+          ) : (
+            <p className="text-sm">{conditions.map((c) => c.name).join(' · ')}</p>
+          )}
         </Section>
 
         <Section title="Current medications">
           {meds.length === 0 ? (
-            <Empty />
+            <Empty to="../medications" action="Add them on the Treatments page" />
           ) : (
             <table className="w-full text-sm">
               <tbody>
@@ -163,7 +173,7 @@ export function EmergencySheetPage() {
               </p>
             ))
           ) : (
-            <Empty />
+            <Empty to="../providers" action="Add a GP on the Providers page" />
           )}
         </Section>
 
@@ -201,6 +211,18 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Empty() {
-  return <p className="text-sm text-muted">Not recorded. Add it in the Care plan tab.</p>;
+/**
+ * An empty section says where the fact is recorded and links straight
+ * there. The link stays off the printed sheet, where it would be a dead
+ * end on paper.
+ */
+function Empty({ to, action }: { to: string; action: string }) {
+  return (
+    <p className="text-sm text-muted">
+      Not recorded.{' '}
+      <Link to={to} className="text-primary hover:underline print:hidden">
+        {action}
+      </Link>
+    </p>
+  );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Modal } from '../../../components/ui/Modal';
@@ -252,7 +253,11 @@ export function EditProfileModal({
           <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         ) : (
           <p className="text-xs text-muted">
-            Health conditions are recorded on the overview page, where typing offers suggestions from a shared list.
+            Health conditions are recorded on the{' '}
+            <Link to={`/app/${profile.id}`} onClick={onClose} className="text-primary hover:underline">
+              overview page
+            </Link>
+            , where typing offers suggestions from a shared list.
           </p>
         )}
         {error ? <p className="text-sm text-red-600">{error}</p> : null}

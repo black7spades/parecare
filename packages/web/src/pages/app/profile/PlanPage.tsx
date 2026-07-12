@@ -123,11 +123,39 @@ export function PlanPage() {
         <AllergiesTable profileId={profile.id} canEdit={canEdit} />
       </Section>
 
-      <Section id="conditions" title="Conditions" subtitle="What they live with. The treatments managing each condition are tied on the Treatments page." open={open.conditions} onToggle={toggle}>
+      <Section
+        id="conditions"
+        title="Conditions"
+        subtitle={
+          <>
+            What they live with. The treatments managing each condition are tied on the{' '}
+            <Link to="../medications" className="text-primary hover:underline">
+              Treatments page
+            </Link>
+            .
+          </>
+        }
+        open={open.conditions}
+        onToggle={toggle}
+      >
         <ConditionsTable profileId={profile.id} canEdit={canEdit} />
       </Section>
 
-      <Section id="treatments" title="Medications and treatments" subtitle="Surfaced from the Treatments page, where they are managed." open={open.treatments} onToggle={toggle}>
+      <Section
+        id="treatments"
+        title="Medications and treatments"
+        subtitle={
+          <>
+            Surfaced from the{' '}
+            <Link to="../medications" className="text-primary hover:underline">
+              Treatments page
+            </Link>
+            , where they are managed.
+          </>
+        }
+        open={open.treatments}
+        onToggle={toggle}
+      >
         <MedicationsTables profileId={profile.id} />
       </Section>
 
@@ -160,11 +188,39 @@ export function PlanPage() {
         </div>
       </Section>
 
-      <Section id="gp" title="GP" subtitle="Surfaced from the Providers page, where the GP is managed." open={open.gp} onToggle={toggle}>
+      <Section
+        id="gp"
+        title="GP"
+        subtitle={
+          <>
+            Surfaced from the{' '}
+            <Link to="../providers" className="text-primary hover:underline">
+              Providers page
+            </Link>
+            , where the GP is managed.
+          </>
+        }
+        open={open.gp}
+        onToggle={toggle}
+      >
         <GpTable profileId={profile.id} />
       </Section>
 
-      <Section id="directive" title="Advance care directive" subtitle="The document itself lives in Documents." open={open.directive} onToggle={toggle}>
+      <Section
+        id="directive"
+        title="Advance care directive"
+        subtitle={
+          <>
+            The document itself lives in{' '}
+            <Link to="../documents" className="text-primary hover:underline">
+              Documents
+            </Link>
+            .
+          </>
+        }
+        open={open.directive}
+        onToggle={toggle}
+      >
         <DirectiveSection profileId={profile.id} plan={plan} savePlan={savePlan} canEdit={canEdit} />
       </Section>
 
@@ -192,7 +248,8 @@ function Section({
 }: {
   id: SectionId;
   title: string;
-  subtitle: string;
+  /** May contain links, so it renders outside the toggle button. */
+  subtitle: React.ReactNode;
   open: boolean;
   onToggle: (id: SectionId) => void;
   accent?: boolean;
@@ -206,14 +263,12 @@ function Section({
         aria-expanded={open}
         onClick={() => onToggle(id)}
       >
-        <span>
-          <span className="block text-sm font-semibold text-ink">{title}</span>
-          <span className="block text-sm text-muted">{subtitle}</span>
-        </span>
+        <span className="block text-sm font-semibold text-ink">{title}</span>
         <span aria-hidden className="text-muted mt-0.5">
           {open ? '▾' : '▸'}
         </span>
       </button>
+      <p className="text-sm text-muted">{subtitle}</p>
       {open ? <div className="mt-3">{children}</div> : null}
     </div>
   );
