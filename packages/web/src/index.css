@@ -14,6 +14,15 @@
     --c-surface-2: 240 237 232;
     --c-border: 226 221 216;
     --c-card: 255 255 255;
+    --c-btn-primary: 170 255 102;
+    --c-btn-primary-hover: 0 204 85;
+    --c-btn-primary-text: 0 0 0;
+    --c-btn-secondary: 187 187 187;
+    --c-btn-secondary-hover: 119 119 119;
+    --c-btn-secondary-text: 0 0 0;
+    --c-btn-danger: 136 0 0;
+    --c-btn-danger-hover: 102 68 0;
+    --c-btn-danger-text: 255 255 255;
   }
   .dark {
     --c-primary: 111 158 137;
@@ -26,6 +35,15 @@
     --c-surface-2: 42 38 34;
     --c-border: 62 56 50;
     --c-card: 31 28 25;
+    --c-btn-primary: 170 255 102;
+    --c-btn-primary-hover: 0 204 85;
+    --c-btn-primary-text: 0 0 0;
+    --c-btn-secondary: 187 187 187;
+    --c-btn-secondary-hover: 119 119 119;
+    --c-btn-secondary-text: 0 0 0;
+    --c-btn-danger: 136 0 0;
+    --c-btn-danger-hover: 102 68 0;
+    --c-btn-danger-text: 255 255 255;
   }
 
   body {
@@ -50,10 +68,10 @@
     @apply inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .btn-primary {
-    @apply btn bg-primary text-white hover:bg-primary-600;
+    @apply btn bg-btn-primary text-btn-primary-text hover:bg-btn-primary-hover font-bold;
   }
   .btn-secondary {
-    @apply btn bg-surface-2 text-ink border border-border hover:bg-surface;
+    @apply btn bg-btn-secondary text-btn-secondary-text hover:bg-btn-secondary-hover border-none font-bold;
   }
   .btn-ghost {
     @apply btn text-muted hover:text-ink hover:bg-surface-2;

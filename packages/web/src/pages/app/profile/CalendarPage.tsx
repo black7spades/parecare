@@ -35,6 +35,24 @@ const MED_STATUS_CLASSES: Record<MedicationStatus, string> = {
   upcoming: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
 };
 
+const EVENT_KIND_CLASSES: Record<string, string> = {
+  birthday: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200',
+  health_status: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200',
+};
+
+const EVENT_KIND_LABELS: Record<string, string> = {
+  task: 'Tasks',
+  medication: 'Medications',
+  birthday: 'Birthdays',
+  health_status: 'Health statuses',
+};
+
+function eventKindClass(e: CalendarEvent): string {
+  if (e.kind && EVENT_KIND_CLASSES[e.kind]) return EVENT_KIND_CLASSES[e.kind];
+  if (e.kind === 'medication') return MED_STATUS_CLASSES[medicationStatus(e)];
+  return e.completed ? 'bg-surface-2 text-muted line-through' : 'bg-primary-50 text-primary';
+}
+
 export function CalendarPage() {
   const { profile, canEdit } = useProfile();
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
@@ -49,7 +67,24 @@ export function CalendarPage() {
         `/care-profiles/${profile.id}/calendar?from=${gridStart.toISOString()}&to=${gridEnd.toISOString()}`
       ),
   });
-  const events = data?.events ?? [];
+  const allEvents = data?.events ?? [];
+  const [hiddenKinds, setHiddenKinds] = useState<Set<string>>(new Set());
+  const toggleKind = (kind: string) =>
+    setHiddenKinds((prev) => {
+      const next = new Set(prev);
+      if (next.has(kind)) next.delete(kind);
+      else next.add(kind);
+      return next;
+    });
+  const events = allEvents.filter((e) => {
+    const kind = e.kind ?? 'task';
+    return !hiddenKinds.has(kind);
+  });
+
+  const availableKinds = useMemo(() => {
+    const kinds = new Set(allEvents.map((e) => e.kind ?? 'task'));
+    return ['task', 'medication', 'birthday', 'health_status'].filter((k) => kinds.has(k));
+  }, [allEvents]);
 
   const { data: feed } = useQuery({
     queryKey: ['calendar-feed', profile.id],
@@ -89,6 +124,25 @@ export function CalendarPage() {
             </Button>
           </div>
         </div>
+
+        {availableKinds.length > 1 ? (
+          <div className="flex flex-wrap gap-2 mb-3">
+            {availableKinds.map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                onClick={() => toggleKind(kind)}
+                className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                  hiddenKinds.has(kind)
+                    ? 'border-border text-muted bg-surface line-through'
+                    : 'border-primary text-primary bg-primary-50 font-medium'
+                }`}
+              >
+                {EVENT_KIND_LABELS[kind] ?? kind}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         <div className="grid grid-cols-7 text-xs text-muted mb-1">
           {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
@@ -146,11 +200,7 @@ export function CalendarPage() {
                 <div className="mt-1 space-y-1">
                   {shown.map((e) => {
                     const isMed = e.kind === 'medication';
-                    const cls = isMed
-                      ? MED_STATUS_CLASSES[medicationStatus(e)]
-                      : e.completed
-                        ? 'bg-surface-2 text-muted line-through'
-                        : 'bg-primary-50 text-primary';
+                    const cls = eventKindClass(e);
                     return (
                       <div
                         key={e.id}
@@ -253,7 +303,9 @@ function DayEventsModal({ day, events, onClose }: { day: Date; events: CalendarE
             const status = isMed ? medicationStatus(e) : e.completed ? 'completed' : null;
             const chipCls = isMed
               ? MED_STATUS_CLASSES[medicationStatus(e)]
-              : 'bg-surface-2 text-muted';
+              : e.kind && EVENT_KIND_CLASSES[e.kind]
+                ? EVENT_KIND_CLASSES[e.kind]
+                : 'bg-surface-2 text-muted';
             return (
               <li key={e.id} className="flex items-start gap-3 rounded-md border border-border px-3 py-2">
                 <span className="text-sm font-medium text-ink tabular-nums">

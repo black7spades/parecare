@@ -304,6 +304,72 @@ export interface Task {
   completed: boolean;
   completed_at: string | null;
   completed_by_name: string | null;
+  desired_outcome: string | null;
+  sentiment: number | null;
+  claimed_by: string | null;
+  claimed_at: string | null;
+  claimed_by_name: string | null;
+  co_owners: { id: string; display_name: string }[];
+}
+
+export const SENTIMENTS = [
+  { value: 1, label: 'Angry', emoji: '\u{1F621}' },
+  { value: 2, label: 'Sad', emoji: '\u{1F622}' },
+  { value: 3, label: 'Disappointed', emoji: '\u{1F61E}' },
+  { value: 4, label: 'Neutral', emoji: '\u{1F610}' },
+  { value: 5, label: 'Happy', emoji: '\u{1F642}' },
+  { value: 6, label: 'Overjoyed', emoji: '\u{1F929}' },
+] as const;
+
+export const sentimentLabel = (v: number) => SENTIMENTS.find((s) => s.value === v)?.label ?? '';
+export const sentimentEmoji = (v: number) => SENTIMENTS.find((s) => s.value === v)?.emoji ?? '';
+
+export const HEALTH_STATUS_CATEGORIES = [
+  { value: 'acute_illness', label: 'Acute illness' },
+  { value: 'post_operative', label: 'Post-operative' },
+  { value: 'recovery', label: 'Recovery' },
+] as const;
+
+export const healthStatusCategoryLabel = (c: string) =>
+  HEALTH_STATUS_CATEGORIES.find((x) => x.value === c)?.label ?? c;
+
+export const HEALTH_STATUS_STATUSES = [
+  { value: 'active', label: 'Active' },
+  { value: 'monitoring', label: 'Monitoring' },
+  { value: 'resolving', label: 'Resolving' },
+  { value: 'resolved', label: 'Resolved' },
+] as const;
+
+export const healthStatusStatusLabel = (s: string) =>
+  HEALTH_STATUS_STATUSES.find((x) => x.value === s)?.label ?? s;
+
+export interface HealthStatusSymptom {
+  id: string;
+  health_status_id: string;
+  name: string;
+  severity: number;
+  noted_at: string;
+  resolved_at: string | null;
+  notes: string | null;
+}
+
+export interface HealthStatus {
+  id: string;
+  care_profile_id: string;
+  name: string;
+  category: string;
+  status: string;
+  onset_date: string;
+  expected_resolution_date: string | null;
+  actual_resolution_date: string | null;
+  is_contagious: boolean;
+  isolation_required: boolean;
+  escalation_notes: string | null;
+  region: string | null;
+  linked_condition_id: string | null;
+  symptoms: HealthStatusSymptom[];
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ChatMessage {
