@@ -586,6 +586,23 @@ adminRouter.post('/assignments', async (req, res) => {
   res.status(201).json({ assigned: created, skipped });
 });
 
+// Care profile IDs an account is already a member of (via circle or ownership).
+adminRouter.get('/accounts/:accountId/memberships', async (req, res) => {
+  const target = await db('accounts').where({ id: req.params.accountId }).first();
+  if (!target) {
+    res.status(404).json({ error: 'Account not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const owned = await db('care_profiles')
+    .where({ account_id: target.id, archived: false })
+    .select('id');
+  const circled = await db('care_circle_members')
+    .where({ account_id: target.id, invite_accepted: true })
+    .select('care_profile_id as id');
+  const ids = [...new Set([...owned.map((r: { id: string }) => r.id), ...circled.map((r: { id: string }) => r.id)])];
+  res.json({ care_profile_ids: ids });
+});
+
 // Minimal profile list for the admin pickers.
 adminRouter.get('/care-profiles', async (req, res) => {
   const search = typeof req.query['search'] === 'string' ? req.query['search'] : '';
