@@ -240,7 +240,7 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
     return;
   }
 
-  const [pins, plans, gpProviders, poa, activity, events, journeyRows] = await Promise.all([
+  const [pins, plans, gpProviders, poa, activity, events, journeyRows, healthRows] = await Promise.all([
     db('care_profile_pins').where({ account_id: accountId }).whereIn('care_profile_id', ids).select('care_profile_id'),
     db('care_plans').whereIn('care_profile_id', ids).select('care_profile_id', 'emergency_contacts'),
     // The GP lives in providers; their phone backs up the named contact's.
@@ -286,6 +286,17 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
        ORDER BY j.started_at ASC`,
       [ids]
     ),
+    // Active health statuses for traffic-light border and dashboard display.
+    db.raw(
+      `SELECT hs.care_profile_id, hs.id, hs.name, hs.category, hs.status,
+              hs.is_contagious, hs.isolation_required, hs.onset_date,
+              (SELECT count(*)::int FROM health_status_symptoms s
+               WHERE s.health_status_id = hs.id AND s.resolved_at IS NULL) AS active_symptom_count
+       FROM health_statuses hs
+       WHERE hs.care_profile_id = ANY(?) AND hs.status != 'resolved'
+       ORDER BY hs.created_at ASC`,
+      [ids]
+    ),
   ]);
 
   // For profiles whose contact is an existing user, pull that user's email.
@@ -316,6 +327,13 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
     const arr = journeyMap.get(j.care_profile_id) ?? [];
     arr.push({ id: j.id, name: j.name, phase_name: j.phase_name, phase_sort_order: j.phase_sort_order });
     journeyMap.set(j.care_profile_id, arr);
+  }
+
+  const healthMap = new Map<string, Array<Record<string, unknown>>>();
+  for (const h of healthRows.rows as Array<{ care_profile_id: string; id: string; name: string; category: string; status: string; is_contagious: boolean; isolation_required: boolean; onset_date: string; active_symptom_count: number }>) {
+    const arr = healthMap.get(h.care_profile_id) ?? [];
+    arr.push({ id: h.id, name: h.name, category: h.category, status: h.status, is_contagious: h.is_contagious, isolation_required: h.isolation_required, onset_date: h.onset_date, active_symptom_count: h.active_symptom_count });
+    healthMap.set(h.care_profile_id, arr);
   }
 
   const result = profiles.map((p) => {
@@ -359,6 +377,7 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
       last_activity: actMap.get(p.id) ?? null,
       next_event: evMap.get(p.id) ?? null,
       journeys: journeyMap.get(p.id) ?? [],
+      health_statuses: healthMap.get(p.id) ?? [],
     };
   });
   res.json({ profiles: result });
