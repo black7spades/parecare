@@ -5,6 +5,8 @@ import { Button } from '../../components/ui/Button';
 import { Input, Textarea } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
 import { useAuthStore } from '../../stores/auth';
+import { useDataView, type DataSort, type DataFilter } from '../../components/data/useDataView';
+import { DataToolbar } from '../../components/data/DataToolbar';
 import {
   JOURNEY_KINDS,
   journeyKindLabel,
@@ -187,11 +189,18 @@ function LifeStagesManager() {
 
 // ------------------------------------------------------------- templates
 
+const byName = (a: JourneyTemplateSummary, b: JourneyTemplateSummary) => a.name.localeCompare(b.name);
+
+const TEMPLATE_SORTS: DataSort<JourneyTemplateSummary>[] = [
+  { key: 'name', label: 'By name (A–Z)', compare: byName },
+  { key: 'kind', label: 'By kind', compare: (a, b) => a.kind.localeCompare(b.kind) || byName(a, b) },
+  { key: 'phases', label: 'By number of phases', compare: (a, b) => b.phase_count - a.phase_count || byName(a, b) },
+];
+
 function TemplateLibrary() {
   const queryClient = useQueryClient();
   const isSuperAdmin = useAuthStore((s) => s.account?.role) === 'super_admin';
   const [editorId, setEditorId] = useState<string | 'new' | null>(null);
-  const [search, setSearch] = useState('');
   const [error, setError] = useState('');
 
   const { data: stagesData } = useQuery({
@@ -211,7 +220,36 @@ function TemplateLibrary() {
     void queryClient.invalidateQueries({ queryKey: ['life-stages'] });
   };
 
-  const filtered = templates.filter((t) => !search.trim() || t.name.toLowerCase().includes(search.trim().toLowerCase()));
+  const kindFilter: DataFilter<JourneyTemplateSummary> = {
+    key: 'kind',
+    label: 'Kind',
+    options: JOURNEY_KINDS.map((k) => ({ value: k.value, label: k.label })),
+    match: (t, v) => t.kind === v,
+  };
+  const statusFilter: DataFilter<JourneyTemplateSummary> = {
+    key: 'status',
+    label: 'Status',
+    options: [
+      { value: 'published', label: 'Published' },
+      { value: 'draft', label: 'Draft' },
+      { value: 'archived', label: 'Archived' },
+    ],
+    match: (t, v) => t.status === v,
+  };
+  const lifeStageFilter: DataFilter<JourneyTemplateSummary> = {
+    key: 'life_stage',
+    label: 'Life stage',
+    options: stages.map((s) => ({ value: s.id, label: s.name })),
+    match: (t, v) => t.life_stage_ids.includes(v),
+  };
+
+  const dv = useDataView<JourneyTemplateSummary>({
+    rows: templates,
+    getId: (t) => t.id,
+    searchText: (t) => [t.name, t.description, journeyKindLabel(t.kind)].filter(Boolean).join(' '),
+    sorts: TEMPLATE_SORTS,
+    filters: [kindFilter, statusFilter, lifeStageFilter],
+  });
 
   const cloneMutation = useMutation({
     mutationFn: (id: string) => api.post<{ template: JourneyTemplateFull }>(`/journey-templates/${id}/clone`),
@@ -243,13 +281,27 @@ function TemplateLibrary() {
             phases from across the library. People's journeys are copies; library edits change no one's record.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Input placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search journeys" />
-          <Button size="sm" onClick={() => setEditorId('new')}>
-            New journey
-          </Button>
-        </div>
+        <Button size="sm" onClick={() => setEditorId('new')}>
+          New journey
+        </Button>
       </div>
+      <DataToolbar
+        search={dv.search}
+        onSearch={dv.setSearch}
+        searchPlaceholder="Search journeys…"
+        sorts={TEMPLATE_SORTS.map((s) => ({ key: s.key, label: s.label }))}
+        sortKey={dv.sortKey}
+        onSort={dv.setSortKey}
+        filters={[kindFilter, statusFilter, lifeStageFilter].map((f) => ({ key: f.key, label: f.label, options: f.options }))}
+        filterValues={dv.filterValues}
+        onFilter={dv.setFilter}
+        page={dv.page}
+        totalPages={dv.totalPages}
+        pageSize={dv.pageSize}
+        totalFiltered={dv.totalFiltered}
+        onPageChange={dv.setPage}
+        onPageSizeChange={dv.setPageSize}
+      />
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
       <div className="card overflow-x-auto p-0">
         <table className="w-full text-sm">
@@ -264,7 +316,7 @@ function TemplateLibrary() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((t) => {
+            {dv.view.map((t) => {
               const canEdit = !t.is_system || isSuperAdmin;
               return (
                 <tr key={t.id} className="border-b border-border last:border-0">

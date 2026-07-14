@@ -58,6 +58,45 @@ questionsRouter.patch('/:questionId', requireAuth, async (req, res) => {
   res.json({ question });
 });
 
+questionsRouter.delete('/:questionId', requireAuth, async (req, res) => {
+  const deleted = await db('open_questions')
+    .where({ id: req.params['questionId'], care_profile_id: req.params['id'] })
+    .del();
+  if (!deleted) {
+    res.status(404).json({ error: 'Question not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ deleted: 1 });
+});
+
+questionsRouter.post('/bulk', requireAuth, async (req, res) => {
+  const schema = z.object({
+    action: z.enum(['resolve', 'delete']),
+    ids: z.array(z.string().uuid()).min(1),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const { action, ids } = parsed.data;
+  const profileId = req.params['id'];
+
+  if (action === 'delete') {
+    const deleted = await db('open_questions')
+      .where({ care_profile_id: profileId })
+      .whereIn('id', ids)
+      .del();
+    res.json({ deleted });
+  } else {
+    const updated = await db<OpenQuestion>('open_questions')
+      .where({ care_profile_id: profileId })
+      .whereIn('id', ids)
+      .update({ status: 'resolved', resolved_at: new Date().toISOString() });
+    res.json({ updated });
+  }
+});
+
 questionsRouter.get('/:questionId/responses', requireAuth, async (req, res) => {
   const responses = await db('open_question_responses')
     .leftJoin('care_circle_members', 'open_question_responses.author_member_id', 'care_circle_members.id')

@@ -109,6 +109,12 @@ export function ProvidersPage() {
                 : []
             }
             onClearSelection={dv.clearSelection}
+            page={dv.page}
+            totalPages={dv.totalPages}
+            pageSize={dv.pageSize}
+            totalFiltered={dv.totalFiltered}
+            onPageChange={dv.setPage}
+            onPageSizeChange={dv.setPageSize}
           />
         </div>
       ) : null}

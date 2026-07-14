@@ -5,6 +5,8 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
+import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
+import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
 import { DOCUMENT_CATEGORIES, documentCategoryLabel, type CareDocument } from '../../../lib/care';
 import { useProfile } from './ProfileLayout';
 
@@ -14,8 +16,18 @@ function formatSize(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const sizeValue = (d: CareDocument): number => d.file_size_bytes ?? 0;
+const byName = (a: CareDocument, b: CareDocument) => a.label.localeCompare(b.label);
+
+const DOC_SORTS: DataSort<CareDocument>[] = [
+  { key: 'name', label: 'By name (A–Z)', compare: byName },
+  { key: 'date', label: 'By date (newest first)', compare: (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime() || byName(a, b) },
+  { key: 'category', label: 'By category', compare: (a, b) => documentCategoryLabel(a.category).localeCompare(documentCategoryLabel(b.category)) || byName(a, b) },
+  { key: 'size', label: 'By size (largest first)', compare: (a, b) => sizeValue(b) - sizeValue(a) || byName(a, b) },
+];
+
 export function DocumentsPage() {
-  const { profile } = useProfile();
+  const { profile, canEdit } = useProfile();
   const queryClient = useQueryClient();
   const fileInput = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -24,6 +36,8 @@ export function DocumentsPage() {
   const [restrictedRoles, setRestrictedRoles] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState<CareDocument | null>(null);
+  const [editing, setEditing] = useState<CareDocument | null>(null);
+  const [confirmBulk, setConfirmBulk] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['documents', profile.id],
@@ -60,6 +74,35 @@ export function DocumentsPage() {
     },
   });
 
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) => Promise.all(ids.map((id) => api.delete(`/care-profiles/${profile.id}/documents/${id}`))),
+    onSuccess: () => {
+      setConfirmBulk(false);
+      dv.clearSelection();
+      invalidate();
+    },
+  });
+
+  // Build category filter dynamically from existing documents.
+  const categoryFilter: DataFilter<CareDocument> = {
+    key: 'category',
+    label: 'Category',
+    options: [...new Set(documents.map((d) => d.category))].map((c) => ({ value: c, label: documentCategoryLabel(c) })),
+    match: (d, v) => d.category === v,
+  };
+
+  const dv = useDataView<CareDocument>({
+    rows: documents,
+    getId: (d) => d.id,
+    searchText: (d) => [d.label, documentCategoryLabel(d.category)].join(' '),
+    sorts: DOC_SORTS,
+    filters: [categoryFilter],
+  });
+
+  const bulkActions: ToolbarBulkAction[] = canEdit
+    ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulk(true) }]
+    : [];
+
   async function download(doc: CareDocument) {
     const blob = await api.blob(`/care-profiles/${profile.id}/documents/${doc.id}/file`);
     const url = URL.createObjectURL(blob);
@@ -75,46 +118,112 @@ export function DocumentsPage() {
     <div className="grid gap-6 lg:grid-cols-[1fr_20rem] items-start">
       <div className="card">
         <h2 className="text-base font-semibold text-ink mb-4">Document repository</h2>
+
+        <DataToolbar
+          search={dv.search}
+          onSearch={dv.setSearch}
+          searchPlaceholder="Search documents…"
+          sorts={DOC_SORTS.map((s) => ({ key: s.key, label: s.label }))}
+          sortKey={dv.sortKey}
+          onSort={dv.setSortKey}
+          filters={[categoryFilter].map((f) => ({ key: f.key, label: f.label, options: f.options }))}
+          filterValues={dv.filterValues}
+          onFilter={dv.setFilter}
+          selectedCount={dv.selectedRows.length}
+          bulkActions={bulkActions}
+          onClearSelection={dv.clearSelection}
+          page={dv.page}
+          totalPages={dv.totalPages}
+          pageSize={dv.pageSize}
+          totalFiltered={dv.totalFiltered}
+          onPageChange={dv.setPage}
+          onPageSizeChange={dv.setPageSize}
+        />
+
         {isLoading ? (
-          <p className="text-sm text-muted">Loading…</p>
-        ) : documents.length === 0 ? (
-          <p className="text-sm text-muted">
-            No documents yet. Keep medical certificates, the will, POA papers and care plans here so nobody hunts
-            through email chains.
+          <p className="text-sm text-muted mt-4">Loading…</p>
+        ) : dv.view.length === 0 ? (
+          <p className="text-sm text-muted mt-4">
+            {documents.length === 0
+              ? 'No documents yet. Keep medical certificates, the will, POA papers and care plans here so nobody hunts through email chains.'
+              : 'No documents match your search or filters.'}
           </p>
         ) : (
-          <ul className="divide-y divide-border -my-2">
-            {documents.map((doc) => (
-              <li key={doc.id} className="py-3 flex flex-wrap items-start gap-x-3 gap-y-2">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium text-ink break-words">{doc.label}</span>
-                    <span className="text-xs text-muted">{formatSize(doc.file_size_bytes)}</span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                    <span className="badge bg-surface-2 text-muted text-xs">{documentCategoryLabel(doc.category)}</span>
-                    {(doc.visible_to_roles?.length ?? 0) > 0 ? (
-                      <span
-                        className="badge bg-amber-50 text-amber-700 text-xs"
-                        title={`Visible to the owner and: ${doc.visible_to_roles!.join(', ')}`}
-                      >
-                        Restricted
-                      </span>
-                    ) : null}
-                    <span className="text-xs text-muted">{format(new Date(doc.created_at), 'd MMM yyyy')}</span>
-                  </div>
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  <Button size="sm" variant="secondary" onClick={() => void download(doc)}>
-                    Download
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setDeleting(doc)}>
-                    Delete
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <div className="card p-0 overflow-x-auto mt-4">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted border-b border-border">
+                  <th className="px-4 py-3 w-8">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all"
+                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                      checked={dv.allSelected}
+                      onChange={dv.toggleAll}
+                    />
+                  </th>
+                  <th className="px-4 py-3 font-medium">Name</th>
+                  <th className="px-4 py-3 font-medium">Category</th>
+                  <th className="px-4 py-3 font-medium">Size</th>
+                  <th className="px-4 py-3 font-medium">Date</th>
+                  <th className="px-4 py-3 font-medium">Visibility</th>
+                  <th className="px-4 py-3 font-medium text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dv.view.map((doc) => (
+                  <tr key={doc.id} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${doc.label}`}
+                        className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                        checked={dv.selected.has(doc.id)}
+                        onChange={() => dv.toggle(doc.id)}
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="font-medium text-ink break-words">{doc.label}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="badge bg-surface-2 text-muted text-xs">{documentCategoryLabel(doc.category)}</span>
+                    </td>
+                    <td className="px-4 py-3 text-muted">{formatSize(doc.file_size_bytes)}</td>
+                    <td className="px-4 py-3 text-muted">{format(new Date(doc.created_at), 'd MMM yyyy')}</td>
+                    <td className="px-4 py-3">
+                      {(doc.visible_to_roles?.length ?? 0) > 0 ? (
+                        <span
+                          className="badge bg-amber-50 text-amber-700 text-xs"
+                          title={`Visible to the owner and: ${doc.visible_to_roles!.join(', ')}`}
+                        >
+                          Restricted
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted">Everyone</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <div className="flex justify-end gap-2">
+                        <Button size="sm" variant="secondary" onClick={() => void download(doc)}>
+                          Download
+                        </Button>
+                        {canEdit ? (
+                          <>
+                            <Button size="sm" variant="secondary" onClick={() => setEditing(doc)}>
+                              Edit
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setDeleting(doc)}>
+                              Delete
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -218,6 +327,73 @@ export function DocumentsPage() {
           </Button>
         </div>
       </Modal>
+
+      <Modal open={confirmBulk} onClose={() => setConfirmBulk(false)} title="Delete documents">
+        <p className="text-sm text-muted mb-4">
+          Permanently delete <span className="font-medium text-ink">{dv.selectedRows.length}</span> selected
+          document{dv.selectedRows.length === 1 ? '' : 's'}? This cannot be undone.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmBulk(false)}>Cancel</Button>
+          <Button
+            variant="danger"
+            loading={bulkDeleteMutation.isPending}
+            onClick={() => bulkDeleteMutation.mutate(dv.selectedRows.map((d) => d.id))}
+          >
+            Delete {dv.selectedRows.length}
+          </Button>
+        </div>
+      </Modal>
+
+      {editing ? (
+        <EditDocumentModal
+          profileId={profile.id}
+          doc={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); invalidate(); }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function EditDocumentModal({ profileId, doc, onClose, onSaved }: { profileId: string; doc: CareDocument; onClose: () => void; onSaved: () => void }) {
+  const [editLabel, setEditLabel] = useState(doc.label);
+  const [editCategory, setEditCategory] = useState(doc.category);
+  const [editError, setEditError] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => api.patch(`/care-profiles/${profileId}/documents/${doc.id}`, {
+      label: editLabel.trim(),
+      category: editCategory,
+    }),
+    onSuccess: onSaved,
+    onError: (err) => setEditError(err instanceof Error ? err.message : 'Failed to save'),
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Edit document">
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (editLabel.trim()) mutation.mutate(); }}>
+        <Input label="Label" value={editLabel} onChange={(e) => setEditLabel(e.target.value)} required />
+        <div>
+          <label htmlFor="edit-doc-category" className="block text-sm font-medium text-ink mb-1">Category</label>
+          <select
+            id="edit-doc-category"
+            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            value={editCategory}
+            onChange={(e) => setEditCategory(e.target.value)}
+          >
+            {DOCUMENT_CATEGORIES.map((c) => (
+              <option key={c.value} value={c.value}>{c.label}</option>
+            ))}
+          </select>
+        </div>
+        {editError ? <p className="text-sm text-red-600">{editError}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={mutation.isPending} disabled={!editLabel.trim()}>Save</Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

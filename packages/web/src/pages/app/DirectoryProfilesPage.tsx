@@ -125,6 +125,12 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
             selectedCount={0}
             bulkActions={[]}
             onClearSelection={() => {}}
+            page={dv.page}
+            totalPages={dv.totalPages}
+            pageSize={dv.pageSize}
+            totalFiltered={dv.totalFiltered}
+            onPageChange={dv.setPage}
+            onPageSizeChange={dv.setPageSize}
           />
         </div>
       ) : null}

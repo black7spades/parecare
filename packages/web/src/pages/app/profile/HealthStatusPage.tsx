@@ -736,6 +736,12 @@ export function HealthStatusPage() {
         filters={FILTERS}
         filterValues={dv.filterValues}
         onFilter={dv.setFilter}
+        page={dv.page}
+        totalPages={dv.totalPages}
+        pageSize={dv.pageSize}
+        totalFiltered={dv.totalFiltered}
+        onPageChange={dv.setPage}
+        onPageSizeChange={dv.setPageSize}
       />
 
       {isLoading ? (

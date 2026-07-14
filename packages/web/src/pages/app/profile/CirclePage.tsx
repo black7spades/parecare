@@ -8,6 +8,16 @@ import { PoaBadge } from '../../../components/PoaBadge';
 import { POA_TYPES, poaLabel, type CircleMember } from '../../../lib/care';
 import { RelationshipSelect } from '../../../components/RelationshipSelect';
 import { useProfile } from './ProfileLayout';
+import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
+import { DataToolbar } from '../../../components/data/DataToolbar';
+
+const byName = (a: CircleMember, b: CircleMember) => a.display_name.localeCompare(b.display_name);
+
+const CIRCLE_SORTS: DataSort<CircleMember>[] = [
+  { key: 'name', label: 'By name (A–Z)', compare: byName },
+  { key: 'role', label: 'By role', compare: (a, b) => a.role.localeCompare(b.role) || byName(a, b) },
+  { key: 'newest', label: 'Newest first', compare: (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime() },
+];
 
 export function CirclePage() {
   const { profile, canManageEditors, careName } = useProfile();
@@ -29,6 +39,39 @@ export function CirclePage() {
       setRemoving(null);
       invalidate();
     },
+  });
+
+  const roleFilter: DataFilter<CircleMember> = {
+    key: 'role',
+    label: 'Role',
+    options: [...new Set(members.map((m) => m.role))].sort().map((r) => ({ value: r, label: r.charAt(0).toUpperCase() + r.slice(1) })),
+    match: (m, v) => m.role === v,
+  };
+  const permissionFilter: DataFilter<CircleMember> = {
+    key: 'permission',
+    label: 'Access level',
+    options: [
+      { value: 'contributor', label: 'Contributor' },
+      { value: 'viewer', label: 'Viewer' },
+    ],
+    match: (m, v) => m.permission === v,
+  };
+  const statusFilter: DataFilter<CircleMember> = {
+    key: 'status',
+    label: 'Status',
+    options: [
+      { value: 'active', label: 'Active' },
+      { value: 'pending', label: 'Invite pending' },
+    ],
+    match: (m, v) => (v === 'active' ? m.invite_accepted : !m.invite_accepted),
+  };
+
+  const dv = useDataView<CircleMember>({
+    rows: members,
+    getId: (m) => m.id,
+    searchText: (m) => [m.display_name, m.role, m.relationship, m.invited_email, m.role_description].filter(Boolean).join(' '),
+    sorts: CIRCLE_SORTS,
+    filters: [roleFilter, permissionFilter, statusFilter],
   });
 
   return (
@@ -57,47 +100,70 @@ export function CirclePage() {
           {canManageEditors ? <Button onClick={() => setInviteOpen(true)}>Send the first invite</Button> : null}
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {members.map((m) => (
-            <div key={m.id} className={`card ${m.poa_activated ? 'border-amber-400' : ''}`}>
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-sm font-semibold text-ink">{m.display_name}</h3>
-                    <PoaBadge type={m.poa_type} activated={m.poa_activated} />
-                  </div>
-                  <p className="text-xs text-muted capitalize">
-                    {m.role}
-                    {m.relationship ? ` · their ${m.relationship}` : ''}
-                    {m.permission === 'viewer' ? ' · view only' : ''}
-                    {m.can_edit_profile ? ' · can edit profile' : ''}
-                  </p>
-                </div>
-                <span
-                  className={`badge text-xs ${m.invite_accepted ? 'bg-primary-50 text-primary' : 'bg-surface-2 text-muted'}`}
-                >
-                  {m.invite_accepted ? 'Active' : 'Invite pending'}
-                </span>
+        <>
+          <DataToolbar
+            search={dv.search}
+            onSearch={dv.setSearch}
+            searchPlaceholder="Search circle members…"
+            sorts={CIRCLE_SORTS.map((s) => ({ key: s.key, label: s.label }))}
+            sortKey={dv.sortKey}
+            onSort={dv.setSortKey}
+            filters={[roleFilter, permissionFilter, statusFilter].map((f) => ({ key: f.key, label: f.label, options: f.options }))}
+            filterValues={dv.filterValues}
+            onFilter={dv.setFilter}
+            page={dv.page}
+            totalPages={dv.totalPages}
+            pageSize={dv.pageSize}
+            totalFiltered={dv.totalFiltered}
+            onPageChange={dv.setPage}
+            onPageSizeChange={dv.setPageSize}
+          />
+          <div className="grid gap-4 sm:grid-cols-2 mt-4">
+            {dv.view.length === 0 ? (
+              <div className="col-span-full card text-center py-10">
+                <p className="text-sm text-muted">No circle members match your search or filters.</p>
               </div>
-              {m.invited_email ? <p className="text-xs text-muted mt-1">{m.invited_email}</p> : null}
-              {m.poa_type ? <p className="text-xs text-amber-700 mt-1">{poaLabel(m.poa_type)}</p> : null}
-              {m.role_description ? <p className="text-sm text-ink mt-2">{m.role_description}</p> : null}
-              {!m.invite_accepted && canManageEditors ? (
-                <PendingInviteActions profileId={profile.id} member={m} onChanged={invalidate} />
-              ) : null}
-              {canManageEditors ? (
-                <div className="mt-3 flex gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>
-                    Edit
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setRemoving(m)}>
-                    Remove
-                  </Button>
+            ) : dv.view.map((m) => (
+              <div key={m.id} className={`card ${m.poa_activated ? 'border-amber-400' : ''}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-sm font-semibold text-ink">{m.display_name}</h3>
+                      <PoaBadge type={m.poa_type} activated={m.poa_activated} />
+                    </div>
+                    <p className="text-xs text-muted capitalize">
+                      {m.role}
+                      {m.relationship ? ` · their ${m.relationship}` : ''}
+                      {m.permission === 'viewer' ? ' · view only' : ''}
+                      {m.can_edit_profile ? ' · can edit profile' : ''}
+                    </p>
+                  </div>
+                  <span
+                    className={`badge text-xs ${m.invite_accepted ? 'bg-primary-50 text-primary' : 'bg-surface-2 text-muted'}`}
+                  >
+                    {m.invite_accepted ? 'Active' : 'Invite pending'}
+                  </span>
                 </div>
-              ) : null}
-            </div>
-          ))}
-        </div>
+                {m.invited_email ? <p className="text-xs text-muted mt-1">{m.invited_email}</p> : null}
+                {m.poa_type ? <p className="text-xs text-amber-700 mt-1">{poaLabel(m.poa_type)}</p> : null}
+                {m.role_description ? <p className="text-sm text-ink mt-2">{m.role_description}</p> : null}
+                {!m.invite_accepted && canManageEditors ? (
+                  <PendingInviteActions profileId={profile.id} member={m} onChanged={invalidate} />
+                ) : null}
+                {canManageEditors ? (
+                  <div className="mt-3 flex gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>
+                      Edit
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setRemoving(m)}>
+                      Remove
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       <InviteModal
