@@ -4,6 +4,8 @@ import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
+import { useDataView, type DataSort } from '../../../components/data/useDataView';
+import { DataToolbar } from '../../../components/data/DataToolbar';
 import { useAuthStore } from '../../../stores/auth';
 import { useProfile } from './ProfileLayout';
 import { ItemNotesThread } from './JourneysSection';
@@ -277,21 +279,22 @@ function MilestoneCard({ achievement }: { achievement: Achievement }) {
   );
 }
 
-type SortKey = 'title' | 'journey' | 'achieved' | 'milestone';
+const ACHIEVEMENT_SORTS: DataSort<Achievement>[] = [
+  { key: 'achieved', label: 'By date (newest first)', compare: (a, b) => new Date(b.achieved_on ?? b.completed_at).getTime() - new Date(a.achieved_on ?? a.completed_at).getTime() },
+  { key: 'title', label: 'By title (A-Z)', compare: (a, b) => a.title.localeCompare(b.title) },
+  { key: 'journey', label: 'By journey', compare: (a, b) => (a.journey_name ?? '').localeCompare(b.journey_name ?? '') || a.title.localeCompare(b.title) },
+  { key: 'milestone', label: 'Milestones first', compare: (a, b) => Number(b.is_milestone) - Number(a.is_milestone) || a.title.localeCompare(b.title) },
+];
 
 function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWriteStory: (a: Achievement) => void }) {
-  const [q, setQ] = useState('');
   const [journeyId, setJourneyId] = useState('');
   const [milestoneOnly, setMilestoneOnly] = useState(false);
   const [photosOnly, setPhotosOnly] = useState(false);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('achieved');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [openId, setOpenId] = useState<string | null>(null);
 
   const params = new URLSearchParams();
-  if (q.trim()) params.set('q', q.trim());
   if (journeyId) params.set('journey_id', journeyId);
   if (milestoneOnly) params.set('milestone', '1');
   if (from) params.set('from', from);
@@ -311,43 +314,23 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
   });
   const journeys = journeysData?.journeys ?? [];
 
-  const rows = useMemo(() => {
+  const serverRows = useMemo(() => {
     let list = data?.achievements ?? [];
     if (photosOnly) list = list.filter((a) => a.photo_count > 0);
-    const dir = sortDir === 'asc' ? 1 : -1;
-    const value = (a: Achievement): string | number => {
-      switch (sortKey) {
-        case 'title':
-          return a.title.toLowerCase();
-        case 'journey':
-          return (a.journey_name ?? '').toLowerCase();
-        case 'achieved':
-          return new Date(a.achieved_on ?? a.completed_at).getTime();
-        case 'milestone':
-          return a.is_milestone ? 1 : 0;
-      }
-    };
-    return [...list].sort((x, y) => {
-      const vx = value(x);
-      const vy = value(y);
-      return vx < vy ? -dir : vx > vy ? dir : 0;
-    });
-  }, [data, photosOnly, sortKey, sortDir]);
+    return list;
+  }, [data, photosOnly]);
 
-  const sortBy = (key: SortKey) => {
-    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else {
-      setSortKey(key);
-      setSortDir(key === 'title' || key === 'journey' ? 'asc' : 'desc');
-    }
-  };
+  const dv = useDataView<Achievement>({
+    rows: serverRows,
+    getId: (a) => a.id,
+    searchText: (a) => [a.title, a.journey_name, a.phase_name, a.recorded_by_name].filter(Boolean).join(' '),
+    sorts: ACHIEVEMENT_SORTS,
+  });
 
-  // The export keeps every fact as its own column even though the table
-  // shows only the essentials.
   const exportCsv = () => {
     const esc = (v: string | number | null) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const header = ['Achievement', 'Journey', 'Phase', 'Date it happened', 'Date it was recorded', 'Recorded by', 'Milestone', 'Notes', 'Photos'];
-    const lines = rows.map((a) =>
+    const lines = dv.filtered.map((a) =>
       [
         a.title,
         a.journey_name ?? '',
@@ -371,15 +354,6 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
     URL.revokeObjectURL(url);
   };
 
-  const th = (key: SortKey, label: string, extra = '') => (
-    <th className={`px-3 py-2 text-left font-medium text-muted ${extra}`}>
-      <button type="button" className="hover:text-ink" onClick={() => sortBy(key)}>
-        {label}
-        {sortKey === key ? <span className="ml-0.5">{sortDir === 'asc' ? '↑' : '↓'}</span> : null}
-      </button>
-    </th>
-  );
-
   return (
     <div className="space-y-4">
       <div className="card space-y-3">
@@ -390,12 +364,27 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
               Every completed checklist item, across every journey. Select one to see its whole story.
             </p>
           </div>
-          <Button size="sm" variant="secondary" onClick={exportCsv} disabled={rows.length === 0}>
+          <Button size="sm" variant="secondary" onClick={exportCsv} disabled={dv.filtered.length === 0}>
             Export as CSV
           </Button>
         </div>
-        <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
-          <Input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search achievements" />
+
+        <DataToolbar
+          search={dv.search}
+          onSearch={dv.setSearch}
+          searchPlaceholder="Search achievements..."
+          sorts={ACHIEVEMENT_SORTS.map((s) => ({ key: s.key, label: s.label }))}
+          sortKey={dv.sortKey}
+          onSort={dv.setSortKey}
+          page={dv.page}
+          totalPages={dv.totalPages}
+          pageSize={dv.pageSize}
+          totalFiltered={dv.totalFiltered}
+          onPageChange={dv.setPage}
+          onPageSizeChange={dv.setPageSize}
+        />
+
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
           <select
             aria-label="Filter by journey"
             className="rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
@@ -435,22 +424,24 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
       <div className="card p-0">
         {isLoading ? (
           <p className="text-sm text-muted p-4">Loading…</p>
-        ) : rows.length === 0 ? (
+        ) : dv.view.length === 0 ? (
           <p className="text-sm text-muted p-4">
-            Nothing here yet. Tick items on any journey checklist and they land here as the record of what was done.
+            {serverRows.length === 0
+              ? 'Nothing here yet. Tick items on any journey checklist and they land here as the record of what was done.'
+              : 'No achievements match your search.'}
           </p>
         ) : (
           <table className="w-full text-sm">
             <thead className="border-b border-border">
               <tr>
-                {th('title', 'Achievement')}
-                {th('journey', 'Journey', 'hidden sm:table-cell')}
-                {th('achieved', 'Date')}
-                {th('milestone', 'Milestone', 'hidden sm:table-cell')}
+                <th className="px-3 py-2 text-left font-medium text-muted">Achievement</th>
+                <th className="px-3 py-2 text-left font-medium text-muted hidden sm:table-cell">Journey</th>
+                <th className="px-3 py-2 text-left font-medium text-muted">Date</th>
+                <th className="px-3 py-2 text-left font-medium text-muted hidden sm:table-cell">Milestone</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((a) => (
+              {dv.view.map((a) => (
                 <AchievementRow
                   key={a.id}
                   profileId={profileId}
