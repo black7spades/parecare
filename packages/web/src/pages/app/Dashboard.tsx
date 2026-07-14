@@ -9,7 +9,7 @@ import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { Avatar } from '../../components/ui/Avatar';
 import { browserTimeZone } from '../../lib/datetime';
-import { POA_TYPES, providerTypeLabel, type Provider } from '../../lib/care';
+import { POA_TYPES, providerTypeLabel, healthStatusStatusLabel, type Provider } from '../../lib/care';
 
 interface AttentionItem {
   profile_id: string;
@@ -29,6 +29,42 @@ interface SummaryJourney {
   phase_name: string | null;
   phase_sort_order: number | null;
 }
+
+interface SummaryHealthStatus {
+  id: string;
+  name: string;
+  category: string;
+  status: string;
+  is_contagious: boolean;
+  isolation_required: boolean;
+  onset_date: string;
+  active_symptom_count: number;
+}
+
+type AlertLevel = 'red' | 'yellow' | 'green' | null;
+
+function profileAlertLevel(statuses: SummaryHealthStatus[]): AlertLevel {
+  if (statuses.length === 0) return null;
+  for (const s of statuses) {
+    if (s.is_contagious || s.isolation_required) return 'red';
+  }
+  for (const s of statuses) {
+    if (s.status === 'active') return 'yellow';
+  }
+  return 'green';
+}
+
+const ALERT_BORDER: Record<string, string> = {
+  red: 'border-l-4 border-l-red-500',
+  yellow: 'border-l-4 border-l-amber-400',
+  green: 'border-l-4 border-l-green-500',
+};
+
+const ALERT_ROW_BG: Record<string, string> = {
+  red: 'bg-red-50 dark:bg-red-900/10',
+  yellow: 'bg-amber-50 dark:bg-amber-900/10',
+  green: '',
+};
 
 interface ProfileSummary {
   id: string;
@@ -52,6 +88,7 @@ interface ProfileSummary {
   last_activity: { action: string; entity_type: string; summary: string | null; created_at: string; actor_name: string | null } | null;
   next_event: { title: string; next_due_at: string } | null;
   journeys: SummaryJourney[];
+  health_statuses: SummaryHealthStatus[];
 }
 
 type SortKey = 'name' | 'activity' | 'journey';
@@ -134,8 +171,14 @@ export function Dashboard() {
       const tb = b.last_activity ? new Date(b.last_activity.created_at).getTime() : 0;
       return tb - ta;
     });
-    // pinned first, keeping the chosen order within each group
-    return list.sort((a, b) => Number(b.pinned) - Number(a.pinned));
+    // Red alerts first, then pinned, keeping the chosen order within each group.
+    const alertWeight = (p: ProfileSummary) => {
+      const level = profileAlertLevel(p.health_statuses);
+      if (level === 'red') return 2;
+      if (level === 'yellow') return 1;
+      return 0;
+    };
+    return list.sort((a, b) => alertWeight(b) - alertWeight(a) || Number(b.pinned) - Number(a.pinned));
   }, [profiles, sort, journeyFilter, poaOnly]);
 
   const viewToggle = (
@@ -564,9 +607,11 @@ function ProfileCard({
 }) {
   const activePoa = p.poa_holders.filter((h) => h.poa_activated);
   const showPoa = activePoa.length > 0 ? activePoa : p.poa_holders;
+  const alertLevel = profileAlertLevel(p.health_statuses);
+  const hasActiveHealth = p.health_statuses.length > 0;
 
   return (
-    <div className={`card relative hover:border-primary transition-colors ${selected ? 'ring-2 ring-primary/40' : ''}`}>
+    <div className={`card relative hover:border-primary transition-colors ${alertLevel ? ALERT_BORDER[alertLevel] : ''} ${selected ? 'ring-2 ring-primary/40' : ''}`}>
       <div className="absolute top-3 right-3 flex items-center gap-2">
         {selectable ? (
           <input
@@ -617,16 +662,51 @@ function ProfileCard({
                     {[p.species, p.breed].filter(Boolean).join(' · ')}
                   </span>
                 ) : null}
-                {p.journeys.length > 0
-                  ? p.journeys.map((j) => (
-                      <span key={j.id} className="badge bg-surface-2 text-muted text-xs">
-                        {j.name}
-                        {j.phase_name ? ` · ${j.phase_name}` : ''}
+                {hasActiveHealth
+                  ? p.health_statuses.map((hs) => (
+                      <span
+                        key={hs.id}
+                        className={`badge text-xs ${
+                          hs.is_contagious || hs.isolation_required
+                            ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                            : hs.status === 'active'
+                              ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                              : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                        }`}
+                      >
+                        {hs.name}
+                        {hs.is_contagious ? ' · Contagious' : ''}
+                        {hs.isolation_required ? ' · Isolating' : ''}
+                        {!hs.is_contagious && !hs.isolation_required ? ` · ${healthStatusStatusLabel(hs.status)}` : ''}
                       </span>
                     ))
-                  : p.kind !== 'pet' || (!p.species && !p.breed) ? (
-                      <span className="badge bg-surface-2 text-muted text-xs">No journey underway</span>
-                    ) : null}
+                  : p.journeys.length > 0
+                    ? p.journeys.map((j) => (
+                        <span key={j.id} className="badge bg-surface-2 text-muted text-xs">
+                          {j.name}
+                          {j.phase_name ? ` · ${j.phase_name}` : ''}
+                        </span>
+                      ))
+                    : p.kind !== 'pet' || (!p.species && !p.breed) ? (
+                        <span className="badge bg-surface-2 text-muted text-xs">No journey underway</span>
+                      ) : null}
+              </span>
+            ) : hasActiveHealth ? (
+              <span className="mt-1 flex flex-wrap gap-1">
+                {p.health_statuses.map((hs) => (
+                  <span
+                    key={hs.id}
+                    className={`badge text-xs ${
+                      hs.is_contagious || hs.isolation_required
+                        ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                        : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                    }`}
+                  >
+                    {hs.name}
+                    {hs.is_contagious ? ' · Contagious' : ''}
+                    {hs.isolation_required ? ' · Isolating' : ''}
+                  </span>
+                ))}
               </span>
             ) : null}
           </div>
@@ -706,6 +786,7 @@ function ProfileTable({
             <th className="px-3 py-2 w-8" aria-label="Pinned" />
             <th className="px-3 py-2 font-medium">Name</th>
             <th className="px-3 py-2 font-medium">Relationship</th>
+            <th className="px-3 py-2 font-medium">Health</th>
             <th className="px-3 py-2 font-medium">Phase</th>
             <th className="px-3 py-2 font-medium">Next</th>
             <th className="px-3 py-2 font-medium">Last update</th>
@@ -714,8 +795,10 @@ function ProfileTable({
         <tbody>
           {profiles.map((p) => {
             const j = firstJourney(p);
+            const alertLevel = profileAlertLevel(p.health_statuses);
+            const rowBg = alertLevel ? ALERT_ROW_BG[alertLevel] : '';
             return (
-              <tr key={p.id} className={`border-b border-border last:border-0 align-top ${selectedIds?.has(p.id) ? 'bg-primary-50/50 dark:bg-primary-900/10' : ''}`}>
+              <tr key={p.id} className={`border-b border-border last:border-0 align-top ${rowBg} ${selectedIds?.has(p.id) ? 'bg-primary-50/50 dark:bg-primary-900/10' : ''}`}>
                 {selectable ? (
                   <td className="px-3 py-2">
                     <input
@@ -743,6 +826,28 @@ function ProfileTable({
                   </Link>
                 </td>
                 <td className="px-3 py-2 text-muted">{p.relationship ?? ''}</td>
+                <td className="px-3 py-2">
+                  {p.health_statuses.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {p.health_statuses.map((hs) => (
+                        <span
+                          key={hs.id}
+                          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${
+                            hs.is_contagious || hs.isolation_required
+                              ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                              : hs.status === 'active'
+                                ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                                : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                          }`}
+                        >
+                          {hs.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-muted">OK</span>
+                  )}
+                </td>
                 <td className="px-3 py-2 text-muted">{j?.phase_name ?? ''}</td>
                 <td className="px-3 py-2 text-muted whitespace-nowrap">
                   {p.next_event ? `${p.next_event.title} · ${format(new Date(p.next_event.next_due_at), 'd MMM, HH:mm')}` : ''}
