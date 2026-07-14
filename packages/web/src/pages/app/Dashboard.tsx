@@ -14,7 +14,7 @@ import { POA_TYPES, providerTypeLabel, type Provider } from '../../lib/care';
 interface AttentionItem {
   profile_id: string;
   profile_name: string;
-  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock';
+  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'unresolved_outcome';
   label: string;
   detail: string | null;
   section: 'tasks' | 'medications' | 'questions';
@@ -379,6 +379,7 @@ const ATTENTION_ICON: Record<AttentionItem['kind'], string> = {
   unrecorded_dose: '💊',
   stale_question: '❓',
   out_of_stock: '📦',
+  unresolved_outcome: '⚠️',
 };
 
 /**
@@ -404,6 +405,8 @@ function itemBrief(it: AttentionItem): string {
       return `Let's record the doses due for ${who}${it.detail ? `: ${it.detail}` : ''}. Check the record and walk me through logging each one.`;
     case 'stale_question':
       return `Let's follow up the open question(s) for ${who} that have had no reply. ${useRecord}Draft the actual message to chase an answer here now.`;
+    case 'unresolved_outcome':
+      return `A task for ${who} was completed with a poor outcome: "${it.detail ?? it.label}". ${useRecord}Help me work out what went wrong and what to do next.`;
     default:
       return `Help me deal with this for ${who}: ${it.label}. ${useRecord}`;
   }

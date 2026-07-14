@@ -47,6 +47,8 @@ import { requireAuth } from './middleware/auth';
 import { requireCareProfileAccess } from './middleware/subscriptionGate';
 import { auditTrail, blockViewerWrites } from './middleware/permissions';
 import { activityRouter } from './routes/activity';
+import { healthStatusesRouter } from './routes/healthStatuses';
+import { reportsRouter } from './routes/reports';
 import { ensureSuperAdmin, runMigrations } from './services/bootstrap';
 import { loadSettings, seedSettingsFromEnv, subscribeSettingsInvalidation } from './config/settings';
 import { settingsRouter } from './routes/settings';
@@ -136,6 +138,8 @@ v1.use('/care-profiles/:id/ai', ...profileAccess, aiRouter);
 v1.use('/care-profiles/:id/messages', ...profileAccess, messagesRouter);
 v1.use('/care-profiles/:id/memory-book', ...profileAccess, memoryBookRouter);
 v1.use('/care-profiles/:id/activity', ...profileAccess, activityRouter);
+v1.use('/care-profiles/:id/health-statuses', ...profileAccess, healthStatusesRouter);
+v1.use('/reports', reportsRouter);
 v1.use('/care-profiles/:id/calendar', ...profileAccess, calendarRouter);
 // Public: token-authenticated read-only calendar feed for Google/Outlook
 v1.use('/calendar', icsRouter);

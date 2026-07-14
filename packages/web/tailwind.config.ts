@@ -29,6 +29,17 @@ export default {
         'surface-2': v('--c-surface-2'),
         border: v('--c-border'),
         card: v('--c-card'),
+        btn: {
+          primary: v('--c-btn-primary'),
+          'primary-hover': v('--c-btn-primary-hover'),
+          'primary-text': v('--c-btn-primary-text'),
+          secondary: v('--c-btn-secondary'),
+          'secondary-hover': v('--c-btn-secondary-hover'),
+          'secondary-text': v('--c-btn-secondary-text'),
+          danger: v('--c-btn-danger'),
+          'danger-hover': v('--c-btn-danger-hover'),
+          'danger-text': v('--c-btn-danger-text'),
+        },
       },
       fontFamily: {
         sans: [

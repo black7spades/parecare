@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
+import { Modal } from '../../../components/ui/Modal';
 import { useProfile } from './ProfileLayout';
+import { useAuthStore } from '../../../stores/auth';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
-import type { CareProfile, CircleMember, Task } from '../../../lib/care';
+import { SENTIMENTS, sentimentEmoji, type CareProfile, type CircleMember, type Task } from '../../../lib/care';
 
 interface FanOutResult {
   created: { profile_id: string }[];
@@ -33,13 +35,90 @@ const TASK_SORTS: DataSort<Task>[] = [
   { key: 'title', label: 'By task (A–Z)', compare: byTitle },
 ];
 
+function TaskCompletionModal({
+  task,
+  profileId,
+  onClose,
+  onCompleted,
+}: {
+  task: Task;
+  profileId: string;
+  onClose: () => void;
+  onCompleted: () => void;
+}) {
+  const [sentiment, setSentiment] = useState<number | null>(null);
+
+  const completeMutation = useMutation({
+    mutationFn: () =>
+      api.patch(`/care-profiles/${profileId}/reminders/${task.id}`, {
+        completed: true,
+        sentiment,
+      }),
+    onSuccess: () => {
+      onCompleted();
+      onClose();
+    },
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Close out task">
+      <div className="space-y-4">
+        <div>
+          <p className="text-sm font-medium text-ink">{task.title}</p>
+          {task.body ? <p className="text-xs text-muted mt-1">{task.body}</p> : null}
+        </div>
+
+        {task.desired_outcome ? (
+          <div className="rounded-md border border-border p-3 bg-surface">
+            <p className="text-xs font-medium text-muted mb-1">Desired outcome</p>
+            <p className="text-sm text-ink">{task.desired_outcome}</p>
+          </div>
+        ) : null}
+
+        <div>
+          <p className="text-sm font-medium text-ink mb-2">How did this go?</p>
+          <div className="flex gap-2 justify-center">
+            {SENTIMENTS.map((s) => (
+              <button
+                key={s.value}
+                type="button"
+                onClick={() => setSentiment(s.value)}
+                className={`flex flex-col items-center gap-1 rounded-sm px-3 py-2 transition-colors ${
+                  sentiment === s.value
+                    ? 'bg-btn-primary text-btn-primary-text ring-2 ring-btn-primary'
+                    : 'bg-surface-2 hover:bg-surface text-ink'
+                }`}
+              >
+                <span className="text-2xl">{s.emoji}</span>
+                <span className="text-[10px] font-bold">{s.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button
+            loading={completeMutation.isPending}
+            onClick={() => completeMutation.mutate()}
+          >
+            {sentiment ? 'Close task' : 'Close without rating'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export function TasksPage() {
   const { profile, canEdit } = useProfile();
+  const account = useAuthStore((s) => s.account);
   const queryClient = useQueryClient();
   const [error, setError] = useState('');
 
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
+  const [desiredOutcome, setDesiredOutcome] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [dueTime, setDueTime] = useState('09:00');
   const [repeat, setRepeat] = useState<Task['reminder_type']>('once');
@@ -47,11 +126,12 @@ export function TasksPage() {
   const [alsoIds, setAlsoIds] = useState<string[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
   const [note, setNote] = useState('');
+  const [completingTask, setCompletingTask] = useState<Task | null>(null);
 
-  // The whole record, open and completed, so nothing disappears when ticked off.
   const { data, isLoading } = useQuery({
     queryKey: ['tasks', profile.id],
     queryFn: () => api.get<{ reminders: Task[] }>(`/care-profiles/${profile.id}/reminders?status=all`),
+    refetchInterval: 5000,
   });
   const tasks = data?.reminders ?? [];
 
@@ -62,7 +142,6 @@ export function TasksPage() {
   const members = circleData?.members ?? [];
   const memberName = (id: string | null) => members.find((m) => m.id === id)?.display_name;
 
-  // Other profiles this carer holds, to add the same task to in one go.
   const { data: profilesData } = useQuery({
     queryKey: ['care-profiles'],
     queryFn: () =>
@@ -86,6 +165,7 @@ export function TasksPage() {
   const resetForm = () => {
     setTitle('');
     setNotes('');
+    setDesiredOutcome('');
     setError('');
     setNote('');
     setAlsoIds([]);
@@ -99,6 +179,7 @@ export function TasksPage() {
         body: notes.trim() || null,
         reminder_type: repeat,
         next_due_at: new Date(`${dueDate}T${dueTime}`).toISOString(),
+        desired_outcome: desiredOutcome.trim() || null,
       };
       if (alsoIds.length > 0) {
         return api.post<FanOutResult>(`/care-profiles/${profile.id}/reminders/fan-out`, {
@@ -129,6 +210,16 @@ export function TasksPage() {
   const setDone = useMutation({
     mutationFn: ({ id, completed }: { id: string; completed: boolean }) =>
       api.patch(`/care-profiles/${profile.id}/reminders/${id}`, { completed }),
+    onSuccess: () => invalidate(),
+  });
+
+  const claimMutation = useMutation({
+    mutationFn: (id: string) => api.post(`/care-profiles/${profile.id}/reminders/${id}/claim`),
+    onSuccess: () => invalidate(),
+  });
+
+  const releaseMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/reminders/${id}/claim`),
     onSuccess: () => invalidate(),
   });
 
@@ -169,7 +260,7 @@ export function TasksPage() {
   const dv = useDataView<Task>({
     rows: tasks,
     getId: (t) => t.id,
-    searchText: (t) => [t.title, t.body, memberName(t.assigned_to), t.completed_by_name].filter(Boolean).join(' '),
+    searchText: (t) => [t.title, t.body, memberName(t.assigned_to), t.completed_by_name, t.desired_outcome].filter(Boolean).join(' '),
     sorts: TASK_SORTS,
     filters: [statusFilter, assigneeFilter, repeatFilter],
   });
@@ -183,6 +274,14 @@ export function TasksPage() {
     : [];
 
   const openCount = tasks.filter((t) => !t.completed).length;
+
+  const handleComplete = (t: Task) => {
+    if (t.completed) {
+      setDone.mutate({ id: t.id, completed: false });
+    } else {
+      setCompletingTask(t);
+    }
+  };
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_20rem] items-start">
@@ -248,12 +347,16 @@ export function TasksPage() {
                       className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary disabled:opacity-50"
                       checked={t.completed}
                       disabled={!canEdit || setDone.isPending}
-                      onChange={() => setDone.mutate({ id: t.id, completed: !t.completed })}
+                      onChange={() => handleComplete(t)}
                     />
                   </td>
                   <td className="px-3 py-3">
-                    <div className={`text-ink font-medium ${t.completed ? 'line-through' : ''}`}>{t.title}</div>
+                    <div className={`text-ink font-medium ${t.completed ? 'line-through' : ''}`}>
+                      {t.title}
+                      {t.sentiment ? <span className="ml-1.5" title={SENTIMENTS.find((s) => s.value === t.sentiment)?.label}>{sentimentEmoji(t.sentiment)}</span> : null}
+                    </div>
                     {t.body ? <div className="text-xs text-muted">{t.body}</div> : null}
+                    {t.desired_outcome ? <div className="text-xs text-muted italic mt-0.5">Goal: {t.desired_outcome}</div> : null}
                   </td>
                   <td className="px-3 py-3 whitespace-nowrap">
                     <span className={isOverdue(t) ? 'text-red-600 font-medium' : 'text-muted'}>
@@ -261,7 +364,34 @@ export function TasksPage() {
                     </span>
                   </td>
                   <td className="px-3 py-3 text-muted">{t.reminder_type === 'once' ? '—' : REPEAT_LABELS[t.reminder_type]}</td>
-                  <td className="px-3 py-3 text-muted">{memberName(t.assigned_to) ?? '—'}</td>
+                  <td className="px-3 py-3">
+                    <span className="text-muted">{memberName(t.assigned_to) ?? '—'}</span>
+                    {t.co_owners?.length > 0 ? (
+                      <span className="text-xs text-muted ml-1">
+                        +{t.co_owners.length} co-owner{t.co_owners.length !== 1 ? 's' : ''}
+                      </span>
+                    ) : null}
+                    {t.claimed_by && !t.completed ? (
+                      <div className="text-xs mt-0.5">
+                        {t.claimed_by === account?.id ? (
+                          <span className="text-primary font-medium">
+                            Claimed by you
+                            <button
+                              type="button"
+                              className="ml-1 text-muted hover:text-ink"
+                              onClick={() => releaseMutation.mutate(t.id)}
+                            >
+                              Release
+                            </button>
+                          </span>
+                        ) : (
+                          <span className="text-amber-600 dark:text-amber-400 font-medium">
+                            {t.claimed_by_name} is claiming this…
+                          </span>
+                        )}
+                      </div>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-3 whitespace-nowrap">
                     {t.completed ? (
                       <span className="text-muted">
@@ -275,7 +405,17 @@ export function TasksPage() {
                     )}
                   </td>
                   {canEdit ? (
-                    <td className="px-3 py-3 text-right whitespace-nowrap">
+                    <td className="px-3 py-3 text-right whitespace-nowrap space-x-2">
+                      {!t.completed && !t.claimed_by && !t.assigned_to ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => claimMutation.mutate(t.id)}
+                          disabled={claimMutation.isPending}
+                        >
+                          Claim
+                        </Button>
+                      ) : null}
                       <button
                         type="button"
                         aria-label={`Delete ${t.title}`}
@@ -303,6 +443,7 @@ export function TasksPage() {
         <h2 className="text-base font-semibold text-ink">New task</h2>
         <Input label="Task" value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="e.g. Pick up prescription" />
         <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+        <Textarea label="Desired outcome" value={desiredOutcome} onChange={(e) => setDesiredOutcome(e.target.value)} rows={2} placeholder="What does success look like for this task?" />
         <div className="grid grid-cols-2 gap-2">
           <Input label="Due date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} required />
           <Input label="Time" type="time" value={dueTime} onChange={(e) => setDueTime(e.target.value)} />
@@ -313,7 +454,7 @@ export function TasksPage() {
           </label>
           <select
             id="task-repeat"
-            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            className="block w-full rounded-sm border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             value={repeat}
             onChange={(e) => setRepeat(e.target.value as Task['reminder_type'])}
           >
@@ -329,7 +470,7 @@ export function TasksPage() {
           </label>
           <select
             id="task-assignee"
-            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            className="block w-full rounded-sm border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             value={assignee}
             onChange={(e) => setAssignee(e.target.value)}
           >
@@ -342,7 +483,7 @@ export function TasksPage() {
           </select>
         </div>
         {otherProfiles.length > 0 ? (
-          <div className="rounded-md border border-border">
+          <div className="rounded-sm border border-border">
             <button
               type="button"
               className="flex w-full items-center justify-between px-3 py-2 text-sm text-ink"
@@ -384,6 +525,15 @@ export function TasksPage() {
           {alsoIds.length > 0 ? `Add task to ${alsoIds.length + 1} profiles` : 'Add task'}
         </Button>
       </form>
+
+      {completingTask ? (
+        <TaskCompletionModal
+          task={completingTask}
+          profileId={profile.id}
+          onClose={() => setCompletingTask(null)}
+          onCompleted={() => invalidate()}
+        />
+      ) : null}
     </div>
   );
 }

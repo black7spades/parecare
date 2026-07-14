@@ -27,6 +27,9 @@ export function SystemLayout() {
         <NavLink to="/system/chats" className={tabClass}>
           Pare chats
         </NavLink>
+        <NavLink to="/system/reports" className={tabClass}>
+          Reports
+        </NavLink>
         {isSuperAdmin ? (
           <NavLink to="/system/settings" className={tabClass}>
             Settings

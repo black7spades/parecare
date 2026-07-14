@@ -324,7 +324,7 @@ export async function countAttentionItems(accountId: string): Promise<number> {
 export interface AttentionItem {
   profile_id: string;
   profile_name: string;
-  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock';
+  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'unresolved_outcome';
   label: string;
   detail: string | null;
   section: 'tasks' | 'medications' | 'questions';
@@ -349,7 +349,23 @@ async function getDismissedKeys(accountId: string): Promise<Set<string>> {
  * account has dismissed is left out.
  */
 export async function gatherAttentionItems(accountId: string, timeZone?: string | null): Promise<AttentionItem[]> {
-  const [data, dismissed] = await Promise.all([gatherDashboardData(accountId, timeZone), getDismissedKeys(accountId)]);
+  const [data, dismissed, poorOutcomes] = await Promise.all([
+    gatherDashboardData(accountId, timeZone),
+    getDismissedKeys(accountId),
+    db('reminders')
+      .whereIn('care_profile_id', (await accessibleProfiles(accountId)).map((p) => p.id))
+      .where('completed', true)
+      .whereNotNull('sentiment')
+      .where('sentiment', '<=', 3)
+      .where('completed_at', '>=', db.raw("now() - interval '7 days'"))
+      .select('care_profile_id', 'id', 'title', 'sentiment'),
+  ]);
+  const poorByProfile = new Map<string, Array<{ id: string; title: string; sentiment: number }>>();
+  for (const r of poorOutcomes) {
+    const arr = poorByProfile.get(r.care_profile_id) ?? [];
+    arr.push({ id: r.id, title: r.title, sentiment: r.sentiment });
+    poorByProfile.set(r.care_profile_id, arr);
+  }
   const items: AttentionItem[] = [];
   for (const s of data.profiles) {
     const name = s.profile.preferred_name ?? s.profile.full_name;
@@ -409,6 +425,20 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
         key: `stale_question:${s.profile.id}`,
         urgent: false,
         dismissible: false,
+      });
+    }
+    const poor = poorByProfile.get(s.profile.id) ?? [];
+    for (const r of poor) {
+      items.push({
+        profile_id: s.profile.id,
+        profile_name: name,
+        kind: 'unresolved_outcome',
+        label: `Task completed with a poor outcome`,
+        detail: r.title,
+        section: 'tasks',
+        key: `unresolved_outcome:${r.id}`,
+        urgent: false,
+        dismissible: true,
       });
     }
   }

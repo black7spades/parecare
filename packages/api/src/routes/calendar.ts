@@ -19,7 +19,9 @@ calendarRouter.get('/', requireAuth, async (req, res) => {
     .orderBy('next_due_at', 'asc');
 
   const medEvents = await expandMedicationEvents(String(req.params['id']), from, to);
-  const events = [...reminders, ...medEvents].sort(
+  const birthdayEvents = await expandBirthdayEvents(String(req.params['id']), from, to);
+  const healthEvents = await expandHealthStatusEvents(String(req.params['id']), from, to);
+  const events = [...reminders, ...medEvents, ...birthdayEvents, ...healthEvents].sort(
     (a, b) => new Date(a.next_due_at).getTime() - new Date(b.next_due_at).getTime()
   );
   res.json({ events });
@@ -67,6 +69,82 @@ async function expandMedicationEvents(profileId: string, from: Date, to: Date): 
           completed: doneByMedDay.has(`${med.id}|${dayStr}`),
           kind: 'medication',
           medication_id: med.id,
+        });
+      }
+    }
+  }
+  return events;
+}
+
+async function expandBirthdayEvents(profileId: string, from: Date, to: Date): Promise<CalendarEvent[]> {
+  const profile = await db('care_profiles')
+    .where({ id: profileId })
+    .select('id', 'full_name', 'date_of_birth')
+    .first();
+  if (!profile?.date_of_birth) return [];
+  const dob = new Date(profile.date_of_birth);
+  if (Number.isNaN(dob.getTime())) return [];
+
+  const events: CalendarEvent[] = [];
+  const startYear = from.getUTCFullYear();
+  const endYear = to.getUTCFullYear();
+  for (let year = startYear; year <= endYear; year++) {
+    const bday = new Date(Date.UTC(year, dob.getUTCMonth(), dob.getUTCDate()));
+    if (bday >= from && bday <= to) {
+      const age = year - dob.getUTCFullYear();
+      events.push({
+        id: `birthday-${profileId}-${year}`,
+        title: `🎂 ${profile.full_name}'s birthday${age > 0 ? ` (turning ${age})` : ''}`,
+        next_due_at: bday.toISOString(),
+        completed: false,
+        kind: 'birthday',
+      });
+    }
+  }
+  return events;
+}
+
+async function expandHealthStatusEvents(profileId: string, from: Date, to: Date): Promise<CalendarEvent[]> {
+  const statuses = await db('health_statuses')
+    .where({ care_profile_id: profileId })
+    .select('id', 'name', 'onset_date', 'expected_resolution_date', 'actual_resolution_date', 'status');
+
+  const events: CalendarEvent[] = [];
+  const fromStr = from.toISOString().slice(0, 10);
+  const toStr = to.toISOString().slice(0, 10);
+
+  for (const hs of statuses) {
+    const onset = String(hs.onset_date).slice(0, 10);
+    if (onset >= fromStr && onset <= toStr) {
+      events.push({
+        id: `hs-onset-${hs.id}`,
+        title: `🤒 ${hs.name} onset`,
+        next_due_at: new Date(onset + 'T00:00:00Z').toISOString(),
+        completed: false,
+        kind: 'health_status',
+      });
+    }
+    if (hs.expected_resolution_date) {
+      const exp = String(hs.expected_resolution_date).slice(0, 10);
+      if (exp >= fromStr && exp <= toStr) {
+        events.push({
+          id: `hs-expected-${hs.id}`,
+          title: `🤒 ${hs.name} expected resolution`,
+          next_due_at: new Date(exp + 'T00:00:00Z').toISOString(),
+          completed: hs.status === 'resolved',
+          kind: 'health_status',
+        });
+      }
+    }
+    if (hs.actual_resolution_date) {
+      const actual = String(hs.actual_resolution_date).slice(0, 10);
+      if (actual >= fromStr && actual <= toStr) {
+        events.push({
+          id: `hs-resolved-${hs.id}`,
+          title: `✅ ${hs.name} resolved`,
+          next_due_at: new Date(actual + 'T00:00:00Z').toISOString(),
+          completed: true,
+          kind: 'health_status',
         });
       }
     }
@@ -141,6 +219,35 @@ icsRouter.get('/:token.ics', async (req, res) => {
     }
     if (r.completed) lines.push('STATUS:CANCELLED');
     lines.push('END:VEVENT');
+  }
+
+  // Birthday and health status events
+  const icsBirthdays = await expandBirthdayEvents(profile.id, since, new Date(Date.now() + 365 * 24 * 3600 * 1000));
+  for (const e of icsBirthdays) {
+    const start = new Date(e.next_due_at);
+    const dayStr = start.toISOString().slice(0, 10).replace(/-/g, '');
+    lines.push(
+      'BEGIN:VEVENT',
+      `UID:${e.id}@parecare`,
+      `DTSTAMP:${icsDate(new Date())}`,
+      `DTSTART;VALUE=DATE:${dayStr}`,
+      `SUMMARY:${icsEscape(e.title)}`,
+      'END:VEVENT'
+    );
+  }
+
+  const icsHealth = await expandHealthStatusEvents(profile.id, since, new Date(Date.now() + 90 * 24 * 3600 * 1000));
+  for (const e of icsHealth) {
+    const start = new Date(e.next_due_at);
+    const dayStr = start.toISOString().slice(0, 10).replace(/-/g, '');
+    lines.push(
+      'BEGIN:VEVENT',
+      `UID:${e.id}@parecare`,
+      `DTSTAMP:${icsDate(new Date())}`,
+      `DTSTART;VALUE=DATE:${dayStr}`,
+      `SUMMARY:${icsEscape(e.title)}`,
+      'END:VEVENT'
+    );
   }
 
   // Medication schedule for the next ~60 days.

@@ -262,6 +262,10 @@ export interface Reminder {
   completed: boolean;
   completed_at: string | Date | null;
   completed_by_account_id: string | null;
+  desired_outcome: string | null;
+  sentiment: number | null;
+  claimed_by: string | null;
+  claimed_at: string | Date | null;
   created_at: string | Date;
 }
 
