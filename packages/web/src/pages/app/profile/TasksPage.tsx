@@ -304,6 +304,12 @@ export function TasksPage() {
           selectedCount={dv.selectedRows.length}
           bulkActions={bulkActions}
           onClearSelection={dv.clearSelection}
+          page={dv.page}
+          totalPages={dv.totalPages}
+          pageSize={dv.pageSize}
+          totalFiltered={dv.totalFiltered}
+          onPageChange={dv.setPage}
+          onPageSizeChange={dv.setPageSize}
         />
 
         <div className="card p-0 overflow-x-auto">

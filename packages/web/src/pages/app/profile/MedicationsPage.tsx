@@ -55,6 +55,7 @@ export function MedicationsPage() {
   const [editing, setEditing] = useState<MedicationRecord | null>(null);
   const [confirmBulk, setConfirmBulk] = useState(false);
   const [confirmBulkLog, setConfirmBulkLog] = useState(false);
+  const [confirmSingleDelete, setConfirmSingleDelete] = useState<MedicationRecord | null>(null);
   // The daily action happens at the record below, so the management list starts
   // collapsed and can be expanded to add, edit or organise medications.
   const [listOpen, setListOpen] = useState(false);
@@ -115,6 +116,11 @@ export function MedicationsPage() {
       entries: dv.selectedRows.map((m) => ({ medication_id: m.id, administered_at: new Date().toISOString(), status: 'given' })),
     }),
     onSuccess: () => { setConfirmBulkLog(false); dv.clearSelection(); invalidate(); },
+  });
+
+  const singleDelete = useMutation({
+    mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/medications/${id}`),
+    onSuccess: () => { setConfirmSingleDelete(null); invalidate(); },
   });
 
   const bulkSetActive = useMutation({
@@ -183,6 +189,12 @@ export function MedicationsPage() {
             selectedCount={dv.selectedRows.length}
             bulkActions={bulkActions}
             onClearSelection={dv.clearSelection}
+            page={dv.page}
+            totalPages={dv.totalPages}
+            pageSize={dv.pageSize}
+            totalFiltered={dv.totalFiltered}
+            onPageChange={dv.setPage}
+            onPageSizeChange={dv.setPageSize}
           />
 
           <div className="card p-0 overflow-x-auto">
@@ -244,8 +256,9 @@ export function MedicationsPage() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                    <td className="px-4 py-3 text-right whitespace-nowrap space-x-1">
                       {canManageMeds ? <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>Edit</Button> : null}
+                      {canManageMeds ? <Button size="sm" variant="danger" onClick={() => setConfirmSingleDelete(m)}>Delete</Button> : null}
                     </td>
                   </tr>
                   );
@@ -277,6 +290,16 @@ export function MedicationsPage() {
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setConfirmBulk(false)}>Cancel</Button>
           <Button variant="danger" loading={bulkDelete.isPending} onClick={() => bulkDelete.mutate()}>Delete {dv.selectedRows.length}</Button>
+        </div>
+      </Modal>
+
+      <Modal open={confirmSingleDelete !== null} onClose={() => setConfirmSingleDelete(null)} title="Delete medication">
+        <p className="text-sm text-muted mb-4">
+          Permanently delete <span className="font-medium text-ink">{confirmSingleDelete?.name}</span> and its administration history? This cannot be undone.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmSingleDelete(null)}>Cancel</Button>
+          <Button variant="danger" loading={singleDelete.isPending} onClick={() => confirmSingleDelete && singleDelete.mutate(confirmSingleDelete.id)}>Delete</Button>
         </div>
       </Modal>
 

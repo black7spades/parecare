@@ -108,6 +108,12 @@ export function DirectoryProvidersPage() {
                 : []
             }
             onClearSelection={dv.clearSelection}
+            page={dv.page}
+            totalPages={dv.totalPages}
+            pageSize={dv.pageSize}
+            totalFiltered={dv.totalFiltered}
+            onPageChange={dv.setPage}
+            onPageSizeChange={dv.setPageSize}
           />
         </div>
       ) : null}
@@ -127,7 +133,12 @@ export function DirectoryProvidersPage() {
           <table className="w-full text-sm">
             <thead className="border-b border-border">
               <tr className="text-left text-xs text-muted">
-                {canEdit ? <th className="px-3 py-2 w-8" /> : null}
+                {canEdit ? (
+                  <th className="px-3 py-2 w-8">
+                    <input type="checkbox" aria-label="Select all" className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                      checked={dv.allSelected} onChange={dv.toggleAll} />
+                  </th>
+                ) : null}
                 <th className="px-3 py-2 font-medium">Name</th>
                 <th className="px-3 py-2 font-medium">Type</th>
                 <th className="px-3 py-2 font-medium">Phone</th>

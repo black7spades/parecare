@@ -6,6 +6,8 @@ import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { useProfile } from './ProfileLayout';
+import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
+import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
 import type { OpenQuestion, QuestionResponse } from '../../../lib/care';
 
 const STATUS_STYLES: Record<OpenQuestion['status'], string> = {
@@ -14,12 +16,37 @@ const STATUS_STYLES: Record<OpenQuestion['status'], string> = {
   deferred: 'bg-surface-2 text-muted',
 };
 
+const QUESTION_SORTS: DataSort<OpenQuestion>[] = [
+  { key: 'newest', label: 'Newest first', compare: (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime() },
+  { key: 'oldest', label: 'Oldest first', compare: (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime() },
+  { key: 'title', label: 'By question (A–Z)', compare: (a, b) => a.title.localeCompare(b.title) },
+  { key: 'status', label: 'By status', compare: (a, b) => {
+    const order: Record<string, number> = { open: 0, deferred: 1, resolved: 2 };
+    return (order[a.status] ?? 3) - (order[b.status] ?? 3) || a.title.localeCompare(b.title);
+  }},
+];
+
+const STATUS_FILTER: DataFilter<OpenQuestion> = {
+  key: 'status',
+  label: 'Status',
+  options: [
+    { value: 'open', label: 'Open' },
+    { value: 'resolved', label: 'Resolved' },
+    { value: 'deferred', label: 'Deferred' },
+  ],
+  match: (q, v) => q.status === v,
+};
+
 export function QuestionsPage() {
-  const { profile } = useProfile();
+  const { profile, access, canEdit } = useProfile();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [resolving, setResolving] = useState<OpenQuestion | null>(null);
+  const [editing, setEditing] = useState<OpenQuestion | null>(null);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+
+  const canManage = access === 'owner' || access === 'admin';
 
   const { data, isLoading } = useQuery({
     queryKey: ['questions', profile.id],
@@ -27,6 +54,14 @@ export function QuestionsPage() {
   });
   const questions = data?.questions ?? [];
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['questions', profile.id] });
+
+  const dv = useDataView<OpenQuestion>({
+    rows: questions,
+    getId: (q) => q.id,
+    searchText: (q) => [q.title, q.body, q.status, q.resolution].filter(Boolean).join(' '),
+    sorts: QUESTION_SORTS,
+    filters: [STATUS_FILTER],
+  });
 
   const createMutation = useMutation({
     mutationFn: () => api.post(`/care-profiles/${profile.id}/questions`, { title: title.trim(), body: body.trim() || null }),
@@ -43,43 +78,112 @@ export function QuestionsPage() {
     onSuccess: invalidate,
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/questions/${id}`),
+    onSuccess: invalidate,
+  });
+
+  const bulkResolveMutation = useMutation({
+    mutationFn: () => api.post(`/care-profiles/${profile.id}/questions/bulk`, {
+      action: 'resolve',
+      ids: dv.selectedRows.map((q) => q.id),
+    }),
+    onSuccess: () => { dv.clearSelection(); invalidate(); },
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: () => api.post(`/care-profiles/${profile.id}/questions/bulk`, {
+      action: 'delete',
+      ids: dv.selectedRows.map((q) => q.id),
+    }),
+    onSuccess: () => { setConfirmBulkDelete(false); dv.clearSelection(); invalidate(); },
+  });
+
+  const bulkActions: ToolbarBulkAction[] = [
+    ...(canEdit ? [{ key: 'resolve', label: 'Mark resolved', onRun: () => bulkResolveMutation.mutate() }] : []),
+    ...(canManage ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulkDelete(true) }] : []),
+  ];
+
   return (
     <div className="space-y-6 max-w-3xl">
-      <form
-        className="card space-y-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (title.trim()) createMutation.mutate();
-        }}
-      >
-        <h2 className="text-base font-semibold text-ink">Raise a question</h2>
-        <p className="text-sm text-muted -mt-2">
-          Open questions the family needs to settle: "Should mum still be driving?", "Who takes February visits?"
-        </p>
-        <Input label="Question" value={title} onChange={(e) => setTitle(e.target.value)} required />
-        <Textarea label="Context (optional)" value={body} onChange={(e) => setBody(e.target.value)} rows={2} />
-        <div className="flex justify-end">
-          <Button type="submit" loading={createMutation.isPending} disabled={!title.trim()}>
-            Raise question
-          </Button>
-        </div>
-      </form>
+      {canEdit ? (
+        <form
+          className="card space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (title.trim()) createMutation.mutate();
+          }}
+        >
+          <h2 className="text-base font-semibold text-ink">Raise a question</h2>
+          <p className="text-sm text-muted -mt-2">
+            Open questions the family needs to settle: "Should mum still be driving?", "Who takes February visits?"
+          </p>
+          <Input label="Question" value={title} onChange={(e) => setTitle(e.target.value)} required />
+          <Textarea label="Context (optional)" value={body} onChange={(e) => setBody(e.target.value)} rows={2} />
+          <div className="flex justify-end">
+            <Button type="submit" loading={createMutation.isPending} disabled={!title.trim()}>
+              Raise question
+            </Button>
+          </div>
+        </form>
+      ) : null}
+
+      <DataToolbar
+        search={dv.search}
+        onSearch={dv.setSearch}
+        searchPlaceholder="Search questions..."
+        sorts={QUESTION_SORTS.map((s) => ({ key: s.key, label: s.label }))}
+        sortKey={dv.sortKey}
+        onSort={dv.setSortKey}
+        filters={[STATUS_FILTER].map((f) => ({ key: f.key, label: f.label, options: f.options }))}
+        filterValues={dv.filterValues}
+        onFilter={dv.setFilter}
+        selectedCount={dv.selectedRows.length}
+        bulkActions={bulkActions}
+        onClearSelection={dv.clearSelection}
+        page={dv.page}
+        totalPages={dv.totalPages}
+        pageSize={dv.pageSize}
+        totalFiltered={dv.totalFiltered}
+        onPageChange={dv.setPage}
+        onPageSizeChange={dv.setPageSize}
+      />
 
       {isLoading ? (
-        <p className="text-sm text-muted">Loading…</p>
-      ) : questions.length === 0 ? (
-        <p className="text-sm text-muted">No questions raised yet.</p>
+        <p className="text-sm text-muted">Loading...</p>
+      ) : dv.view.length === 0 ? (
+        <p className="text-sm text-muted">
+          {questions.length === 0 ? 'No questions raised yet.' : 'No questions match your search or filters.'}
+        </p>
       ) : (
         <div className="space-y-4">
-          {questions.map((q) => (
-            <QuestionCard
-              key={q.id}
-              profileId={profile.id}
-              question={q}
-              onResolve={() => setResolving(q)}
-              onReopen={() => statusMutation.mutate({ id: q.id, status: 'open' })}
-              onDefer={() => statusMutation.mutate({ id: q.id, status: 'deferred' })}
-            />
+          {dv.view.map((q) => (
+            <div key={q.id} className="flex items-start gap-3">
+              {(canEdit || canManage) ? (
+                <div className="pt-4 shrink-0">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select "${q.title}"`}
+                    className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    checked={dv.selected.has(q.id)}
+                    onChange={() => dv.toggle(q.id)}
+                  />
+                </div>
+              ) : null}
+              <div className="flex-1 min-w-0">
+                <QuestionCard
+                  profileId={profile.id}
+                  question={q}
+                  canManage={canManage}
+                  canEdit={canEdit}
+                  onResolve={() => setResolving(q)}
+                  onReopen={() => statusMutation.mutate({ id: q.id, status: 'open' })}
+                  onDefer={() => statusMutation.mutate({ id: q.id, status: 'deferred' })}
+                  onEdit={() => setEditing(q)}
+                  onDelete={() => deleteMutation.mutate(q.id)}
+                />
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -93,6 +197,31 @@ export function QuestionsPage() {
           invalidate();
         }}
       />
+
+      {editing ? (
+        <EditQuestionModal
+          profileId={profile.id}
+          question={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            invalidate();
+          }}
+        />
+      ) : null}
+
+      <Modal open={confirmBulkDelete} onClose={() => setConfirmBulkDelete(false)} title="Delete questions">
+        <p className="text-sm text-muted mb-4">
+          Permanently delete <span className="font-medium text-ink">{dv.selectedRows.length}</span> selected
+          question{dv.selectedRows.length === 1 ? '' : 's'}? Their responses will be removed too. This cannot be undone.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmBulkDelete(false)}>Cancel</Button>
+          <Button variant="danger" loading={bulkDeleteMutation.isPending} onClick={() => bulkDeleteMutation.mutate()}>
+            Delete {dv.selectedRows.length}
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -100,15 +229,23 @@ export function QuestionsPage() {
 function QuestionCard({
   profileId,
   question,
+  canManage,
+  canEdit,
   onResolve,
   onReopen,
   onDefer,
+  onEdit,
+  onDelete,
 }: {
   profileId: string;
   question: OpenQuestion;
+  canManage: boolean;
+  canEdit: boolean;
   onResolve: () => void;
   onReopen: () => void;
   onDefer: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
 }) {
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
@@ -172,6 +309,16 @@ function QuestionCard({
               Reopen
             </Button>
           )}
+          {canEdit ? (
+            <Button size="sm" variant="secondary" onClick={onEdit}>
+              Edit
+            </Button>
+          ) : null}
+          {canManage ? (
+            <Button size="sm" variant="danger" onClick={onDelete}>
+              Delete
+            </Button>
+          ) : null}
         </div>
       </div>
       {question.body ? <p className="text-sm text-ink mt-2 whitespace-pre-wrap">{question.body}</p> : null}
@@ -194,7 +341,7 @@ function QuestionCard({
               r.is_ai ? (
                 <div key={r.id} className="rounded-md border border-primary-100 bg-primary-50/50 px-3 py-2">
                   <p className="text-xs font-medium text-primary mb-1">
-                    ⚖ PareCare mediator · {format(new Date(r.created_at), 'd MMM, HH:mm')}
+                    PareCare mediator · {format(new Date(r.created_at), 'd MMM, HH:mm')}
                   </p>
                   <p className="text-sm text-ink whitespace-pre-wrap">{r.body}</p>
                 </div>
@@ -216,7 +363,7 @@ function QuestionCard({
             }}
           >
             <div className="flex-1">
-              <Input placeholder="Add a response…" value={reply} onChange={(e) => setReply(e.target.value)} />
+              <Input placeholder="Add a response..." value={reply} onChange={(e) => setReply(e.target.value)} />
             </div>
             <Button type="submit" size="sm" variant="secondary" loading={replyMutation.isPending} disabled={!reply.trim()}>
               Reply
@@ -231,7 +378,7 @@ function QuestionCard({
                 loading={mediateMutation.isPending}
                 onClick={() => mediateMutation.mutate()}
               >
-                ⚖ Ask PareCare to mediate
+                Ask PareCare to mediate
               </Button>
               <p className="text-xs text-muted mt-1">
                 Posts a neutral summary into the thread: what everyone agrees on, each person's view stated fairly,
@@ -243,6 +390,53 @@ function QuestionCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function EditQuestionModal({
+  profileId,
+  question,
+  onClose,
+  onSaved,
+}: {
+  profileId: string;
+  question: OpenQuestion;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [editTitle, setEditTitle] = useState(question.title);
+  const [editBody, setEditBody] = useState(question.body ?? '');
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.patch(`/care-profiles/${profileId}/questions/${question.id}`, {
+        title: editTitle.trim(),
+        body: editBody.trim() || null,
+      }),
+    onSuccess: onSaved,
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Edit question">
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (editTitle.trim()) mutation.mutate();
+        }}
+      >
+        <Input label="Question" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} required />
+        <Textarea label="Context (optional)" value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={3} />
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={mutation.isPending} disabled={!editTitle.trim()}>
+            Save
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
