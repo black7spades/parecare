@@ -7,7 +7,6 @@ import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
-import { RelationshipSelect } from '../../../components/RelationshipSelect';
 import { ConditionsSection } from './ConditionsSection';
 import { HealthStatusOverview } from './HealthStatusOverview';
 import { CareLogSection } from './CareLogSection';
@@ -22,7 +21,7 @@ import {
 } from '../../../lib/care';
 
 export function OverviewPage() {
-  const { profile, relationship, isOwner, canEdit } = useProfile();
+  const { profile, isOwner, canEdit } = useProfile();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -100,7 +99,6 @@ export function OverviewPage() {
     <div className="space-y-6">
       {/* Who they are: relationship, power of attorney, contacts, conditions. */}
       <div className="card space-y-3">
-        <RelationshipRow profileId={profile.id} relationship={relationship} isOwner={isOwner} />
         {isPet ? (
           <PetDetails
             species={profile.species}
@@ -124,9 +122,9 @@ export function OverviewPage() {
         <ConditionsSection profileId={profile.id} canEdit={canEdit} />
       </div>
 
-      <HealthStatusOverview profileId={profile.id} />
-
       <ProfileAttention profileId={profile.id} />
+
+      <HealthStatusOverview profileId={profile.id} />
 
       <CareLogSection profileId={profile.id} canEdit={canEdit} />
 
@@ -310,23 +308,21 @@ function ProfileAttention({ profileId }: { profileId: string }) {
   });
   const items = (data?.items ?? []).filter((i) => i.profile_id === profileId);
 
+  if (items.length === 0) return null;
+
   return (
     <div className="card py-3 px-4">
       <p className="text-sm font-semibold text-ink">Needs attention today</p>
-      {items.length === 0 ? (
-        <p className="mt-1 text-sm text-muted">Nothing needs attention right now.</p>
-      ) : (
-        <ul className="mt-2 divide-y divide-border">
-          {items.map((it) => (
-            <li key={it.key} className={`py-2 -mx-2 px-2 rounded ${it.urgent ? 'border-l-2 border-red-500 bg-red-50 dark:bg-red-900/10' : ''}`}>
-              <Link to={it.section} className="block text-sm hover:underline">
-                <span className={it.urgent ? 'text-red-700 dark:text-red-300 font-medium' : 'text-ink font-medium'}>{it.label}</span>
-                {it.detail ? <span className={it.urgent ? 'text-red-700 dark:text-red-300' : 'text-muted'}> · {it.detail}</span> : null}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
+      <ul className="mt-2 divide-y divide-border">
+        {items.map((it) => (
+          <li key={it.key} className={`py-2 -mx-2 px-2 rounded ${it.urgent ? 'border-l-2 border-red-500 bg-red-50 dark:bg-red-900/10' : ''}`}>
+            <Link to={it.section} className="block text-sm hover:underline">
+              <span className={it.urgent ? 'text-red-700 dark:text-red-300 font-medium' : 'text-ink font-medium'}>{it.label}</span>
+              {it.detail ? <span className={it.urgent ? 'text-red-700 dark:text-red-300' : 'text-muted'}> · {it.detail}</span> : null}
+            </Link>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -537,68 +533,3 @@ function PetDetails({
   );
 }
 
-/** Shows and edits what THIS viewer calls the person ("Your Oma"). */
-function RelationshipRow({
-  profileId,
-  relationship,
-  isOwner,
-}: {
-  profileId: string;
-  relationship: string | null;
-  isOwner: boolean;
-}) {
-  const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState(relationship ?? '');
-  const [error, setError] = useState('');
-
-  const mutation = useMutation({
-    mutationFn: () => {
-      const value = draft.trim() || null;
-      return isOwner
-        ? api.patch(`/care-profiles/${profileId}`, { owner_relationship: value })
-        : api.patch(`/care-profiles/${profileId}/circle/me/relationship`, { relationship: value });
-    },
-    onSuccess: () => {
-      setOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ['care-profile', profileId] });
-      void queryClient.invalidateQueries({ queryKey: ['care-profiles'] });
-    },
-    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
-  });
-
-  return (
-    <div className="text-sm">
-      <span className="text-muted">To you: </span>
-      <span className="text-ink font-medium">{relationship ?? 'not set'}</span>{' '}
-      <button
-        type="button"
-        className="text-xs text-primary hover:underline"
-        onClick={() => {
-          setDraft(relationship ?? '');
-          setError('');
-          setOpen(true);
-        }}
-      >
-        change
-      </button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Who are they to you?">
-        <div className="space-y-4">
-          <p className="text-sm text-muted">
-            The app will use this everywhere it talks about them, so it reads the way your family speaks.
-          </p>
-          <RelationshipSelect value={draft} onChange={setDraft} />
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button loading={mutation.isPending} onClick={() => mutation.mutate()}>
-              Save
-            </Button>
-          </div>
-        </div>
-      </Modal>
-    </div>
-  );
-}
