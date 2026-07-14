@@ -1015,9 +1015,12 @@ function AssignToCareModal({ account, onClose, onSaved }: { account: AdminAccoun
     if (account) {
       setRole('carer');
       setPermission('contributor');
-      setSelected([]);
       setError('');
       setDone(null);
+      adminApi
+        .getAccountMemberships(account.id)
+        .then((res) => setSelected(res.care_profile_ids))
+        .catch(() => setSelected([]));
     }
   }, [account]);
 

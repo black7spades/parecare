@@ -160,6 +160,8 @@ export const adminApi = {
   revokeInvitation: (id: string) => api.delete<{ message: string }>(`/admin/invitations/${id}`),
   createAssignments: (body: { account_id: string; role: string; permission: 'viewer' | 'contributor'; care_profile_ids: string[] }) =>
     api.post<{ assigned: string[]; skipped: Array<{ care_profile_id: string; reason: string }> }>('/admin/assignments', body),
+  getAccountMemberships: (accountId: string) =>
+    api.get<{ care_profile_ids: string[] }>(`/admin/accounts/${accountId}/memberships`),
   listCareProfiles: (search?: string) =>
     api.get<{ profiles: AdminCareProfile[] }>(`/admin/care-profiles${search ? `?search=${encodeURIComponent(search)}` : ''}`),
   listRightsTemplates: () => api.get<{ templates: RightsTemplate[] }>('/admin/rights-templates'),
