@@ -3,10 +3,11 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { resolveConditionCatalogueId } from './conditionCatalogue';
+import { resolveSymptomCatalogueId } from './symptomCatalogue';
 
 export const healthStatusesRouter = Router({ mergeParams: true });
 
-const CATEGORIES = ['acute_illness', 'post_operative', 'recovery'] as const;
+const CATEGORIES = ['illness', 'injury', 'post_operative', 'recovery', 'mental_health', 'chronic_flare', 'acute_illness', 'other'] as const;
 const STATUSES = ['active', 'monitoring', 'resolving', 'resolved'] as const;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -50,11 +51,20 @@ healthStatusesRouter.get('/', requireAuth, async (req, res) => {
     .orderBy('onset_date', 'desc');
 
   const statusIds = statuses.map((s: { id: string }) => s.id);
-  const symptoms = statusIds.length > 0
-    ? await db('health_status_symptoms')
-        .whereIn('health_status_id', statusIds)
-        .orderBy('noted_at', 'desc')
-    : [];
+
+  const [symptoms, docLinks] = await Promise.all([
+    statusIds.length > 0
+      ? db('health_status_symptoms')
+          .whereIn('health_status_id', statusIds)
+          .orderBy('noted_at', 'desc')
+      : [],
+    statusIds.length > 0
+      ? db('health_status_documents as hsd')
+          .join('documents as d', 'hsd.document_id', 'd.id')
+          .whereIn('hsd.health_status_id', statusIds)
+          .select('hsd.health_status_id', 'd.id', 'd.category', 'd.label', 'd.file_size_bytes', 'd.mime_type', 'd.created_at')
+      : [],
+  ]);
 
   const symptomsByStatus = new Map<string, unknown[]>();
   for (const s of symptoms) {
@@ -63,9 +73,20 @@ healthStatusesRouter.get('/', requireAuth, async (req, res) => {
     symptomsByStatus.set(s.health_status_id, arr);
   }
 
+  const docsByStatus = new Map<string, unknown[]>();
+  for (const d of docLinks as Array<Record<string, unknown>>) {
+    const arr = docsByStatus.get(d.health_status_id as string) ?? [];
+    arr.push({ id: d.id, category: d.category, label: d.label, file_size_bytes: d.file_size_bytes, mime_type: d.mime_type, created_at: d.created_at });
+    docsByStatus.set(d.health_status_id as string, arr);
+  }
+
   res.json({
     health_statuses: statuses.map((s: Record<string, unknown>) =>
-      serialize({ ...s, symptoms: symptomsByStatus.get(s.id as string) ?? [] })
+      serialize({
+        ...s,
+        symptoms: symptomsByStatus.get(s.id as string) ?? [],
+        documents: docsByStatus.get(s.id as string) ?? [],
+      })
     ),
   });
 });
@@ -79,7 +100,7 @@ healthStatusesRouter.post('/', requireAuth, async (req, res) => {
   const [row] = await db('health_statuses')
     .insert({ care_profile_id: req.params['id'], ...parsed.data })
     .returning('*');
-  res.status(201).json({ health_status: serialize({ ...row, symptoms: [] }) });
+  res.status(201).json({ health_status: serialize({ ...row, symptoms: [], documents: [] }) });
 });
 
 healthStatusesRouter.patch('/:statusId', requireAuth, async (req, res) => {
@@ -110,6 +131,8 @@ healthStatusesRouter.delete('/:statusId', requireAuth, async (req, res) => {
   res.json({ message: 'Health status removed.' });
 });
 
+// --- Symptoms ---
+
 healthStatusesRouter.post('/:statusId/symptoms', requireAuth, async (req, res) => {
   const parsed = symptomSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -123,8 +146,9 @@ healthStatusesRouter.post('/:statusId/symptoms', requireAuth, async (req, res) =
     res.status(404).json({ error: 'Health status not found', code: 'NOT_FOUND' });
     return;
   }
+  const catalogueId = await resolveSymptomCatalogueId(parsed.data.name, req.account!.id).catch(() => null);
   const [symptom] = await db('health_status_symptoms')
-    .insert({ health_status_id: req.params['statusId'], ...parsed.data })
+    .insert({ health_status_id: req.params['statusId'], ...parsed.data, symptom_catalogue_id: catalogueId })
     .returning('*');
   res.status(201).json({ symptom });
 });
@@ -137,9 +161,14 @@ healthStatusesRouter.patch('/:statusId/symptoms/:symptomId', requireAuth, async 
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
+  const updates: Record<string, unknown> = { ...parsed.data };
+  if (parsed.data.name) {
+    const catalogueId = await resolveSymptomCatalogueId(parsed.data.name, req.account!.id).catch(() => null);
+    if (catalogueId) updates.symptom_catalogue_id = catalogueId;
+  }
   const [symptom] = await db('health_status_symptoms')
     .where({ id: req.params['symptomId'], health_status_id: req.params['statusId'] })
-    .update(parsed.data)
+    .update(updates)
     .returning('*');
   if (!symptom) {
     res.status(404).json({ error: 'Symptom not found', code: 'NOT_FOUND' });
@@ -159,6 +188,56 @@ healthStatusesRouter.delete('/:statusId/symptoms/:symptomId', requireAuth, async
   res.json({ message: 'Symptom removed.' });
 });
 
+// --- Documents linked to a health status ---
+
+healthStatusesRouter.post('/:statusId/documents', requireAuth, async (req, res) => {
+  const parsed = z.object({ document_id: z.string().uuid() }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const status = await db('health_statuses')
+    .where({ id: req.params['statusId'], care_profile_id: req.params['id'] })
+    .first();
+  if (!status) {
+    res.status(404).json({ error: 'Health status not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const doc = await db('documents')
+    .where({ id: parsed.data.document_id, care_profile_id: req.params['id'] })
+    .first();
+  if (!doc) {
+    res.status(404).json({ error: 'Document not found', code: 'NOT_FOUND' });
+    return;
+  }
+  try {
+    await db('health_status_documents').insert({
+      health_status_id: req.params['statusId'],
+      document_id: parsed.data.document_id,
+    });
+  } catch (err) {
+    if ((err as { code?: string }).code === '23505') {
+      res.json({ message: 'Already linked.' });
+      return;
+    }
+    throw err;
+  }
+  res.status(201).json({ message: 'Document linked.' });
+});
+
+healthStatusesRouter.delete('/:statusId/documents/:docId', requireAuth, async (req, res) => {
+  const deleted = await db('health_status_documents')
+    .where({ health_status_id: req.params['statusId'], document_id: req.params['docId'] })
+    .delete();
+  if (!deleted) {
+    res.status(404).json({ error: 'Link not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ message: 'Document unlinked.' });
+});
+
+// --- Flagged ---
+
 healthStatusesRouter.get('/flagged', requireAuth, async (req, res) => {
   const threshold = new Date();
   threshold.setDate(threshold.getDate() - 21);
@@ -169,6 +248,8 @@ healthStatusesRouter.get('/flagged', requireAuth, async (req, res) => {
     .orderBy('onset_date', 'asc');
   res.json({ flagged: flagged.map(serialize) });
 });
+
+// --- Migrate to condition ---
 
 healthStatusesRouter.post('/:statusId/migrate', requireAuth, async (req, res) => {
   const migrateSchema = z.object({
