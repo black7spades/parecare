@@ -325,9 +325,14 @@ export const sentimentLabel = (v: number) => SENTIMENTS.find((s) => s.value === 
 export const sentimentEmoji = (v: number) => SENTIMENTS.find((s) => s.value === v)?.emoji ?? '';
 
 export const HEALTH_STATUS_CATEGORIES = [
-  { value: 'acute_illness', label: 'Acute illness' },
+  { value: 'illness', label: 'Illness' },
+  { value: 'injury', label: 'Injury' },
   { value: 'post_operative', label: 'Post-operative' },
   { value: 'recovery', label: 'Recovery' },
+  { value: 'mental_health', label: 'Mental health' },
+  { value: 'chronic_flare', label: 'Chronic flare-up' },
+  { value: 'acute_illness', label: 'Acute illness' },
+  { value: 'other', label: 'Other' },
 ] as const;
 
 export const healthStatusCategoryLabel = (c: string) =>
@@ -353,6 +358,15 @@ export interface HealthStatusSymptom {
   notes: string | null;
 }
 
+export interface HealthStatusDocument {
+  id: string;
+  category: string;
+  label: string;
+  file_size_bytes: number | null;
+  mime_type: string | null;
+  created_at: string;
+}
+
 export interface HealthStatus {
   id: string;
   care_profile_id: string;
@@ -368,6 +382,7 @@ export interface HealthStatus {
   region: string | null;
   linked_condition_id: string | null;
   symptoms: HealthStatusSymptom[];
+  documents: HealthStatusDocument[];
   created_at: string;
   updated_at: string;
 }

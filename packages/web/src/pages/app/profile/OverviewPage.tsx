@@ -9,6 +9,7 @@ import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
 import { RelationshipSelect } from '../../../components/RelationshipSelect';
 import { ConditionsSection } from './ConditionsSection';
+import { HealthStatusOverview } from './HealthStatusOverview';
 import { CareLogSection } from './CareLogSection';
 import { useProfile } from './ProfileLayout';
 import {
@@ -122,6 +123,8 @@ export function OverviewPage() {
         <ProfileContact profile={profile} />
         <ConditionsSection profileId={profile.id} canEdit={canEdit} />
       </div>
+
+      <HealthStatusOverview profileId={profile.id} />
 
       <ProfileAttention profileId={profile.id} />
 
