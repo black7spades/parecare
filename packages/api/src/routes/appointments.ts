@@ -37,7 +37,7 @@ const appointmentSelect = (profileId: string) =>
   db('appointments as a')
     .leftJoin('providers as p', 'a.provider_id', 'p.id')
     .where('a.care_profile_id', profileId)
-    .select('a.*', 'p.name as provider_name', 'p.provider_type', 'p.organisation as provider_organisation');
+    .select('a.*', 'p.name as provider_name', 'p.provider_type', 'p.organisation as provider_organisation', 'p.address as provider_address', 'p.directions_link as provider_directions_link');
 
 appointmentsRouter.get('/', requireAuth, async (req, res) => {
   const query = appointmentSelect(String(req.params['id']));

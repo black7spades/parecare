@@ -19,6 +19,8 @@ export interface Appointment {
   provider_id: string | null;
   provider_name: string | null;
   provider_organisation: string | null;
+  provider_address: string | null;
+  provider_directions_link: string | null;
   location: string | null;
   starts_at: string;
   ends_at: string | null;
@@ -74,11 +76,6 @@ const TYPE_FILTER: DataFilter<Appointment> = {
   match: (a, v) => a.appointment_type === v,
 };
 
-/**
- * The full appointment book for a person: who they are seeing, what for,
- * where and when. Every appointment automatically appears on the Calendar
- * and in the upcoming events on the Overview.
- */
 export function AppointmentsPage() {
   const { profile, careName, canEdit } = useProfile();
   const queryClient = useQueryClient();
@@ -316,12 +313,15 @@ export function AppointmentsPage() {
   );
 }
 
-/** Local datetime string (YYYY-MM-DDTHH:mm) for a datetime-local input. */
-function toLocalInput(iso: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+interface ProviderFull {
+  id: string;
+  name: string;
+  provider_type: string;
+  organisation: string | null;
+  address: string | null;
+  directions_link: string | null;
+  phone: string | null;
+  email: string | null;
 }
 
 function AppointmentEditor({
@@ -335,47 +335,100 @@ function AppointmentEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const queryClient = useQueryClient();
   const isNew = appointment === null;
   const [title, setTitle] = useState(appointment?.title ?? '');
   const [type, setType] = useState(appointment?.appointment_type ?? 'consultation');
   const [providerId, setProviderId] = useState(appointment?.provider_id ?? '');
+  const [providerName, setProviderName] = useState('');
   const [location, setLocation] = useState(appointment?.location ?? '');
-  const [startsAt, setStartsAt] = useState(toLocalInput(appointment?.starts_at ?? null));
-  const [endsAt, setEndsAt] = useState(toLocalInput(appointment?.ends_at ?? null));
+  const [startDate, setStartDate] = useState('');
+  const [startTime, setStartTime] = useState('09:00');
+  const [endTime, setEndTime] = useState('');
   const [status, setStatus] = useState(appointment?.status ?? 'scheduled');
   const [notes, setNotes] = useState(appointment?.notes ?? '');
   const [error, setError] = useState('');
+  const [showSaveProvider, setShowSaveProvider] = useState(false);
 
   useEffect(() => {
-    if (!appointment) return;
-    setTitle(appointment.title);
-    setType(appointment.appointment_type);
-    setProviderId(appointment.provider_id ?? '');
-    setLocation(appointment.location ?? '');
-    setStartsAt(toLocalInput(appointment.starts_at));
-    setEndsAt(toLocalInput(appointment.ends_at));
-    setStatus(appointment.status);
-    setNotes(appointment.notes ?? '');
+    if (appointment) {
+      setTitle(appointment.title);
+      setType(appointment.appointment_type);
+      setProviderId(appointment.provider_id ?? '');
+      setLocation(appointment.location ?? '');
+      const d = new Date(appointment.starts_at);
+      const pad = (n: number) => String(n).padStart(2, '0');
+      setStartDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+      setStartTime(`${pad(d.getHours())}:${pad(d.getMinutes())}`);
+      if (appointment.ends_at) {
+        const e = new Date(appointment.ends_at);
+        setEndTime(`${pad(e.getHours())}:${pad(e.getMinutes())}`);
+      } else {
+        setEndTime('');
+      }
+      setStatus(appointment.status);
+      setNotes(appointment.notes ?? '');
+    }
   }, [appointment]);
 
-  // The person's linked providers, so the appointment ties to a real record.
   const { data: providersData } = useQuery({
     queryKey: ['providers', profileId],
-    queryFn: () => api.get<{ providers: Array<{ id: string; name: string; provider_type: string }> }>(
-      `/care-profiles/${profileId}/providers`
-    ),
+    queryFn: () => api.get<{ providers: ProviderFull[] }>(`/care-profiles/${profileId}/providers`),
   });
   const providers = providersData?.providers ?? [];
 
+  const handleProviderChange = (newProviderId: string) => {
+    setProviderId(newProviderId);
+    setShowSaveProvider(false);
+    if (newProviderId) {
+      const provider = providers.find((p) => p.id === newProviderId);
+      if (provider) {
+        if (provider.directions_link) {
+          setLocation(provider.directions_link);
+        } else if (provider.address) {
+          setLocation(provider.address);
+        }
+      }
+    }
+  };
+
+  const handleProviderNameBlur = () => {
+    if (providerName.trim() && !providerId) {
+      const match = providers.find((p) => p.name.toLowerCase() === providerName.trim().toLowerCase());
+      if (match) {
+        handleProviderChange(match.id);
+      } else {
+        setShowSaveProvider(true);
+      }
+    }
+  };
+
+  const saveProviderMutation = useMutation({
+    mutationFn: () =>
+      api.post<{ provider: ProviderFull }>(`/care-profiles/${profileId}/providers`, {
+        name: providerName.trim(),
+        provider_type: 'other',
+        address: location.trim() || null,
+      }),
+    onSuccess: (res) => {
+      setProviderId(res.provider.id);
+      setShowSaveProvider(false);
+      setProviderName('');
+      void queryClient.invalidateQueries({ queryKey: ['providers', profileId] });
+    },
+  });
+
   const saveMutation = useMutation({
     mutationFn: () => {
+      const startsAt = new Date(`${startDate}T${startTime}`).toISOString();
+      const endsAt = endTime ? new Date(`${startDate}T${endTime}`).toISOString() : null;
       const body = {
         title: title.trim(),
         appointment_type: type,
         provider_id: providerId || null,
         location: location.trim() || null,
-        starts_at: new Date(startsAt).toISOString(),
-        ends_at: endsAt ? new Date(endsAt).toISOString() : null,
+        starts_at: startsAt,
+        ends_at: endsAt,
         status,
         notes: notes.trim() || null,
       };
@@ -405,32 +458,66 @@ function AppointmentEditor({
               ))}
             </select>
           </label>
-          <label className="block">
-            <span className="block text-sm font-medium text-ink mb-1">Provider</span>
-            <select className={inputClass} value={providerId} onChange={(e) => setProviderId(e.target.value)}>
-              <option value="">No provider linked</option>
-              {providers.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </label>
+          <div>
+            <label className="block">
+              <span className="block text-sm font-medium text-ink mb-1">Provider</span>
+              <select className={inputClass} value={providerId} onChange={(e) => handleProviderChange(e.target.value)}>
+                <option value="">No provider linked</option>
+                {providers.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </label>
+            {!providerId && providers.length > 0 ? (
+              <div className="mt-1">
+                <input
+                  type="text"
+                  className={inputClass}
+                  placeholder="Or type a new provider name"
+                  value={providerName}
+                  onChange={(e) => { setProviderName(e.target.value); setShowSaveProvider(false); }}
+                  onBlur={handleProviderNameBlur}
+                />
+                {showSaveProvider && providerName.trim() ? (
+                  <div className="mt-1">
+                    <Button
+                      size="xs"
+                      variant="secondary"
+                      loading={saveProviderMutation.isPending}
+                      onClick={() => saveProviderMutation.mutate()}
+                    >
+                      Save "{providerName.trim()}" to Providers
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
           <Input
             label="Location"
-            placeholder="e.g. Suite 4, 12 High St"
+            placeholder="e.g. Suite 4, 12 High St or a map link"
             value={location}
             onChange={(e) => setLocation(e.target.value)}
+            hint={providerId ? 'Auto-filled from provider. Edit if different.' : undefined}
           />
           <Input
-            label="Starts"
-            type="datetime-local"
-            value={startsAt}
-            onChange={(e) => setStartsAt(e.target.value)}
+            label="Start date"
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
           />
           <Input
-            label="Ends"
-            type="datetime-local"
-            value={endsAt}
-            onChange={(e) => setEndsAt(e.target.value)}
+            label="Start time"
+            type="time"
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+          />
+          <Input
+            label="End time"
+            type="time"
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+            hint="On the same day. Leave blank if unknown."
           />
           <label className="block">
             <span className="block text-sm font-medium text-ink mb-1">Status</span>
@@ -447,7 +534,7 @@ function AppointmentEditor({
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button
             loading={saveMutation.isPending}
-            disabled={!title.trim() || !startsAt}
+            disabled={!title.trim() || !startDate}
             onClick={() => saveMutation.mutate()}
           >
             Save

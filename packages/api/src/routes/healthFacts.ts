@@ -151,6 +151,16 @@ conditionsRouter.get('/', requireAuth, async (req, res) => {
     functionsByCondition.set(fn.condition_id, arr);
   }
 
+  const symptoms = ids.length
+    ? await db('condition_symptoms').whereIn('condition_id', ids).orderBy('noted_at', 'desc')
+    : [];
+  const symptomsByCondition = new Map<string, unknown[]>();
+  for (const s of symptoms) {
+    const arr = symptomsByCondition.get(s.condition_id) ?? [];
+    arr.push(s);
+    symptomsByCondition.set(s.condition_id, arr);
+  }
+
   res.json({
     conditions: conditions.map((c) =>
       serializeCondition({
@@ -159,6 +169,7 @@ conditionsRouter.get('/', requireAuth, async (req, res) => {
         treatments: treatmentsByCondition.get(c.id) ?? [],
         codes: codesByCondition.get(c.id) ?? [],
         functions: functionsByCondition.get(c.id) ?? [],
+        symptoms: symptomsByCondition.get(c.id) ?? [],
       })
     ),
   });
@@ -168,18 +179,18 @@ const conditionSchema = z.object({
   name: z.string().min(1).max(255),
   notes: z.string().max(2000).optional().nullable(),
   sort_order: z.number().int().optional(),
-  // A condition's lifecycle, one fact per field: whether it is expected to
-  // pass, how it stands now, and when it started and cleared.
   is_temporary: z.boolean().optional(),
   status: z.enum(['active', 'improving', 'managed', 'resolved']).optional(),
   started_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   resolved_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
-  // The structured profile: what kind of condition, how severe, whether it
-  // is expected to improve, and how long it is expected to last.
   condition_type: z.enum(['chronic', 'acute', 'disability', 'other']).optional().nullable(),
   severity: z.enum(['mild', 'moderate', 'severe', 'profound']).optional().nullable(),
   is_permanent: z.boolean().optional().nullable(),
   expected_duration: z.enum(['self_limiting', 'short_term', 'long_term', 'lifelong']).optional().nullable(),
+  category: z.enum(['illness', 'injury', 'post_operative', 'recovery', 'mental_health', 'chronic_flare', 'acute_illness', 'disability', 'other']).optional().nullable(),
+  is_contagious: z.boolean().optional(),
+  isolation_required: z.boolean().optional(),
+  region: z.string().max(255).optional().nullable(),
 });
 
 /**
@@ -373,4 +384,97 @@ conditionsRouter.delete('/:conditionId/functions/:functionId', requireAuth, asyn
     return;
   }
   res.json({ message: 'Functional impact removed.' });
+});
+
+// --- Condition symptoms ---------------------------------------------------
+
+const symptomSchema = z.object({
+  name: z.string().min(1).max(255),
+  severity: z.number().int().min(1).max(5).default(3),
+  notes: z.string().max(2000).optional().nullable(),
+});
+
+async function resolveSymptomCatalogueId(name: string): Promise<string | null> {
+  const n = name.trim();
+  const existing = await db('symptom_catalogue').whereRaw('lower(name) = lower(?)', [n]).first();
+  if (existing) return existing.id as string;
+  try {
+    const [row] = await db('symptom_catalogue').insert({ name: n }).returning('id');
+    return (row as { id: string }).id;
+  } catch {
+    const again = await db('symptom_catalogue').whereRaw('lower(name) = lower(?)', [n]).first();
+    return again ? (again.id as string) : null;
+  }
+}
+
+conditionsRouter.get('/:conditionId/symptoms', requireAuth, async (req, res) => {
+  if (!(await findProfileCondition(String(req.params['conditionId']), String(req.params['id'])))) {
+    res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const symptoms = await db('condition_symptoms')
+    .where({ condition_id: req.params['conditionId'] })
+    .orderBy('noted_at', 'desc');
+  res.json({ symptoms });
+});
+
+conditionsRouter.post('/:conditionId/symptoms', requireAuth, async (req, res) => {
+  const parsed = symptomSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  if (!(await findProfileCondition(String(req.params['conditionId']), String(req.params['id'])))) {
+    res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const catalogueId = await resolveSymptomCatalogueId(parsed.data.name);
+  const [symptom] = await db('condition_symptoms')
+    .insert({
+      condition_id: req.params['conditionId'],
+      symptom_catalogue_id: catalogueId,
+      ...parsed.data,
+    })
+    .returning('*');
+  res.status(201).json({ symptom });
+});
+
+conditionsRouter.patch('/:conditionId/symptoms/:symptomId', requireAuth, async (req, res) => {
+  if (!(await findProfileCondition(String(req.params['conditionId']), String(req.params['id'])))) {
+    res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const allowed = z.object({
+    resolved_at: z.string().datetime().nullable().optional(),
+    severity: z.number().int().min(1).max(5).optional(),
+    notes: z.string().max(2000).nullable().optional(),
+  }).safeParse(req.body);
+  if (!allowed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const [symptom] = await db('condition_symptoms')
+    .where({ id: req.params['symptomId'], condition_id: req.params['conditionId'] })
+    .update({ ...allowed.data, updated_at: db.fn.now() })
+    .returning('*');
+  if (!symptom) {
+    res.status(404).json({ error: 'Symptom not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ symptom });
+});
+
+conditionsRouter.delete('/:conditionId/symptoms/:symptomId', requireAuth, async (req, res) => {
+  if (!(await findProfileCondition(String(req.params['conditionId']), String(req.params['id'])))) {
+    res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const deleted = await db('condition_symptoms')
+    .where({ id: req.params['symptomId'], condition_id: req.params['conditionId'] })
+    .delete();
+  if (!deleted) {
+    res.status(404).json({ error: 'Symptom not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ message: 'Symptom removed.' });
 });

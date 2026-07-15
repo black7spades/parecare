@@ -25,7 +25,6 @@ import { QuestionsPage } from './pages/app/profile/QuestionsPage';
 import { ProvidersPage } from './pages/app/profile/ProvidersPage';
 import { ActivityPage } from './pages/app/profile/ActivityPage';
 import { AiPage } from './pages/app/profile/AiPage';
-import { HealthStatusPage } from './pages/app/profile/HealthStatusPage';
 import { DirectoryProvidersPage } from './pages/app/DirectoryProvidersPage';
 import { DirectoryPeoplePage, DirectoryPetsPage } from './pages/app/DirectoryProfilesPage';
 import { InvitePage } from './pages/InvitePage';
@@ -107,7 +106,7 @@ export const router = createBrowserRouter([
           // The section is named Treatments; both paths land on the same page
           { path: 'treatments', element: <MedicationsPage /> },
           { path: 'tasks', element: <TasksPage /> },
-          { path: 'health-status', element: <HealthStatusPage /> },
+          { path: 'health-status', element: <Navigate to="../conditions" replace /> },
           { path: 'appointments', element: <AppointmentsPage /> },
           { path: 'calendar', element: <CalendarPage /> },
           { path: 'mar', element: <MarPage /> },

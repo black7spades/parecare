@@ -41,7 +41,6 @@ export const PROFILE_NAV: ProfileNavGroup[] = [
     label: 'Conditions',
     items: [
       { key: 'conditions', to: 'conditions', label: 'Conditions' },
-      { key: 'health-status', to: 'health-status', label: 'Health status' },
       { key: 'treatments', to: 'medications', label: 'Treatments' },
     ],
   },
