@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
@@ -7,24 +7,68 @@ import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
-import { ConditionsSection } from './ConditionsSection';
 import { HealthStatusOverview } from './HealthStatusOverview';
 import { CareLogSection } from './CareLogSection';
 import { useProfile } from './ProfileLayout';
 import {
   POA_TYPES,
   PROVIDER_TYPES,
+  conditionCategoryLabel,
+  conditionStatusLabel,
+  diagnosisStatusLabel,
+  neurotypeLabelText,
+  poaLabel,
   providerTypeLabel,
   type CareProfile,
   type CircleMember,
+  type MedicalCondition,
   type Provider,
 } from '../../../lib/care';
+
+const CARD_KEYS = ['profile', 'conditions', 'neurotypes', 'poa', 'attention', 'upcoming', 'health', 'log', 'journey'] as const;
+type CardKey = (typeof CARD_KEYS)[number];
+
+const CARD_LABELS: Record<CardKey, string> = {
+  profile: 'Contact details',
+  conditions: 'Conditions',
+  neurotypes: 'Neurotypes',
+  poa: 'Power of attorney',
+  attention: 'Needs attention',
+  upcoming: 'Coming up',
+  health: 'Current health',
+  log: 'Care log',
+  journey: 'Care journey',
+};
+
+function loadCardOrder(): CardKey[] {
+  try {
+    const raw = localStorage.getItem('overview-card-order');
+    if (raw) {
+      const parsed = JSON.parse(raw) as string[];
+      const valid = parsed.filter((k): k is CardKey => (CARD_KEYS as readonly string[]).includes(k));
+      const missing = CARD_KEYS.filter((k) => !valid.includes(k));
+      return [...valid, ...missing];
+    }
+  } catch { /* ignore */ }
+  return [...CARD_KEYS];
+}
+
+function loadCollapsed(): Set<CardKey> {
+  try {
+    const raw = localStorage.getItem('overview-collapsed');
+    if (raw) return new Set(JSON.parse(raw) as CardKey[]);
+  } catch { /* ignore */ }
+  return new Set();
+}
 
 export function OverviewPage() {
   const { profile, isOwner, canEdit } = useProfile();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [editView, setEditView] = useState(false);
+  const [cardOrder, setCardOrder] = useState<CardKey[]>(loadCardOrder);
+  const [collapsed, setCollapsed] = useState<Set<CardKey>>(loadCollapsed);
 
   const { data: circleData } = useQuery({
     queryKey: ['circle', profile.id],
@@ -36,8 +80,7 @@ export function OverviewPage() {
   });
   const members = circleData?.members ?? [];
   const providers = providersData?.providers ?? [];
-  // Power of attorney can be held by a person in the care circle or by an
-  // organisation in the providers list (e.g. a law firm). Show both together.
+
   const poaHolders: PoaHolder[] = [
     ...members
       .filter((m) => m.poa_type)
@@ -93,55 +136,213 @@ export function OverviewPage() {
     setDeleteError('');
   };
 
+  const toggleCollapse = useCallback((key: CardKey) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      localStorage.setItem('overview-collapsed', JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+
+  const moveCard = useCallback((key: CardKey, dir: -1 | 1) => {
+    setCardOrder((prev) => {
+      const idx = prev.indexOf(key);
+      const target = idx + dir;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[target]] = [next[target], next[idx]];
+      localStorage.setItem('overview-card-order', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   const isPet = profile.kind === 'pet';
+  const careName = profile.preferred_name ?? profile.full_name;
+
+  const renderCard = (key: CardKey) => {
+    const isCollapsed = collapsed.has(key);
+    switch (key) {
+      case 'profile':
+        return (
+          <CollapsibleCard
+            key={key}
+            cardKey={key}
+            label={CARD_LABELS[key]}
+            collapsed={isCollapsed}
+            editView={editView}
+            onToggle={toggleCollapse}
+            onMove={moveCard}
+            order={cardOrder}
+          >
+            {isPet ? (
+              <PetDetails
+                species={profile.species}
+                breed={profile.breed}
+                desexed={profile.desexed}
+                microchip={profile.microchip_number}
+              />
+            ) : (
+              <ProfileContact profile={profile} />
+            )}
+          </CollapsibleCard>
+        );
+      case 'conditions':
+        return (
+          <CollapsibleCard
+            key={key}
+            cardKey={key}
+            label={CARD_LABELS[key]}
+            collapsed={isCollapsed}
+            editView={editView}
+            onToggle={toggleCollapse}
+            onMove={moveCard}
+            order={cardOrder}
+          >
+            <ConditionsOverview profileId={profile.id} canEdit={canEdit} careName={careName} />
+          </CollapsibleCard>
+        );
+      case 'neurotypes':
+        return (
+          <CollapsibleCard
+            key={key}
+            cardKey={key}
+            label={CARD_LABELS[key]}
+            collapsed={isCollapsed}
+            editView={editView}
+            onToggle={toggleCollapse}
+            onMove={moveCard}
+            order={cardOrder}
+            hideWhenEmpty
+          >
+            <NeurotypesOverview profileId={profile.id} careName={careName} />
+          </CollapsibleCard>
+        );
+      case 'poa':
+        if (isPet) return null;
+        return (
+          <CollapsibleCard
+            key={key}
+            cardKey={key}
+            label={CARD_LABELS[key]}
+            collapsed={isCollapsed}
+            editView={editView}
+            onToggle={toggleCollapse}
+            onMove={moveCard}
+            order={cardOrder}
+          >
+            <PoaCard
+              profileId={profile.id}
+              poaHolders={poaHolders}
+              members={members}
+              providers={providers}
+              isOwner={isOwner}
+              careName={careName}
+            />
+          </CollapsibleCard>
+        );
+      case 'attention':
+        return (
+          <CollapsibleCard
+            key={key}
+            cardKey={key}
+            label={CARD_LABELS[key]}
+            collapsed={isCollapsed}
+            editView={editView}
+            onToggle={toggleCollapse}
+            onMove={moveCard}
+            order={cardOrder}
+            hideWhenEmpty
+          >
+            <ProfileAttention profileId={profile.id} />
+          </CollapsibleCard>
+        );
+      case 'upcoming':
+        return (
+          <CollapsibleCard
+            key={key}
+            cardKey={key}
+            label={CARD_LABELS[key]}
+            collapsed={isCollapsed}
+            editView={editView}
+            onToggle={toggleCollapse}
+            onMove={moveCard}
+            order={cardOrder}
+            hideWhenEmpty
+          >
+            <UpcomingEvents profileId={profile.id} />
+          </CollapsibleCard>
+        );
+      case 'health':
+        return (
+          <CollapsibleCard
+            key={key}
+            cardKey={key}
+            label={CARD_LABELS[key]}
+            collapsed={isCollapsed}
+            editView={editView}
+            onToggle={toggleCollapse}
+            onMove={moveCard}
+            order={cardOrder}
+            hideWhenEmpty
+          >
+            <HealthStatusOverview profileId={profile.id} />
+          </CollapsibleCard>
+        );
+      case 'log':
+        return (
+          <CollapsibleCard
+            key={key}
+            cardKey={key}
+            label={CARD_LABELS[key]}
+            collapsed={isCollapsed}
+            editView={editView}
+            onToggle={toggleCollapse}
+            onMove={moveCard}
+            order={cardOrder}
+          >
+            <CareLogSection profileId={profile.id} canEdit={canEdit} />
+          </CollapsibleCard>
+        );
+      case 'journey':
+        return (
+          <CollapsibleCard
+            key={key}
+            cardKey={key}
+            label={CARD_LABELS[key]}
+            collapsed={isCollapsed}
+            editView={editView}
+            onToggle={toggleCollapse}
+            onMove={moveCard}
+            order={cardOrder}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-muted">Journeys, phases and milestones live on their own page.</p>
+              <Link to="journey">
+                <Button variant="secondary" size="sm">Open care journey</Button>
+              </Link>
+            </div>
+          </CollapsibleCard>
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
     <div className="space-y-6">
-      {/* Who they are: relationship, power of attorney, contacts, conditions. */}
-      <div className="card space-y-3">
-        {isPet ? (
-          <PetDetails
-            species={profile.species}
-            breed={profile.breed}
-            desexed={profile.desexed}
-            microchip={profile.microchip_number}
-          />
-        ) : poaHolders.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-3">
-            {poaHolders.map((h) => (
-              <PoaHolderChip key={h.key} holder={h} />
-            ))}
-            {isOwner ? <SetPoaInline profileId={profile.id} members={members} providers={providers} compact /> : null}
-          </div>
-        ) : isOwner ? (
-          <SetPoaInline profileId={profile.id} members={members} providers={providers} />
-        ) : (
-          <p className="text-sm text-muted">No power of attorney recorded yet.</p>
-        )}
-        <ProfileContact profile={profile} />
-        <ConditionsSection profileId={profile.id} canEdit={canEdit} />
+      <div className="flex justify-end">
+        <Button
+          variant={editView ? 'secondary' : 'ghost'}
+          size="sm"
+          onClick={() => setEditView((v) => !v)}
+        >
+          {editView ? 'Done editing' : 'Edit view'}
+        </Button>
       </div>
 
-      <ProfileAttention profileId={profile.id} />
-
-      <UpcomingEvents profileId={profile.id} />
-
-      <HealthStatusOverview profileId={profile.id} />
-
-      <CareLogSection profileId={profile.id} canEdit={canEdit} />
-
-      {/* The journey itself lives on its own page and feeds this one. */}
-      <div className="card flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-ink">Care journey</h2>
-          <p className="text-sm text-muted">The journeys, their phases and milestones live on their own page.</p>
-        </div>
-        <Link to="journey">
-          <Button variant="secondary" size="sm">
-            Open care journey
-          </Button>
-        </Link>
-      </div>
+      {cardOrder.map(renderCard)}
 
       <div className="pt-4 border-t border-border">
         <Button variant="ghost" size="sm" onClick={() => setArchiveOpen(true)}>
@@ -151,13 +352,11 @@ export function OverviewPage() {
 
       <Modal open={archiveOpen} onClose={closeArchive} title="Archive or delete profile">
         <p className="text-sm text-muted mb-4">
-          Archiving hides {profile.preferred_name ?? profile.full_name}'s profile and its records from your
+          Archiving hides {careName}'s profile and its records from your
           dashboard. Nothing is deleted, and you can bring it back later.
         </p>
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={closeArchive}>
-            Cancel
-          </Button>
+          <Button variant="ghost" onClick={closeArchive}>Cancel</Button>
           <Button variant="secondary" loading={archiveMutation.isPending} onClick={() => archiveMutation.mutate()}>
             Archive
           </Button>
@@ -167,7 +366,7 @@ export function OverviewPage() {
           <div className="mt-6 pt-4 border-t border-border">
             <p className="text-sm font-medium text-ink mb-1">Delete permanently</p>
             <p className="text-sm text-muted mb-3">
-              This cannot be undone. It removes {profile.preferred_name ?? profile.full_name} and everything recorded
+              This cannot be undone. It removes {careName} and everything recorded
               for them: journeys, care log, tasks, medications, documents and the care circle. To confirm, type their
               full name <span className="font-medium text-ink">{profile.full_name}</span> below.
             </p>
@@ -198,7 +397,74 @@ export function OverviewPage() {
   );
 }
 
-/** A power of attorney holder, whether a person in the circle or an organisation. */
+function CollapsibleCard({
+  cardKey,
+  label,
+  collapsed,
+  editView,
+  onToggle,
+  onMove,
+  order,
+  hideWhenEmpty,
+  children,
+}: {
+  cardKey: CardKey;
+  label: string;
+  collapsed: boolean;
+  editView: boolean;
+  onToggle: (key: CardKey) => void;
+  onMove: (key: CardKey, dir: -1 | 1) => void;
+  order: CardKey[];
+  hideWhenEmpty?: boolean;
+  children: React.ReactNode;
+}) {
+  const idx = order.indexOf(cardKey);
+  const isFirst = idx === 0;
+  const isLast = idx === order.length - 1;
+
+  if (hideWhenEmpty && collapsed) return null;
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          className="flex items-center gap-2 text-sm font-semibold text-ink hover:text-primary"
+          onClick={() => onToggle(cardKey)}
+          aria-expanded={!collapsed}
+          aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${label}`}
+        >
+          <span className="text-xs text-muted">{collapsed ? '▶' : '▼'}</span>
+          {label}
+        </button>
+        {editView ? (
+          <span className="flex items-center gap-1">
+            <button
+              type="button"
+              aria-label={`Move ${label} up`}
+              disabled={isFirst}
+              onClick={() => onMove(cardKey, -1)}
+              className="p-1 text-xs text-muted hover:text-ink disabled:opacity-30"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              aria-label={`Move ${label} down`}
+              disabled={isLast}
+              onClick={() => onMove(cardKey, 1)}
+              className="p-1 text-xs text-muted hover:text-ink disabled:opacity-30"
+            >
+              ↓
+            </button>
+          </span>
+        ) : null}
+      </div>
+      {collapsed ? null : <div className="mt-3">{children}</div>}
+    </div>
+  );
+}
+
 interface PoaHolder {
   key: string;
   name: string;
@@ -210,16 +476,213 @@ interface PoaHolder {
   address: string | null;
 }
 
-/**
- * A named power-of-attorney holder. Hovering or focusing reveals their
- * contact details, so whoever needs to reach them can do so from right
- * here without opening the circle or providers page.
- */
-/**
- * The next two weeks from the calendar, which appointments, tasks,
- * medications and health dates all feed into. The calendar page has the
- * full picture; this card answers "what is coming up" at a glance.
- */
+function buildConditionsSummary(conditions: MedicalCondition[], careName: string): string {
+  if (conditions.length === 0) return '';
+  const active = conditions.filter((c) => c.status !== 'resolved');
+  const resolved = conditions.filter((c) => c.status === 'resolved');
+  const neurotypes = active.filter((c) => c.category === 'neurotype');
+  const chronic = active.filter((c) => c.condition_type === 'chronic' && c.category !== 'neurotype');
+  const acute = active.filter((c) => c.condition_type === 'acute' || c.category === 'illness' || c.category === 'acute_illness');
+  const other = active.filter(
+    (c) => !neurotypes.includes(c) && !chronic.includes(c) && !acute.includes(c)
+  );
+
+  const parts: string[] = [];
+
+  if (neurotypes.length > 0) {
+    parts.push(
+      `${careName} is neurodivergent: ${neurotypes.map((c) => c.name).join(', ')}.`
+    );
+  }
+
+  if (chronic.length > 0) {
+    const managed = chronic.filter((c) => c.status === 'managed');
+    if (managed.length === chronic.length) {
+      parts.push(`${chronic.length === 1 ? 'Has' : 'Has'} ${chronic.map((c) => c.name).join(', ')}, currently managed.`);
+    } else {
+      parts.push(`Living with ${chronic.map((c) => `${c.name}${c.severity ? ` (${c.severity})` : ''}`).join(', ')}.`);
+    }
+  }
+
+  if (acute.length > 0) {
+    parts.push(`Currently dealing with ${acute.map((c) => c.name).join(', ')}.`);
+  }
+
+  if (other.length > 0) {
+    parts.push(`Also recorded: ${other.map((c) => c.name).join(', ')}.`);
+  }
+
+  if (resolved.length > 0) {
+    parts.push(`${resolved.length} resolved ${resolved.length === 1 ? 'condition' : 'conditions'}.`);
+  }
+
+  return parts.join(' ');
+}
+
+function ConditionsOverview({
+  profileId,
+  canEdit,
+  careName,
+}: {
+  profileId: string;
+  canEdit: boolean;
+  careName: string;
+}) {
+  const [viewMode, setViewMode] = useState<'summary' | 'list'>('summary');
+
+  const { data } = useQuery({
+    queryKey: ['conditions', profileId],
+    queryFn: () => api.get<{ conditions: MedicalCondition[] }>(`/care-profiles/${profileId}/conditions`),
+  });
+  const conditions = data?.conditions ?? [];
+  const sorted = [...conditions].sort((a, b) => a.name.localeCompare(b.name));
+
+  if (conditions.length === 0) {
+    return (
+      <div>
+        <p className="text-sm text-muted">No conditions recorded yet.</p>
+        {canEdit ? (
+          <Link to="conditions" className="mt-2 inline-block">
+            <Button variant="secondary" size="sm">Add conditions</Button>
+          </Link>
+        ) : null}
+      </div>
+    );
+  }
+
+  const summary = buildConditionsSummary(conditions, careName);
+
+  const pillClass = (active: boolean) =>
+    active
+      ? 'px-3 py-1 text-xs rounded-full bg-card text-ink font-medium shadow-sm'
+      : 'px-3 py-1 text-xs rounded-full text-muted hover:text-ink';
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1 rounded-full bg-surface-2 p-0.5">
+          <button type="button" className={pillClass(viewMode === 'summary')} onClick={() => setViewMode('summary')}>
+            Summary
+          </button>
+          <button type="button" className={pillClass(viewMode === 'list')} onClick={() => setViewMode('list')}>
+            A-Z list
+          </button>
+        </div>
+        <Link to="conditions" className="text-xs text-primary hover:underline">
+          Manage conditions
+        </Link>
+      </div>
+
+      {viewMode === 'summary' ? (
+        <p className="text-sm text-ink leading-relaxed">{summary}</p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {sorted.map((c) => (
+            <li key={c.id} className="py-1.5 flex items-center gap-3 text-sm">
+              <span className="text-ink font-medium min-w-0 truncate">{c.name}</span>
+              {c.category ? <span className="text-xs text-muted">{conditionCategoryLabel(c.category)}</span> : null}
+              <span className="text-xs text-muted">{conditionStatusLabel(c.status)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function NeurotypesOverview({ profileId, careName }: { profileId: string; careName: string }) {
+  const { data } = useQuery({
+    queryKey: ['conditions', profileId],
+    queryFn: () => api.get<{ conditions: MedicalCondition[] }>(`/care-profiles/${profileId}/conditions`),
+  });
+  const neurotypes = (data?.conditions ?? []).filter((c) => c.category === 'neurotype');
+
+  if (neurotypes.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm text-ink">
+          {careName} {neurotypes.length === 1 ? 'has a' : 'has'} neurodivergent {neurotypes.length === 1 ? 'profile' : 'profiles'}.
+        </p>
+        <Link to="conditions" className="text-xs text-primary hover:underline">
+          Manage conditions
+        </Link>
+      </div>
+      <div className="space-y-2">
+        {neurotypes.map((n) => (
+          <div key={n.id} className="flex items-start gap-3 text-sm">
+            <span className="font-medium text-ink">{n.name}</span>
+            {n.neurotype ? <span className="text-xs text-muted">{neurotypeLabelText(n.neurotype)}</span> : null}
+            {n.diagnosis_status ? (
+              <span className="text-xs text-muted">{diagnosisStatusLabel(n.diagnosis_status)}</span>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PoaCard({
+  profileId,
+  poaHolders,
+  members,
+  providers,
+  isOwner,
+  careName,
+}: {
+  profileId: string;
+  poaHolders: PoaHolder[];
+  members: CircleMember[];
+  providers: Provider[];
+  isOwner: boolean;
+  careName: string;
+}) {
+  if (poaHolders.length > 0) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-ink">
+          Power of attorney means someone is legally authorised to make decisions on {careName}'s behalf.
+          The type of authority determines what decisions they can make. A medical POA can make healthcare
+          decisions; a financial POA can manage money and property; an enduring POA continues even if
+          {careName} loses capacity to make their own decisions.
+        </p>
+        <div className="divide-y divide-border">
+          {poaHolders.map((h) => (
+            <div key={h.key} className="py-2 flex items-start gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium text-ink">{h.name}</span>
+                  <PoaBadge type={h.poa_type} activated={h.poa_activated} />
+                </div>
+                {h.sublabel ? <p className="text-xs text-muted">{h.sublabel}</p> : null}
+                <p className="text-xs text-muted mt-0.5">
+                  {poaLabel(h.poa_type ?? '')} {h.poa_activated ? '(activated)' : '(not yet activated)'}
+                </p>
+                {h.phone || h.email ? (
+                  <p className="text-xs text-muted mt-0.5">
+                    {h.phone ? `Phone: ${h.phone}` : null}
+                    {h.phone && h.email ? ' · ' : null}
+                    {h.email ? `Email: ${h.email}` : null}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+        {isOwner ? <SetPoaInline profileId={profileId} members={members} providers={providers} compact /> : null}
+      </div>
+    );
+  }
+
+  if (isOwner) {
+    return <SetPoaInline profileId={profileId} members={members} providers={providers} />;
+  }
+
+  return <p className="text-sm text-muted">No power of attorney recorded.</p>;
+}
+
 function UpcomingEvents({ profileId }: { profileId: string }) {
   const from = new Date();
   const to = new Date(Date.now() + 14 * 24 * 3600 * 1000);
@@ -230,14 +693,12 @@ function UpcomingEvents({ profileId }: { profileId: string }) {
         `/care-profiles/${profileId}/calendar?from=${from.toISOString()}&to=${to.toISOString()}`
       ),
   });
-  // Medication doses would swamp the list; the Medication record covers those.
   const events = (data?.events ?? []).filter((e) => e.kind !== 'medication' && !e.completed).slice(0, 6);
   if (events.length === 0) return null;
 
   return (
-    <div className="card">
+    <div>
       <div className="flex items-center justify-between gap-2 mb-2">
-        <h2 className="text-base font-semibold text-ink">Coming up</h2>
         <Link to="calendar" className="text-xs text-primary hover:underline">
           Open the calendar
         </Link>
@@ -257,45 +718,6 @@ function UpcomingEvents({ profileId }: { profileId: string }) {
   );
 }
 
-function PoaHolderChip({ holder }: { holder: PoaHolder }) {
-  const hasContact = !!(holder.phone || holder.email || holder.address);
-  return (
-    <span className="relative group inline-flex" tabIndex={hasContact ? 0 : undefined}>
-      <span className="flex items-center gap-2 text-sm text-ink cursor-default">
-        <span className="font-medium">{holder.name}</span>
-        <PoaBadge type={holder.poa_type} activated={holder.poa_activated} />
-      </span>
-      {hasContact ? (
-        <span className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden w-64 rounded-md border border-border bg-card p-3 shadow-lg group-hover:block group-focus-within:block">
-          <span className="block text-sm font-medium text-ink">{holder.name}</span>
-          {holder.sublabel ? <span className="block text-xs text-muted">{holder.sublabel}</span> : null}
-          <span className="mt-1.5 block space-y-0.5">
-            {holder.phone ? (
-              <span className="block text-sm text-ink">
-                <span className="text-muted">Phone: </span>
-                {holder.phone}
-              </span>
-            ) : null}
-            {holder.email ? (
-              <span className="block text-sm text-ink">
-                <span className="text-muted">Email: </span>
-                {holder.email}
-              </span>
-            ) : null}
-            {holder.address ? (
-              <span className="block text-sm text-ink">
-                <span className="text-muted">Address: </span>
-                {holder.address}
-              </span>
-            ) : null}
-          </span>
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
-/** Who to contact about this person, shown fact by fact. */
 function ProfileContact({ profile }: { profile: CareProfile }) {
   if (!profile.contact_kind) return null;
   const rows: { label: string; value: string }[] = [];
@@ -316,7 +738,7 @@ function ProfileContact({ profile }: { profile: CareProfile }) {
   }
   if (rows.length === 0) return null;
   return (
-    <dl className="grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-2 border-t border-border pt-3">
+    <dl className="grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-2">
       {rows.map((r) => (
         <div key={r.label} className="flex gap-2">
           <dt className="w-24 shrink-0 text-muted">{r.label}</dt>
@@ -327,7 +749,6 @@ function ProfileContact({ profile }: { profile: CareProfile }) {
   );
 }
 
-/** One pressing thing for this person, from the account-wide attention feed. */
 interface AttentionItem {
   profile_id: string;
   profile_name: string;
@@ -340,10 +761,6 @@ interface AttentionItem {
   dismissible: boolean;
 }
 
-/**
- * This person's own "needs attention today": the account-wide feed
- * narrowed to them, right under their profile details.
- */
 function ProfileAttention({ profileId }: { profileId: string }) {
   const tz = browserTimeZone();
   const { data } = useQuery({
@@ -355,34 +772,19 @@ function ProfileAttention({ profileId }: { profileId: string }) {
   if (items.length === 0) return null;
 
   return (
-    <div className="card py-3 px-4">
-      <p className="text-sm font-semibold text-ink">Needs attention today</p>
-      <ul className="mt-2 divide-y divide-border">
-        {items.map((it) => (
-          <li key={it.key} className={`py-2 -mx-2 px-2 rounded ${it.urgent ? 'border-l-2 border-red-500 bg-red-50 dark:bg-red-900/10' : ''}`}>
-            <Link to={it.section} className="block text-sm hover:underline">
-              <span className={it.urgent ? 'text-red-700 dark:text-red-300 font-medium' : 'text-ink font-medium'}>{it.label}</span>
-              {it.detail ? <span className={it.urgent ? 'text-red-700 dark:text-red-300' : 'text-muted'}> · {it.detail}</span> : null}
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <ul className="divide-y divide-border">
+      {items.map((it) => (
+        <li key={it.key} className={`py-2 -mx-2 px-2 rounded ${it.urgent ? 'border-l-2 border-red-500 bg-red-50 dark:bg-red-900/10' : ''}`}>
+          <Link to={it.section} className="block text-sm hover:underline">
+            <span className={it.urgent ? 'text-red-700 dark:text-red-300 font-medium' : 'text-ink font-medium'}>{it.label}</span>
+            {it.detail ? <span className={it.urgent ? 'text-red-700 dark:text-red-300' : 'text-muted'}> · {it.detail}</span> : null}
+          </Link>
+        </li>
+      ))}
+    </ul>
   );
 }
 
-/**
- * Name a power of attorney right here, without leaving the overview. The
- * user picks whoever holds it, from the people already in the care circle
- * or the organisations in the providers list (a law firm can hold enduring
- * or financial power of attorney), and the kind of authority they hold:
- * two separate choices, so each stays its own data point. Activating it and
- * finer edits still live on the care circle and provider screens. Only
- * shown to the profile owner, who is the one allowed to set it.
- *
- * In compact mode it collapses to a single "Name another" toggle, so an
- * existing holder list is not crowded by the full form.
- */
 function SetPoaInline({
   profileId,
   members,
@@ -395,9 +797,6 @@ function SetPoaInline({
   compact?: boolean;
 }) {
   const queryClient = useQueryClient();
-  // The selected holder is encoded as "member:<id>" or "provider:<id>" so
-  // one dropdown can offer both people and organisations. "neworg" adds an
-  // organisation that is not on the providers list yet, right here.
   const [holder, setHolder] = useState('');
   const [orgName, setOrgName] = useState('');
   const [orgType, setOrgType] = useState('legal');
@@ -410,8 +809,6 @@ function SetPoaInline({
       let path: string;
       let id: string;
       if (holder === 'neworg') {
-        // The organisation joins the providers list, then holds the POA:
-        // one step here, no trip to the Providers page.
         const created = await api.post<{ provider: Provider }>(`/care-profiles/${profileId}/providers`, {
           provider_type: orgType,
           name: orgName.trim(),
@@ -548,7 +945,6 @@ function SetPoaInline({
   );
 }
 
-/** A pet's structured facts, each on its own labelled line. */
 function PetDetails({
   species,
   breed,
@@ -576,4 +972,3 @@ function PetDetails({
     </dl>
   );
 }
-

@@ -15,9 +15,11 @@ import {
   CONDITION_SEVERITIES,
   CONDITION_STATUSES,
   CONDITION_TYPES,
+  DIAGNOSIS_STATUSES,
   EXPECTED_DURATIONS,
   FUNCTION_DOMAINS,
   LIMITATION_LEVELS,
+  NEUROTYPE_LABELS,
   TEMPORAL_PATTERNS,
   TREATMENT_CATEGORIES,
   TREATMENT_STATUS_OPTIONS,
@@ -456,6 +458,10 @@ function ConditionEditor({
   const [isContagious, setIsContagious] = useState(condition?.is_contagious ?? false);
   const [isolationRequired, setIsolationRequired] = useState(condition?.isolation_required ?? false);
   const [region, setRegion] = useState(condition?.region ?? '');
+  const [neurotype, setNeurotype] = useState(condition?.neurotype ?? '');
+  const [diagnosisStatus, setDiagnosisStatus] = useState(condition?.diagnosis_status ?? '');
+  const [diagnosisDate, setDiagnosisDate] = useState(condition?.diagnosis_date ?? '');
+  const [diagnosingProvider, setDiagnosingProvider] = useState(condition?.diagnosing_provider ?? '');
   const [notes, setNotes] = useState(condition?.notes ?? '');
   const [error, setError] = useState('');
 
@@ -473,6 +479,10 @@ function ConditionEditor({
     setIsContagious(condition.is_contagious ?? false);
     setIsolationRequired(condition.isolation_required ?? false);
     setRegion(condition.region ?? '');
+    setNeurotype(condition.neurotype ?? '');
+    setDiagnosisStatus(condition.diagnosis_status ?? '');
+    setDiagnosisDate(condition.diagnosis_date ?? '');
+    setDiagnosingProvider(condition.diagnosing_provider ?? '');
     setNotes(condition.notes ?? '');
   }, [condition]);
 
@@ -493,6 +503,10 @@ function ConditionEditor({
         is_contagious: isContagious,
         isolation_required: isolationRequired,
         region: region.trim() || null,
+        neurotype: category === 'neurotype' ? (neurotype || null) : null,
+        diagnosis_status: category === 'neurotype' ? (diagnosisStatus || null) : null,
+        diagnosis_date: category === 'neurotype' ? (diagnosisDate || null) : null,
+        diagnosing_provider: category === 'neurotype' ? (diagnosingProvider.trim() || null) : null,
         notes: notes.trim() || null,
       };
       return isNew
@@ -621,7 +635,47 @@ function ConditionEditor({
               hint="Where on the body, if applicable"
             />
           ) : null}
+          {category === 'neurotype' ? (
+            <>
+              <label className="block">
+                <span className="block text-sm font-medium text-ink mb-1">Neurotype</span>
+                <select className={inputClass} value={neurotype} onChange={(e) => setNeurotype(e.target.value)}>
+                  <option value="">Select</option>
+                  {NEUROTYPE_LABELS.map((n) => (
+                    <option key={n.value} value={n.value}>{n.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="block text-sm font-medium text-ink mb-1">Diagnosis status</span>
+                <select className={inputClass} value={diagnosisStatus} onChange={(e) => setDiagnosisStatus(e.target.value)}>
+                  <option value="">Not set</option>
+                  {DIAGNOSIS_STATUSES.map((d) => (
+                    <option key={d.value} value={d.value}>{d.label}</option>
+                  ))}
+                </select>
+              </label>
+              <Input
+                label="Diagnosis date"
+                type="date"
+                value={diagnosisDate}
+                onChange={(e) => setDiagnosisDate(e.target.value)}
+                hint="When the formal diagnosis was given, if applicable"
+              />
+              <Input
+                label="Diagnosing clinician"
+                value={diagnosingProvider}
+                onChange={(e) => setDiagnosingProvider(e.target.value)}
+                hint="Name of the clinician or practice that provided the diagnosis"
+              />
+            </>
+          ) : null}
         </div>
+        {category === 'neurotype' ? (
+          <p className="text-xs text-muted">
+            Neurotypes are lifelong. To upload a formal diagnosis document, use the Documents section and choose the Medical record category.
+          </p>
+        ) : null}
         <Textarea label="Notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
 
         {!isNew ? (

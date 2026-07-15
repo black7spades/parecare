@@ -500,6 +500,11 @@ export interface MedicalCondition {
   is_contagious: boolean;
   isolation_required: boolean;
   region: string | null;
+  neurotype: string | null;
+  diagnosis_status: string | null;
+  diagnosis_date: string | null;
+  diagnosing_provider: string | null;
+  diagnosis_document_id: string | null;
   catalogue_icd10_code?: string | null;
   catalogue_snomed_code?: string | null;
   medications: { id?: string; name: string; active: boolean }[];
@@ -554,8 +559,34 @@ export const CONDITION_CATEGORIES = [
   { value: 'chronic_flare', label: 'Chronic flare-up' },
   { value: 'acute_illness', label: 'Acute illness' },
   { value: 'disability', label: 'Disability' },
+  { value: 'neurotype', label: 'Neurotype' },
   { value: 'other', label: 'Other' },
 ] as const;
+
+export const NEUROTYPE_LABELS = [
+  { value: 'autism', label: 'Autism spectrum' },
+  { value: 'adhd', label: 'ADHD' },
+  { value: 'dyslexia', label: 'Dyslexia' },
+  { value: 'dyspraxia', label: 'Dyspraxia' },
+  { value: 'dyscalculia', label: 'Dyscalculia' },
+  { value: 'tourette', label: 'Tourette syndrome' },
+  { value: 'intellectual_disability', label: 'Intellectual disability' },
+  { value: 'sensory_processing', label: 'Sensory processing difference' },
+  { value: 'other', label: 'Other' },
+] as const;
+
+export const neurotypeLabelText = (v: string | null | undefined) =>
+  NEUROTYPE_LABELS.find((x) => x.value === v)?.label ?? '';
+
+export const DIAGNOSIS_STATUSES = [
+  { value: 'formal', label: 'Formally diagnosed' },
+  { value: 'self_identified', label: 'Self-identified' },
+  { value: 'suspected', label: 'Suspected' },
+  { value: 'in_assessment', label: 'In assessment' },
+] as const;
+
+export const diagnosisStatusLabel = (v: string | null | undefined) =>
+  DIAGNOSIS_STATUSES.find((x) => x.value === v)?.label ?? '';
 
 export const conditionCategoryLabel = (v: string | null | undefined) =>
   CONDITION_CATEGORIES.find((x) => x.value === v)?.label ?? '';

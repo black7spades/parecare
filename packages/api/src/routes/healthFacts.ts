@@ -187,10 +187,15 @@ const conditionSchema = z.object({
   severity: z.enum(['mild', 'moderate', 'severe', 'profound']).optional().nullable(),
   is_permanent: z.boolean().optional().nullable(),
   expected_duration: z.enum(['self_limiting', 'short_term', 'long_term', 'lifelong']).optional().nullable(),
-  category: z.enum(['illness', 'injury', 'post_operative', 'recovery', 'mental_health', 'chronic_flare', 'acute_illness', 'disability', 'other']).optional().nullable(),
+  category: z.enum(['illness', 'injury', 'post_operative', 'recovery', 'mental_health', 'chronic_flare', 'acute_illness', 'disability', 'neurotype', 'other']).optional().nullable(),
   is_contagious: z.boolean().optional(),
   isolation_required: z.boolean().optional(),
   region: z.string().max(255).optional().nullable(),
+  neurotype: z.enum(['autism', 'adhd', 'dyslexia', 'dyspraxia', 'dyscalculia', 'tourette', 'intellectual_disability', 'sensory_processing', 'other']).optional().nullable(),
+  diagnosis_status: z.enum(['formal', 'self_identified', 'suspected', 'in_assessment']).optional().nullable(),
+  diagnosis_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  diagnosing_provider: z.string().max(255).optional().nullable(),
+  diagnosis_document_id: z.union([z.string().uuid(), z.null()]).optional(),
 });
 
 /**
@@ -213,6 +218,12 @@ function classifyCondition(data: Partial<z.infer<typeof conditionSchema>>): Part
   // A lifelong condition is not a temporary one, and vice versa.
   if (out.expected_duration && out.is_temporary === undefined) {
     out.is_temporary = out.expected_duration === 'self_limiting' || out.expected_duration === 'short_term';
+  }
+  // Neurotypes are always lifelong.
+  if (out.category === 'neurotype') {
+    out.expected_duration = 'lifelong';
+    out.is_temporary = false;
+    out.condition_type = 'disability';
   }
   return out;
 }
