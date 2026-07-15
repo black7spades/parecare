@@ -127,6 +127,10 @@ export function Shell() {
       <NavLink to="/app/directory/providers" className={navLinkClass}>
         Providers
       </NavLink>
+      <div className="pt-4 pb-1 px-3 text-[11px] font-medium uppercase tracking-wide text-muted">Tools</div>
+      <NavLink to="/app/reports" className={navLinkClass}>
+        Reports
+      </NavLink>
       {pinned.length > 0 ? (
         <>
           <div className="pt-4 pb-1 px-3 text-[11px] font-medium uppercase tracking-wide text-muted">Pinned</div>

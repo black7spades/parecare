@@ -1,8 +1,13 @@
 import { Router } from 'express';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
+import { getCareAccess } from '../middleware/subscriptionGate';
+import { requireAccountRight } from '../middleware/accountRights';
+import { getRegistry, generateReport, toCsv, SYSTEM_PRESETS, type ReportPreset } from '../services/reportEngine';
 
 export const reportsRouter = Router();
+
+// ── Helpers ────────────────────────────────────────────────────────────
 
 async function profileIdsForAccount(accountId: string, role: string): Promise<string[]> {
   if (role === 'super_admin') {
@@ -25,6 +30,15 @@ function parseDateRange(query: Record<string, unknown>): { from: Date; to: Date 
   const from = query['from'] ? new Date(String(query['from'])) : new Date(to.getTime() - 30 * 24 * 3600 * 1000);
   return { from, to };
 }
+
+async function accessibleProfileIds(accountId: string, role: string, requestedIds: string[]): Promise<string[]> {
+  const allAccessible = await profileIdsForAccount(accountId, role);
+  const accessible = new Set(allAccessible);
+  if (requestedIds.length === 0) return allAccessible;
+  return requestedIds.filter((id) => accessible.has(id));
+}
+
+// ── Legacy endpoints (kept for backwards compatibility) ────────────────
 
 reportsRouter.get('/sentiment-trends', requireAuth, async (req, res) => {
   const { from, to } = parseDateRange(req.query);
@@ -90,4 +104,170 @@ reportsRouter.get('/outcome-analysis', requireAuth, async (req, res) => {
 
   const r = rows.rows[0] ?? { positive: 0, negative: 0, total: 0 };
   res.json(r);
+});
+
+// ── Report generator endpoints ─────────────────────────────────────────
+
+reportsRouter.get('/registry', requireAuth, async (_req, res) => {
+  res.json({ sections: getRegistry() });
+});
+
+reportsRouter.get('/profiles', requireAuth, async (req, res) => {
+  const profileIds = await profileIdsForAccount(req.account!.id, req.account!.role);
+  if (profileIds.length === 0) {
+    res.json({ profiles: [] });
+    return;
+  }
+  const profiles = await db('care_profiles')
+    .whereIn('id', profileIds)
+    .where({ archived: false })
+    .select('id', 'full_name', 'preferred_name', 'kind', 'current_phase', 'photo_url', 'photo_color')
+    .orderBy('full_name', 'asc');
+  res.json({ profiles });
+});
+
+reportsRouter.post('/generate', requireAuth, async (req, res) => {
+  const account = req.account!;
+  const { profileIds: requestedIds, sections, dateRange, includeAiNarrative, aiPrompt } = req.body;
+
+  if (!Array.isArray(sections) || sections.length === 0) {
+    res.status(400).json({ error: 'At least one section is required', code: 'VALIDATION' });
+    return;
+  }
+
+  const profileIds = await accessibleProfileIds(account.id, account.role, requestedIds ?? []);
+  if (profileIds.length === 0) {
+    res.status(404).json({ error: 'No accessible profiles found', code: 'NOT_FOUND' });
+    return;
+  }
+
+  // Viewers cannot generate reports
+  if (requestedIds && requestedIds.length === 1) {
+    const access = await getCareAccess(account, requestedIds[0]);
+    if (access && access.level === 'viewer') {
+      res.status(403).json({ error: 'Viewers cannot generate reports', code: 'FORBIDDEN' });
+      return;
+    }
+  }
+
+  const result = await generateReport({
+    profileIds,
+    sections,
+    dateRange: dateRange ?? null,
+    includeAiNarrative: !!includeAiNarrative,
+    aiPrompt: aiPrompt ?? undefined,
+  });
+
+  res.json(result);
+});
+
+reportsRouter.post('/export/csv', requireAuth, requireAccountRight('can_export_data'), async (req, res) => {
+  const account = req.account!;
+  const { profileIds: requestedIds, sections, dateRange } = req.body;
+
+  if (!Array.isArray(sections) || sections.length === 0) {
+    res.status(400).json({ error: 'At least one section is required', code: 'VALIDATION' });
+    return;
+  }
+
+  const profileIds = await accessibleProfileIds(account.id, account.role, requestedIds ?? []);
+  if (profileIds.length === 0) {
+    res.status(404).json({ error: 'No accessible profiles found', code: 'NOT_FOUND' });
+    return;
+  }
+
+  const result = await generateReport({
+    profileIds,
+    sections,
+    dateRange: dateRange ?? null,
+    includeAiNarrative: false,
+  });
+
+  const csv = toCsv(result.sections);
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="parecare-report-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.send(csv);
+});
+
+// ── Presets ─────────────────────────────────────────────────────────────
+
+reportsRouter.get('/presets', requireAuth, async (req, res) => {
+  const account = req.account!;
+  const dbPresets = await db('report_presets')
+    .where(function () {
+      this.where('account_id', account.id).orWhere('is_system', true);
+    })
+    .orderBy([{ column: 'is_system', order: 'desc' }, { column: 'name', order: 'asc' }]);
+
+  const systemFromCode = SYSTEM_PRESETS.map((p, i) => ({
+    id: `system_${i}`,
+    ...p,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }));
+
+  const dbSystemIds = new Set(dbPresets.filter((p) => p.is_system).map((p) => p.name));
+  const mergedSystem = systemFromCode.filter((p) => !dbSystemIds.has(p.name));
+
+  res.json({ presets: [...mergedSystem, ...dbPresets] });
+});
+
+reportsRouter.post('/presets', requireAuth, async (req, res) => {
+  const account = req.account!;
+  const { name, description, config } = req.body;
+
+  if (!name || !config) {
+    res.status(400).json({ error: 'Name and config are required', code: 'VALIDATION' });
+    return;
+  }
+
+  const [preset] = await db('report_presets')
+    .insert({
+      account_id: account.id,
+      name,
+      description: description ?? null,
+      is_system: false,
+      config: JSON.stringify(config),
+    })
+    .returning('*');
+
+  res.status(201).json(preset);
+});
+
+reportsRouter.put('/presets/:presetId', requireAuth, async (req, res) => {
+  const account = req.account!;
+  const { presetId } = req.params;
+  const { name, description, config } = req.body;
+
+  const existing = await db('report_presets').where({ id: presetId }).first();
+  if (!existing || (existing.account_id !== account.id && account.role !== 'super_admin')) {
+    res.status(404).json({ error: 'Preset not found', code: 'NOT_FOUND' });
+    return;
+  }
+
+  const [updated] = await db('report_presets')
+    .where({ id: presetId })
+    .update({
+      name: name ?? existing.name,
+      description: description !== undefined ? description : existing.description,
+      config: config ? JSON.stringify(config) : existing.config,
+      updated_at: new Date(),
+    })
+    .returning('*');
+
+  res.json(updated);
+});
+
+reportsRouter.delete('/presets/:presetId', requireAuth, async (req, res) => {
+  const account = req.account!;
+  const { presetId } = req.params;
+
+  const existing = await db('report_presets').where({ id: presetId }).first();
+  if (!existing || (existing.account_id !== account.id && account.role !== 'super_admin')) {
+    res.status(404).json({ error: 'Preset not found', code: 'NOT_FOUND' });
+    return;
+  }
+
+  await db('report_presets').where({ id: presetId }).delete();
+  res.json({ ok: true });
 });
