@@ -7,17 +7,7 @@ import type { Provider, CareProfileProvider } from '../types';
 export const providersRouter = Router({ mergeParams: true });
 
 const providerSchema = z.object({
-  provider_type: z.enum([
-    'gp',
-    'specialist',
-    'pharmacy',
-    'care_facility',
-    'allied_health',
-    'legal',
-    'financial',
-    'social_worker',
-    'other',
-  ]),
+  provider_type: z.string().min(1).max(100),
   name: z.string().min(1).max(255),
   organisation: z.string().max(255).optional().nullable(),
   phone: z.string().max(50).optional().nullable(),

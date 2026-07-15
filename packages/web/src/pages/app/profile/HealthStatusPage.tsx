@@ -552,6 +552,8 @@ function StatusCard({
   onEdit,
   onDeleted,
   onChanged,
+  selected,
+  onToggle,
 }: {
   hs: HealthStatus;
   profileId: string;
@@ -559,6 +561,8 @@ function StatusCard({
   onEdit: () => void;
   onDeleted: () => void;
   onChanged: () => void;
+  selected?: boolean;
+  onToggle?: () => void;
 }) {
   const [expanded, setExpanded] = useState(hs.status === 'active');
   const flagged = isFlagged(hs);
@@ -585,6 +589,15 @@ function StatusCard({
       ) : null}
 
       <div className="flex items-start justify-between gap-3">
+        {onToggle ? (
+          <input
+            type="checkbox"
+            className="h-4 w-4 mt-1 rounded border-border text-primary focus:ring-primary flex-shrink-0"
+            checked={selected}
+            onChange={onToggle}
+            aria-label={`Select ${hs.name}`}
+          />
+        ) : null}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-sm font-semibold text-ink">{hs.name}</h3>
@@ -689,6 +702,7 @@ export function HealthStatusPage() {
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<HealthStatus | null>(null);
+  const [bulkEditQueue, setBulkEditQueue] = useState<HealthStatus[]>([]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['health-statuses', profile.id],
@@ -696,6 +710,16 @@ export function HealthStatusPage() {
   });
   const statuses = data?.health_statuses ?? [];
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['health-statuses', profile.id] });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      for (const id of ids) await api.delete(`/care-profiles/${profile.id}/health-statuses/${id}`);
+    },
+    onSuccess: () => {
+      dv.clearSelection();
+      invalidate();
+    },
+  });
 
   const dv = useDataView({
     rows: statuses,
@@ -736,6 +760,16 @@ export function HealthStatusPage() {
         filters={FILTERS}
         filterValues={dv.filterValues}
         onFilter={dv.setFilter}
+        selectedCount={dv.selectedRows.length}
+        bulkActions={
+          canEdit
+            ? [
+                { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setBulkEditQueue(q); setEditing(q[0] ?? null); setModalOpen(true); } },
+                { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => bulkDeleteMutation.mutate(dv.selectedRows.map((hs) => hs.id)) },
+              ]
+            : []
+        }
+        onClearSelection={dv.clearSelection}
         page={dv.page}
         totalPages={dv.totalPages}
         pageSize={dv.pageSize}
@@ -763,6 +797,8 @@ export function HealthStatusPage() {
               onEdit={() => { setEditing(hs); setModalOpen(true); }}
               onDeleted={invalidate}
               onChanged={invalidate}
+              selected={dv.selected.has(hs.id)}
+              onToggle={canEdit ? () => dv.toggle(hs.id) : undefined}
             />
           ))}
         </div>
@@ -771,10 +807,22 @@ export function HealthStatusPage() {
       {modalOpen ? (
         <StatusFormModal
           open={modalOpen}
-          onClose={() => { setModalOpen(false); setEditing(null); }}
+          onClose={() => { setModalOpen(false); setEditing(null); setBulkEditQueue([]); }}
           profileId={profile.id}
           editing={editing}
-          onSaved={invalidate}
+          onSaved={() => {
+            invalidate();
+            const next = bulkEditQueue.slice(1);
+            if (next.length > 0) {
+              setBulkEditQueue(next);
+              setEditing(next[0]);
+            } else {
+              setBulkEditQueue([]);
+              setModalOpen(false);
+              setEditing(null);
+              dv.clearSelection();
+            }
+          }}
         />
       ) : null}
     </div>

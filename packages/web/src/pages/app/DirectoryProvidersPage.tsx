@@ -40,6 +40,8 @@ export function DirectoryProvidersPage() {
   const [editing, setEditing] = useState<DirectoryProvider | null>(null);
   const [deleting, setDeleting] = useState<DirectoryProvider | null>(null);
   const [bulkLinking, setBulkLinking] = useState<DirectoryProvider | null>(null);
+  const [bulkLinkingIds, setBulkLinkingIds] = useState<DirectoryProvider[]>([]);
+  const [bulkEditQueue, setBulkEditQueue] = useState<DirectoryProvider[]>([]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['directory-providers'],
@@ -104,7 +106,11 @@ export function DirectoryProvidersPage() {
             selectedCount={dv.selectedRows.length}
             bulkActions={
               canEdit
-                ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => bulkDeleteMutation.mutate(dv.selectedRows.map((p) => p.id)) }]
+                ? [
+                    { key: 'link', label: 'Link selected', onRun: () => setBulkLinkingIds(dv.selectedRows) },
+                    { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setBulkEditQueue(q); setEditing(q[0] ?? null); setEditorOpen(true); } },
+                    { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => bulkDeleteMutation.mutate(dv.selectedRows.map((p) => p.id)) },
+                  ]
                 : []
             }
             onClearSelection={dv.clearSelection}
@@ -202,14 +208,31 @@ export function DirectoryProvidersPage() {
       <DirectoryProviderEditor
         open={editorOpen}
         provider={editing}
-        onClose={() => setEditorOpen(false)}
-        onSaved={() => { setEditorOpen(false); invalidate(); }}
+        onClose={() => { setEditorOpen(false); setBulkEditQueue([]); }}
+        onSaved={() => {
+          invalidate();
+          const next = bulkEditQueue.slice(1);
+          if (next.length > 0) {
+            setBulkEditQueue(next);
+            setEditing(next[0]);
+          } else {
+            setBulkEditQueue([]);
+            setEditorOpen(false);
+            dv.clearSelection();
+          }
+        }}
       />
 
       <BulkLinkDialog
         provider={bulkLinking}
         onClose={() => setBulkLinking(null)}
         onLinked={() => { setBulkLinking(null); invalidate(); }}
+      />
+
+      <BulkLinkAllDialog
+        providers={bulkLinkingIds}
+        onClose={() => setBulkLinkingIds([])}
+        onLinked={() => { setBulkLinkingIds([]); dv.clearSelection(); invalidate(); }}
       />
 
       <Modal open={deleting !== null} onClose={() => setDeleting(null)} title="Delete provider">
@@ -339,6 +362,7 @@ function DirectoryProviderEditor({
   onSaved: () => void;
 }) {
   const [type, setType] = useState('gp');
+  const [customType, setCustomType] = useState('');
   const [name, setName] = useState('');
   const [organisation, setOrganisation] = useState('');
   const [phone, setPhone] = useState('');
@@ -349,7 +373,10 @@ function DirectoryProviderEditor({
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setType(provider?.provider_type ?? 'gp');
+    const pt = provider?.provider_type ?? 'gp';
+    const isKnown = PROVIDER_TYPES.some((t) => t.value === pt);
+    setType(isKnown ? pt : 'other');
+    setCustomType(isKnown ? '' : pt);
     setName(provider?.name ?? '');
     setOrganisation(provider?.organisation ?? '');
     setPhone(provider?.phone ?? '');
@@ -363,7 +390,7 @@ function DirectoryProviderEditor({
   const mutation = useMutation({
     mutationFn: () => {
       const body = {
-        provider_type: type,
+        provider_type: type === 'other' && customType.trim() ? customType.trim() : type,
         name: name.trim(),
         organisation: organisation.trim() || null,
         phone: phone.trim() || null,
@@ -402,6 +429,15 @@ function DirectoryProviderEditor({
               <option key={t.value} value={t.value}>{t.label}</option>
             ))}
           </select>
+          {type === 'other' ? (
+            <Input
+              label="Custom type"
+              placeholder="e.g. Naturopath, Osteopath"
+              value={customType}
+              onChange={(e) => setCustomType(e.target.value)}
+              className="mt-2"
+            />
+          ) : null}
         </div>
         <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
         <Input label="Organisation" value={organisation} onChange={(e) => setOrganisation(e.target.value)} />
@@ -420,6 +456,95 @@ function DirectoryProviderEditor({
           <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>Save</Button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+function BulkLinkAllDialog({
+  providers,
+  onClose,
+  onLinked,
+}: {
+  providers: DirectoryProvider[];
+  onClose: () => void;
+  onLinked: () => void;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const { data } = useQuery({
+    queryKey: ['care-profiles-summary'],
+    queryFn: () => api.get<{ profiles: { id: string; full_name: string }[] }>('/care-profiles/summary'),
+    enabled: providers.length > 0,
+  });
+  const profiles = data?.profiles ?? [];
+
+  useEffect(() => {
+    setSelected(new Set());
+  }, [providers.length]);
+
+  const linkMutation = useMutation({
+    mutationFn: async (profileIds: string[]) => {
+      for (const p of providers) {
+        await api.post(`/directory/providers/${p.id}/bulk-link`, { profile_ids: profileIds });
+      }
+    },
+    onSuccess: onLinked,
+  });
+
+  if (providers.length === 0) return null;
+
+  const toggleAll = () => {
+    if (selected.size === profiles.length) setSelected(new Set());
+    else setSelected(new Set(profiles.map((p) => p.id)));
+  };
+
+  return (
+    <Modal open onClose={onClose} title={`Link ${providers.length} providers to profiles`}>
+      <p className="text-sm text-muted mb-3">
+        Select profiles to link all {providers.length} selected providers to.
+      </p>
+      {profiles.length === 0 ? (
+        <p className="text-sm text-muted py-4 text-center">No profiles found.</p>
+      ) : (
+        <>
+          <label className="flex items-center gap-2 text-sm text-ink mb-2 pb-2 border-b border-border">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+              checked={selected.size === profiles.length}
+              onChange={toggleAll}
+            />
+            <span className="font-medium">Select all ({profiles.length})</span>
+          </label>
+          <div className="max-h-56 overflow-y-auto space-y-1">
+            {profiles.map((p) => (
+              <label key={p.id} className="flex items-center gap-2 p-1.5 rounded-md hover:bg-surface-2 text-sm text-ink cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                  checked={selected.has(p.id)}
+                  onChange={() => {
+                    const next = new Set(selected);
+                    if (next.has(p.id)) next.delete(p.id); else next.add(p.id);
+                    setSelected(next);
+                  }}
+                />
+                {p.full_name}
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+      <div className="flex justify-end gap-2 mt-4">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button
+          disabled={selected.size === 0}
+          loading={linkMutation.isPending}
+          onClick={() => linkMutation.mutate([...selected])}
+        >
+          Link to {selected.size} profile{selected.size !== 1 ? 's' : ''}
+        </Button>
+      </div>
     </Modal>
   );
 }

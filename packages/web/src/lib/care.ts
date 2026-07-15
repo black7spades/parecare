@@ -307,11 +307,24 @@ export interface Task {
   completed_by_name: string | null;
   desired_outcome: string | null;
   sentiment: number | null;
+  completion_reason: string | null;
+  completion_note: string | null;
   claimed_by: string | null;
   claimed_at: string | null;
   claimed_by_name: string | null;
   co_owners: { id: string; display_name: string }[];
 }
+
+export const COMPLETION_REASONS = [
+  { value: 'achieved', label: 'Goal achieved' },
+  { value: 'partially_achieved', label: 'Partially achieved' },
+  { value: 'not_achieved', label: 'Not achieved' },
+  { value: 'no_longer_needed', label: 'No longer needed' },
+  { value: 'delegated', label: 'Delegated to someone else' },
+  { value: 'rescheduled', label: 'Rescheduled' },
+  { value: 'blocked', label: 'Blocked or unable to complete' },
+  { value: 'other', label: 'Other' },
+] as const;
 
 export const SENTIMENTS = [
   { value: 1, label: 'Angry', emoji: '\u{1F621}' },

@@ -25,6 +25,7 @@ export function CirclePage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [editing, setEditing] = useState<CircleMember | null>(null);
   const [removing, setRemoving] = useState<CircleMember | null>(null);
+  const [bulkEditQueue, setBulkEditQueue] = useState<CircleMember[]>([]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['circle', profile.id],
@@ -37,6 +38,16 @@ export function CirclePage() {
     mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/circle/${id}`),
     onSuccess: () => {
       setRemoving(null);
+      invalidate();
+    },
+  });
+
+  const bulkRemoveMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      for (const id of ids) await api.delete(`/care-profiles/${profile.id}/circle/${id}`);
+    },
+    onSuccess: () => {
+      dv.clearSelection();
       invalidate();
     },
   });
@@ -111,6 +122,16 @@ export function CirclePage() {
             filters={[roleFilter, permissionFilter, statusFilter].map((f) => ({ key: f.key, label: f.label, options: f.options }))}
             filterValues={dv.filterValues}
             onFilter={dv.setFilter}
+            selectedCount={dv.selectedRows.length}
+            bulkActions={
+              canManageEditors
+                ? [
+                    { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setBulkEditQueue(q); setEditing(q[0] ?? null); } },
+                    { key: 'remove', label: 'Remove selected', destructive: true, onRun: () => bulkRemoveMutation.mutate(dv.selectedRows.map((m) => m.id)) },
+                  ]
+                : []
+            }
+            onClearSelection={dv.clearSelection}
             page={dv.page}
             totalPages={dv.totalPages}
             pageSize={dv.pageSize}
@@ -125,6 +146,17 @@ export function CirclePage() {
               </div>
             ) : dv.view.map((m) => (
               <div key={m.id} className={`card ${m.poa_activated ? 'border-amber-400' : ''}`}>
+                {canManageEditors ? (
+                  <div className="mb-2">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                      checked={dv.selected.has(m.id)}
+                      onChange={() => dv.toggle(m.id)}
+                      aria-label={`Select ${m.display_name}`}
+                    />
+                  </div>
+                ) : null}
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
@@ -178,10 +210,18 @@ export function CirclePage() {
       <EditMemberModal
         profileId={profile.id}
         member={editing}
-        onClose={() => setEditing(null)}
+        onClose={() => { setEditing(null); setBulkEditQueue([]); }}
         onSaved={() => {
-          setEditing(null);
           invalidate();
+          const next = bulkEditQueue.slice(1);
+          if (next.length > 0) {
+            setBulkEditQueue(next);
+            setEditing(next[0]);
+          } else {
+            setBulkEditQueue([]);
+            setEditing(null);
+            dv.clearSelection();
+          }
         }}
       />
       <Modal open={removing !== null} onClose={() => setRemoving(null)} title="Remove from circle">

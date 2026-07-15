@@ -127,6 +127,8 @@ remindersRouter.patch('/:reminderId', requireAuth, async (req, res) => {
   const parsed = reminderSchema.partial().extend({
     completed: z.boolean().optional(),
     sentiment: z.number().int().min(1).max(6).optional().nullable(),
+    completion_reason: z.string().max(100).optional().nullable(),
+    completion_note: z.string().max(240).optional().nullable(),
   }).safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
@@ -141,6 +143,8 @@ remindersRouter.patch('/:reminderId', requireAuth, async (req, res) => {
     update['completed_at'] = null;
     update['completed_by_account_id'] = null;
     update['sentiment'] = null;
+    update['completion_reason'] = null;
+    update['completion_note'] = null;
   }
 
   const [reminder] = await db<Reminder>('reminders')
@@ -271,4 +275,30 @@ remindersRouter.delete('/:reminderId', requireAuth, async (req, res) => {
     return;
   }
   res.json({ message: 'Reminder deleted.' });
+});
+
+remindersRouter.get('/:reminderId/notes', requireAuth, async (req, res) => {
+  const notes = await db('task_notes as n')
+    .join('accounts as a', 'n.account_id', 'a.id')
+    .where('n.reminder_id', req.params['reminderId'])
+    .select('n.id', 'n.content', 'n.created_at', 'a.display_name as author_name')
+    .orderBy('n.created_at', 'asc');
+  res.json({ notes });
+});
+
+remindersRouter.post('/:reminderId/notes', requireAuth, async (req, res) => {
+  const noteSchema = z.object({ content: z.string().min(1).max(5000) });
+  const parsed = noteSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const [note] = await db('task_notes')
+    .insert({
+      reminder_id: req.params['reminderId'],
+      account_id: req.account!.id,
+      content: parsed.data.content,
+    })
+    .returning('*');
+  res.status(201).json({ note });
 });

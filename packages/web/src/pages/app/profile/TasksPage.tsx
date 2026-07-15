@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
@@ -9,7 +9,7 @@ import { useProfile } from './ProfileLayout';
 import { useAuthStore } from '../../../stores/auth';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
-import { SENTIMENTS, sentimentEmoji, type CareProfile, type CircleMember, type Task } from '../../../lib/care';
+import { SENTIMENTS, COMPLETION_REASONS, sentimentEmoji, type CareProfile, type CircleMember, type Task } from '../../../lib/care';
 
 interface FanOutResult {
   created: { profile_id: string }[];
@@ -47,12 +47,16 @@ function TaskCompletionModal({
   onCompleted: () => void;
 }) {
   const [sentiment, setSentiment] = useState<number | null>(null);
+  const [reason, setReason] = useState('');
+  const [customNote, setCustomNote] = useState('');
 
   const completeMutation = useMutation({
     mutationFn: () =>
       api.patch(`/care-profiles/${profileId}/reminders/${task.id}`, {
         completed: true,
         sentiment,
+        completion_reason: reason || null,
+        completion_note: reason === 'other' && customNote.trim() ? customNote.trim() : null,
       }),
     onSuccess: () => {
       onCompleted();
@@ -96,6 +100,33 @@ function TaskCompletionModal({
           </div>
         </div>
 
+        <div>
+          <label htmlFor="completion-reason" className="block text-sm font-medium text-ink mb-1">Why? (optional)</label>
+          <select
+            id="completion-reason"
+            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          >
+            <option value="">Select a reason</option>
+            {COMPLETION_REASONS.map((r) => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </select>
+          {reason === 'other' ? (
+            <div className="mt-2">
+              <Textarea
+                label="Your reason"
+                value={customNote}
+                onChange={(e) => setCustomNote(e.target.value.slice(0, 240))}
+                rows={2}
+                placeholder="What happened?"
+              />
+              <p className="text-xs text-muted mt-0.5 text-right">{customNote.length}/240</p>
+            </div>
+          ) : null}
+        </div>
+
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button
@@ -127,6 +158,7 @@ export function TasksPage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [note, setNote] = useState('');
   const [completingTask, setCompletingTask] = useState<Task | null>(null);
+  const [expandedTask, setExpandedTask] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['tasks', profile.id],
@@ -339,7 +371,8 @@ export function TasksPage() {
                   {tasks.length === 0 ? 'No tasks yet. Add one on the right; assign it so nothing falls on one person.' : 'No tasks match your search or filters.'}
                 </td></tr>
               ) : dv.view.map((t) => (
-                <tr key={t.id} className={`border-b border-border last:border-0 align-top group ${t.completed ? 'opacity-60' : ''}`}>
+                <React.Fragment key={t.id}>
+                <tr className={`border-b border-border last:border-0 align-top group ${t.completed ? 'opacity-60' : ''}`}>
                   {canEdit ? (
                     <td className="px-3 py-3">
                       <input type="checkbox" aria-label={`Select ${t.title}`} className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
@@ -363,6 +396,19 @@ export function TasksPage() {
                     </div>
                     {t.body ? <div className="text-xs text-muted">{t.body}</div> : null}
                     {t.desired_outcome ? <div className="text-xs text-muted italic mt-0.5">Goal: {t.desired_outcome}</div> : null}
+                    {t.completion_reason ? (
+                      <div className="text-xs text-muted mt-0.5">
+                        Reason: {COMPLETION_REASONS.find((r) => r.value === t.completion_reason)?.label ?? t.completion_reason}
+                        {t.completion_note ? ` — ${t.completion_note}` : ''}
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="text-xs text-primary hover:underline mt-1"
+                      onClick={() => setExpandedTask(expandedTask === t.id ? null : t.id)}
+                    >
+                      {expandedTask === t.id ? 'Hide notes' : 'Notes'}
+                    </button>
                   </td>
                   <td className="px-3 py-3 whitespace-nowrap">
                     <span className={isOverdue(t) ? 'text-red-600 font-medium' : 'text-muted'}>
@@ -433,6 +479,14 @@ export function TasksPage() {
                     </td>
                   ) : null}
                 </tr>
+                {expandedTask === t.id ? (
+                  <tr>
+                    <td colSpan={canEdit ? 8 : 6} className="px-3 py-3 bg-surface">
+                      <TaskNotesPanel profileId={profile.id} taskId={t.id} canEdit={canEdit} />
+                    </td>
+                  </tr>
+                ) : null}
+                </React.Fragment>
               ))}
             </tbody>
           </table>
@@ -539,6 +593,71 @@ export function TasksPage() {
           onClose={() => setCompletingTask(null)}
           onCompleted={() => invalidate()}
         />
+      ) : null}
+    </div>
+  );
+}
+
+interface TaskNote {
+  id: string;
+  content: string;
+  created_at: string;
+  author_name: string;
+}
+
+function TaskNotesPanel({ profileId, taskId, canEdit }: { profileId: string; taskId: string; canEdit: boolean }) {
+  const queryClient = useQueryClient();
+  const [newNote, setNewNote] = useState('');
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['task-notes', taskId],
+    queryFn: () => api.get<{ notes: TaskNote[] }>(`/care-profiles/${profileId}/reminders/${taskId}/notes`),
+  });
+  const notes = data?.notes ?? [];
+
+  const addNote = useMutation({
+    mutationFn: () => api.post(`/care-profiles/${profileId}/reminders/${taskId}/notes`, { content: newNote.trim() }),
+    onSuccess: () => {
+      setNewNote('');
+      void queryClient.invalidateQueries({ queryKey: ['task-notes', taskId] });
+    },
+  });
+
+  return (
+    <div className="max-w-lg">
+      <p className="text-xs font-medium text-muted mb-2">Notes</p>
+      {isLoading ? (
+        <p className="text-xs text-muted">Loading...</p>
+      ) : notes.length === 0 ? (
+        <p className="text-xs text-muted mb-2">No notes yet.</p>
+      ) : (
+        <div className="space-y-2 mb-3">
+          {notes.map((n) => (
+            <div key={n.id} className="rounded-md border border-border bg-card px-3 py-2">
+              <p className="text-sm text-ink whitespace-pre-wrap">{n.content}</p>
+              <p className="text-xs text-muted mt-1">{n.author_name} · {format(new Date(n.created_at), 'd MMM yyyy, HH:mm')}</p>
+            </div>
+          ))}
+        </div>
+      )}
+      {canEdit ? (
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (newNote.trim()) addNote.mutate();
+          }}
+        >
+          <Input
+            placeholder="Add a note..."
+            value={newNote}
+            onChange={(e) => setNewNote(e.target.value)}
+            className="flex-1"
+          />
+          <Button type="submit" size="sm" disabled={!newNote.trim()} loading={addNote.isPending}>
+            Add
+          </Button>
+        </form>
       ) : null}
     </div>
   );

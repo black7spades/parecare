@@ -38,6 +38,7 @@ export function DocumentsPage() {
   const [deleting, setDeleting] = useState<CareDocument | null>(null);
   const [editing, setEditing] = useState<CareDocument | null>(null);
   const [confirmBulk, setConfirmBulk] = useState(false);
+  const [bulkEditQueue, setBulkEditQueue] = useState<CareDocument[]>([]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['documents', profile.id],
@@ -100,7 +101,10 @@ export function DocumentsPage() {
   });
 
   const bulkActions: ToolbarBulkAction[] = canEdit
-    ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulk(true) }]
+    ? [
+        { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setBulkEditQueue(q); setEditing(q[0] ?? null); } },
+        { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulk(true) },
+      ]
     : [];
 
   async function download(doc: CareDocument) {
@@ -349,8 +353,19 @@ export function DocumentsPage() {
         <EditDocumentModal
           profileId={profile.id}
           doc={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); invalidate(); }}
+          onClose={() => { setEditing(null); setBulkEditQueue([]); }}
+          onSaved={() => {
+            invalidate();
+            const next = bulkEditQueue.slice(1);
+            if (next.length > 0) {
+              setBulkEditQueue(next);
+              setEditing(next[0]);
+            } else {
+              setBulkEditQueue([]);
+              setEditing(null);
+              dv.clearSelection();
+            }
+          }}
         />
       ) : null}
     </div>

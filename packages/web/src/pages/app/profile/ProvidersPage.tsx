@@ -32,6 +32,7 @@ export function ProvidersPage() {
   const [editing, setEditing] = useState<Provider | null>(null);
   const [removing, setRemoving] = useState<Provider | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [bulkEditQueue, setBulkEditQueue] = useState<Provider[]>([]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['providers', profile.id],
@@ -105,7 +106,10 @@ export function ProvidersPage() {
             selectedCount={dv.selectedRows.length}
             bulkActions={
               canEdit
-                ? [{ key: 'delete', label: 'Remove selected', destructive: true, onRun: () => bulkDeleteMutation.mutate(dv.selectedRows.map((p) => p.id)) }]
+                ? [
+                    { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setBulkEditQueue(q); setEditing(q[0] ?? null); setEditorOpen(true); } },
+                    { key: 'delete', label: 'Remove selected', destructive: true, onRun: () => bulkDeleteMutation.mutate(dv.selectedRows.map((p) => p.id)) },
+                  ]
                 : []
             }
             onClearSelection={dv.clearSelection}
@@ -213,10 +217,18 @@ export function ProvidersPage() {
         profileId={profile.id}
         open={editorOpen}
         provider={editing}
-        onClose={() => setEditorOpen(false)}
+        onClose={() => { setEditorOpen(false); setBulkEditQueue([]); }}
         onSaved={() => {
-          setEditorOpen(false);
           invalidate();
+          const next = bulkEditQueue.slice(1);
+          if (next.length > 0) {
+            setBulkEditQueue(next);
+            setEditing(next[0]);
+          } else {
+            setBulkEditQueue([]);
+            setEditorOpen(false);
+            dv.clearSelection();
+          }
         }}
       />
 
