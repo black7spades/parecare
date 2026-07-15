@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -11,6 +11,7 @@ import { useDataView, type DataFilter, type DataSort } from '../../../components
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
 import {
   CODE_SYSTEMS,
+  CONDITION_CATEGORIES,
   CONDITION_SEVERITIES,
   CONDITION_STATUSES,
   CONDITION_TYPES,
@@ -21,6 +22,7 @@ import {
   TREATMENT_CATEGORIES,
   TREATMENT_STATUS_OPTIONS,
   codeSystemLabel,
+  conditionCategoryLabel,
   conditionStatusLabel,
   conditionTypeLabel,
   functionDomainLabel,
@@ -29,6 +31,7 @@ import {
   treatmentStatusLabel,
   type ConditionCode,
   type ConditionFunction,
+  type ConditionSymptom,
   type MedicalCondition,
 } from '../../../lib/care';
 import { useProfile } from './ProfileLayout';
@@ -37,6 +40,8 @@ const inputClass =
   'w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
 const fmtDate = (d: string | null | undefined) => (d ? format(new Date(d), 'd MMM yyyy') : '');
+
+const SEVERITY_LABELS = ['Mild', 'Low', 'Moderate', 'High', 'Severe'] as const;
 
 const SORTS: DataSort<MedicalCondition>[] = [
   { key: 'name', label: 'Name', compare: (a, b) => a.name.localeCompare(b.name) },
@@ -52,7 +57,19 @@ const SORTS: DataSort<MedicalCondition>[] = [
       CONDITION_SEVERITIES.findIndex((s) => s.value === b.severity) -
       CONDITION_SEVERITIES.findIndex((s) => s.value === a.severity),
   },
+  {
+    key: 'category',
+    label: 'Category',
+    compare: (a, b) => (a.category ?? '').localeCompare(b.category ?? ''),
+  },
 ];
+
+const CATEGORY_FILTER: DataFilter<MedicalCondition> = {
+  key: 'category',
+  label: 'Category',
+  options: CONDITION_CATEGORIES.map((c) => ({ value: c.value, label: c.label })),
+  match: (c, v) => c.category === v,
+};
 
 const TYPE_FILTER: DataFilter<MedicalCondition> = {
   key: 'condition_type',
@@ -68,12 +85,9 @@ const STATUS_FILTER: DataFilter<MedicalCondition> = {
   match: (c, v) => c.status === v,
 };
 
-/**
- * The structured record of everything a person lives with: chronic and
- * acute conditions and disabilities, each with severity, expected
- * duration, standard ICD-10 and SNOMED CT codes, the domains of daily
- * life it limits, and the treatments managing it.
- */
+type SortDir = 'asc' | 'desc';
+type SortCol = 'name' | 'category' | 'condition_type' | 'severity' | 'status' | 'started_on';
+
 export function ConditionsPage() {
   const { profile, careName, canEdit } = useProfile();
   const queryClient = useQueryClient();
@@ -82,6 +96,7 @@ export function ConditionsPage() {
   const [confirmDelete, setConfirmDelete] = useState<MedicalCondition | null>(null);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkEditQueue, setBulkEditQueue] = useState<MedicalCondition[]>([]);
+  const [colSort, setColSort] = useState<{ col: SortCol; dir: SortDir }>({ col: 'name', dir: 'asc' });
 
   const { data, isLoading } = useQuery({
     queryKey: ['conditions', profile.id],
@@ -109,6 +124,24 @@ export function ConditionsPage() {
     },
   });
 
+  const headerSort: DataSort<MedicalCondition> = {
+    key: `col-${colSort.col}-${colSort.dir}`,
+    label: '',
+    compare: (a, b) => {
+      const valA = String(a[colSort.col] ?? '');
+      const valB = String(b[colSort.col] ?? '');
+      let cmp: number;
+      if (colSort.col === 'severity') {
+        cmp =
+          CONDITION_SEVERITIES.findIndex((s) => s.value === a.severity) -
+          CONDITION_SEVERITIES.findIndex((s) => s.value === b.severity);
+      } else {
+        cmp = valA.localeCompare(valB);
+      }
+      return colSort.dir === 'desc' ? -cmp : cmp;
+    },
+  };
+
   const dv = useDataView<MedicalCondition>({
     rows: conditions,
     getId: (c) => c.id,
@@ -116,6 +149,7 @@ export function ConditionsPage() {
       [
         c.name,
         conditionTypeLabel(c.condition_type),
+        conditionCategoryLabel(c.category),
         c.severity,
         conditionStatusLabel(c.status),
         ...(c.codes ?? []).map((code) => code.code),
@@ -123,10 +157,20 @@ export function ConditionsPage() {
       ]
         .filter(Boolean)
         .join(' '),
-    sorts: SORTS,
-    filters: [TYPE_FILTER, STATUS_FILTER],
+    sorts: [...SORTS, headerSort],
+    filters: [CATEGORY_FILTER, TYPE_FILTER, STATUS_FILTER],
     defaultPageSize: 25,
   });
+
+  useEffect(() => {
+    dv.setSortKey(headerSort.key);
+  }, [colSort.col, colSort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleColSort = (col: SortCol) => {
+    setColSort((prev) =>
+      prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' }
+    );
+  };
 
   const bulkActions: ToolbarBulkAction[] = canEdit
     ? [
@@ -160,8 +204,8 @@ export function ConditionsPage() {
         <div>
           <h2 className="text-base font-semibold text-ink">Conditions</h2>
           <p className="text-sm text-muted">
-            Everything {careName} lives with, from short illnesses to lifelong disabilities, with standard
-            diagnosis codes, the parts of daily life affected, and the treatments managing each one.
+            Everything {careName} lives with: illnesses, injuries, recovery, disabilities, and long-term
+            conditions, each with their category, severity, diagnosis codes, treatments, and symptoms.
           </p>
         </div>
         {canEdit ? <Button size="sm" onClick={() => setAdding(true)}>Add condition</Button> : null}
@@ -174,7 +218,7 @@ export function ConditionsPage() {
         sorts={SORTS.map((s) => ({ key: s.key, label: s.label }))}
         sortKey={dv.sortKey}
         onSort={dv.setSortKey}
-        filters={[TYPE_FILTER, STATUS_FILTER].map((f) => ({ key: f.key, label: f.label, options: f.options }))}
+        filters={[CATEGORY_FILTER, TYPE_FILTER, STATUS_FILTER].map((f) => ({ key: f.key, label: f.label, options: f.options }))}
         filterValues={dv.filterValues}
         onFilter={dv.setFilter}
         selectedCount={dv.selected.size}
@@ -204,11 +248,12 @@ export function ConditionsPage() {
             <thead>
               <tr className="text-left text-xs text-muted border-b border-border">
                 {canEdit ? <th className="px-3 py-2 w-8" /> : null}
-                <th className="px-3 py-2">Condition</th>
-                <th className="px-3 py-2">Type</th>
-                <th className="px-3 py-2">Severity</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Started</th>
+                <SortableHeader col="name" label="Condition" current={colSort} onSort={toggleColSort} />
+                <SortableHeader col="category" label="Category" current={colSort} onSort={toggleColSort} />
+                <SortableHeader col="condition_type" label="Type" current={colSort} onSort={toggleColSort} />
+                <SortableHeader col="severity" label="Severity" current={colSort} onSort={toggleColSort} />
+                <SortableHeader col="status" label="Status" current={colSort} onSort={toggleColSort} />
+                <SortableHeader col="started_on" label="Started" current={colSort} onSort={toggleColSort} />
                 <th className="px-3 py-2 hidden md:table-cell">Resolved</th>
                 <th className="px-3 py-2 hidden lg:table-cell">Codes</th>
                 <th className="px-3 py-2 hidden lg:table-cell">Treatments</th>
@@ -217,7 +262,11 @@ export function ConditionsPage() {
             </thead>
             <tbody>
               {dv.view.map((c) => {
-                const treatmentCount = (c.treatments?.length ?? 0) + (c.medications?.length ?? 0);
+                const allTreatments = [
+                  ...(c.medications ?? []).map((m) => m.name),
+                  ...(c.treatments ?? []).map((t) => t.name),
+                ];
+                const treatmentCount = allTreatments.length;
                 return (
                   <tr key={c.id} className="border-b border-border last:border-0 align-top">
                     {canEdit ? (
@@ -236,12 +285,16 @@ export function ConditionsPage() {
                       {c.is_permanent ? (
                         <span className="ml-2 badge bg-surface-2 text-muted text-xs">Permanent</span>
                       ) : null}
+                      {c.is_contagious ? (
+                        <span className="ml-1 badge bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-xs">Contagious</span>
+                      ) : null}
                       {(c.functions?.length ?? 0) > 0 ? (
                         <p className="text-xs text-muted mt-0.5">
                           Affects {c.functions!.map((f) => functionDomainLabel(f.domain).toLowerCase()).join(', ')}
                         </p>
                       ) : null}
                     </td>
+                    <td className="px-3 py-2 text-ink">{conditionCategoryLabel(c.category)}</td>
                     <td className="px-3 py-2 text-ink">{conditionTypeLabel(c.condition_type)}</td>
                     <td className="px-3 py-2 text-ink capitalize">{c.severity ?? ''}</td>
                     <td className="px-3 py-2 text-ink">{conditionStatusLabel(c.status)}</td>
@@ -254,8 +307,17 @@ export function ConditionsPage() {
                         </span>
                       ))}
                     </td>
-                    <td className="px-3 py-2 text-muted hidden lg:table-cell">
-                      {treatmentCount > 0 ? treatmentCount : ''}
+                    <td className="px-3 py-2 hidden lg:table-cell">
+                      {treatmentCount > 0 ? (
+                        <span
+                          className="text-ink cursor-default"
+                          title={allTreatments.join(', ')}
+                        >
+                          {treatmentCount} ({allTreatments.slice(0, 2).join(', ')}{allTreatments.length > 2 ? `, +${allTreatments.length - 2}` : ''})
+                        </span>
+                      ) : (
+                        <span className="text-muted"></span>
+                      )}
                     </td>
                     {canEdit ? (
                       <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -283,8 +345,6 @@ export function ConditionsPage() {
           onSaved={(saved) => {
             setAdding(false);
             invalidate();
-            // Continue straight into the full editor so codes, functional
-            // impact and treatments can be added in one sitting.
             setEditing(saved);
           }}
         />
@@ -307,7 +367,7 @@ export function ConditionsPage() {
       <Modal open={confirmDelete !== null} onClose={() => setConfirmDelete(null)} title="Delete condition">
         <p className="text-sm text-muted mb-4">
           Delete <span className="font-medium text-ink">{confirmDelete?.name}</span> and its codes, functional
-          impact and treatment links? This cannot be undone.
+          impact, symptoms, and treatment links? This cannot be undone.
         </p>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setConfirmDelete(null)}>Cancel</Button>
@@ -324,7 +384,7 @@ export function ConditionsPage() {
       <Modal open={confirmBulkDelete} onClose={() => setConfirmBulkDelete(false)} title="Delete conditions">
         <p className="text-sm text-muted mb-4">
           Delete {dv.selected.size} {dv.selected.size === 1 ? 'condition' : 'conditions'} and their codes,
-          functional impact and treatment links? This cannot be undone.
+          functional impact, symptoms, and treatment links? This cannot be undone.
         </p>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setConfirmBulkDelete(false)}>Cancel</Button>
@@ -341,12 +401,37 @@ export function ConditionsPage() {
   );
 }
 
-/**
- * The condition editor. Creating asks for the essentials and works out
- * type and duration from the dates where it can; once saved, the editor
- * continues with standard codes, functional impact and the treatment
- * plan, which need the condition to exist first.
- */
+function SortableHeader({
+  col,
+  label,
+  current,
+  onSort,
+}: {
+  col: SortCol;
+  label: string;
+  current: { col: SortCol; dir: SortDir };
+  onSort: (col: SortCol) => void;
+}) {
+  const active = current.col === col;
+  return (
+    <th className="px-3 py-2">
+      <button
+        type="button"
+        className={`inline-flex items-center gap-1 hover:text-ink ${active ? 'text-ink font-semibold' : ''}`}
+        onClick={() => onSort(col)}
+        aria-label={`Sort by ${label}`}
+      >
+        {label}
+        {active ? (
+          <span className="text-[10px]">{current.dir === 'asc' ? '▲' : '▼'}</span>
+        ) : (
+          <span className="text-[10px] opacity-0 group-hover:opacity-50">▲</span>
+        )}
+      </button>
+    </th>
+  );
+}
+
 function ConditionEditor({
   profileId,
   condition,
@@ -360,6 +445,7 @@ function ConditionEditor({
 }) {
   const isNew = condition === null;
   const [name, setName] = useState(condition?.name ?? '');
+  const [category, setCategory] = useState(condition?.category ?? '');
   const [conditionType, setConditionType] = useState(condition?.condition_type ?? '');
   const [severity, setSeverity] = useState(condition?.severity ?? '');
   const [status, setStatus] = useState(condition?.status ?? 'active');
@@ -367,12 +453,16 @@ function ConditionEditor({
   const [resolvedOn, setResolvedOn] = useState(condition?.resolved_on ?? '');
   const [expectedDuration, setExpectedDuration] = useState(condition?.expected_duration ?? '');
   const [isPermanent, setIsPermanent] = useState(condition?.is_permanent ?? false);
+  const [isContagious, setIsContagious] = useState(condition?.is_contagious ?? false);
+  const [isolationRequired, setIsolationRequired] = useState(condition?.isolation_required ?? false);
+  const [region, setRegion] = useState(condition?.region ?? '');
   const [notes, setNotes] = useState(condition?.notes ?? '');
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!condition) return;
     setName(condition.name);
+    setCategory(condition.category ?? '');
     setConditionType(condition.condition_type ?? '');
     setSeverity(condition.severity ?? '');
     setStatus(condition.status);
@@ -380,13 +470,19 @@ function ConditionEditor({
     setResolvedOn(condition.resolved_on ?? '');
     setExpectedDuration(condition.expected_duration ?? '');
     setIsPermanent(condition.is_permanent ?? false);
+    setIsContagious(condition.is_contagious ?? false);
+    setIsolationRequired(condition.isolation_required ?? false);
+    setRegion(condition.region ?? '');
     setNotes(condition.notes ?? '');
   }, [condition]);
+
+  const showIllnessFields = category === 'illness' || category === 'acute_illness' || category === 'chronic_flare';
 
   const saveMutation = useMutation({
     mutationFn: () => {
       const body = {
         name: name.trim(),
+        category: category || null,
         condition_type: conditionType || null,
         severity: severity || null,
         status,
@@ -394,6 +490,9 @@ function ConditionEditor({
         resolved_on: resolvedOn || null,
         expected_duration: expectedDuration || null,
         is_permanent: conditionType === 'disability' ? isPermanent : null,
+        is_contagious: isContagious,
+        isolation_required: isolationRequired,
+        region: region.trim() || null,
         notes: notes.trim() || null,
       };
       return isNew
@@ -413,17 +512,22 @@ function ConditionEditor({
             <CatalogueCombo
               endpoint="/condition-catalogue"
               ariaLabel="Condition name"
-              placeholder="Type to search, e.g. Type 2 diabetes or E11"
+              placeholder="Type to search, e.g. Type 2 diabetes"
               initial={name}
               keepValue
               onPick={setName}
               widthClass="w-full"
             />
-            <p className="text-xs text-muted mt-1">
-              Searching by name or by ICD-10 or SNOMED CT code both work. Picking a known condition fills in
-              its standard codes automatically.
-            </p>
           </div>
+          <label className="block">
+            <span className="block text-sm font-medium text-ink mb-1">Category</span>
+            <select className={inputClass} value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="">Not set</option>
+              {CONDITION_CATEGORIES.map((c) => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
+          </label>
           <label className="block">
             <span className="block text-sm font-medium text-ink mb-1">Type</span>
             <select className={inputClass} value={conditionType} onChange={(e) => setConditionType(e.target.value)}>
@@ -487,20 +591,57 @@ function ConditionEditor({
               <span className="text-sm text-ink">Permanent, not expected to improve</span>
             </label>
           ) : null}
+          {showIllnessFields ? (
+            <>
+              <label className="flex items-center gap-2 self-end pb-2">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                  checked={isContagious}
+                  onChange={(e) => setIsContagious(e.target.checked)}
+                />
+                <span className="text-sm text-ink">Contagious</span>
+              </label>
+              <label className="flex items-center gap-2 self-end pb-2">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                  checked={isolationRequired}
+                  onChange={(e) => setIsolationRequired(e.target.checked)}
+                />
+                <span className="text-sm text-ink">Isolation required</span>
+              </label>
+            </>
+          ) : null}
+          {(category === 'injury' || showIllnessFields) ? (
+            <Input
+              label="Body region"
+              value={region}
+              onChange={(e) => setRegion(e.target.value)}
+              hint="Where on the body, if applicable"
+            />
+          ) : null}
         </div>
         <Textarea label="Notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
 
-        {isNew ? (
-          <p className="text-xs text-muted">
-            Standard codes, functional impact and treatments can be added straight after saving.
-          </p>
-        ) : (
+        {!isNew ? (
           <>
             <CodesSection profileId={profileId} condition={condition} />
             <FunctionsSection profileId={profileId} condition={condition} />
-            <TreatmentPlanSection profileId={profileId} condition={condition} />
           </>
-        )}
+        ) : null}
+
+        <TreatmentPlanSection profileId={profileId} condition={condition} isNew={isNew} />
+
+        {showIllnessFields && !isNew ? (
+          <SymptomsSection profileId={profileId} condition={condition} />
+        ) : null}
+
+        {isNew && showIllnessFields ? (
+          <p className="text-xs text-muted">
+            Symptoms can be added straight after saving.
+          </p>
+        ) : null}
 
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
@@ -514,7 +655,6 @@ function ConditionEditor({
   );
 }
 
-/** Standard diagnosis codes on the condition, one row per system and code. */
 function CodesSection({ profileId, condition }: { profileId: string; condition: MedicalCondition }) {
   const queryClient = useQueryClient();
   const [codes, setCodes] = useState<ConditionCode[]>(condition.codes ?? []);
@@ -592,7 +732,6 @@ function CodesSection({ profileId, condition }: { profileId: string; condition: 
   );
 }
 
-/** The domains of daily life this condition limits, one row per domain. */
 function FunctionsSection({ profileId, condition }: { profileId: string; condition: MedicalCondition }) {
   const queryClient = useQueryClient();
   const [functions, setFunctions] = useState<ConditionFunction[]>(condition.functions ?? []);
@@ -691,16 +830,19 @@ function FunctionsSection({ profileId, condition }: { profileId: string; conditi
   );
 }
 
-/**
- * The treatment plan for this condition: the linked medications, every
- * other kind of treatment from therapy to surgery to assistive devices,
- * each with its status and last review date, and a form to add more.
- */
-function TreatmentPlanSection({ profileId, condition }: { profileId: string; condition: MedicalCondition }) {
+function TreatmentPlanSection({
+  profileId,
+  condition,
+  isNew,
+}: {
+  profileId: string;
+  condition: MedicalCondition | null;
+  isNew: boolean;
+}) {
   const queryClient = useQueryClient();
-  const [treatments, setTreatments] = useState(condition.treatments ?? []);
+  const [treatments, setTreatments] = useState(condition?.treatments ?? []);
   const [name, setName] = useState('');
-  const [category, setCategory] = useState('therapy');
+  const [treatmentCategory, setTreatmentCategory] = useState('therapy');
   const [treatmentStatus, setTreatmentStatus] = useState('active');
   const [reviewDate, setReviewDate] = useState('');
 
@@ -715,10 +857,10 @@ function TreatmentPlanSection({ profileId, condition }: { profileId: string; con
         `/care-profiles/${profileId}/treatments`,
         {
           name: name.trim(),
-          category,
+          category: treatmentCategory,
           current_status: treatmentStatus,
           last_review_date: reviewDate || null,
-          medical_condition_id: condition.id,
+          medical_condition_id: condition?.id ?? null,
         }
       ),
     onSuccess: (res) => {
@@ -742,11 +884,12 @@ function TreatmentPlanSection({ profileId, condition }: { profileId: string; con
     <div className="border-t border-border pt-3">
       <h3 className="text-sm font-semibold text-ink mb-1">Treatment plan</h3>
       <p className="text-xs text-muted mb-2">
-        Everything managing this condition. Medications are prescribed on the Treatments page and appear here
-        once linked to this condition.
+        {isNew
+          ? 'Add treatments for this condition. They will also appear on the Treatments page.'
+          : 'Everything managing this condition. Medications are prescribed on the Treatments page and appear here once linked to this condition.'}
       </p>
       <div className="space-y-1.5">
-        {(condition.medications ?? []).map((m, i) => (
+        {!isNew && (condition?.medications ?? []).map((m, i) => (
           <div key={`med-${i}`} className="flex items-center gap-2 text-sm">
             <span className="badge bg-surface-2 text-muted text-xs w-28 justify-center">Medication</span>
             <span className="text-ink">{m.name}</span>
@@ -775,7 +918,7 @@ function TreatmentPlanSection({ profileId, condition }: { profileId: string; con
             </select>
           </div>
         ))}
-        {treatments.length === 0 && (condition.medications ?? []).length === 0 ? (
+        {treatments.length === 0 && (condition?.medications ?? []).length === 0 ? (
           <p className="text-sm text-muted">Nothing managing this condition yet.</p>
         ) : null}
       </div>
@@ -790,7 +933,7 @@ function TreatmentPlanSection({ profileId, condition }: { profileId: string; con
         </div>
         <label className="block">
           <span className="block text-xs text-muted mb-1">Kind</span>
-          <select className={inputClass} value={category} onChange={(e) => setCategory(e.target.value)}>
+          <select className={inputClass} value={treatmentCategory} onChange={(e) => setTreatmentCategory(e.target.value)}>
             {TREATMENT_CATEGORIES.map((c) => (
               <option key={c.value} value={c.value}>{c.label}</option>
             ))}
@@ -807,10 +950,204 @@ function TreatmentPlanSection({ profileId, condition }: { profileId: string; con
         <Input label="Last reviewed" type="date" value={reviewDate} onChange={(e) => setReviewDate(e.target.value)} />
       </div>
       <div className="flex justify-end mt-2">
-        <Button size="sm" variant="secondary" disabled={!name.trim()} loading={addMutation.isPending} onClick={() => addMutation.mutate()}>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={!name.trim() || (isNew && !condition)}
+          loading={addMutation.isPending}
+          onClick={() => addMutation.mutate()}
+        >
           Add treatment
         </Button>
       </div>
+    </div>
+  );
+}
+
+function SymptomsSection({ profileId, condition }: { profileId: string; condition: MedicalCondition }) {
+  const queryClient = useQueryClient();
+  const symptoms = condition.symptoms ?? [];
+  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['conditions', profileId] });
+
+  return (
+    <div className="border-t border-border pt-3">
+      <h3 className="text-sm font-semibold text-ink mb-1">Symptoms</h3>
+      <p className="text-xs text-muted mb-2">
+        Track the symptoms of this condition. Each symptom has a severity from 1 (mild) to 5 (severe).
+      </p>
+      {symptoms.length === 0 ? (
+        <p className="text-sm text-muted">No symptoms recorded yet.</p>
+      ) : (
+        <div className="space-y-1">
+          {symptoms.map((sym) => (
+            <SymptomRow
+              key={sym.id}
+              symptom={sym}
+              profileId={profileId}
+              conditionId={condition.id}
+              onChanged={invalidate}
+            />
+          ))}
+        </div>
+      )}
+      <SymptomForm profileId={profileId} conditionId={condition.id} onSaved={invalidate} />
+    </div>
+  );
+}
+
+function SymptomRow({
+  symptom,
+  profileId,
+  conditionId,
+  onChanged,
+}: {
+  symptom: ConditionSymptom;
+  profileId: string;
+  conditionId: string;
+  onChanged: () => void;
+}) {
+  const resolveMutation = useMutation({
+    mutationFn: () =>
+      api.patch(`/care-profiles/${profileId}/conditions/${conditionId}/symptoms/${symptom.id}`, {
+        resolved_at: symptom.resolved_at ? null : new Date().toISOString(),
+      }),
+    onSuccess: onChanged,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () =>
+      api.delete(`/care-profiles/${profileId}/conditions/${conditionId}/symptoms/${symptom.id}`),
+    onSuccess: onChanged,
+  });
+
+  return (
+    <div className="flex items-center gap-3 py-1.5 text-sm border-b border-border last:border-0">
+      <span className={`font-medium ${symptom.resolved_at ? 'line-through text-muted' : 'text-ink'}`}>
+        {symptom.name}
+      </span>
+      <span className="text-xs text-muted">
+        {symptom.severity}/5 {SEVERITY_LABELS[symptom.severity - 1]}
+      </span>
+      <span className="text-xs text-muted ml-auto">
+        {format(new Date(symptom.noted_at), 'd MMM yyyy')}
+      </span>
+      <Button size="xs" variant="ghost" onClick={() => resolveMutation.mutate()}>
+        {symptom.resolved_at ? 'Reopen' : 'Resolve'}
+      </Button>
+      <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate()}>
+        Remove
+      </Button>
+    </div>
+  );
+}
+
+function SymptomForm({
+  profileId,
+  conditionId,
+  onSaved,
+}: {
+  profileId: string;
+  conditionId: string;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [severity, setSeverity] = useState(3);
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  const { data: suggestionData } = useQuery({
+    queryKey: ['symptom-catalogue', name],
+    queryFn: () => api.get<{ items: { id: string; name: string }[] }>(`/symptom-catalogue?search=${encodeURIComponent(name)}`),
+    enabled: name.trim().length > 0,
+  });
+  const suggestions = (suggestionData?.items ?? []).slice(0, 8);
+  const trimmed = name.trim();
+  const exactMatch = suggestions.some((s) => s.name.toLowerCase() === trimmed.toLowerCase());
+  const options = [...suggestions.map((s) => s.name), ...(trimmed && !exactMatch ? [trimmed] : [])];
+
+  useEffect(() => { setHighlight(0); }, [name]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const mutation = useMutation({
+    mutationFn: (symptomName: string) =>
+      api.post(`/care-profiles/${profileId}/conditions/${conditionId}/symptoms`, {
+        name: symptomName,
+        severity,
+      }),
+    onSuccess: () => {
+      setName('');
+      setSeverity(3);
+      setOpen(false);
+      onSaved();
+    },
+  });
+
+  const submit = (n: string) => {
+    if (!n.trim() || mutation.isPending) return;
+    mutation.mutate(n.trim());
+  };
+
+  const selectClass = 'block w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
+
+  return (
+    <div className="flex flex-wrap items-end gap-2 mt-3">
+      <div className="flex-1 min-w-[12rem] relative" ref={boxRef}>
+        <label className="block text-sm font-medium text-ink mb-1">Symptom</label>
+        <input
+          type="text"
+          role="combobox"
+          aria-expanded={open && options.length > 0}
+          placeholder="Type to search symptoms..."
+          className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          value={name}
+          onChange={(e) => { setName(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight((h) => Math.min(h + 1, options.length - 1)); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight((h) => Math.max(h - 1, 0)); }
+            else if (e.key === 'Enter') { e.preventDefault(); if (options[highlight]) submit(options[highlight]); }
+            else if (e.key === 'Escape') setOpen(false);
+          }}
+        />
+        {open && options.length > 0 ? (
+          <ul className="absolute left-0 top-full mt-1 w-full max-h-48 overflow-y-auto rounded-md border border-border bg-card shadow-lg z-20">
+            {options.map((n, i) => {
+              const isNew = i >= suggestions.length;
+              return (
+                <li key={`${n}-${isNew}`}>
+                  <button
+                    type="button"
+                    className={`w-full text-left px-3 py-1.5 text-sm ${i === highlight ? 'bg-primary-50 text-primary' : 'text-ink hover:bg-surface-2'}`}
+                    onMouseEnter={() => setHighlight(i)}
+                    onClick={() => submit(n)}
+                  >
+                    {isNew ? <>Add &ldquo;{n}&rdquo; as a new symptom</> : n}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+      </div>
+      <div className="w-28">
+        <label className="block text-sm font-medium text-ink mb-1">Severity</label>
+        <select className={selectClass} value={severity} onChange={(e) => setSeverity(Number(e.target.value))}>
+          {[1, 2, 3, 4, 5].map((v) => (
+            <option key={v} value={v}>{v} - {SEVERITY_LABELS[v - 1]}</option>
+          ))}
+        </select>
+      </div>
+      <Button size="sm" loading={mutation.isPending} disabled={!name.trim()} onClick={() => submit(name)}>
+        Add symptom
+      </Button>
     </div>
   );
 }

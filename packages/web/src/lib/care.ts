@@ -474,32 +474,39 @@ export const conditionStatusLabel = (s: string) =>
   CONDITION_STATUSES.find((x) => x.value === s)?.label ?? s;
 
 /** What they live with, tied to the medications and treatments that manage it. */
+export interface ConditionSymptom {
+  id: string;
+  condition_id: string;
+  name: string;
+  severity: number;
+  noted_at: string;
+  resolved_at: string | null;
+  notes: string | null;
+}
+
 export interface MedicalCondition {
   id: string;
   name: string;
   notes: string | null;
-  /** Expected to pass, rather than long-term. */
   is_temporary: boolean;
   status: string;
-  /** When it started, if known. */
   started_on: string | null;
-  /** When it cleared, once resolved. */
   resolved_on: string | null;
-  /** chronic, acute, disability or other. */
   condition_type: string | null;
-  /** mild, moderate, severe or profound. */
   severity: string | null;
-  /** For disabilities: expected not to improve. */
   is_permanent: boolean | null;
-  /** self_limiting, short_term, long_term or lifelong. */
   expected_duration: string | null;
-  /** Reference codes from the shared catalogue entry, if any. */
+  category: string | null;
+  is_contagious: boolean;
+  isolation_required: boolean;
+  region: string | null;
   catalogue_icd10_code?: string | null;
   catalogue_snomed_code?: string | null;
   medications: { id?: string; name: string; active: boolean }[];
   treatments?: ConditionTreatment[];
   codes?: ConditionCode[];
   functions?: ConditionFunction[];
+  symptoms?: ConditionSymptom[];
 }
 
 /** A standard diagnosis code on a condition: the system and the code. */
@@ -537,6 +544,21 @@ export const CONDITION_TYPES = [
 
 export const conditionTypeLabel = (v: string | null | undefined) =>
   CONDITION_TYPES.find((x) => x.value === v)?.label ?? '';
+
+export const CONDITION_CATEGORIES = [
+  { value: 'illness', label: 'Illness' },
+  { value: 'injury', label: 'Injury' },
+  { value: 'post_operative', label: 'Post-operative' },
+  { value: 'recovery', label: 'Recovery' },
+  { value: 'mental_health', label: 'Mental health' },
+  { value: 'chronic_flare', label: 'Chronic flare-up' },
+  { value: 'acute_illness', label: 'Acute illness' },
+  { value: 'disability', label: 'Disability' },
+  { value: 'other', label: 'Other' },
+] as const;
+
+export const conditionCategoryLabel = (v: string | null | undefined) =>
+  CONDITION_CATEGORIES.find((x) => x.value === v)?.label ?? '';
 
 export const CONDITION_SEVERITIES = [
   { value: 'mild', label: 'Mild' },

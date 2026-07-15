@@ -37,7 +37,7 @@ conditionCatalogueRouter.get('/', requireAuth, async (req, res) => {
   // type "E11" and land on Type 2 diabetes.
   if (q) {
     query = query.where((qb) => {
-      qb.whereILike('name', `%${q}%`).orWhereILike('icd10_code', `${q}%`).orWhereILike('snomed_code', `${q}%`);
+      qb.whereILike('name', `${q}%`).orWhereILike('icd10_code', `${q}%`).orWhereILike('snomed_code', `${q}%`);
     });
   }
   const items = await query.orderBy('name', 'asc').limit(50);
