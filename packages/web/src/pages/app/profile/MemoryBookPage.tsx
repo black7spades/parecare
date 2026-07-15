@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
@@ -13,49 +14,45 @@ import type { MemoryEntry } from '../../../lib/care';
 import type { Achievement, CareJourney } from '../../../lib/journeys';
 
 /**
- * The Memory Book: the place where everything a person set out to do,
- * did, and felt about it is kept. The book view interleaves written
- * memories with milestone achievements; the achievements view is the
- * full sortable, filterable record of every completed checklist item
- * across every journey.
+ * The Memory Book: written memories interleaved with milestone
+ * achievements on a timeline. The full achievements record lives with the
+ * care journey (AchievementsPage), which hands over here when someone
+ * wants to write the story behind an achievement.
  */
 export function MemoryBookPage() {
   const { profile } = useProfile();
+  const location = useLocation();
   const personName = profile.preferred_name ?? profile.first_name ?? profile.full_name.split(' ')[0];
-  const [view, setView] = useState<'book' | 'achievements'>('book');
-  const [storyOf, setStoryOf] = useState<Achievement | null>(null);
-
-  const tabClass = (active: boolean) =>
-    `px-3 py-1.5 text-sm rounded-md transition-colors ${active ? 'bg-primary text-white font-medium' : 'text-muted hover:text-ink'}`;
+  // Arriving from the Achievements page with "Write the story" prefills
+  // the new-memory form with that achievement.
+  const arrivedWith = (location.state as { storyOf?: Achievement } | null)?.storyOf ?? null;
+  const [storyOf, setStoryOf] = useState<Achievement | null>(arrivedWith);
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-1 bg-surface-2 rounded-lg p-1 w-fit">
-        <button type="button" className={tabClass(view === 'book')} onClick={() => setView('book')}>
-          The book
-        </button>
-        <button type="button" className={tabClass(view === 'achievements')} onClick={() => setView('achievements')}>
-          Achievements
-        </button>
-      </div>
-
-      {view === 'book' ? (
-        <BookView
-          profileId={profile.id}
-          personName={personName}
-          storyOf={storyOf}
-          onStoryDone={() => setStoryOf(null)}
-        />
-      ) : (
-        <AchievementsView
-          profileId={profile.id}
-          onWriteStory={(a) => {
-            setStoryOf(a);
-            setView('book');
-          }}
-        />
-      )}
+      <BookView
+        profileId={profile.id}
+        personName={personName}
+        storyOf={storyOf}
+        onStoryDone={() => setStoryOf(null)}
+      />
     </div>
+  );
+}
+
+/**
+ * The full sortable, filterable record of every completed checklist item
+ * across every journey. Its own page in the Care profile group; writing
+ * the story behind an achievement hands over to the Memory book.
+ */
+export function AchievementsPage() {
+  const { profile } = useProfile();
+  const navigate = useNavigate();
+  return (
+    <AchievementsView
+      profileId={profile.id}
+      onWriteStory={(a) => navigate(`/app/${profile.id}/memory-book`, { state: { storyOf: a } })}
+    />
   );
 }
 

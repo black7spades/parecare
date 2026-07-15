@@ -27,6 +27,12 @@ const ENTITY_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'care-profiles', label: 'Profile' },
   { value: 'ai', label: 'AI conversation' },
   { value: 'treatments', label: 'Treatment' },
+  { value: 'allergies', label: 'Allergy' },
+  { value: 'conditions', label: 'Condition' },
+  { value: 'medications', label: 'Medication' },
+  { value: 'health-statuses', label: 'Health status' },
+  { value: 'appointments', label: 'Appointment' },
+  { value: 'calendar', label: 'Calendar entry' },
 ];
 
 const ACTIVITY_SORTS: DataSort<ActivityEntry>[] = [
@@ -87,7 +93,7 @@ export function ActivityPage() {
 
   return (
     <div className="card max-w-3xl">
-      <h2 className="text-base font-semibold text-ink mb-1">Activity</h2>
+      <h2 className="text-base font-semibold text-ink mb-1">Logs</h2>
       <p className="text-sm text-muted mb-4">
         Every change made to {careName}'s records: who did what, and when.
         Nobody can edit or remove this list.

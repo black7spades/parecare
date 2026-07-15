@@ -1,0 +1,459 @@
+import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { format } from 'date-fns';
+import { api } from '../../../api/client';
+import { Button } from '../../../components/ui/Button';
+import { Input, Textarea } from '../../../components/ui/Input';
+import { Modal } from '../../../components/ui/Modal';
+import { useDataView, type DataFilter, type DataSort } from '../../../components/data/useDataView';
+import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
+import { useProfile } from './ProfileLayout';
+
+const inputClass =
+  'w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
+
+export interface Appointment {
+  id: string;
+  title: string;
+  appointment_type: string;
+  provider_id: string | null;
+  provider_name: string | null;
+  provider_organisation: string | null;
+  location: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  status: string;
+  notes: string | null;
+}
+
+const APPOINTMENT_TYPES = [
+  { value: 'consultation', label: 'Consultation' },
+  { value: 'test', label: 'Test' },
+  { value: 'procedure', label: 'Procedure' },
+  { value: 'therapy', label: 'Therapy session' },
+  { value: 'review', label: 'Review' },
+  { value: 'vaccination', label: 'Vaccination' },
+  { value: 'other', label: 'Other' },
+] as const;
+
+const APPOINTMENT_STATUSES = [
+  { value: 'scheduled', label: 'Scheduled' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'missed', label: 'Missed' },
+] as const;
+
+const typeLabel = (v: string) => APPOINTMENT_TYPES.find((t) => t.value === v)?.label ?? v;
+const statusLabel = (v: string) => APPOINTMENT_STATUSES.find((s) => s.value === v)?.label ?? v;
+
+const SORTS: DataSort<Appointment>[] = [
+  {
+    key: 'upcoming',
+    label: 'Soonest first',
+    compare: (a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime(),
+  },
+  {
+    key: 'newest',
+    label: 'Latest first',
+    compare: (a, b) => new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime(),
+  },
+  { key: 'title', label: 'Title', compare: (a, b) => a.title.localeCompare(b.title) },
+];
+
+const STATUS_FILTER: DataFilter<Appointment> = {
+  key: 'status',
+  label: 'Status',
+  options: APPOINTMENT_STATUSES.map((s) => ({ value: s.value, label: s.label })),
+  match: (a, v) => a.status === v,
+};
+
+const TYPE_FILTER: DataFilter<Appointment> = {
+  key: 'appointment_type',
+  label: 'Kind',
+  options: APPOINTMENT_TYPES.map((t) => ({ value: t.value, label: t.label })),
+  match: (a, v) => a.appointment_type === v,
+};
+
+/**
+ * The full appointment book for a person: who they are seeing, what for,
+ * where and when. Every appointment automatically appears on the Calendar
+ * and in the upcoming events on the Overview.
+ */
+export function AppointmentsPage() {
+  const { profile, careName, canEdit } = useProfile();
+  const queryClient = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Appointment | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Appointment | null>(null);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkEditQueue, setBulkEditQueue] = useState<Appointment[]>([]);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['appointments', profile.id],
+    queryFn: () => api.get<{ appointments: Appointment[] }>(`/care-profiles/${profile.id}/appointments`),
+  });
+  const appointments = data?.appointments ?? [];
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['appointments', profile.id] });
+    void queryClient.invalidateQueries({ queryKey: ['calendar', profile.id] });
+  };
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/appointments/${id}`),
+    onSuccess: () => {
+      setConfirmDelete(null);
+      invalidate();
+    },
+  });
+
+  const bulkMutation = useMutation({
+    mutationFn: (payload: { action: 'complete' | 'cancel' | 'delete'; ids: string[] }) =>
+      api.post(`/care-profiles/${profile.id}/appointments/bulk`, payload),
+    onSuccess: () => {
+      setConfirmBulkDelete(false);
+      dv.clearSelection();
+      invalidate();
+    },
+  });
+
+  const dv = useDataView<Appointment>({
+    rows: appointments,
+    getId: (a) => a.id,
+    searchText: (a) =>
+      [a.title, typeLabel(a.appointment_type), a.provider_name, a.location, statusLabel(a.status)]
+        .filter(Boolean)
+        .join(' '),
+    sorts: SORTS,
+    filters: [STATUS_FILTER, TYPE_FILTER],
+    defaultPageSize: 25,
+  });
+
+  const bulkActions: ToolbarBulkAction[] = canEdit
+    ? [
+        {
+          key: 'edit',
+          label: 'Edit selected',
+          onRun: () => {
+            const queue = appointments.filter((a) => dv.selected.has(a.id));
+            if (queue.length === 0) return;
+            setBulkEditQueue(queue.slice(1));
+            setEditing(queue[0]);
+          },
+        },
+        {
+          key: 'complete',
+          label: 'Complete selected',
+          onRun: () => bulkMutation.mutate({ action: 'complete', ids: [...dv.selected] }),
+        },
+        {
+          key: 'cancel',
+          label: 'Cancel selected',
+          onRun: () => bulkMutation.mutate({ action: 'cancel', ids: [...dv.selected] }),
+        },
+        { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulkDelete(true) },
+      ]
+    : [];
+
+  const advanceQueue = () => {
+    if (bulkEditQueue.length > 0) {
+      setEditing(bulkEditQueue[0]);
+      setBulkEditQueue(bulkEditQueue.slice(1));
+    } else {
+      setEditing(null);
+      dv.clearSelection();
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-base font-semibold text-ink">Appointments</h2>
+          <p className="text-sm text-muted">
+            Everything booked for {careName}. Each appointment shows on the Calendar and in the upcoming
+            events on the Overview.
+          </p>
+        </div>
+        {canEdit ? <Button size="sm" onClick={() => setAdding(true)}>Add appointment</Button> : null}
+      </div>
+
+      <DataToolbar
+        search={dv.search}
+        onSearch={dv.setSearch}
+        searchPlaceholder="Search appointments..."
+        sorts={SORTS.map((s) => ({ key: s.key, label: s.label }))}
+        sortKey={dv.sortKey}
+        onSort={dv.setSortKey}
+        filters={[STATUS_FILTER, TYPE_FILTER].map((f) => ({ key: f.key, label: f.label, options: f.options }))}
+        filterValues={dv.filterValues}
+        onFilter={dv.setFilter}
+        selectedCount={dv.selected.size}
+        bulkActions={bulkActions}
+        onClearSelection={dv.clearSelection}
+        page={dv.page}
+        totalPages={dv.totalPages}
+        pageSize={dv.pageSize}
+        totalFiltered={dv.totalFiltered}
+        onPageChange={dv.setPage}
+        onPageSizeChange={dv.setPageSize}
+      />
+
+      {isLoading ? (
+        <p className="text-sm text-muted">Loading...</p>
+      ) : dv.view.length === 0 ? (
+        <div className="card text-center py-10">
+          <p className="text-sm text-muted">
+            {appointments.length === 0
+              ? `No appointments recorded for ${careName} yet.`
+              : 'No appointments match your search or filters.'}
+          </p>
+        </div>
+      ) : (
+        <div className="card p-0 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-muted border-b border-border">
+                {canEdit ? <th className="px-3 py-2 w-8" /> : null}
+                <th className="px-3 py-2">When</th>
+                <th className="px-3 py-2">Appointment</th>
+                <th className="px-3 py-2">Kind</th>
+                <th className="px-3 py-2 hidden md:table-cell">Provider</th>
+                <th className="px-3 py-2 hidden lg:table-cell">Location</th>
+                <th className="px-3 py-2">Status</th>
+                {canEdit ? <th className="px-3 py-2 text-right">Actions</th> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {dv.view.map((a) => (
+                <tr key={a.id} className="border-b border-border last:border-0 align-top">
+                  {canEdit ? (
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${a.title}`}
+                        className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                        checked={dv.selected.has(a.id)}
+                        onChange={() => dv.toggle(a.id)}
+                      />
+                    </td>
+                  ) : null}
+                  <td className="px-3 py-2 text-ink whitespace-nowrap">
+                    {format(new Date(a.starts_at), 'EEE d MMM yyyy, HH:mm')}
+                  </td>
+                  <td className="px-3 py-2 font-medium text-ink">{a.title}</td>
+                  <td className="px-3 py-2 text-ink">{typeLabel(a.appointment_type)}</td>
+                  <td className="px-3 py-2 text-ink hidden md:table-cell">{a.provider_name ?? ''}</td>
+                  <td className="px-3 py-2 text-muted hidden lg:table-cell">{a.location ?? ''}</td>
+                  <td className="px-3 py-2 text-ink">{statusLabel(a.status)}</td>
+                  {canEdit ? (
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <Button size="xs" variant="ghost" className="mr-1" onClick={() => setEditing(a)}>
+                        Edit
+                      </Button>
+                      <Button size="xs" variant="ghost-danger" onClick={() => setConfirmDelete(a)}>
+                        Delete
+                      </Button>
+                    </td>
+                  ) : null}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {adding || editing ? (
+        <AppointmentEditor
+          profileId={profile.id}
+          appointment={editing}
+          onClose={() => {
+            setAdding(false);
+            setEditing(null);
+            setBulkEditQueue([]);
+          }}
+          onSaved={() => {
+            setAdding(false);
+            invalidate();
+            if (editing) advanceQueue();
+          }}
+        />
+      ) : null}
+
+      <Modal open={confirmDelete !== null} onClose={() => setConfirmDelete(null)} title="Delete appointment">
+        <p className="text-sm text-muted mb-4">
+          Delete <span className="font-medium text-ink">{confirmDelete?.title}</span>? This cannot be undone.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+          <Button
+            variant="danger"
+            loading={deleteMutation.isPending}
+            onClick={() => confirmDelete && deleteMutation.mutate(confirmDelete.id)}
+          >
+            Delete
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal open={confirmBulkDelete} onClose={() => setConfirmBulkDelete(false)} title="Delete appointments">
+        <p className="text-sm text-muted mb-4">
+          Delete {dv.selected.size} {dv.selected.size === 1 ? 'appointment' : 'appointments'}? This cannot be
+          undone.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmBulkDelete(false)}>Cancel</Button>
+          <Button
+            variant="danger"
+            loading={bulkMutation.isPending}
+            onClick={() => bulkMutation.mutate({ action: 'delete', ids: [...dv.selected] })}
+          >
+            Delete
+          </Button>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+/** Local datetime string (YYYY-MM-DDTHH:mm) for a datetime-local input. */
+function toLocalInput(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function AppointmentEditor({
+  profileId,
+  appointment,
+  onClose,
+  onSaved,
+}: {
+  profileId: string;
+  appointment: Appointment | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const isNew = appointment === null;
+  const [title, setTitle] = useState(appointment?.title ?? '');
+  const [type, setType] = useState(appointment?.appointment_type ?? 'consultation');
+  const [providerId, setProviderId] = useState(appointment?.provider_id ?? '');
+  const [location, setLocation] = useState(appointment?.location ?? '');
+  const [startsAt, setStartsAt] = useState(toLocalInput(appointment?.starts_at ?? null));
+  const [endsAt, setEndsAt] = useState(toLocalInput(appointment?.ends_at ?? null));
+  const [status, setStatus] = useState(appointment?.status ?? 'scheduled');
+  const [notes, setNotes] = useState(appointment?.notes ?? '');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!appointment) return;
+    setTitle(appointment.title);
+    setType(appointment.appointment_type);
+    setProviderId(appointment.provider_id ?? '');
+    setLocation(appointment.location ?? '');
+    setStartsAt(toLocalInput(appointment.starts_at));
+    setEndsAt(toLocalInput(appointment.ends_at));
+    setStatus(appointment.status);
+    setNotes(appointment.notes ?? '');
+  }, [appointment]);
+
+  // The person's linked providers, so the appointment ties to a real record.
+  const { data: providersData } = useQuery({
+    queryKey: ['providers', profileId],
+    queryFn: () => api.get<{ providers: Array<{ id: string; name: string; provider_type: string }> }>(
+      `/care-profiles/${profileId}/providers`
+    ),
+  });
+  const providers = providersData?.providers ?? [];
+
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      const body = {
+        title: title.trim(),
+        appointment_type: type,
+        provider_id: providerId || null,
+        location: location.trim() || null,
+        starts_at: new Date(startsAt).toISOString(),
+        ends_at: endsAt ? new Date(endsAt).toISOString() : null,
+        status,
+        notes: notes.trim() || null,
+      };
+      return isNew
+        ? api.post(`/care-profiles/${profileId}/appointments`, body)
+        : api.patch(`/care-profiles/${profileId}/appointments/${appointment.id}`, body);
+    },
+    onSuccess: onSaved,
+    onError: (err) => setError(err instanceof Error ? err.message : 'Could not save the appointment.'),
+  });
+
+  return (
+    <Modal open onClose={onClose} title={isNew ? 'Add appointment' : `Edit ${appointment.title}`} wide>
+      <div className="space-y-4">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Input
+            label="What for"
+            placeholder="e.g. Cardiology check-up"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <label className="block">
+            <span className="block text-sm font-medium text-ink mb-1">Kind</span>
+            <select className={inputClass} value={type} onChange={(e) => setType(e.target.value)}>
+              {APPOINTMENT_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="block text-sm font-medium text-ink mb-1">Provider</span>
+            <select className={inputClass} value={providerId} onChange={(e) => setProviderId(e.target.value)}>
+              <option value="">No provider linked</option>
+              {providers.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </label>
+          <Input
+            label="Location"
+            placeholder="e.g. Suite 4, 12 High St"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+          />
+          <Input
+            label="Starts"
+            type="datetime-local"
+            value={startsAt}
+            onChange={(e) => setStartsAt(e.target.value)}
+          />
+          <Input
+            label="Ends"
+            type="datetime-local"
+            value={endsAt}
+            onChange={(e) => setEndsAt(e.target.value)}
+          />
+          <label className="block">
+            <span className="block text-sm font-medium text-ink mb-1">Status</span>
+            <select className={inputClass} value={status} onChange={(e) => setStatus(e.target.value)}>
+              {APPOINTMENT_STATUSES.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <Textarea label="Notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button
+            loading={saveMutation.isPending}
+            disabled={!title.trim() || !startsAt}
+            onClick={() => saveMutation.mutate()}
+          >
+            Save
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}

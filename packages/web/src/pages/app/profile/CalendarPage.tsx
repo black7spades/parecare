@@ -38,6 +38,7 @@ const MED_STATUS_CLASSES: Record<MedicationStatus, string> = {
 const EVENT_KIND_CLASSES: Record<string, string> = {
   birthday: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200',
   health_status: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200',
+  appointment: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200',
 };
 
 const EVENT_KIND_LABELS: Record<string, string> = {
@@ -45,6 +46,7 @@ const EVENT_KIND_LABELS: Record<string, string> = {
   medication: 'Medications',
   birthday: 'Birthdays',
   health_status: 'Health statuses',
+  appointment: 'Appointments',
 };
 
 function eventKindClass(e: CalendarEvent): string {
@@ -83,7 +85,7 @@ export function CalendarPage() {
 
   const availableKinds = useMemo(() => {
     const kinds = new Set(allEvents.map((e) => e.kind ?? 'task'));
-    return ['task', 'medication', 'birthday', 'health_status'].filter((k) => kinds.has(k));
+    return ['task', 'medication', 'appointment', 'birthday', 'health_status'].filter((k) => kinds.has(k));
   }, [allEvents]);
 
   const { data: feed } = useQuery({

@@ -55,7 +55,22 @@ export function auditTrail(req: Request, res: Response, next: NextFunction): voi
   res.on('finish', () => {
     if (res.statusCode >= 400 || !profileId) return;
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const summary = [body.title, body.label, body.display_name, body.full_name, body.name]
+    // The best available one-line description of what was touched, checked
+    // in order of specificity across every record type the API accepts.
+    const summary = [
+      body.title, // tasks, appointments, documents, memories
+      body.label, // documents, notification channels
+      body.display_name,
+      body.full_name,
+      body.name, // conditions, treatments, health statuses, providers
+      body.substance, // allergies
+      body.medication_name, // medications and dose records
+      body.subject,
+      body.domain, // functional impact rows
+      body.code, // diagnosis codes
+      body.content, // notes and messages
+      body.body,
+    ]
       .find((v): v is string => typeof v === 'string' && v.trim().length > 0)
       ?.slice(0, 255);
     void db('audit_log')
