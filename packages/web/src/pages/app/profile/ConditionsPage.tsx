@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { CareDocument } from '../../../lib/care';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
@@ -463,7 +464,42 @@ function ConditionEditor({
   const [diagnosisDate, setDiagnosisDate] = useState(condition?.diagnosis_date ?? '');
   const [diagnosingProvider, setDiagnosingProvider] = useState(condition?.diagnosing_provider ?? '');
   const [notes, setNotes] = useState(condition?.notes ?? '');
+  const [diagnosisFile, setDiagnosisFile] = useState<File | null>(null);
+  const [diagnosisDocId, setDiagnosisDocId] = useState(condition?.diagnosis_document_id ?? null);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const queryClient = useQueryClient();
+
+  const { data: existingDocData } = useQuery({
+    queryKey: ['document-meta', diagnosisDocId],
+    queryFn: () => api.get<{ documents: CareDocument[] }>(`/care-profiles/${profileId}/documents`),
+    enabled: !!diagnosisDocId,
+  });
+  const existingDoc = diagnosisDocId
+    ? (existingDocData?.documents ?? []).find((d) => d.id === diagnosisDocId)
+    : null;
+
+  const uploadDiagnosisDoc = async (file: File, conditionId: string) => {
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('category', 'medical_record');
+      form.append('label', `Diagnosis: ${name.trim() || 'Neurotype'}`);
+      const doc = await api.upload<{ document: CareDocument }>(`/care-profiles/${profileId}/documents`, form);
+      await api.patch(`/care-profiles/${profileId}/conditions/${conditionId}`, {
+        diagnosis_document_id: doc.document.id,
+      });
+      setDiagnosisDocId(doc.document.id);
+      setDiagnosisFile(null);
+      void queryClient.invalidateQueries({ queryKey: ['conditions', profileId] });
+      void queryClient.invalidateQueries({ queryKey: ['document-meta', doc.document.id] });
+    } finally {
+      setUploading(false);
+    }
+  };
 
   useEffect(() => {
     if (!condition) return;
@@ -483,6 +519,8 @@ function ConditionEditor({
     setDiagnosisStatus(condition.diagnosis_status ?? '');
     setDiagnosisDate(condition.diagnosis_date ?? '');
     setDiagnosingProvider(condition.diagnosing_provider ?? '');
+    setDiagnosisDocId(condition.diagnosis_document_id ?? null);
+    setDiagnosisFile(null);
     setNotes(condition.notes ?? '');
   }, [condition]);
 
@@ -513,7 +551,12 @@ function ConditionEditor({
         ? api.post<{ condition: MedicalCondition }>(`/care-profiles/${profileId}/conditions`, body)
         : api.patch<{ condition: MedicalCondition }>(`/care-profiles/${profileId}/conditions/${condition.id}`, body);
     },
-    onSuccess: (res) => onSaved(res.condition),
+    onSuccess: async (res) => {
+      if (diagnosisFile && res.condition.id) {
+        await uploadDiagnosisDoc(diagnosisFile, res.condition.id);
+      }
+      onSaved(res.condition);
+    },
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not save the condition.'),
   });
 
@@ -672,9 +715,55 @@ function ConditionEditor({
           ) : null}
         </div>
         {category === 'neurotype' ? (
-          <p className="text-xs text-muted">
-            Neurotypes are lifelong. To upload a formal diagnosis document, use the Documents section and choose the Medical record category.
-          </p>
+          <div className="space-y-2">
+            <span className="block text-sm font-medium text-ink">Formal diagnosis document</span>
+            {existingDoc ? (
+              <div className="flex items-center gap-3 text-sm">
+                <span className="text-ink">{existingDoc.label}</span>
+                {existingDoc.file_size_bytes ? (
+                  <span className="text-xs text-muted">{(existingDoc.file_size_bytes / 1024).toFixed(0)} KB</span>
+                ) : null}
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => {
+                    setDiagnosisDocId(null);
+                    if (!isNew && condition) {
+                      void api.patch(`/care-profiles/${profileId}/conditions/${condition.id}`, {
+                        diagnosis_document_id: null,
+                      });
+                    }
+                  }}
+                >
+                  Remove
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                  className="text-sm text-ink file:mr-3 file:rounded-md file:border file:border-border file:bg-card file:px-3 file:py-1.5 file:text-sm file:text-ink hover:file:bg-surface-2"
+                  onChange={(e) => setDiagnosisFile(e.target.files?.[0] ?? null)}
+                />
+                {diagnosisFile && !isNew && condition ? (
+                  <Button
+                    size="sm"
+                    loading={uploading}
+                    onClick={() => uploadDiagnosisDoc(diagnosisFile, condition.id)}
+                  >
+                    Upload
+                  </Button>
+                ) : diagnosisFile && isNew ? (
+                  <span className="text-xs text-muted">Will upload after saving</span>
+                ) : null}
+              </div>
+            )}
+            <p className="text-xs text-muted">
+              Upload a formal diagnosis report, assessment letter, or other supporting documentation.
+            </p>
+          </div>
         ) : null}
         <Textarea label="Notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
 
