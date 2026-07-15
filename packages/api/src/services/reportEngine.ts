@@ -133,6 +133,7 @@ export interface ReportPreset {
     dateRangePreset: string | null;
     includeAiNarrative: boolean;
     aiPrompt: string | null;
+    profileFilter?: { kind?: string };
   };
   created_at: string;
   updated_at: string;
@@ -141,8 +142,8 @@ export interface ReportPreset {
 export const SYSTEM_PRESETS: Omit<ReportPreset, 'id' | 'created_at' | 'updated_at'>[] = [
   {
     account_id: null,
-    name: 'Health summary for doctor visit',
-    description: 'Demographics, allergies, conditions, medications, and recent health events. Ideal for preparing a GP or specialist appointment.',
+    name: 'Health summary for doctor or vet visit',
+    description: 'Demographics, allergies, conditions, medications, and recent health events. Ideal for preparing a GP, specialist, or veterinary appointment.',
     is_system: true,
     config: {
       sections: [
@@ -155,7 +156,7 @@ export const SYSTEM_PRESETS: Omit<ReportPreset, 'id' | 'created_at' | 'updated_a
       ],
       dateRangePreset: '90d',
       includeAiNarrative: true,
-      aiPrompt: 'Write this summary as if preparing a patient for a doctor visit. Highlight anything the doctor should be made aware of urgently.',
+      aiPrompt: 'Write this summary as if preparing for a doctor or vet visit. Highlight anything the clinician should be made aware of urgently.',
     },
   },
   {
@@ -188,6 +189,7 @@ export const SYSTEM_PRESETS: Omit<ReportPreset, 'id' | 'created_at' | 'updated_a
       dateRangePreset: '30d',
       includeAiNarrative: true,
       aiPrompt: 'Analyse this data for outbreak patterns. Identify who is sick, what they have, how long they have been unwell, who might be a vector, which areas or wings are affected, and who might be at greatest risk. Flag anyone not improving and suggest whether isolation measures are warranted.',
+      profileFilter: { kind: 'person' },
     },
   },
   {
@@ -205,6 +207,7 @@ export const SYSTEM_PRESETS: Omit<ReportPreset, 'id' | 'created_at' | 'updated_a
       dateRangePreset: '90d',
       includeAiNarrative: true,
       aiPrompt: 'Write this as an NDIS progress report. Focus on measurable outcomes, goal progress, task completion rates, and treatment adherence. Use evidence-based language suitable for an NDIS plan review.',
+      profileFilter: { kind: 'person' },
     },
   },
   {
@@ -244,6 +247,7 @@ export const SYSTEM_PRESETS: Omit<ReportPreset, 'id' | 'created_at' | 'updated_a
       dateRangePreset: '7d',
       includeAiNarrative: true,
       aiPrompt: 'Write a facility manager briefing. Summarise the overall health picture, flag anyone requiring urgent attention, note medication supply issues, and highlight overdue tasks.',
+      profileFilter: { kind: 'person' },
     },
   },
 ];

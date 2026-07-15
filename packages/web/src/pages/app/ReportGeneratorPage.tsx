@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useCallback, useMemo, useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { useAuthStore } from '../../stores/auth';
 import { Button } from '../../components/ui/Button';
+import { DataToolbar } from '../../components/data/DataToolbar';
+import { useDataView, type DataSort, type DataFilter } from '../../components/data/useDataView';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -42,6 +44,8 @@ interface ProfileOption {
   preferred_name: string | null;
   kind: string;
   current_phase: string;
+  photo_url: string | null;
+  photo_color: string | null;
 }
 
 interface ReportSectionResult {
@@ -63,6 +67,7 @@ interface PresetConfig {
   dateRangePreset: string | null;
   includeAiNarrative: boolean;
   aiPrompt: string | null;
+  profileFilter?: { kind?: string };
 }
 
 interface Preset {
@@ -71,6 +76,22 @@ interface Preset {
   description: string | null;
   is_system: boolean;
   config: PresetConfig;
+}
+
+interface SavedReport {
+  id: string;
+  name: string;
+  profile_count: number;
+  section_count: number;
+  total_rows: number;
+  has_ai_narrative: boolean;
+  generated_at: string;
+  created_at: string;
+}
+
+interface SavedReportFull extends SavedReport {
+  config: unknown;
+  result: ReportResult;
 }
 
 type DatePreset = '7d' | '30d' | '90d' | '180d' | '1y' | 'custom' | 'all';
@@ -94,6 +115,11 @@ const PHASE_LABELS: Record<string, string> = {
   end_of_life: 'End of life',
 };
 
+const KIND_LABELS: Record<string, string> = {
+  person: 'Person',
+  pet: 'Pet',
+};
+
 const CATEGORY_LABELS: Record<string, string> = {
   demographics: 'Profile',
   health: 'Health',
@@ -104,9 +130,51 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const SELECT_CLS = 'rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
+// ── Profile table sorts and filters ────────────────────────────────────
+
+const PROFILE_SORTS: DataSort<ProfileOption>[] = [
+  { key: 'name', label: 'Name (A-Z)', compare: (a, b) => a.full_name.localeCompare(b.full_name) },
+  { key: 'kind', label: 'Kind', compare: (a, b) => a.kind.localeCompare(b.kind) || a.full_name.localeCompare(b.full_name) },
+  { key: 'phase', label: 'Phase', compare: (a, b) => a.current_phase.localeCompare(b.current_phase) || a.full_name.localeCompare(b.full_name) },
+];
+
+function buildProfileFilters(profiles: ProfileOption[]): DataFilter<ProfileOption>[] {
+  const kinds = [...new Set(profiles.map((p) => p.kind))].filter(Boolean);
+  const phases = [...new Set(profiles.map((p) => p.current_phase))].filter(Boolean);
+  const filters: DataFilter<ProfileOption>[] = [];
+  if (kinds.length > 1) {
+    filters.push({
+      key: 'kind',
+      label: 'Kind',
+      options: kinds.map((k) => ({ value: k, label: KIND_LABELS[k] ?? k })),
+      match: (row, value) => row.kind === value,
+    });
+  }
+  if (phases.length > 1) {
+    filters.push({
+      key: 'phase',
+      label: 'Phase',
+      options: phases.map((p) => ({ value: p, label: PHASE_LABELS[p] ?? p.replace(/_/g, ' ') })),
+      match: (row, value) => row.current_phase === value,
+    });
+  }
+  return filters;
+}
+
+// ── Saved reports table sorts ──────────────────────────────────────────
+
+const SAVED_SORTS: DataSort<SavedReport>[] = [
+  { key: 'newest', label: 'Newest first', compare: (a, b) => new Date(b.generated_at).getTime() - new Date(a.generated_at).getTime() },
+  { key: 'oldest', label: 'Oldest first', compare: (a, b) => new Date(a.generated_at).getTime() - new Date(b.generated_at).getTime() },
+  { key: 'name', label: 'Name (A-Z)', compare: (a, b) => a.name.localeCompare(b.name) },
+  { key: 'rows', label: 'Most data', compare: (a, b) => b.total_rows - a.total_rows },
+];
+
 // ── Main component ─────────────────────────────────────────────────────
 
 export function ReportGeneratorPage() {
+  const queryClient = useQueryClient();
+
   // Data fetching
   const { data: registryData } = useQuery({
     queryKey: ['report-registry'],
@@ -126,8 +194,32 @@ export function ReportGeneratorPage() {
   });
   const presets = presetsData?.presets ?? [];
 
+  const { data: savedData } = useQuery({
+    queryKey: ['saved-reports'],
+    queryFn: () => api.get<{ reports: SavedReport[] }>('/reports/saved'),
+  });
+  const savedReports = savedData?.reports ?? [];
+
+  // Profile table
+  const profileFilters = useMemo(() => buildProfileFilters(allProfiles), [allProfiles]);
+  const profileDv = useDataView<ProfileOption>({
+    rows: allProfiles,
+    getId: (p) => p.id,
+    searchText: (p) => [p.full_name, p.preferred_name, p.kind, PHASE_LABELS[p.current_phase] ?? p.current_phase].filter(Boolean).join(' '),
+    sorts: PROFILE_SORTS,
+    filters: profileFilters,
+    defaultPageSize: 10,
+  });
+
+  // Saved reports table
+  const savedDv = useDataView<SavedReport>({
+    rows: savedReports,
+    getId: (r) => r.id,
+    searchText: (r) => r.name,
+    sorts: SAVED_SORTS,
+  });
+
   // Report builder state
-  const [selectedProfileIds, setSelectedProfileIds] = useState<string[]>([]);
   const [selectedSections, setSelectedSections] = useState<Map<string, SectionConfig>>(new Map());
   const [datePreset, setDatePreset] = useState<DatePreset>('30d');
   const [customFrom, setCustomFrom] = useState('');
@@ -139,7 +231,10 @@ export function ReportGeneratorPage() {
   const [showPresetSave, setShowPresetSave] = useState(false);
   const [presetName, setPresetName] = useState('');
   const [presetDesc, setPresetDesc] = useState('');
-  const [step, setStep] = useState<'configure' | 'results'>('configure');
+  const [step, setStep] = useState<'configure' | 'results' | 'saved-view'>('configure');
+  const [viewingSavedReport, setViewingSavedReport] = useState<SavedReportFull | null>(null);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [saveName, setSaveName] = useState('');
 
   const sectionsByCategory = useMemo(() => {
     const map = new Map<string, SectionMeta[]>();
@@ -187,7 +282,7 @@ export function ReportGeneratorPage() {
     });
   }, []);
 
-  // Load preset
+  // Load preset — apply profileFilter to auto-select matching profiles
   const loadPreset = useCallback((preset: Preset) => {
     setActivePresetId(preset.id);
     const cfg = preset.config;
@@ -201,7 +296,21 @@ export function ReportGeneratorPage() {
     setAiPrompt(cfg.aiPrompt ?? '');
     setStep('configure');
     setResult(null);
-  }, []);
+
+    // Apply profile filter from preset
+    if (cfg.profileFilter?.kind) {
+      const kind = cfg.profileFilter.kind;
+      const matching = allProfiles.filter((p) => p.kind === kind).map((p) => p.id);
+      profileDv.clearSelection();
+      for (const id of matching) {
+        profileDv.toggle(id);
+      }
+    } else {
+      profileDv.clearSelection();
+    }
+  }, [allProfiles, profileDv]);
+
+  const selectedProfileIds = useMemo(() => Array.from(profileDv.selected), [profileDv.selected]);
 
   // Generate report
   const generateMutation = useMutation({
@@ -272,20 +381,80 @@ export function ReportGeneratorPage() {
     onSuccess: () => refetchPresets(),
   });
 
-  // Select all profiles by default when loaded
-  useEffect(() => {
-    if (allProfiles.length > 0 && selectedProfileIds.length === 0) {
-      setSelectedProfileIds(allProfiles.map((p) => p.id));
-    }
-  }, [allProfiles, selectedProfileIds.length]);
+  // Save generated report
+  const saveReportMutation = useMutation({
+    mutationFn: async () => {
+      if (!result) throw new Error('No report to save');
+      const config = {
+        sections: Array.from(selectedSections.values()),
+        datePreset,
+        includeAiNarrative: includeAi,
+        aiPrompt: aiPrompt || null,
+        profileIds: selectedProfileIds,
+      };
+      return api.post('/reports/saved', { name: saveName, config, result });
+    },
+    onSuccess: () => {
+      setShowSaveDialog(false);
+      setSaveName('');
+      queryClient.invalidateQueries({ queryKey: ['saved-reports'] });
+    },
+  });
+
+  // Delete saved report
+  const deleteSavedMutation = useMutation({
+    mutationFn: async (id: string) => api.delete(`/reports/saved/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['saved-reports'] });
+      savedDv.clearSelection();
+    },
+  });
+
+  // View saved report
+  const viewSavedReport = async (id: string) => {
+    const data = await api.get<SavedReportFull>(`/reports/saved/${id}`);
+    setViewingSavedReport(data);
+    setStep('saved-view');
+  };
 
   const canGenerate = selectedSections.size > 0 && selectedProfileIds.length > 0;
 
-  // ── Configure step ────────────────────────────────────────────────────
+  // ── Viewing a saved report ────────────────────────────────────────────
+  if (step === 'saved-view' && viewingSavedReport) {
+    const r = viewingSavedReport.result;
+    return (
+      <div className="print-report space-y-6 max-w-5xl">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-ink">{viewingSavedReport.name}</h2>
+            <p className="text-sm text-muted">
+              Generated {new Date(viewingSavedReport.generated_at).toLocaleString()} for {r.profileCount} {r.profileCount === 1 ? 'profile' : 'profiles'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={() => window.print()}>Print</Button>
+            <Button variant="secondary" size="sm" onClick={() => { setStep('configure'); setViewingSavedReport(null); }}>Back</Button>
+          </div>
+        </div>
 
+        {r.aiNarrative ? (
+          <div className="card">
+            <h3 className="text-sm font-semibold text-ink mb-3">AI narrative summary</h3>
+            <div className="prose prose-sm max-w-none text-ink whitespace-pre-wrap">{r.aiNarrative}</div>
+          </div>
+        ) : null}
+
+        {r.sections.map((section) => (
+          <ReportSectionTable key={section.key} section={section} />
+        ))}
+      </div>
+    );
+  }
+
+  // ── Results step ─────────────────────────────────────────────────────
   if (step === 'results' && result) {
     return (
-      <div className="space-y-6 max-w-5xl">
+      <div className="print-report space-y-6 max-w-5xl">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-base font-semibold text-ink">Report results</h2>
@@ -296,9 +465,31 @@ export function ReportGeneratorPage() {
           <div className="flex items-center gap-2">
             <Button variant="secondary" size="sm" onClick={() => window.print()}>Print</Button>
             <Button variant="secondary" size="sm" onClick={() => exportCsvMutation.mutate()} loading={exportCsvMutation.isPending}>Export CSV</Button>
+            <Button variant="secondary" size="sm" onClick={() => { setShowSaveDialog(true); setSaveName(`Report ${new Date().toLocaleDateString()}`); }}>
+              Save report
+            </Button>
             <Button variant="secondary" size="sm" onClick={() => { setStep('configure'); setResult(null); }}>Back to builder</Button>
           </div>
         </div>
+
+        {showSaveDialog ? (
+          <div className="card">
+            <h3 className="text-sm font-semibold text-ink mb-2">Save this report</h3>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                className={SELECT_CLS + ' flex-1'}
+                placeholder="Report name"
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+              />
+              <Button size="sm" onClick={() => saveReportMutation.mutate()} loading={saveReportMutation.isPending} disabled={!saveName.trim()}>
+                Save
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setShowSaveDialog(false)}>Cancel</Button>
+            </div>
+          </div>
+        ) : null}
 
         {result.aiNarrative ? (
           <div className="card">
@@ -308,43 +499,13 @@ export function ReportGeneratorPage() {
         ) : null}
 
         {result.sections.map((section) => (
-          <div key={section.key} className="card">
-            <h3 className="text-sm font-semibold text-ink mb-1">{section.label}</h3>
-            <p className="text-xs text-muted mb-3">{section.rows.length} {section.rows.length === 1 ? 'record' : 'records'}</p>
-            {section.rows.length === 0 ? (
-              <p className="text-sm text-muted">No data for this section.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-xs text-muted border-b border-border">
-                      <th className="px-3 py-2 font-medium">Profile</th>
-                      {section.fields.map((f) => (
-                        <th key={f.key} className="px-3 py-2 font-medium">{f.label}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {section.rows.map((row, i) => (
-                      <tr key={i} className="border-b border-border last:border-0">
-                        <td className="px-3 py-2 font-medium">{String(row['_profile_name'] ?? '')}</td>
-                        {section.fields.map((f) => (
-                          <td key={f.key} className="px-3 py-2">
-                            <CellValue value={row[f.key]} type={f.type} />
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+          <ReportSectionTable key={section.key} section={section} />
         ))}
       </div>
     );
   }
 
+  // ── Configure step ────────────────────────────────────────────────────
   return (
     <div className="space-y-6 max-w-5xl">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -353,6 +514,79 @@ export function ReportGeneratorPage() {
           <p className="text-sm text-muted">Build custom reports from any data in the system</p>
         </div>
       </div>
+
+      {/* Saved reports */}
+      {savedReports.length > 0 ? (
+        <div className="card">
+          <h3 className="text-sm font-semibold text-ink mb-3">Saved reports</h3>
+          <DataToolbar
+            search={savedDv.search}
+            onSearch={savedDv.setSearch}
+            searchPlaceholder="Search saved reports..."
+            sorts={SAVED_SORTS.map((s) => ({ key: s.key, label: s.label }))}
+            sortKey={savedDv.sortKey}
+            onSort={savedDv.setSortKey}
+            selectedCount={savedDv.selectedRows.length}
+            bulkActions={[
+              { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => { for (const r of savedDv.selectedRows) deleteSavedMutation.mutate(r.id); } },
+            ]}
+            onClearSelection={savedDv.clearSelection}
+            page={savedDv.page}
+            totalPages={savedDv.totalPages}
+            pageSize={savedDv.pageSize}
+            totalFiltered={savedDv.totalFiltered}
+            onPageChange={savedDv.setPage}
+            onPageSizeChange={savedDv.setPageSize}
+          />
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted border-b border-border">
+                  <th className="px-3 py-2 w-8">
+                    <input type="checkbox" aria-label="Select all" checked={savedDv.allSelected} onChange={savedDv.toggleAll} className="rounded border-border" />
+                  </th>
+                  <th className="px-3 py-2 font-medium">Name</th>
+                  <th className="px-3 py-2 font-medium">Generated</th>
+                  <th className="px-3 py-2 font-medium">Profiles</th>
+                  <th className="px-3 py-2 font-medium">Sections</th>
+                  <th className="px-3 py-2 font-medium">Rows</th>
+                  <th className="px-3 py-2 font-medium">AI summary</th>
+                  <th className="px-3 py-2 w-20" />
+                </tr>
+              </thead>
+              <tbody>
+                {savedDv.view.map((r) => (
+                  <tr key={r.id} className="border-b border-border last:border-0 hover:bg-surface-2">
+                    <td className="px-3 py-2">
+                      <input type="checkbox" aria-label={`Select ${r.name}`} checked={savedDv.selected.has(r.id)} onChange={() => savedDv.toggle(r.id)} className="rounded border-border" />
+                    </td>
+                    <td className="px-3 py-2 font-medium text-ink">
+                      <button type="button" className="hover:underline text-primary text-left" onClick={() => viewSavedReport(r.id)}>
+                        {r.name}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2 tabular-nums">{new Date(r.generated_at).toLocaleDateString()}</td>
+                    <td className="px-3 py-2 tabular-nums">{r.profile_count}</td>
+                    <td className="px-3 py-2 tabular-nums">{r.section_count}</td>
+                    <td className="px-3 py-2 tabular-nums">{r.total_rows}</td>
+                    <td className="px-3 py-2">{r.has_ai_narrative ? 'Yes' : 'No'}</td>
+                    <td className="px-3 py-2">
+                      <button
+                        type="button"
+                        className="text-muted hover:text-red-500 text-xs"
+                        onClick={() => deleteSavedMutation.mutate(r.id)}
+                        title="Delete"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
 
       {/* Presets */}
       <div className="card">
@@ -432,44 +666,63 @@ export function ReportGeneratorPage() {
         </div>
       </div>
 
-      {/* Profile selector */}
+      {/* Profile selector — DataToolbar table */}
       <div className="card">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-ink">Profiles to include</h3>
-          <div className="flex gap-2 text-xs">
-            <button type="button" className="text-primary hover:underline" onClick={() => setSelectedProfileIds(allProfiles.map((p) => p.id))}>
-              Select all
-            </button>
-            <button type="button" className="text-primary hover:underline" onClick={() => setSelectedProfileIds([])}>
-              Clear
-            </button>
+        <h3 className="text-sm font-semibold text-ink mb-3">Profiles to include</h3>
+        <DataToolbar
+          search={profileDv.search}
+          onSearch={profileDv.setSearch}
+          searchPlaceholder="Search profiles..."
+          sorts={PROFILE_SORTS.map((s) => ({ key: s.key, label: s.label }))}
+          sortKey={profileDv.sortKey}
+          onSort={profileDv.setSortKey}
+          filters={profileFilters.map((f) => ({ key: f.key, label: f.label, options: f.options }))}
+          filterValues={profileDv.filterValues}
+          onFilter={profileDv.setFilter}
+          selectedCount={profileDv.selectedRows.length}
+          bulkActions={[]}
+          onClearSelection={profileDv.clearSelection}
+          page={profileDv.page}
+          totalPages={profileDv.totalPages}
+          pageSize={profileDv.pageSize}
+          totalFiltered={profileDv.totalFiltered}
+          onPageChange={profileDv.setPage}
+          onPageSizeChange={profileDv.setPageSize}
+        />
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-muted border-b border-border">
+                <th className="px-3 py-2 w-8">
+                  <input type="checkbox" aria-label="Select all" checked={profileDv.allSelected} onChange={profileDv.toggleAll} className="rounded border-border" />
+                </th>
+                <th className="px-3 py-2 font-medium">Name</th>
+                <th className="px-3 py-2 font-medium">Kind</th>
+                <th className="px-3 py-2 font-medium">Phase</th>
+              </tr>
+            </thead>
+            <tbody>
+              {profileDv.view.map((p) => (
+                <tr key={p.id} className={`border-b border-border last:border-0 cursor-pointer transition-colors ${profileDv.selected.has(p.id) ? 'bg-primary-50' : 'hover:bg-surface-2'}`} onClick={() => profileDv.toggle(p.id)}>
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" aria-label={`Select ${p.full_name}`} checked={profileDv.selected.has(p.id)} onChange={() => profileDv.toggle(p.id)} className="rounded border-border" />
+                  </td>
+                  <td className="px-3 py-2 font-medium text-ink">{p.preferred_name || p.full_name}</td>
+                  <td className="px-3 py-2">{KIND_LABELS[p.kind] ?? p.kind}</td>
+                  <td className="px-3 py-2">{PHASE_LABELS[p.current_phase] ?? p.current_phase?.replace(/_/g, ' ')}</td>
+                </tr>
+              ))}
+              {allProfiles.length === 0 ? (
+                <tr><td colSpan={4} className="px-3 py-4 text-sm text-muted text-center">No profiles available.</td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+        {profileDv.selected.size > 0 ? (
+          <div className="mt-2 text-xs text-muted">
+            {profileDv.selected.size} {profileDv.selected.size === 1 ? 'profile' : 'profiles'} selected
           </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {allProfiles.map((p) => {
-            const selected = selectedProfileIds.includes(p.id);
-            return (
-              <button
-                key={p.id}
-                type="button"
-                className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
-                  selected
-                    ? 'border-primary bg-primary-50 text-primary font-medium'
-                    : 'border-border text-muted hover:text-ink hover:border-primary/50'
-                }`}
-                onClick={() => {
-                  setSelectedProfileIds((prev) =>
-                    selected ? prev.filter((id) => id !== p.id) : [...prev, p.id]
-                  );
-                }}
-              >
-                {p.preferred_name || p.full_name}
-                {p.kind === 'pet' ? ' (pet)' : ''}
-              </button>
-            );
-          })}
-          {allProfiles.length === 0 ? <p className="text-sm text-muted">No profiles available.</p> : null}
-        </div>
+        ) : null}
       </div>
 
       {/* Section selector */}
@@ -653,6 +906,43 @@ export function ReportGeneratorPage() {
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────
+
+function ReportSectionTable({ section }: { section: ReportSectionResult }) {
+  return (
+    <div className="card">
+      <h3 className="text-sm font-semibold text-ink mb-1">{section.label}</h3>
+      <p className="text-xs text-muted mb-3">{section.rows.length} {section.rows.length === 1 ? 'record' : 'records'}</p>
+      {section.rows.length === 0 ? (
+        <p className="text-sm text-muted">No data for this section.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-muted border-b border-border">
+                <th className="px-3 py-2 font-medium">Profile</th>
+                {section.fields.map((f) => (
+                  <th key={f.key} className="px-3 py-2 font-medium">{f.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {section.rows.map((row, i) => (
+                <tr key={i} className="border-b border-border last:border-0">
+                  <td className="px-3 py-2 font-medium">{String(row['_profile_name'] ?? '')}</td>
+                  {section.fields.map((f) => (
+                    <td key={f.key} className="px-3 py-2">
+                      <CellValue value={row[f.key]} type={f.type} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function FilterControl({
   filter,

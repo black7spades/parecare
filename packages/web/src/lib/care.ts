@@ -267,6 +267,7 @@ export interface CareDocument {
 export const PROVIDER_TYPES = [
   { value: 'gp', label: 'GP' },
   { value: 'specialist', label: 'Specialist' },
+  { value: 'vet', label: 'Vet' },
   { value: 'pharmacy', label: 'Pharmacy' },
   { value: 'care_facility', label: 'Care facility' },
   { value: 'allied_health', label: 'Allied health' },
