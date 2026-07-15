@@ -35,6 +35,7 @@ import { AdminJourneys } from './pages/admin/AdminJourneys';
 import { AdminChats } from './pages/admin/AdminChats';
 import { AdminSettings } from './pages/admin/AdminSettings';
 import { ReportsPage } from './pages/admin/ReportsPage';
+import { ReportGeneratorPage } from './pages/app/ReportGeneratorPage';
 import { SystemLayout } from './pages/admin/SystemLayout';
 
 function NotFound() {
@@ -86,6 +87,7 @@ export const router = createBrowserRouter([
       { path: 'app/directory/people', element: <DirectoryPeoplePage /> },
       { path: 'app/directory/pets', element: <DirectoryPetsPage /> },
       { path: 'app/directory/providers', element: <DirectoryProvidersPage /> },
+      { path: 'app/reports', element: <ReportGeneratorPage /> },
       {
         path: 'app/:profileId',
         element: <ProfileLayout />,
