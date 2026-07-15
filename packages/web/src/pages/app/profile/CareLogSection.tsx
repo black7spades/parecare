@@ -274,12 +274,12 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
       {/* Selection and bulk actions */}
       {canEdit && entries.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
-          <button type="button" className="text-xs text-primary hover:underline" onClick={() => setSelected(new Set(entries.map((e) => e.id)))}>
+          <Button size="xs" variant="ghost" onClick={() => setSelected(new Set(entries.map((e) => e.id)))}>
             Select all
-          </button>
-          <button type="button" className="text-xs text-primary hover:underline" onClick={() => setSelected(new Set())}>
+          </Button>
+          <Button size="xs" variant="ghost" onClick={() => setSelected(new Set())}>
             Select none
-          </button>
+          </Button>
           {selected.size > 0 ? (
             <>
               <span className="text-muted">{selected.size} selected</span>
@@ -354,12 +354,12 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
                         </div>
                         {canEdit ? (
                           <div className="flex flex-col items-end gap-1 shrink-0">
-                            <button type="button" className="text-xs text-primary hover:underline" onClick={() => { setActionError(''); setEditing(entry); }}>
+                            <Button size="xs" variant="ghost" onClick={() => { setActionError(''); setEditing(entry); }}>
                               Edit
-                            </button>
-                            <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => { setActionError(''); setConfirmDelete(entry); }}>
+                            </Button>
+                            <Button size="xs" variant="ghost-danger" onClick={() => { setActionError(''); setConfirmDelete(entry); }}>
                               Delete
-                            </button>
+                            </Button>
                           </div>
                         ) : null}
                       </li>

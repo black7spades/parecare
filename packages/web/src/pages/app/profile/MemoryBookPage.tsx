@@ -154,9 +154,9 @@ function BookView({
             The story behind <span className="font-medium text-ink">{storyOf.title}</span>
             {storyOf.achieved_on ? `, ${format(new Date(storyOf.achieved_on), 'd MMM yyyy')}` : ''}. It stays linked to
             the achievement.{' '}
-            <button type="button" className="text-primary hover:underline" onClick={onStoryDone}>
+            <Button size="xs" variant="ghost" onClick={onStoryDone}>
               Write a plain memory instead
-            </button>
+            </Button>
           </p>
         ) : (
           <p className="text-sm text-muted -mt-2">
@@ -511,9 +511,9 @@ function AchievementRow({
                 {a.story_entry_id ? (
                   <span className="text-xs text-muted">The story of this achievement is in the book.</span>
                 ) : (
-                  <button type="button" className="text-xs text-primary hover:underline" onClick={onWriteStory}>
+                  <Button size="xs" variant="ghost" onClick={onWriteStory}>
                     Write the story
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>

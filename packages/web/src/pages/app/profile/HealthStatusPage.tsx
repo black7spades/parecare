@@ -258,12 +258,12 @@ function SymptomRow({
       {symptom.notes ? <span className="text-xs text-muted italic">{symptom.notes}</span> : null}
       {canEdit ? (
         <>
-          <button type="button" className="text-xs text-primary hover:underline" onClick={() => resolveMutation.mutate()}>
+          <Button size="xs" variant="ghost" onClick={() => resolveMutation.mutate()}>
             {symptom.resolved_at ? 'Reopen' : 'Resolve'}
-          </button>
-          <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => deleteMutation.mutate()}>
+          </Button>
+          <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate()}>
             Remove
-          </button>
+          </Button>
         </>
       ) : null}
     </div>
@@ -393,9 +393,9 @@ function LinkedDocuments({
                 View in Documents
               </Link>
               {canEdit ? (
-                <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => unlinkMutation.mutate(d.id)}>
+                <Button size="xs" variant="ghost-danger" onClick={() => unlinkMutation.mutate(d.id)}>
                   Unlink
-                </button>
+                </Button>
               ) : null}
             </div>
           ))}

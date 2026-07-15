@@ -219,20 +219,20 @@ function ChannelsCard({ channels, vapidKey, onChanged }: { channels: Channel[]; 
                 <span className="badge bg-surface-2 text-ink text-xs">{KIND_LABELS[c.kind]}</span>
                 <span className="text-sm font-medium text-ink">{c.label}</span>
                 {!c.enabled ? <span className="badge bg-surface-2 text-muted text-xs">Paused</span> : null}
-                <span className="ml-auto flex items-center gap-2">
-                  <button type="button" className="text-xs text-primary hover:underline" onClick={() => testMutation.mutate(c.id)}>
+                <span className="ml-auto flex items-center gap-1">
+                  <Button size="xs" variant="ghost" onClick={() => testMutation.mutate(c.id)}>
                     Send a test
-                  </button>
-                  <button
-                    type="button"
-                    className="text-xs text-muted hover:underline"
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="ghost"
                     onClick={() => patchMutation.mutate({ id: c.id, patch: { enabled: !c.enabled } })}
                   >
                     {c.enabled ? 'Pause' : 'Resume'}
-                  </button>
-                  <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => deleteMutation.mutate(c.id)}>
+                  </Button>
+                  <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate(c.id)}>
                     Remove
-                  </button>
+                  </Button>
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -461,9 +461,9 @@ function ApiKeysCard() {
                 created {format(new Date(k.created_at), 'd MMM yyyy')}
                 {k.last_used_at ? `, last used ${format(new Date(k.last_used_at), 'd MMM yyyy')}` : ', never used'}
               </span>
-              <button type="button" className="ml-auto text-xs text-red-600 hover:underline" onClick={() => revokeMutation.mutate(k.id)}>
+              <Button size="xs" variant="ghost-danger" className="ml-auto" onClick={() => revokeMutation.mutate(k.id)}>
                 Revoke
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
@@ -475,9 +475,9 @@ function ApiKeysCard() {
         <div className="rounded-md border border-primary/40 bg-primary-50 dark:bg-primary-900/10 p-3 space-y-1">
           <p className="text-sm font-medium text-ink">Copy this key now. It will not be shown again.</p>
           <code className="block break-all rounded bg-card border border-border px-2 py-1 text-xs">{createdToken}</code>
-          <button type="button" className="text-xs text-primary hover:underline" onClick={() => setCreatedToken('')}>
+          <Button size="xs" variant="secondary" onClick={() => setCreatedToken('')}>
             I have copied it
-          </button>
+          </Button>
         </div>
       ) : null}
 

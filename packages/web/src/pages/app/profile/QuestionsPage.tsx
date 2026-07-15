@@ -328,9 +328,9 @@ function QuestionCard({
         </p>
       ) : null}
 
-      <button type="button" className="text-xs text-primary hover:underline mt-3" onClick={() => setExpanded((v) => !v)}>
-        {expanded ? 'Hide discussion' : `Discussion${responses.length ? ` (${responses.length})` : ''}`}
-      </button>
+      <Button size="xs" variant="ghost" className="mt-3" onClick={() => setExpanded((v) => !v)}>
+        {expanded ? 'Hide discussion' : responses.length ? `Show discussion with ${responses.length} ${responses.length === 1 ? 'response' : 'responses'}` : 'Show discussion'}
+      </Button>
 
       {expanded ? (
         <div className="mt-3 space-y-3 border-t border-border pt-3">

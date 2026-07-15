@@ -71,9 +71,9 @@ export function JourneysSection({
 
       {past.length > 0 ? (
         <div>
-          <button type="button" className="text-xs text-primary hover:underline" onClick={() => setShowPast((v) => !v)}>
-            {showPast ? 'Hide past journeys' : `Past journeys (${past.length})`}
-          </button>
+          <Button size="xs" variant="ghost" onClick={() => setShowPast((v) => !v)}>
+            {showPast ? 'Hide past journeys' : `Show ${past.length} past ${past.length === 1 ? 'journey' : 'journeys'}`}
+          </Button>
           {showPast ? (
             <div className="mt-3 space-y-4">
               {past.map((j) => (
@@ -157,24 +157,24 @@ function JourneyCard({ profileId, journey }: { profileId: string; journey: CareJ
           ) : null}
         </div>
         {!ended ? (
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex items-center gap-1">
             {journey.handovers.length > 0 && onLastPhase ? (
               <Button size="sm" onClick={() => setHandoverOpen(true)}>
                 Where next
               </Button>
             ) : null}
             {journey.status === 'paused' ? (
-              <button type="button" className="text-primary hover:underline" onClick={() => statusMutation.mutate('active')}>
+              <Button size="xs" variant="secondary" onClick={() => statusMutation.mutate('active')}>
                 Resume
-              </button>
+              </Button>
             ) : (
-              <button type="button" className="text-muted hover:text-ink" onClick={() => statusMutation.mutate('paused')}>
+              <Button size="xs" variant="ghost" onClick={() => statusMutation.mutate('paused')}>
                 Pause
-              </button>
+              </Button>
             )}
-            <button type="button" className="text-muted hover:text-ink" onClick={() => statusMutation.mutate('completed')}>
+            <Button size="xs" variant="ghost" onClick={() => statusMutation.mutate('completed')}>
               Mark complete
-            </button>
+            </Button>
           </div>
         ) : null}
       </div>
