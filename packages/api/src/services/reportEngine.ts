@@ -37,13 +37,19 @@ export async function generateReport(req: ReportRequest): Promise<ReportResult> 
     const section = getSection(sectionCfg.key);
     if (!section) continue;
 
-    const rows = await section.fetch({
-      profileIds: req.profileIds,
-      fields: sectionCfg.fields,
-      filters: sectionCfg.filters,
-      dateRange: section.meta.supportsDateRange ? req.dateRange : null,
-      db,
-    });
+    let rows: Record<string, unknown>[];
+    try {
+      rows = await section.fetch({
+        profileIds: req.profileIds,
+        fields: sectionCfg.fields,
+        filters: sectionCfg.filters,
+        dateRange: section.meta.supportsDateRange ? req.dateRange : null,
+        db,
+      });
+    } catch (err) {
+      console.error(`Report section "${sectionCfg.key}" failed:`, err);
+      rows = [];
+    }
 
     let visibleFields = section.meta.fields;
     if (sectionCfg.fields.length > 0) {
