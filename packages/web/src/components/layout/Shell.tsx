@@ -86,11 +86,43 @@ function ProfileNavRow({
   );
 }
 
+const COLLAPSED_GROUPS_KEY = 'profile-nav-collapsed-groups';
+
+function readCollapsedGroups(): Set<string> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_KEY) ?? '[]');
+    return new Set(Array.isArray(raw) ? raw.filter((v): v is string => typeof v === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** A small chevron that points right when closed and down when open. */
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      className={`transition-transform ${open ? 'rotate-90' : ''}`}
+    >
+      <polyline points="9 6 15 12 9 18" />
+    </svg>
+  );
+}
+
 /**
  * The left nav for an open care profile: this carer's pinned sections
  * first, then the grouped sections (Care profile, Conditions, Management,
  * Communications) with Overview, Logs and Ask PareCare at the top and
- * bottom.
+ * bottom. Group headings expand and collapse on click, remembered across
+ * visits, with an expand-all and collapse-all control at the top.
  */
 function ProfileSidebarNav({ profileId }: { profileId: string }) {
   const queryClient = useQueryClient();
@@ -114,11 +146,50 @@ function ProfileSidebarNav({ profileId }: { profileId: string }) {
     .map((key) => profileNavItem(key))
     .filter((i): i is ProfileNavItem => !!i);
 
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(readCollapsedGroups);
+  const persistCollapsed = (next: Set<string>) => {
+    setCollapsedGroups(next);
+    localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify([...next]));
+  };
+  const toggleGroup = (key: string) => {
+    const next = new Set(collapsedGroups);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    persistCollapsed(next);
+  };
+  const collapsibleKeys = PROFILE_NAV.filter((g) => g.label).map((g) => g.key);
+  const anyCollapsed = collapsibleKeys.some((k) => collapsedGroups.has(k));
+
   return (
     <>
-      <NavLink to="/app" className={navLinkClass}>
-        <span aria-hidden>←</span> All people
-      </NavLink>
+      <div className="flex items-center gap-1">
+        <div className="flex-1 min-w-0">
+          <NavLink to="/app" className={navLinkClass}>
+            <span aria-hidden>←</span> All people
+          </NavLink>
+        </div>
+        <button
+          type="button"
+          aria-label={anyCollapsed ? 'Expand all groups' : 'Collapse all groups'}
+          title={anyCollapsed ? 'Expand all groups' : 'Collapse all groups'}
+          onClick={() => persistCollapsed(anyCollapsed ? new Set() : new Set(collapsibleKeys))}
+          className="shrink-0 p-1.5 rounded-md text-muted hover:text-ink hover:bg-surface-2 transition-colors"
+        >
+          {anyCollapsed ? (
+            /* Expand all: chevrons pointing apart */
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <polyline points="7 9 12 4 17 9" />
+              <polyline points="7 15 12 20 17 15" />
+            </svg>
+          ) : (
+            /* Collapse all: chevrons pointing together */
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <polyline points="7 4 12 9 17 4" />
+              <polyline points="7 20 12 15 17 20" />
+            </svg>
+          )}
+        </button>
+      </div>
       {pinnedItems.length > 0 ? (
         <>
           <div className={navHeadingClass}>Pinned</div>
@@ -127,22 +198,39 @@ function ProfileSidebarNav({ profileId }: { profileId: string }) {
           ))}
         </>
       ) : null}
-      {PROFILE_NAV.map((group) => (
-        <div key={group.key}>
-          {group.label ? <div className={navHeadingClass}>{group.label}</div> : <div className="my-2 border-t border-border" />}
-          {group.items
-            .filter((item) => !pinnedKeys.includes(item.key))
-            .map((item) => (
-              <ProfileNavRow
-                key={item.key}
-                profileId={profileId}
-                item={item}
-                pinned={false}
-                onTogglePin={togglePin}
-              />
-            ))}
-        </div>
-      ))}
+      {PROFILE_NAV.map((group) => {
+        const isCollapsed = group.label ? collapsedGroups.has(group.key) : false;
+        return (
+          <div key={group.key}>
+            {group.label ? (
+              <button
+                type="button"
+                aria-expanded={!isCollapsed}
+                onClick={() => toggleGroup(group.key)}
+                className={`${navHeadingClass} w-full flex items-center justify-between gap-1 hover:text-ink transition-colors`}
+              >
+                {group.label}
+                <Chevron open={!isCollapsed} />
+              </button>
+            ) : (
+              <div className="my-2 border-t border-border" />
+            )}
+            {!isCollapsed
+              ? group.items
+                  .filter((item) => !pinnedKeys.includes(item.key))
+                  .map((item) => (
+                    <ProfileNavRow
+                      key={item.key}
+                      profileId={profileId}
+                      item={item}
+                      pinned={false}
+                      onTogglePin={togglePin}
+                    />
+                  ))
+              : null}
+          </div>
+        );
+      })}
     </>
   );
 }
@@ -152,6 +240,13 @@ export function Shell() {
   const role = useAuthStore((s) => s.account?.role);
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // The whole left nav can be put away on desktop, remembered across visits.
+  const [sidebarHidden, setSidebarHidden] = useState(() => localStorage.getItem('sidebar-hidden') === '1');
+  const toggleSidebar = () => {
+    const next = !sidebarHidden;
+    setSidebarHidden(next);
+    localStorage.setItem('sidebar-hidden', next ? '1' : '0');
+  };
 
   // The logo returns the viewer to the highest-level dashboard they can reach:
   // the system overview for admins and super admins, otherwise the care home.
@@ -253,6 +348,21 @@ export function Shell() {
               <line x1="3" y1="18" x2="21" y2="18" />
             </svg>
           </button>
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label={sidebarHidden ? 'Show navigation' : 'Hide navigation'}
+            aria-expanded={!sidebarHidden}
+            title={sidebarHidden ? 'Show navigation' : 'Hide navigation'}
+            className="hidden lg:inline-flex -ml-1 p-2 rounded-md text-muted hover:text-ink hover:bg-surface-2 transition-colors"
+          >
+            {/* A panel icon: the left pane filled when the nav is open */}
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <line x1="9" y1="4" x2="9" y2="20" />
+              {sidebarHidden ? null : <rect x="4" y="5" width="4" height="14" fill="currentColor" stroke="none" rx="1" />}
+            </svg>
+          </button>
           <NavLink to={homeDest} aria-label="PareCare home" className="text-lg font-semibold text-primary hover:opacity-80 transition-opacity">
             PareCare
           </NavLink>
@@ -266,13 +376,15 @@ export function Shell() {
       </header>
 
       <div className="flex flex-1 min-h-0">
-        {/* Desktop sidebar */}
-        <nav className="hidden lg:flex w-56 shrink-0 bg-card border-r border-border flex-col py-5 px-4 overflow-y-auto">
-          <div className="flex-1 space-y-1">{sidebarNav}</div>
-          <div className="pt-4 mt-4 border-t border-border px-3">
-            <ThemeToggle />
-          </div>
-        </nav>
+        {/* Desktop sidebar, hideable from the header toggle */}
+        {!sidebarHidden ? (
+          <nav className="hidden lg:flex w-56 shrink-0 bg-card border-r border-border flex-col py-5 px-4 overflow-y-auto">
+            <div className="flex-1 space-y-1">{sidebarNav}</div>
+            <div className="pt-4 mt-4 border-t border-border px-3">
+              <ThemeToggle />
+            </div>
+          </nav>
+        ) : null}
 
         {/* Mobile slide-in drawer */}
         {drawerOpen ? (
