@@ -87,16 +87,19 @@
   }
 }
 
-/* Emergency sheet printing: only the sheet itself, full width */
+/* Printing: only the designated print region is visible, full width */
 @media print {
   body * {
     visibility: hidden;
   }
   .print-sheet,
-  .print-sheet * {
+  .print-sheet *,
+  .print-report,
+  .print-report * {
     visibility: visible;
   }
-  .print-sheet {
+  .print-sheet,
+  .print-report {
     position: absolute;
     inset: 0;
     box-shadow: none;

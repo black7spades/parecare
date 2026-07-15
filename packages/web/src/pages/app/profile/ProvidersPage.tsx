@@ -332,6 +332,7 @@ function ProviderEditor({
   onSaved: () => void;
 }) {
   const [type, setType] = useState('gp');
+  const [customType, setCustomType] = useState('');
   const [name, setName] = useState('');
   const [organisation, setOrganisation] = useState('');
   const [phone, setPhone] = useState('');
@@ -344,7 +345,10 @@ function ProviderEditor({
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setType(provider?.provider_type ?? 'gp');
+    const pt = provider?.provider_type ?? 'gp';
+    const isKnown = PROVIDER_TYPES.some((t) => t.value === pt);
+    setType(isKnown ? pt : 'other');
+    setCustomType(isKnown ? '' : pt);
     setName(provider?.name ?? '');
     setOrganisation(provider?.organisation ?? '');
     setPhone(provider?.phone ?? '');
@@ -360,7 +364,7 @@ function ProviderEditor({
   const mutation = useMutation({
     mutationFn: () => {
       const body = {
-        provider_type: type,
+        provider_type: type === 'other' && customType.trim() ? customType.trim() : type,
         name: name.trim(),
         organisation: organisation.trim() || null,
         phone: phone.trim() || null,
@@ -405,6 +409,15 @@ function ProviderEditor({
               </option>
             ))}
           </select>
+          {type === 'other' ? (
+            <Input
+              label="Custom type"
+              placeholder="e.g. Naturopath, Osteopath"
+              value={customType}
+              onChange={(e) => setCustomType(e.target.value)}
+              className="mt-2"
+            />
+          ) : null}
         </div>
         <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
         <Input label="Organisation" value={organisation} onChange={(e) => setOrganisation(e.target.value)} />

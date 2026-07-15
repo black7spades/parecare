@@ -271,3 +271,70 @@ reportsRouter.delete('/presets/:presetId', requireAuth, async (req, res) => {
   await db('report_presets').where({ id: presetId }).delete();
   res.json({ ok: true });
 });
+
+// ── Saved reports ──────────────────────────────────────────────────────
+
+reportsRouter.get('/saved', requireAuth, async (req, res) => {
+  const reports = await db('saved_reports')
+    .where({ account_id: req.account!.id })
+    .orderBy('generated_at', 'desc');
+  res.json({
+    reports: reports.map((r) => ({
+      id: r.id,
+      name: r.name,
+      profile_count: r.profile_count,
+      section_count: r.section_count,
+      total_rows: r.total_rows,
+      has_ai_narrative: r.has_ai_narrative,
+      generated_at: r.generated_at,
+      created_at: r.created_at,
+    })),
+  });
+});
+
+reportsRouter.get('/saved/:reportId', requireAuth, async (req, res) => {
+  const report = await db('saved_reports')
+    .where({ id: req.params.reportId, account_id: req.account!.id })
+    .first();
+  if (!report) {
+    res.status(404).json({ error: 'Report not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json(report);
+});
+
+reportsRouter.post('/saved', requireAuth, async (req, res) => {
+  const { name, config, result } = req.body;
+  if (!name || !result) {
+    res.status(400).json({ error: 'Name and result are required', code: 'VALIDATION' });
+    return;
+  }
+  const totalRows = Array.isArray(result.sections)
+    ? result.sections.reduce((sum: number, s: { rows?: unknown[] }) => sum + (s.rows?.length ?? 0), 0)
+    : 0;
+  const [saved] = await db('saved_reports')
+    .insert({
+      account_id: req.account!.id,
+      name,
+      config: JSON.stringify(config ?? {}),
+      result: JSON.stringify(result),
+      profile_count: result.profileCount ?? 0,
+      section_count: Array.isArray(result.sections) ? result.sections.length : 0,
+      total_rows: totalRows,
+      has_ai_narrative: !!result.aiNarrative,
+      generated_at: result.generatedAt ?? new Date().toISOString(),
+    })
+    .returning('*');
+  res.status(201).json(saved);
+});
+
+reportsRouter.delete('/saved/:reportId', requireAuth, async (req, res) => {
+  const deleted = await db('saved_reports')
+    .where({ id: req.params.reportId, account_id: req.account!.id })
+    .delete();
+  if (!deleted) {
+    res.status(404).json({ error: 'Report not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ ok: true });
+});
