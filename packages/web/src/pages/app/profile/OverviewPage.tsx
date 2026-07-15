@@ -124,6 +124,8 @@ export function OverviewPage() {
 
       <ProfileAttention profileId={profile.id} />
 
+      <UpcomingEvents profileId={profile.id} />
+
       <HealthStatusOverview profileId={profile.id} />
 
       <CareLogSection profileId={profile.id} canEdit={canEdit} />
@@ -213,6 +215,48 @@ interface PoaHolder {
  * contact details, so whoever needs to reach them can do so from right
  * here without opening the circle or providers page.
  */
+/**
+ * The next two weeks from the calendar, which appointments, tasks,
+ * medications and health dates all feed into. The calendar page has the
+ * full picture; this card answers "what is coming up" at a glance.
+ */
+function UpcomingEvents({ profileId }: { profileId: string }) {
+  const from = new Date();
+  const to = new Date(Date.now() + 14 * 24 * 3600 * 1000);
+  const { data } = useQuery({
+    queryKey: ['calendar-upcoming', profileId],
+    queryFn: () =>
+      api.get<{ events: Array<{ id: string; title: string; next_due_at: string; completed: boolean; kind?: string; location?: string | null }> }>(
+        `/care-profiles/${profileId}/calendar?from=${from.toISOString()}&to=${to.toISOString()}`
+      ),
+  });
+  // Medication doses would swamp the list; the Medication record covers those.
+  const events = (data?.events ?? []).filter((e) => e.kind !== 'medication' && !e.completed).slice(0, 6);
+  if (events.length === 0) return null;
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <h2 className="text-base font-semibold text-ink">Coming up</h2>
+        <Link to="calendar" className="text-xs text-primary hover:underline">
+          Open the calendar
+        </Link>
+      </div>
+      <ul className="divide-y divide-border">
+        {events.map((e) => (
+          <li key={e.id} className="py-1.5 flex items-baseline gap-3 text-sm">
+            <span className="text-muted whitespace-nowrap tabular-nums">
+              {new Date(e.next_due_at).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
+            </span>
+            <span className="text-ink min-w-0 truncate">{e.title}</span>
+            {e.location ? <span className="text-xs text-muted truncate">{e.location}</span> : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function PoaHolderChip({ holder }: { holder: PoaHolder }) {
   const hasContact = !!(holder.phone || holder.email || holder.address);
   return (

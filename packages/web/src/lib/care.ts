@@ -234,6 +234,12 @@ const ENTITY_LABELS: Record<string, string> = {
   'care-profiles': 'profile',
   ai: 'AI conversation',
   treatments: 'treatment',
+  allergies: 'allergy',
+  conditions: 'condition',
+  medications: 'medication',
+  'health-statuses': 'health status',
+  appointments: 'appointment',
+  calendar: 'calendar entry',
 };
 
 export const entityLabel = (type: string) => ENTITY_LABELS[type] ?? type;
@@ -479,9 +485,122 @@ export interface MedicalCondition {
   started_on: string | null;
   /** When it cleared, once resolved. */
   resolved_on: string | null;
-  medications: { name: string; active: boolean }[];
-  treatments?: { name: string; active: boolean }[];
+  /** chronic, acute, disability or other. */
+  condition_type: string | null;
+  /** mild, moderate, severe or profound. */
+  severity: string | null;
+  /** For disabilities: expected not to improve. */
+  is_permanent: boolean | null;
+  /** self_limiting, short_term, long_term or lifelong. */
+  expected_duration: string | null;
+  /** Reference codes from the shared catalogue entry, if any. */
+  catalogue_icd10_code?: string | null;
+  catalogue_snomed_code?: string | null;
+  medications: { id?: string; name: string; active: boolean }[];
+  treatments?: ConditionTreatment[];
+  codes?: ConditionCode[];
+  functions?: ConditionFunction[];
 }
+
+/** A standard diagnosis code on a condition: the system and the code. */
+export interface ConditionCode {
+  id: string;
+  system: 'icd10' | 'snomed';
+  code: string;
+}
+
+/** One affected domain of daily life, per the classification of functioning. */
+export interface ConditionFunction {
+  id: string;
+  domain: string;
+  limitation_level: string;
+  temporal_pattern: string | null;
+  impact_on_activities: string | null;
+}
+
+/** A treatment tied to a condition, as returned inside the condition. */
+export interface ConditionTreatment {
+  id: string;
+  name: string;
+  category: string;
+  current_status: string;
+  last_review_date: string | null;
+  active: boolean;
+}
+
+export const CONDITION_TYPES = [
+  { value: 'chronic', label: 'Chronic', description: 'Long lasting, managed over months or years.' },
+  { value: 'acute', label: 'Acute', description: 'Short lived, expected to pass.' },
+  { value: 'disability', label: 'Disability', description: 'Limits daily activities, may be temporary or permanent.' },
+  { value: 'other', label: 'Other', description: 'Does not fit the categories above.' },
+] as const;
+
+export const conditionTypeLabel = (v: string | null | undefined) =>
+  CONDITION_TYPES.find((x) => x.value === v)?.label ?? '';
+
+export const CONDITION_SEVERITIES = [
+  { value: 'mild', label: 'Mild' },
+  { value: 'moderate', label: 'Moderate' },
+  { value: 'severe', label: 'Severe' },
+  { value: 'profound', label: 'Profound' },
+] as const;
+
+export const EXPECTED_DURATIONS = [
+  { value: 'self_limiting', label: 'Days to weeks' },
+  { value: 'short_term', label: 'Weeks to months' },
+  { value: 'long_term', label: 'Months to years' },
+  { value: 'lifelong', label: 'Lifelong' },
+] as const;
+
+export const expectedDurationLabel = (v: string | null | undefined) =>
+  EXPECTED_DURATIONS.find((x) => x.value === v)?.label ?? '';
+
+export const FUNCTION_DOMAINS = [
+  { value: 'mobility', label: 'Mobility', description: 'Moving around, standing, walking.' },
+  { value: 'cognition', label: 'Thinking and memory', description: 'Concentration, memory, decision making.' },
+  { value: 'sensation', label: 'Senses', description: 'Seeing, hearing, feeling.' },
+  { value: 'self_care', label: 'Self care', description: 'Washing, dressing, eating.' },
+  { value: 'communication', label: 'Communication', description: 'Speaking, understanding, being understood.' },
+  { value: 'social', label: 'Social life', description: 'Relationships and taking part.' },
+  { value: 'work_study', label: 'Work and study', description: 'Holding a job or keeping up with school.' },
+  { value: 'other', label: 'Other', description: 'Anything not covered above.' },
+] as const;
+
+export const functionDomainLabel = (v: string) => FUNCTION_DOMAINS.find((x) => x.value === v)?.label ?? v;
+
+export const LIMITATION_LEVELS = [
+  { value: 'none', label: 'None' },
+  { value: 'mild', label: 'Mild' },
+  { value: 'moderate', label: 'Moderate' },
+  { value: 'severe', label: 'Severe' },
+  { value: 'complete', label: 'Complete' },
+] as const;
+
+export const TEMPORAL_PATTERNS = [
+  { value: 'constant', label: 'Constant' },
+  { value: 'intermittent', label: 'Comes and goes' },
+  { value: 'progressive', label: 'Getting worse' },
+  { value: 'improving', label: 'Improving' },
+] as const;
+
+export const temporalPatternLabel = (v: string | null | undefined) =>
+  TEMPORAL_PATTERNS.find((x) => x.value === v)?.label ?? '';
+
+export const TREATMENT_STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'discontinued', label: 'Stopped' },
+] as const;
+
+export const treatmentStatusLabel = (v: string) =>
+  TREATMENT_STATUS_OPTIONS.find((x) => x.value === v)?.label ?? v;
+
+export const CODE_SYSTEMS = [
+  { value: 'icd10', label: 'ICD-10' },
+  { value: 'snomed', label: 'SNOMED CT' },
+] as const;
+
+export const codeSystemLabel = (v: string) => CODE_SYSTEMS.find((x) => x.value === v)?.label ?? v;
 
 export interface EmergencyContact {
   name: string;
@@ -661,6 +780,9 @@ export const TREATMENT_CATEGORIES = [
   { value: 'exercise', label: 'Exercise', description: 'A prescribed movement or activity program.' },
   { value: 'wound_care', label: 'Wound care', description: 'Dressing changes and wound checks.' },
   { value: 'diet', label: 'Diet', description: 'A dietary program or restriction being followed.' },
+  { value: 'surgery', label: 'Surgery', description: 'An operation, done or planned.' },
+  { value: 'lifestyle', label: 'Lifestyle change', description: 'A change in daily habits, like quitting smoking.' },
+  { value: 'assistive_device', label: 'Assistive device', description: 'An aid used day to day, like a walking frame or hearing aid.' },
   { value: 'other', label: 'Other', description: 'Anything else done to manage a condition.' },
 ] as const;
 

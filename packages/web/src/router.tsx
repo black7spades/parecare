@@ -15,7 +15,10 @@ import { MedicationsPage } from './pages/app/profile/MedicationsPage';
 import { TasksPage } from './pages/app/profile/TasksPage';
 import { CalendarPage } from './pages/app/profile/CalendarPage';
 import { MessagesPage } from './pages/app/profile/MessagesPage';
-import { MemoryBookPage } from './pages/app/profile/MemoryBookPage';
+import { AchievementsPage, MemoryBookPage } from './pages/app/profile/MemoryBookPage';
+import { ConditionsPage } from './pages/app/profile/ConditionsPage';
+import { AppointmentsPage } from './pages/app/profile/AppointmentsPage';
+import { MarPage } from './pages/app/profile/MarPage';
 import { EmergencySheetPage } from './pages/app/profile/EmergencySheetPage';
 import { DocumentsPage } from './pages/app/profile/DocumentsPage';
 import { QuestionsPage } from './pages/app/profile/QuestionsPage';
@@ -96,20 +99,26 @@ export const router = createBrowserRouter([
           // Legacy path from before the tabbed layout
           { path: 'dashboard', element: <OverviewPage /> },
           { path: 'journey', element: <JourneyPage /> },
+          { path: 'achievements', element: <AchievementsPage /> },
           { path: 'circle', element: <CirclePage /> },
           { path: 'plan', element: <PlanPage /> },
+          { path: 'conditions', element: <ConditionsPage /> },
           { path: 'medications', element: <MedicationsPage /> },
           // The section is named Treatments; both paths land on the same page
           { path: 'treatments', element: <MedicationsPage /> },
           { path: 'tasks', element: <TasksPage /> },
           { path: 'health-status', element: <HealthStatusPage /> },
+          { path: 'appointments', element: <AppointmentsPage /> },
           { path: 'calendar', element: <CalendarPage /> },
+          { path: 'mar', element: <MarPage /> },
           { path: 'messages', element: <MessagesPage /> },
           { path: 'memory-book', element: <MemoryBookPage /> },
           { path: 'emergency', element: <EmergencySheetPage /> },
           { path: 'documents', element: <DocumentsPage /> },
           { path: 'questions', element: <QuestionsPage /> },
           { path: 'providers', element: <ProvidersPage /> },
+          { path: 'logs', element: <ActivityPage /> },
+          // Legacy path from before Logs replaced Activity in the nav
           { path: 'activity', element: <ActivityPage /> },
           { path: 'ai', element: <AiPage /> },
         ],

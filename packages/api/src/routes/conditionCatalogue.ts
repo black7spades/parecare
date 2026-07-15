@@ -32,8 +32,14 @@ export async function resolveConditionCatalogueId(name: string, accountId?: stri
 
 conditionCatalogueRouter.get('/', requireAuth, async (req, res) => {
   const q = String(req.query['search'] ?? '').trim();
-  let query = db('condition_catalogue').select('id', 'name');
-  if (q) query = query.whereILike('name', `%${q}%`);
+  let query = db('condition_catalogue').select('id', 'name', 'icd10_code', 'snomed_code');
+  // A search by standard code finds the condition too, so a clinician can
+  // type "E11" and land on Type 2 diabetes.
+  if (q) {
+    query = query.where((qb) => {
+      qb.whereILike('name', `%${q}%`).orWhereILike('icd10_code', `${q}%`).orWhereILike('snomed_code', `${q}%`);
+    });
+  }
   const items = await query.orderBy('name', 'asc').limit(50);
   res.json({ items });
 });

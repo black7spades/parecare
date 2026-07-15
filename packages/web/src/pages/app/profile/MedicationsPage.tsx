@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
@@ -21,7 +22,6 @@ import {
   type MedicalCondition,
   type MedicationRecord,
 } from '../../../lib/care';
-import { MedicationMar } from './MedicationMar';
 import { TreatmentsSection } from './TreatmentsSection';
 
 // Domain sort/filter helpers for the reusable data view.
@@ -270,10 +270,12 @@ export function MedicationsPage() {
       ) : null}
 
       <div className="pt-2">
-        <h3 className="text-base font-semibold text-ink">Medication Administration Record</h3>
-        <p className="text-sm text-muted">Log each dose against {careName} and review the history. Doses colour instantly as you record them.</p>
+        <p className="text-sm text-muted">
+          Looking for dose logging? The{' '}
+          <Link to="../mar" className="text-primary hover:underline">Medication record</Link>{' '}
+          is under Management, where each dose given is logged and reviewed.
+        </p>
       </div>
-      <MedicationMar profileId={profile.id} personName={profile.full_name} canAdminister={canEdit} />
 
       <div className="border-t border-border pt-6">
         <TreatmentsSection profileId={profile.id} careName={careName} canManage={canManageMeds} canLog={canAdminister} />

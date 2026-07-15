@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation, useMatch } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore, type AccountRole } from '../../stores/auth';
 import { useSubscriptionStore } from '../../stores/subscription';
 import { UpgradePrompt } from '../UpgradePrompt';
@@ -10,7 +10,7 @@ import { NotificationsBell } from './NotificationsBell';
 import { AvatarMenu } from './AvatarMenu';
 import { Clock } from './Clock';
 import { Avatar } from '../ui/Avatar';
-import { PROFILE_TABS } from '../../pages/app/profile/tabs';
+import { PROFILE_NAV, profileNavItem, type ProfileNavItem } from '../../pages/app/profile/tabs';
 import { api } from '../../api/client';
 
 interface PinnedProfile {
@@ -40,6 +40,112 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
     isActive ? 'bg-primary-50 text-primary font-medium' : 'text-muted hover:text-ink hover:bg-surface-2'
   }`;
+
+const navHeadingClass = 'pt-4 pb-1 px-3 text-[11px] font-medium uppercase tracking-wide text-muted';
+
+/**
+ * One row of the profile nav: the section link plus a pin toggle that keeps
+ * the section at the top of this carer's navigation. The pin is an
+ * icon-only control (sanctioned by the style guide) shown on hover, focus,
+ * or when already pinned.
+ */
+function ProfileNavRow({
+  profileId,
+  item,
+  pinned,
+  onTogglePin,
+}: {
+  profileId: string;
+  item: ProfileNavItem;
+  pinned: boolean;
+  onTogglePin: (key: string) => void;
+}) {
+  return (
+    <div className="group relative">
+      <NavLink
+        to={`/app/${profileId}${item.to ? `/${item.to}` : ''}`}
+        end={item.end}
+        className={navLinkClass}
+      >
+        <span className="truncate pr-5">{item.label}</span>
+      </NavLink>
+      <button
+        type="button"
+        aria-label={pinned ? `Unpin ${item.label}` : `Pin ${item.label} to the top`}
+        aria-pressed={pinned}
+        onClick={() => onTogglePin(item.key)}
+        className={`absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded text-sm leading-none transition-opacity ${
+          pinned
+            ? 'text-primary opacity-100'
+            : 'text-muted opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-primary'
+        }`}
+      >
+        {pinned ? '★' : '☆'}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The left nav for an open care profile: this carer's pinned sections
+ * first, then the grouped sections (Care profile, Conditions, Management,
+ * Communications) with Overview, Logs and Ask PareCare at the top and
+ * bottom.
+ */
+function ProfileSidebarNav({ profileId }: { profileId: string }) {
+  const queryClient = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ['nav-pins', profileId],
+    queryFn: () => api.get<{ pins: Array<{ item_key: string }> }>(`/care-profiles/${profileId}/nav-pins`),
+  });
+  const pinnedKeys = (data?.pins ?? []).map((p) => p.item_key);
+
+  const savePins = useMutation({
+    mutationFn: (item_keys: string[]) => api.put(`/care-profiles/${profileId}/nav-pins`, { item_keys }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['nav-pins', profileId] }),
+  });
+
+  const togglePin = (key: string) => {
+    const next = pinnedKeys.includes(key) ? pinnedKeys.filter((k) => k !== key) : [...pinnedKeys, key];
+    savePins.mutate(next);
+  };
+
+  const pinnedItems = pinnedKeys
+    .map((key) => profileNavItem(key))
+    .filter((i): i is ProfileNavItem => !!i);
+
+  return (
+    <>
+      <NavLink to="/app" className={navLinkClass}>
+        <span aria-hidden>←</span> All people
+      </NavLink>
+      {pinnedItems.length > 0 ? (
+        <>
+          <div className={navHeadingClass}>Pinned</div>
+          {pinnedItems.map((item) => (
+            <ProfileNavRow key={`pin-${item.key}`} profileId={profileId} item={item} pinned onTogglePin={togglePin} />
+          ))}
+        </>
+      ) : null}
+      {PROFILE_NAV.map((group) => (
+        <div key={group.key}>
+          {group.label ? <div className={navHeadingClass}>{group.label}</div> : <div className="my-2 border-t border-border" />}
+          {group.items
+            .filter((item) => !pinnedKeys.includes(item.key))
+            .map((item) => (
+              <ProfileNavRow
+                key={item.key}
+                profileId={profileId}
+                item={item}
+                pinned={false}
+                onTogglePin={togglePin}
+              />
+            ))}
+        </div>
+      ))}
+    </>
+  );
+}
 
 export function Shell() {
   const updateAccount = useAuthStore((s) => s.updateAccount);
@@ -96,28 +202,13 @@ export function Shell() {
   const pinned = pinnedData?.profiles ?? [];
 
   const sidebarNav = profileId ? (
-    <>
-      <NavLink to="/app" className={navLinkClass}>
-        <span aria-hidden>←</span> All people
-      </NavLink>
-      <div className="my-2 border-t border-border" />
-      {PROFILE_TABS.map((tab) => (
-        <NavLink
-          key={tab.label}
-          to={`/app/${profileId}${tab.to ? `/${tab.to}` : ''}`}
-          end={tab.end}
-          className={navLinkClass}
-        >
-          {tab.label}
-        </NavLink>
-      ))}
-    </>
+    <ProfileSidebarNav profileId={profileId} />
   ) : (
     <>
       <NavLink to="/app" end className={navLinkClass}>
         Homeboard
       </NavLink>
-      <div className="pt-4 pb-1 px-3 text-[11px] font-medium uppercase tracking-wide text-muted">Directory</div>
+      <div className={navHeadingClass}>Directory</div>
       <NavLink to="/app/directory/people" className={navLinkClass}>
         People
       </NavLink>
@@ -127,13 +218,13 @@ export function Shell() {
       <NavLink to="/app/directory/providers" className={navLinkClass}>
         Providers
       </NavLink>
-      <div className="pt-4 pb-1 px-3 text-[11px] font-medium uppercase tracking-wide text-muted">Tools</div>
+      <div className={navHeadingClass}>Tools</div>
       <NavLink to="/app/reports" className={navLinkClass}>
         Reports
       </NavLink>
       {pinned.length > 0 ? (
         <>
-          <div className="pt-4 pb-1 px-3 text-[11px] font-medium uppercase tracking-wide text-muted">Pinned</div>
+          <div className={navHeadingClass}>Pinned</div>
           {pinned.map((p) => (
             <NavLink key={p.id} to={`/app/${p.id}`} className={navLinkClass}>
               <Avatar accountId={p.id} name={p.full_name} avatarUrl={p.photo_url} color={p.photo_color} fetchPath={`/care-profiles/${p.id}/photo`} size={22} />

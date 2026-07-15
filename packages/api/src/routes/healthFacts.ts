@@ -94,38 +94,71 @@ const serializeCondition = <T extends Record<string, unknown>>(c: T): T => ({
 });
 
 conditionsRouter.get('/', requireAuth, async (req, res) => {
-  const conditions = await db('medical_conditions')
-    .where({ care_profile_id: req.params['id'] })
-    .orderBy([{ column: 'sort_order', order: 'asc' }, { column: 'name', order: 'asc' }]);
+  const conditions = await db('medical_conditions as mc')
+    .leftJoin('condition_catalogue as cc', 'mc.condition_catalogue_id', 'cc.id')
+    .where({ 'mc.care_profile_id': req.params['id'] })
+    .orderBy([{ column: 'mc.sort_order', order: 'asc' }, { column: 'mc.name', order: 'asc' }])
+    .select('mc.*', 'cc.icd10_code as catalogue_icd10_code', 'cc.snomed_code as catalogue_snomed_code');
+  const ids = conditions.map((c) => c.id as string);
+
   // The medications treating each condition, so the tie is visible.
   const meds = await db('medications as m')
     .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
     .where('m.care_profile_id', req.params['id'])
     .whereNotNull('m.medical_condition_id')
-    .select('m.medical_condition_id', 'c.name', 'm.active');
-  const medsByCondition = new Map<string, Array<{ name: string; active: boolean }>>();
+    .select('m.medical_condition_id', 'm.id', 'c.name', 'm.active');
+  const medsByCondition = new Map<string, Array<{ id: string; name: string; active: boolean }>>();
   for (const m of meds) {
     const arr = medsByCondition.get(m.medical_condition_id) ?? [];
-    arr.push({ name: m.name, active: m.active });
+    arr.push({ id: m.id, name: m.name, active: m.active });
     medsByCondition.set(m.medical_condition_id, arr);
   }
   // And the other treatments managing each condition, the same way.
   const treatments = await db('treatments')
     .where({ care_profile_id: req.params['id'] })
     .whereNotNull('medical_condition_id')
-    .select('medical_condition_id', 'name', 'active');
-  const treatmentsByCondition = new Map<string, Array<{ name: string; active: boolean }>>();
+    .select('medical_condition_id', 'id', 'name', 'category', 'current_status', 'last_review_date', 'active');
+  const treatmentsByCondition = new Map<string, Array<Record<string, unknown>>>();
   for (const t of treatments) {
     const arr = treatmentsByCondition.get(t.medical_condition_id) ?? [];
-    arr.push({ name: t.name, active: t.active });
+    arr.push({
+      id: t.id,
+      name: t.name,
+      category: t.category,
+      current_status: t.current_status,
+      last_review_date: dateOrNull(t.last_review_date),
+      active: t.active,
+    });
     treatmentsByCondition.set(t.medical_condition_id, arr);
   }
+  // Standard diagnosis codes and functional impacts, one row each.
+  const codes = ids.length
+    ? await db('condition_codes').whereIn('condition_id', ids).orderBy([{ column: 'system' }, { column: 'code' }])
+    : [];
+  const codesByCondition = new Map<string, unknown[]>();
+  for (const code of codes) {
+    const arr = codesByCondition.get(code.condition_id) ?? [];
+    arr.push(code);
+    codesByCondition.set(code.condition_id, arr);
+  }
+  const functions = ids.length
+    ? await db('condition_functions').whereIn('condition_id', ids).orderBy('created_at', 'asc')
+    : [];
+  const functionsByCondition = new Map<string, unknown[]>();
+  for (const fn of functions) {
+    const arr = functionsByCondition.get(fn.condition_id) ?? [];
+    arr.push(fn);
+    functionsByCondition.set(fn.condition_id, arr);
+  }
+
   res.json({
     conditions: conditions.map((c) =>
       serializeCondition({
         ...c,
         medications: medsByCondition.get(c.id) ?? [],
         treatments: treatmentsByCondition.get(c.id) ?? [],
+        codes: codesByCondition.get(c.id) ?? [],
+        functions: functionsByCondition.get(c.id) ?? [],
       })
     ),
   });
@@ -141,7 +174,37 @@ const conditionSchema = z.object({
   status: z.enum(['active', 'improving', 'managed', 'resolved']).optional(),
   started_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   resolved_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  // The structured profile: what kind of condition, how severe, whether it
+  // is expected to improve, and how long it is expected to last.
+  condition_type: z.enum(['chronic', 'acute', 'disability', 'other']).optional().nullable(),
+  severity: z.enum(['mild', 'moderate', 'severe', 'profound']).optional().nullable(),
+  is_permanent: z.boolean().optional().nullable(),
+  expected_duration: z.enum(['self_limiting', 'short_term', 'long_term', 'lifelong']).optional().nullable(),
 });
+
+/**
+ * Fill in what can be worked out from the dates when the user has not said
+ * explicitly: a resolved condition was acute; an unresolved one that began
+ * more than three months ago is chronic.
+ */
+function classifyCondition(data: Partial<z.infer<typeof conditionSchema>>): Partial<z.infer<typeof conditionSchema>> {
+  const out = { ...data };
+  if (out.condition_type === undefined || out.condition_type === null) {
+    if (out.resolved_on) out.condition_type = 'acute';
+    else if (out.started_on) {
+      const threeMonthsAgo = new Date();
+      threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+      out.condition_type = new Date(out.started_on) < threeMonthsAgo ? 'chronic' : 'acute';
+    }
+  }
+  // A resolution date means the condition is resolved unless told otherwise.
+  if (out.resolved_on && out.status === undefined) out.status = 'resolved';
+  // A lifelong condition is not a temporary one, and vice versa.
+  if (out.expected_duration && out.is_temporary === undefined) {
+    out.is_temporary = out.expected_duration === 'self_limiting' || out.expected_duration === 'short_term';
+  }
+  return out;
+}
 
 conditionsRouter.post('/', requireAuth, async (req, res) => {
   const parsed = conditionSchema.safeParse(req.body);
@@ -152,10 +215,19 @@ conditionsRouter.post('/', requireAuth, async (req, res) => {
   // Every recorded condition joins the shared catalogue, so a name typed
   // once is suggested to everyone from then on.
   const catalogueId = await resolveConditionCatalogueId(parsed.data.name, req.account!.id);
+  const data = classifyCondition(parsed.data);
   const [condition] = await db('medical_conditions')
-    .insert({ care_profile_id: req.params['id'], ...parsed.data, condition_catalogue_id: catalogueId })
+    .insert({ care_profile_id: req.params['id'], ...data, condition_catalogue_id: catalogueId })
     .returning('*');
-  res.status(201).json({ condition: serializeCondition(condition) });
+  // The catalogue's reference codes come along automatically, so a picked
+  // condition starts with its standard ICD-10 and SNOMED CT codes.
+  const catalogueEntry = await db('condition_catalogue').where({ id: catalogueId }).first();
+  const seedCodes: Array<{ condition_id: string; system: string; code: string }> = [];
+  if (catalogueEntry?.icd10_code) seedCodes.push({ condition_id: condition.id, system: 'icd10', code: catalogueEntry.icd10_code });
+  if (catalogueEntry?.snomed_code) seedCodes.push({ condition_id: condition.id, system: 'snomed', code: catalogueEntry.snomed_code });
+  if (seedCodes.length > 0) await db('condition_codes').insert(seedCodes).onConflict(['condition_id', 'system', 'code']).ignore();
+  const codes = await db('condition_codes').where({ condition_id: condition.id });
+  res.status(201).json({ condition: serializeCondition({ ...condition, codes, functions: [] }) });
 });
 
 conditionsRouter.patch('/:conditionId', requireAuth, async (req, res) => {
@@ -168,10 +240,11 @@ conditionsRouter.patch('/:conditionId', requireAuth, async (req, res) => {
   const catalogueId = parsed.data.name
     ? await resolveConditionCatalogueId(parsed.data.name, req.account!.id)
     : undefined;
+  const data = classifyCondition(parsed.data);
   const [condition] = await db('medical_conditions')
     .where({ id: req.params['conditionId'], care_profile_id: req.params['id'] })
     .update({
-      ...parsed.data,
+      ...data,
       ...(catalogueId ? { condition_catalogue_id: catalogueId } : {}),
       updated_at: db.fn.now(),
     })
@@ -192,4 +265,112 @@ conditionsRouter.delete('/:conditionId', requireAuth, async (req, res) => {
     return;
   }
   res.json({ message: 'Condition removed.' });
+});
+
+// A condition being edited must belong to this profile before any of its
+// child records (codes, functional impacts) can be touched.
+async function findProfileCondition(conditionId: string, profileId: string) {
+  return db('medical_conditions').where({ id: conditionId, care_profile_id: profileId }).first();
+}
+
+// --- Standard diagnosis codes -------------------------------------------
+
+const codeSchema = z.object({
+  system: z.enum(['icd10', 'snomed']),
+  code: z.string().min(1).max(30),
+});
+
+conditionsRouter.post('/:conditionId/codes', requireAuth, async (req, res) => {
+  const parsed = codeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  if (!(await findProfileCondition(String(req.params['conditionId']), String(req.params['id'])))) {
+    res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const [code] = await db('condition_codes')
+    .insert({ condition_id: req.params['conditionId'], ...parsed.data })
+    .onConflict(['condition_id', 'system', 'code'])
+    .ignore()
+    .returning('*');
+  const saved = code ?? (await db('condition_codes').where({ condition_id: req.params['conditionId'], ...parsed.data }).first());
+  res.status(201).json({ code: saved });
+});
+
+conditionsRouter.delete('/:conditionId/codes/:codeId', requireAuth, async (req, res) => {
+  if (!(await findProfileCondition(String(req.params['conditionId']), String(req.params['id'])))) {
+    res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const deleted = await db('condition_codes')
+    .where({ id: req.params['codeId'], condition_id: req.params['conditionId'] })
+    .delete();
+  if (!deleted) {
+    res.status(404).json({ error: 'Code not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ message: 'Code removed.' });
+});
+
+// --- Functional impact ----------------------------------------------------
+
+const functionSchema = z.object({
+  domain: z.enum(['mobility', 'cognition', 'sensation', 'self_care', 'communication', 'social', 'work_study', 'other']),
+  limitation_level: z.enum(['none', 'mild', 'moderate', 'severe', 'complete']),
+  temporal_pattern: z.enum(['constant', 'intermittent', 'progressive', 'improving']).optional().nullable(),
+  impact_on_activities: z.string().max(2000).optional().nullable(),
+});
+
+conditionsRouter.post('/:conditionId/functions', requireAuth, async (req, res) => {
+  const parsed = functionSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  if (!(await findProfileCondition(String(req.params['conditionId']), String(req.params['id'])))) {
+    res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const [fn] = await db('condition_functions')
+    .insert({ condition_id: req.params['conditionId'], ...parsed.data })
+    .returning('*');
+  res.status(201).json({ function: fn });
+});
+
+conditionsRouter.patch('/:conditionId/functions/:functionId', requireAuth, async (req, res) => {
+  const parsed = functionSchema.partial().safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  if (!(await findProfileCondition(String(req.params['conditionId']), String(req.params['id'])))) {
+    res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const [fn] = await db('condition_functions')
+    .where({ id: req.params['functionId'], condition_id: req.params['conditionId'] })
+    .update({ ...parsed.data, updated_at: db.fn.now() })
+    .returning('*');
+  if (!fn) {
+    res.status(404).json({ error: 'Functional impact not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ function: fn });
+});
+
+conditionsRouter.delete('/:conditionId/functions/:functionId', requireAuth, async (req, res) => {
+  if (!(await findProfileCondition(String(req.params['conditionId']), String(req.params['id'])))) {
+    res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const deleted = await db('condition_functions')
+    .where({ id: req.params['functionId'], condition_id: req.params['conditionId'] })
+    .delete();
+  if (!deleted) {
+    res.status(404).json({ error: 'Functional impact not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ message: 'Functional impact removed.' });
 });

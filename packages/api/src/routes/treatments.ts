@@ -17,7 +17,18 @@ import { resolveConditionId } from './medications';
 
 export const treatmentsRouter = Router({ mergeParams: true });
 
-export const TREATMENT_CATEGORIES = ['device', 'therapy', 'exercise', 'wound_care', 'diet', 'other'] as const;
+export const TREATMENT_CATEGORIES = [
+  'device',
+  'therapy',
+  'exercise',
+  'wound_care',
+  'diet',
+  'surgery',
+  'lifestyle',
+  'assistive_device',
+  'other',
+] as const;
+export const TREATMENT_STATUSES = ['active', 'completed', 'discontinued'] as const;
 export const METRIC_VALUE_TYPES = ['number', 'text', 'yes_no'] as const;
 export const OBSERVATION_STATUSES = ['completed', 'partial', 'skipped', 'refused'] as const;
 
@@ -39,6 +50,11 @@ const treatmentSchema = z.object({
   schedule_times: z.array(z.string().regex(/^\d{2}:\d{2}$/)).optional().nullable(),
   as_needed: z.boolean().optional(),
   active: z.boolean().optional(),
+  // Where the treatment stands in its lifecycle, and when the plan was
+  // last reviewed. current_status supersedes the bare active flag; the two
+  // are kept in sync for existing callers.
+  current_status: z.enum(TREATMENT_STATUSES).optional(),
+  last_review_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   // Accepted on create so a treatment and its measures are set up in one go.
   metrics: z.array(metricSchema).max(20).optional(),
 });
@@ -81,7 +97,16 @@ async function treatmentFieldsFrom(
   if ('instructions' in data) fields['instructions'] = data.instructions ?? null;
   if ('frequency' in data) fields['frequency'] = data.frequency ?? null;
   if ('as_needed' in data) fields['as_needed'] = data.as_needed ?? false;
-  if ('active' in data) fields['active'] = data.active ?? true;
+  // current_status is the source of truth; active mirrors it. A bare
+  // active toggle from an older caller updates both.
+  if (data.current_status !== undefined) {
+    fields['current_status'] = data.current_status;
+    fields['active'] = data.current_status === 'active';
+  } else if ('active' in data) {
+    fields['active'] = data.active ?? true;
+    fields['current_status'] = data.active === false ? 'discontinued' : 'active';
+  }
+  if ('last_review_date' in data) fields['last_review_date'] = data.last_review_date ?? null;
   if (data.schedule_times !== undefined) {
     fields['schedule_times'] = data.schedule_times ? db.raw('?::jsonb', [JSON.stringify(data.schedule_times)]) : null;
   }

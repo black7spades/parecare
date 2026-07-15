@@ -21,7 +21,8 @@ calendarRouter.get('/', requireAuth, async (req, res) => {
   const medEvents = await expandMedicationEvents(String(req.params['id']), from, to);
   const birthdayEvents = await expandBirthdayEvents(String(req.params['id']), from, to);
   const healthEvents = await expandHealthStatusEvents(String(req.params['id']), from, to);
-  const events = [...reminders, ...medEvents, ...birthdayEvents, ...healthEvents].sort(
+  const appointmentEvents = await expandAppointmentEvents(String(req.params['id']), from, to);
+  const events = [...reminders, ...medEvents, ...birthdayEvents, ...healthEvents, ...appointmentEvents].sort(
     (a, b) => new Date(a.next_due_at).getTime() - new Date(b.next_due_at).getTime()
   );
   res.json({ events });
@@ -34,6 +35,28 @@ interface CalendarEvent {
   completed: boolean;
   kind?: string;
   medication_id?: string;
+  appointment_id?: string;
+  location?: string | null;
+}
+
+// Appointments are their own table; the calendar shows each one at its
+// start time, marked done when it has been completed.
+async function expandAppointmentEvents(profileId: string, from: Date, to: Date): Promise<CalendarEvent[]> {
+  const appointments = await db('appointments as a')
+    .leftJoin('providers as p', 'a.provider_id', 'p.id')
+    .where('a.care_profile_id', profileId)
+    .whereBetween('a.starts_at', [from, to])
+    .whereNot('a.status', 'cancelled')
+    .select('a.id', 'a.title', 'a.starts_at', 'a.status', 'a.location', 'p.name as provider_name');
+  return appointments.map((a) => ({
+    id: `appt-${a.id}`,
+    title: `🩺 ${a.title}${a.provider_name ? ` with ${a.provider_name}` : ''}`,
+    next_due_at: new Date(a.starts_at).toISOString(),
+    completed: a.status === 'completed',
+    kind: 'appointment',
+    appointment_id: a.id,
+    location: a.location ?? null,
+  }));
 }
 
 // Expand each active medication's scheduled times across the date range into
@@ -248,6 +271,31 @@ icsRouter.get('/:token.ics', async (req, res) => {
       `SUMMARY:${icsEscape(e.title)}`,
       'END:VEVENT'
     );
+  }
+
+  // Appointments, with their real start and end times and location.
+  const icsAppointments = await db('appointments as a')
+    .leftJoin('providers as p', 'a.provider_id', 'p.id')
+    .where('a.care_profile_id', profile.id)
+    .where('a.starts_at', '>=', since)
+    .whereNot('a.status', 'cancelled')
+    .orderBy('a.starts_at', 'asc')
+    .limit(500)
+    .select('a.*', 'p.name as provider_name');
+  for (const a of icsAppointments) {
+    const start = new Date(a.starts_at);
+    const end = a.ends_at ? new Date(a.ends_at) : new Date(start.getTime() + 30 * 60 * 1000);
+    lines.push(
+      'BEGIN:VEVENT',
+      `UID:appt-${a.id}@parecare`,
+      `DTSTAMP:${icsDate(new Date())}`,
+      `DTSTART:${icsDate(start)}`,
+      `DTEND:${icsDate(end)}`,
+      `SUMMARY:${icsEscape(`🩺 ${a.title}${a.provider_name ? ` with ${a.provider_name}` : ''}`)}`
+    );
+    if (a.location) lines.push(`LOCATION:${icsEscape(a.location)}`);
+    if (a.notes) lines.push(`DESCRIPTION:${icsEscape(a.notes)}`);
+    lines.push('END:VEVENT');
   }
 
   // Medication schedule for the next ~60 days.
