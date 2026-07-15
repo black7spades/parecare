@@ -111,22 +111,22 @@ function LifeStagesManager() {
                 <td className="px-3 py-2">
                   {s.retired ? <span className="badge bg-surface-2 text-muted text-xs">Retired</span> : <span className="badge bg-primary-50 text-primary text-xs">Active</span>}
                 </td>
-                <td className="px-3 py-2 whitespace-nowrap text-xs">
-                  <button type="button" className="text-primary hover:underline mr-3" onClick={() => setEditing(s)}>
+                <td className="px-3 py-2 whitespace-nowrap">
+                  <Button size="xs" variant="ghost" className="mr-1" onClick={() => setEditing(s)}>
                     Edit
-                  </button>
+                  </Button>
                   {s.template_count === 0 ? (
-                    <button type="button" className="text-muted hover:text-red-600" onClick={() => deleteMutation.mutate(s.id)}>
+                    <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate(s.id)}>
                       Delete
-                    </button>
+                    </Button>
                   ) : (
-                    <button
-                      type="button"
-                      className="text-muted hover:text-ink"
+                    <Button
+                      size="xs"
+                      variant="ghost"
                       onClick={() => saveMutation.mutate({ ...s, retired: !s.retired })}
                     >
                       {s.retired ? 'Reactivate' : 'Retire'}
-                    </button>
+                    </Button>
                   )}
                 </td>
               </tr>
@@ -345,42 +345,36 @@ function TemplateLibrary() {
                       {t.status === 'published' ? 'Published' : t.status === 'draft' ? 'Draft' : 'Archived'}
                     </span>
                   </td>
-                  <td className="px-3 py-2 whitespace-nowrap text-xs space-x-3">
-                    {canEdit ? (
-                      <button type="button" className="text-primary hover:underline" onClick={() => setEditorId(t.id)}>
-                        Edit
-                      </button>
-                    ) : (
-                      <button type="button" className="text-primary hover:underline" onClick={() => setEditorId(t.id)}>
-                        View
-                      </button>
-                    )}
-                    <button type="button" className="text-muted hover:text-ink" onClick={() => cloneMutation.mutate(t.id)}>
+                  <td className="px-3 py-2 whitespace-nowrap space-x-1">
+                    <Button size="xs" variant="ghost" onClick={() => setEditorId(t.id)}>
+                      {canEdit ? 'Edit' : 'View'}
+                    </Button>
+                    <Button size="xs" variant="ghost" onClick={() => cloneMutation.mutate(t.id)}>
                       Clone
-                    </button>
+                    </Button>
                     {canEdit ? (
                       t.status === 'published' ? (
-                        <button
-                          type="button"
-                          className="text-muted hover:text-ink"
+                        <Button
+                          size="xs"
+                          variant="ghost"
                           onClick={() => statusMutation.mutate({ id: t.id, status: 'archived' })}
                         >
                           Archive
-                        </button>
+                        </Button>
                       ) : (
-                        <button
-                          type="button"
-                          className="text-muted hover:text-ink"
+                        <Button
+                          size="xs"
+                          variant="ghost"
                           onClick={() => statusMutation.mutate({ id: t.id, status: 'published' })}
                         >
                           Publish
-                        </button>
+                        </Button>
                       )
                     ) : null}
                     {canEdit && t.status === 'draft' && !t.is_system ? (
-                      <button type="button" className="text-muted hover:text-red-600" onClick={() => deleteMutation.mutate(t.id)}>
+                      <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate(t.id)}>
                         Delete
-                      </button>
+                      </Button>
                     ) : null}
                   </td>
                 </tr>
@@ -727,9 +721,9 @@ function PhaseEditor({
             onChange={(e) => onChange({ name: e.target.value })}
             disabled={readOnly}
           />
-          <button type="button" className="text-xs text-primary hover:underline" onClick={() => setOpen((v) => !v)}>
-            {open ? 'Hide checklist items' : `Checklist items (${phase.tasks.length})`}
-          </button>
+          <Button size="xs" variant="ghost" onClick={() => setOpen((v) => !v)}>
+            {open ? 'Hide checklist items' : `Show ${phase.tasks.length} checklist ${phase.tasks.length === 1 ? 'item' : 'items'}`}
+          </Button>
           {open ? (
             <div className="space-y-2">
               {phase.tasks.map((task, i) => (

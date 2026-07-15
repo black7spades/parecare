@@ -155,9 +155,9 @@ function PersonForm({ onBack }: { onBack: () => void }) {
   return (
     <div className="max-w-xl">
       <div className="mb-6">
-        <button type="button" onClick={onBack} className="text-sm text-muted hover:text-ink mb-2">
+        <Button size="sm" variant="ghost" className="mb-2" onClick={onBack}>
           ← Person or pet
-        </button>
+        </Button>
         <h1 className="text-xl font-semibold text-ink">New person</h1>
         <p className="text-sm text-muted">Set up a profile for the person whose care you are managing. That can be yourself.</p>
       </div>
@@ -280,9 +280,9 @@ function PetForm({ onBack }: { onBack: () => void }) {
   return (
     <div className="max-w-xl">
       <div className="mb-6">
-        <button type="button" onClick={onBack} className="text-sm text-muted hover:text-ink mb-2">
+        <Button size="sm" variant="ghost" className="mb-2" onClick={onBack}>
           ← Person or pet
-        </button>
+        </Button>
         <h1 className="text-xl font-semibold text-ink">New pet</h1>
         <p className="text-sm text-muted">Just a name and what kind of animal to start. You can fill in the rest later.</p>
       </div>
@@ -675,9 +675,9 @@ function JourneyPicker({
         {shown.length === 0 ? <p className="px-3 py-2 text-sm text-muted">The journey library is empty.</p> : null}
       </div>
       {suggested.length > 0 && suggested.length < templates.length ? (
-        <button type="button" className="mt-1 text-xs text-primary hover:underline" onClick={() => setShowAll((v) => !v)}>
-          {showAll ? 'Show suggestions only' : `Show the whole library (${templates.length})`}
-        </button>
+        <Button size="xs" variant="ghost" className="mt-1" onClick={() => setShowAll((v) => !v)}>
+          {showAll ? 'Show suggestions only' : `Show the whole library of ${templates.length}`}
+        </Button>
       ) : null}
     </div>
   );

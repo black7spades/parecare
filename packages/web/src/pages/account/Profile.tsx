@@ -318,7 +318,7 @@ function AddRelationship() {
             <span className="block text-xs text-muted mb-1">Person</span>
             <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm">
               <span className="flex-1 truncate">{selected.display_name}</span>
-              <button type="button" className="text-xs text-muted hover:text-ink" onClick={() => setSelected(null)}>change</button>
+              <Button size="xs" variant="ghost" onClick={() => setSelected(null)}>Change</Button>
             </div>
           </div>
           <div className="flex-1 min-w-[10rem]">

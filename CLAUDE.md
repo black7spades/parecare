@@ -55,6 +55,16 @@ fields, but prefer structure whenever the values are queryable.
 When adding or reviewing any feature, check every table, form, DB column and
 export against this rule before shipping.
 
+## UI style guide
+
+**Every UI change must comply with `packages/web/STYLE_GUIDE.md`.** Read it
+before touching any component or page, and walk its review checklist before
+shipping. Core rules: links navigate, buttons act (all actions use the
+`Button` component, never a hand-rolled `<button>` styled as a link); one
+`primary` button per surface; four-step typography scale; one word per
+action concept (Hide, Dismiss, Delete, Remove, Unlink each have a fixed
+meaning).
+
 ## UI copy
 
 - **Never use parentheses in headings.** Name a thing one way and spell it

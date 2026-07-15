@@ -573,7 +573,7 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
           <span className="text-sm text-ink font-medium">{selectedRows.length} selected</span>
           <Button size="sm" variant="secondary" onClick={() => setBulkEditing(true)}>Edit selected</Button>
           <Button size="sm" variant="secondary" onClick={() => exportAdminsCsv(selectedRows)}>Export to CSV</Button>
-          <button type="button" className="text-xs text-primary hover:underline" onClick={() => setSelected(new Set())}>Clear selection</button>
+          <Button size="xs" variant="ghost" onClick={() => setSelected(new Set())}>Clear selection</Button>
           <Button size="sm" variant="danger" className="ml-auto" onClick={() => setConfirmBulkDelete(true)}>Remove selected</Button>
         </div>
       ) : null}
@@ -650,8 +650,8 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
                             <span className="text-xs text-muted" title="Archived records are a permanent history and cannot be changed.">—</span>
                           ) : (
                             <span className="inline-flex gap-3">
-                              <button type="button" className="text-xs text-muted hover:text-primary" onClick={() => setEditing(a)}>Edit</button>
-                              <button type="button" className="text-xs text-muted hover:text-red-600" onClick={() => setPendingDelete(a)}>Remove</button>
+                              <Button size="xs" variant="ghost" onClick={() => setEditing(a)}>Edit</Button>
+                              <Button size="xs" variant="ghost-danger" onClick={() => setPendingDelete(a)}>Remove</Button>
                             </span>
                           )}
                         </td>

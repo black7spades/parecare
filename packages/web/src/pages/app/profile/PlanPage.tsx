@@ -104,12 +104,12 @@ export function PlanPage() {
         </div>
         <div className="flex items-center gap-3">
           {saved ? <span className="text-sm text-primary">Saved ✓</span> : null}
-          <button type="button" className="text-xs text-primary hover:underline" onClick={() => setAll(true)}>
+          <Button size="sm" variant="ghost" onClick={() => setAll(true)}>
             Expand all
-          </button>
-          <button type="button" className="text-xs text-primary hover:underline" onClick={() => setAll(false)}>
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setAll(false)}>
             Collapse all
-          </button>
+          </Button>
           <Link to="../emergency">
             <Button type="button" variant="secondary" size="sm">
               Emergency sheet
@@ -409,32 +409,34 @@ function AllergiesTable({ profileId, canEdit }: { profileId: string; canEdit: bo
                     <td className="py-2 text-right whitespace-nowrap">
                       {editingId === a.id ? (
                         <>
-                          <button
-                            type="button"
-                            className="text-xs text-primary hover:underline mr-2"
+                          <Button
+                            size="xs"
+                            variant="secondary"
+                            className="mr-1"
                             onClick={() => updateMutation.mutate({ id: a.id, reaction: editReaction.trim() || null })}
                           >
                             Save
-                          </button>
-                          <button type="button" className="text-xs text-muted hover:underline" onClick={() => setEditingId(null)}>
+                          </Button>
+                          <Button size="xs" variant="ghost" onClick={() => setEditingId(null)}>
                             Cancel
-                          </button>
+                          </Button>
                         </>
                       ) : (
                         <>
-                          <button
-                            type="button"
-                            className="text-xs text-primary hover:underline mr-2"
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            className="mr-1"
                             onClick={() => {
                               setEditingId(a.id);
                               setEditReaction(a.reaction ?? '');
                             }}
                           >
                             Edit
-                          </button>
-                          <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => deleteMutation.mutate(a.id)}>
+                          </Button>
+                          <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate(a.id)}>
                             Delete
-                          </button>
+                          </Button>
                         </>
                       )}
                     </td>
@@ -558,12 +560,12 @@ function ConditionsTable({ profileId, canEdit }: { profileId: string; canEdit: b
                   <td className="py-2 pr-3 text-muted">{managedBy(c)}</td>
                   {canEdit ? (
                     <td className="py-2 text-right whitespace-nowrap">
-                      <button type="button" className="text-xs text-primary hover:underline mr-2" onClick={() => setEditing(c)}>
+                      <Button size="xs" variant="ghost" className="mr-1" onClick={() => setEditing(c)}>
                         Edit
-                      </button>
-                      <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => deleteMutation.mutate(c.id)}>
+                      </Button>
+                      <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate(c.id)}>
                         Delete
-                      </button>
+                      </Button>
                     </td>
                   ) : null}
                 </tr>
@@ -883,28 +885,29 @@ function GpTable({ profileId, canEdit }: { profileId: string; canEdit: boolean }
                     <td className="py-2 text-right whitespace-nowrap">
                       {editingId === p.id ? (
                         <>
-                          <button
-                            type="button"
-                            className="text-xs text-primary hover:underline mr-2"
+                          <Button
+                            size="xs"
+                            variant="secondary"
+                            className="mr-1"
                             onClick={() => edit.name.trim() && updateMutation.mutate(p.id)}
                           >
                             Save
-                          </button>
-                          <button type="button" className="text-xs text-muted hover:underline" onClick={() => setEditingId(null)}>
+                          </Button>
+                          <Button size="xs" variant="ghost" onClick={() => setEditingId(null)}>
                             Cancel
-                          </button>
+                          </Button>
                         </>
                       ) : (
-                        <button
-                          type="button"
-                          className="text-xs text-primary hover:underline"
+                        <Button
+                          size="xs"
+                          variant="ghost"
                           onClick={() => {
                             setEditingId(p.id);
                             setEdit({ name: p.name, organisation: p.organisation ?? '', phone: p.phone ?? '' });
                           }}
                         >
                           Edit
-                        </button>
+                        </Button>
                       )}
                     </td>
                   ) : null}
@@ -1182,9 +1185,10 @@ function EmergencyContactsTable({
                     <td className="py-2 text-right whitespace-nowrap">
                       {editingIndex === i ? (
                         <>
-                          <button
-                            type="button"
-                            className="text-xs text-primary hover:underline mr-2"
+                          <Button
+                            size="xs"
+                            variant="secondary"
+                            className="mr-1"
                             onClick={() => {
                               onChange(
                                 contacts.map((x, idx) =>
@@ -1195,16 +1199,17 @@ function EmergencyContactsTable({
                             }}
                           >
                             Save
-                          </button>
-                          <button type="button" className="text-xs text-muted hover:underline" onClick={() => setEditingIndex(null)}>
+                          </Button>
+                          <Button size="xs" variant="ghost" onClick={() => setEditingIndex(null)}>
                             Cancel
-                          </button>
+                          </Button>
                         </>
                       ) : (
                         <>
-                          <button
-                            type="button"
-                            className="text-xs text-primary hover:underline mr-2"
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            className="mr-1"
                             onClick={() => {
                               setEditingIndex(i);
                               setEditRelationship(c.relationship ?? '');
@@ -1212,14 +1217,14 @@ function EmergencyContactsTable({
                             }}
                           >
                             Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="text-xs text-red-600 hover:underline"
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="ghost-danger"
                             onClick={() => onChange(contacts.filter((_, idx) => idx !== i))}
                           >
                             Delete
-                          </button>
+                          </Button>
                         </>
                       )}
                     </td>

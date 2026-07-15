@@ -280,13 +280,13 @@ function FieldRow({
             <span className="text-sm text-muted">
               {willClear ? 'Will clear on save' : field.isSet ? '••••••••  (set)' : 'Not set'}
             </span>
-            <button type="button" className="text-xs text-primary hover:underline" onClick={onReveal}>
+            <Button size="xs" variant="ghost" onClick={onReveal}>
               {field.isSet ? 'Replace' : 'Set'}
-            </button>
+            </Button>
             {field.isSet && !willClear ? (
-              <button type="button" className="text-xs text-muted hover:text-red-600" onClick={onClear}>
+              <Button size="xs" variant="ghost-danger" onClick={onClear}>
                 Clear
-              </button>
+              </Button>
             ) : null}
           </div>
         )}

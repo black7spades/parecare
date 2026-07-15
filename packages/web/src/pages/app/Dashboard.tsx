@@ -257,15 +257,15 @@ export function Dashboard() {
             ) : null}
             <div className="ml-auto flex items-center gap-2">
               {view === 'cards' ? (
-                <button
-                  type="button"
-                  className="text-xs text-muted hover:text-ink px-2 py-1 rounded-md hover:bg-surface-2 transition-colors"
+                <Button
+                  size="xs"
+                  variant="ghost"
                   onClick={() =>
                     setCollapsedIds((prev) => (prev.size >= shown.length ? new Set() : new Set(shown.map((p) => p.id))))
                   }
                 >
                   {collapsedIds.size >= shown.length && shown.length > 0 ? 'Expand all' : 'Collapse all'}
-                </button>
+                </Button>
               ) : null}
               {viewToggle}
             </div>
@@ -277,13 +277,14 @@ export function Dashboard() {
               <Button size="sm" onClick={() => setBulkLinkOpen(true)}>
                 Link provider
               </Button>
-              <button
-                type="button"
-                className="ml-auto text-xs text-muted hover:text-ink"
+              <Button
+                size="sm"
+                variant="ghost"
+                className="ml-auto"
                 onClick={() => setSelectedProfileIds(new Set())}
               >
                 Clear selection
-              </button>
+              </Button>
             </div>
           ) : null}
 
@@ -458,9 +459,10 @@ function itemBrief(it: AttentionItem): string {
 /**
  * The things needing attention today, listed in full so the user can see
  * and act on each one without opening the assistant. Urgent items lead and
- * stand out; every item offers to be done together with Pare, and an
- * out-of-stock alert can be set aside behind an "are you sure?" confirm.
- * Asking Pare stays available for anyone who prefers to talk it through.
+ * stand out. Each row has exactly two controls per the style guide: "Ask
+ * Pare" opens the assistant primed with that item's brief, and "Dismiss"
+ * sets a dismissible item aside behind an "are you sure?" confirm. The
+ * panel header has one control, the Hide and Show collapse toggle.
  */
 function AttentionPanel({ items }: { items: AttentionItem[] }) {
   const openWithMessage = useAssistantStore((s) => s.openWithMessage);
@@ -478,27 +480,20 @@ function AttentionPanel({ items }: { items: AttentionItem[] }) {
 
   return (
     <div className="card py-3 px-4">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-        <span className="font-semibold text-ink">Needs attention today</span>
-        <span className="text-muted">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-sm font-semibold text-ink">Needs attention today</span>
+        <span className="text-xs text-muted">
           {items.length === 1 ? '1 thing' : `${items.length} things`}
         </span>
-        <div className="ml-auto flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => openWithMessage('What needs my attention today?')}
-            className="text-primary hover:underline font-medium"
-          >
-            Ask Pare
-          </button>
-          <button
-            type="button"
+        <div className="ml-auto">
+          <Button
+            size="sm"
+            variant="ghost"
             onClick={() => setCollapsed((v) => !v)}
-            className="text-muted hover:text-ink"
             aria-expanded={!collapsed}
           >
             {collapsed ? 'Show' : 'Hide'}
-          </button>
+          </Button>
         </div>
       </div>
       {!collapsed ? (
@@ -526,23 +521,25 @@ function AttentionPanel({ items }: { items: AttentionItem[] }) {
                   ) : null}
                 </span>
               </Link>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1 shrink-0">
                 {it.dismissible ? (
-                  <button
-                    type="button"
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    className="whitespace-nowrap"
                     onClick={() => setConfirmDismiss(it)}
-                    className="text-xs text-muted hover:text-ink whitespace-nowrap"
                   >
                     Dismiss
-                  </button>
+                  </Button>
                 ) : null}
-                <button
-                  type="button"
+                <Button
+                  size="xs"
+                  variant="secondary"
+                  className="whitespace-nowrap"
                   onClick={() => openWithMessage(itemBrief(it), it.profile_id)}
-                  className="rounded-md border border-primary/40 text-primary px-2 py-1 text-xs font-medium hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors whitespace-nowrap"
                 >
-                  Let's do it
-                </button>
+                  Ask Pare
+                </Button>
               </div>
             </li>
           ))}

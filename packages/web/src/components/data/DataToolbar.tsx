@@ -84,9 +84,9 @@ export function DataToolbar({
               <Button key={a.key} size="sm" variant="secondary" onClick={a.onRun}>{a.label}</Button>
             ))}
           </div>
-          <button type="button" className="ml-auto text-xs text-primary hover:underline" onClick={onClearSelection}>
+          <Button size="sm" variant="ghost" className="ml-auto" onClick={onClearSelection}>
             Clear selection
-          </button>
+          </Button>
           {bulkActions.filter((a) => a.destructive).map((a) => (
             <Button key={a.key} size="sm" variant="danger" onClick={a.onRun}>{a.label}</Button>
           ))}

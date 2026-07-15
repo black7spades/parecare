@@ -125,9 +125,9 @@ export function ImportExport({ basePath, resource, canImport, onImported, templa
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); }}
                 disabled={importing}
               />
-              <button type="button" className="mt-2 text-xs text-primary hover:underline" onClick={downloadTemplate}>
+              <Button size="xs" variant="ghost" className="mt-2" onClick={downloadTemplate}>
                 Download a blank CSV template
-              </button>
+              </Button>
               {importing ? <p className="mt-2 text-sm text-muted">Importing…</p> : null}
             </section>
           ) : null}
