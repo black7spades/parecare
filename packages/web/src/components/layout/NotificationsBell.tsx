@@ -74,6 +74,8 @@ function itemText(item: NotificationItem): string {
 }
 
 function itemPath(item: NotificationItem): string {
+  // An unrecorded dose is logged on the Medication record page, not the list.
+  if (item.kind === 'dose_overdue') return `/app/${item.profile_id}/mar`;
   const page = ENTITY_TARGETS[item.entity_type ?? '']?.page ?? '';
   return `/app/${item.profile_id}${page ? `/${page}` : ''}`;
 }

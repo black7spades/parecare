@@ -4,6 +4,8 @@ import type { Account, CareAccess, CareCircleMember, CareProfile } from '../type
 import { parseZonedTime, formatInZone } from '../lib/timezone';
 import { matchProfileNames, type NameCandidate } from '../lib/nameMatch';
 import { drawDownOnHand, perDoseDrawdown } from './medicationSupply';
+import { resolveConditionCatalogueId } from '../routes/conditionCatalogue';
+import { resolveSymptomCatalogueId } from '../routes/symptomCatalogue';
 
 /**
  * Actions the assistant can carry out on the user's behalf: logging a care
@@ -99,9 +101,12 @@ const addMedicationSchema = z.object({
   frequency: z.string().max(255).optional().nullable(),
   schedule_times: z.array(z.string().regex(/^\d{2}:\d{2}$/)).max(12).optional().nullable(),
   instructions: z.string().optional().nullable(),
+  units_per_dose: z.number().nonnegative().optional().nullable(),
   supply: z.number().nonnegative().optional().nullable(),
+  packs_on_hand: z.number().nonnegative().optional().nullable(),
   with_food: z.boolean().optional(),
   as_needed: z.boolean().optional(),
+  critical: z.boolean().optional(),
 });
 
 const updateMedicationSchema = z.object({
@@ -112,7 +117,21 @@ const updateMedicationSchema = z.object({
   frequency: z.string().max(255).optional().nullable(),
   schedule_times: z.array(z.string().regex(/^\d{2}:\d{2}$/)).max(12).optional().nullable(),
   instructions: z.string().optional().nullable(),
+  units_per_dose: z.number().nonnegative().optional().nullable(),
   supply: z.number().nonnegative().optional().nullable(),
+  supply_remaining: z.number().nonnegative().optional().nullable(),
+  packs_on_hand: z.number().nonnegative().optional().nullable(),
+  with_food: z.boolean().optional(),
+  as_needed: z.boolean().optional(),
+  critical: z.boolean().optional(),
+});
+
+// "Picked up two packs of Perindopril": set what is on hand after a restock.
+const restockMedicationSchema = z.object({
+  type: z.literal('restock_medication'),
+  medication_name: z.string().min(1).max(255),
+  packs_on_hand: z.number().nonnegative().optional().nullable(),
+  units_remaining: z.number().nonnegative().optional().nullable(),
 });
 
 const stopMedicationSchema = z.object({
@@ -131,15 +150,77 @@ const removeAllergySchema = z.object({
   substance: z.string().min(1).max(255),
 });
 
+const CONDITION_CATEGORIES = [
+  'illness',
+  'injury',
+  'post_operative',
+  'recovery',
+  'mental_health',
+  'chronic_flare',
+  'acute_illness',
+  'disability',
+  'other',
+] as const;
+
+const CONDITION_STATUSES = ['active', 'improving', 'managed', 'resolved'] as const;
+
+const CONDITION_SEVERITIES = ['mild', 'moderate', 'severe', 'critical'] as const;
+
 const addConditionSchema = z.object({
   type: z.literal('add_condition'),
   name: z.string().min(1).max(255),
+  category: z.enum(CONDITION_CATEGORIES).optional().nullable(),
+  severity: z.enum(CONDITION_SEVERITIES).optional().nullable(),
+  status: z.enum(CONDITION_STATUSES).optional().nullable(),
+  started_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   notes: z.string().optional().nullable(),
 });
 
 const removeConditionSchema = z.object({
   type: z.literal('remove_condition'),
   name: z.string().min(1).max(255),
+});
+
+const resolveConditionSchema = z.object({
+  type: z.literal('resolve_condition'),
+  name: z.string().min(1).max(255),
+  resolved_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+});
+
+// The acute illness tracker: record a symptom on a condition, or move an
+// existing symptom's severity up or down as things progress.
+const addSymptomSchema = z.object({
+  type: z.literal('add_symptom'),
+  condition_name: z.string().min(1).max(255),
+  symptom_name: z.string().min(1).max(255),
+  severity: z.number().int().min(1).max(5).default(3),
+});
+
+const updateSymptomSchema = z.object({
+  type: z.literal('update_symptom'),
+  symptom_name: z.string().min(1).max(255),
+  condition_name: z.string().max(255).optional().nullable(),
+  severity: z.number().int().min(1).max(5).optional().nullable(),
+  resolved: z.boolean().optional().nullable(),
+});
+
+const TREATMENT_CATEGORIES = [
+  'device',
+  'therapy',
+  'exercise',
+  'wound_care',
+  'diet',
+  'surgery',
+  'lifestyle',
+  'assistive_device',
+  'other',
+] as const;
+
+const addTreatmentSchema = z.object({
+  type: z.literal('add_treatment'),
+  name: z.string().min(1).max(255),
+  category: z.enum(TREATMENT_CATEGORIES).default('other'),
+  condition_name: z.string().max(255).optional().nullable(),
 });
 
 const raiseQuestionSchema = z.object({
@@ -203,10 +284,15 @@ export const actionSchema = z.discriminatedUnion('type', [
   addMedicationSchema,
   updateMedicationSchema,
   stopMedicationSchema,
+  restockMedicationSchema,
   addAllergySchema,
   removeAllergySchema,
   addConditionSchema,
   removeConditionSchema,
+  resolveConditionSchema,
+  addSymptomSchema,
+  updateSymptomSchema,
+  addTreatmentSchema,
   raiseQuestionSchema,
   setCarePhaseSchema,
   addProviderSchema,
@@ -321,9 +407,15 @@ export function extractActionBlocks<T>(reply: string, schema: z.ZodType<T, z.Zod
       const parsed = schema.safeParse(raw);
       if (parsed.success) actions.push(parsed.data);
       else {
-        const attempted = String(raw?.type ?? raw?.action ?? '').replace(/_/g, ' ') || 'unknown';
+        const attempted = String(raw?.type ?? raw?.action ?? '').replace(/_/g, ' ') || 'take an unrecognised action';
+        // Name the field that failed, so the user (and Pare, on the next
+        // turn) can see exactly what was wrong instead of a dead end.
+        const first = parsed.error.issues[0];
+        const where = first?.path?.length ? ` (problem with "${first.path.join('.')}": ${first.message.toLowerCase()})` : '';
         console.warn('Assistant action validation failed:', attempted, parsed.error.format());
-        parseErrors.push(`Pare tried to ${attempted} but that action could not be validated, so it was not carried out.`);
+        parseErrors.push(
+          `Pare tried to ${attempted} but that action could not be validated${where}, so it was not carried out. Try asking again in different words.`
+        );
       }
     } catch {
       parseErrors.push('Pare suggested an action that could not be read, so it was not carried out.');
@@ -496,10 +588,13 @@ async function executeOne(
         frequency: action.frequency ?? null,
         schedule_times: action.schedule_times ? JSON.stringify(action.schedule_times) : null,
         instructions: action.instructions ?? null,
+        units_per_dose: action.units_per_dose ?? null,
         supply: action.supply ?? null,
         supply_remaining: action.supply ?? null,
+        packs_on_hand: action.packs_on_hand ?? null,
         with_food: action.with_food ?? false,
         as_needed: action.as_needed ?? false,
+        critical: action.critical ?? false,
         active: true,
       });
       await audit(profileId, account.id, 'medications', `added ${name}`);
@@ -520,10 +615,16 @@ async function executeOne(
       if (action.schedule_times !== undefined)
         patch['schedule_times'] = action.schedule_times ? JSON.stringify(action.schedule_times) : null;
       if (action.instructions !== undefined) patch['instructions'] = action.instructions;
+      if (action.units_per_dose !== undefined) patch['units_per_dose'] = action.units_per_dose;
       if (action.supply !== undefined) {
         patch['supply'] = action.supply;
-        patch['supply_remaining'] = action.supply;
+        if (action.supply_remaining === undefined) patch['supply_remaining'] = action.supply;
       }
+      if (action.supply_remaining !== undefined) patch['supply_remaining'] = action.supply_remaining;
+      if (action.packs_on_hand !== undefined) patch['packs_on_hand'] = action.packs_on_hand;
+      if (action.with_food !== undefined) patch['with_food'] = action.with_food;
+      if (action.as_needed !== undefined) patch['as_needed'] = action.as_needed;
+      if (action.critical !== undefined) patch['critical'] = action.critical;
       await db('medications').where({ id: med.id }).update(patch);
       await audit(profileId, account.id, 'medications', `updated ${med.name}`);
       const when = action.schedule_times ? ` Scheduled at ${action.schedule_times.join(', ')}.` : '';
@@ -540,6 +641,32 @@ async function executeOne(
       await db('medications').where({ id: med.id }).update({ active: false, updated_at: db.fn.now() });
       await audit(profileId, account.id, 'medications', `stopped ${med.name}`);
       return `Stopped ${med.name}. It is no longer on the active medication list.`;
+    }
+    case 'restock_medication': {
+      if (action.packs_on_hand == null && action.units_remaining == null) {
+        return `Could not restock ${action.medication_name}: say how many packs or units are now on hand.`;
+      }
+      const med = await db('medications as m')
+        .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
+        .where({ 'm.care_profile_id': profileId, 'm.active': true })
+        .whereRaw('lower(c.name) = lower(?)', [action.medication_name.trim()])
+        .select('m.id', 'm.supply', 'c.name as name')
+        .first();
+      if (!med) return `Could not find an active medication called "${action.medication_name}".`;
+      const patch: Record<string, unknown> = { updated_at: db.fn.now() };
+      if (action.packs_on_hand != null) patch['packs_on_hand'] = action.packs_on_hand;
+      if (action.units_remaining != null) patch['supply_remaining'] = action.units_remaining;
+      // Restocking packs alone, with nothing loose recorded, starts the count
+      // from zero loose units so the total reads exactly what was picked up.
+      await db('medications').where({ id: med.id }).update(patch);
+      // A restock clears any "out of stock" acknowledgement, same as the app.
+      await db('attention_dismissals').where({ item_key: `out_of_stock:${med.id}` }).delete();
+      await audit(profileId, account.id, 'medications', `restocked ${med.name}`);
+      const parts = [
+        action.packs_on_hand != null ? `${action.packs_on_hand} ${action.packs_on_hand === 1 ? 'pack' : 'packs'}` : null,
+        action.units_remaining != null ? `${action.units_remaining} units in the open pack` : null,
+      ].filter(Boolean);
+      return `Updated ${med.name}'s supply: ${parts.join(' and ')} on hand.`;
     }
     case 'add_allergy': {
       await db('allergies').insert({
@@ -560,13 +687,22 @@ async function executeOne(
       return `Removed the allergy to ${action.substance}.`;
     }
     case 'add_condition': {
+      const name = action.name.trim();
+      // The shared catalogue keeps one entry per condition across the
+      // instance, same as adding it by hand.
+      const catalogueId = await resolveConditionCatalogueId(name, account.id).catch(() => null);
       await db('medical_conditions').insert({
         care_profile_id: profileId,
-        name: action.name.trim(),
+        condition_catalogue_id: catalogueId,
+        name,
+        category: action.category ?? null,
+        severity: action.severity ?? null,
+        status: action.status ?? 'active',
+        started_on: action.started_on ?? null,
         notes: action.notes ?? null,
       });
-      await audit(profileId, account.id, 'conditions', `added condition ${action.name}`);
-      return `Added the medical condition ${action.name}.`;
+      await audit(profileId, account.id, 'conditions', `added condition ${name}`);
+      return `Added the condition ${name}${action.category ? ` (${action.category.replace(/_/g, ' ')})` : ''}.`;
     }
     case 'remove_condition': {
       const n = await db('medical_conditions')
@@ -576,6 +712,94 @@ async function executeOne(
       if (!n) return `No condition called "${action.name}" was on the record.`;
       await audit(profileId, account.id, 'conditions', `removed condition ${action.name}`);
       return `Removed the condition ${action.name}.`;
+    }
+    case 'resolve_condition': {
+      const resolvedOn = action.resolved_on ?? new Date().toISOString().slice(0, 10);
+      const [row] = await db('medical_conditions')
+        .where({ care_profile_id: profileId })
+        .whereRaw('lower(name) = lower(?)', [action.name.trim()])
+        .update({ status: 'resolved', resolved_on: resolvedOn, updated_at: db.fn.now() })
+        .returning('name');
+      if (!row) return `No condition called "${action.name}" was on the record.`;
+      await audit(profileId, account.id, 'conditions', `resolved ${action.name}`);
+      return `Marked ${row.name} as resolved on ${resolvedOn}.`;
+    }
+    case 'add_symptom': {
+      const condition = await db('medical_conditions')
+        .where({ care_profile_id: profileId })
+        .whereRaw('lower(name) = lower(?)', [action.condition_name.trim()])
+        .first();
+      if (!condition) return `No condition called "${action.condition_name}" was on the record, so the symptom was not added.`;
+      const catalogueId = await resolveSymptomCatalogueId(action.symptom_name.trim(), account.id).catch(() => null);
+      const [symptom] = await db('condition_symptoms')
+        .insert({
+          condition_id: condition.id,
+          symptom_catalogue_id: catalogueId,
+          name: action.symptom_name.trim(),
+          severity: action.severity,
+        })
+        .returning('*');
+      await db('condition_symptom_readings').insert({
+        symptom_id: symptom.id,
+        severity: symptom.severity,
+        recorded_at: symptom.noted_at,
+      });
+      await audit(profileId, account.id, 'conditions', `symptom ${action.symptom_name} on ${condition.name}`);
+      return `Recorded the symptom ${action.symptom_name} (severity ${action.severity}/5) on ${condition.name}.`;
+    }
+    case 'update_symptom': {
+      let query = db('condition_symptoms as s')
+        .join('medical_conditions as mc', 's.condition_id', 'mc.id')
+        .where('mc.care_profile_id', profileId)
+        .whereRaw('lower(s.name) = lower(?)', [action.symptom_name.trim()])
+        .whereNull('s.resolved_at');
+      if (action.condition_name) {
+        query = query.whereRaw('lower(mc.name) = lower(?)', [action.condition_name.trim()]);
+      }
+      const matches = await query.select('s.*', 'mc.name as condition_name');
+      if (matches.length === 0) {
+        return `No open symptom called "${action.symptom_name}" was found${action.condition_name ? ` on ${action.condition_name}` : ''}.`;
+      }
+      if (matches.length > 1) {
+        return `"${action.symptom_name}" is tracked on more than one condition (${matches.map((m) => m.condition_name).join(', ')}). Say which condition you mean.`;
+      }
+      const symptom = matches[0];
+      const patch: Record<string, unknown> = { updated_at: db.fn.now() };
+      const said: string[] = [];
+      if (action.severity != null && action.severity !== symptom.severity) {
+        patch['severity'] = action.severity;
+        // Every severity change is a dated reading in the symptom's course.
+        await db('condition_symptom_readings').insert({ symptom_id: symptom.id, severity: action.severity });
+        said.push(`severity ${symptom.severity} to ${action.severity}`);
+      }
+      if (action.resolved) {
+        patch['resolved_at'] = db.fn.now();
+        said.push('marked resolved');
+      }
+      if (said.length === 0) return `Nothing to change on the symptom ${symptom.name}.`;
+      await db('condition_symptoms').where({ id: symptom.id }).update(patch);
+      await audit(profileId, account.id, 'conditions', `symptom ${symptom.name} updated`);
+      return `Updated ${symptom.name} on ${symptom.condition_name}: ${said.join(', ')}.`;
+    }
+    case 'add_treatment': {
+      let conditionId: string | null = null;
+      if (action.condition_name) {
+        const condition = await db('medical_conditions')
+          .where({ care_profile_id: profileId })
+          .whereRaw('lower(name) = lower(?)', [action.condition_name.trim()])
+          .first();
+        if (!condition) return `No condition called "${action.condition_name}" was on the record, so the treatment was not added.`;
+        conditionId = condition.id;
+      }
+      await db('treatments').insert({
+        care_profile_id: profileId,
+        medical_condition_id: conditionId,
+        name: action.name.trim(),
+        category: action.category,
+        current_status: 'active',
+      });
+      await audit(profileId, account.id, 'treatments', `added treatment ${action.name}`);
+      return `Added the treatment ${action.name}${action.condition_name ? ` for ${action.condition_name}` : ''}.`;
     }
     case 'raise_question': {
       await db('open_questions').insert({

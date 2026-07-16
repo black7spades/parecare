@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { describeAiError } from '../../../lib/aiErrors';
+import { ASSISTANT_COMMANDS, commandHelpText, expandSlashCommand } from '../../../lib/assistantCommands';
 import { browserTimeZone } from '../../../lib/datetime';
 import { Button } from '../../../components/ui/Button';
 import { Textarea } from '../../../components/ui/Input';
@@ -30,7 +31,29 @@ export function AiPage() {
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const [pendingReply, setPendingReply] = useState<string | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Typing "/" offers the quick commands; picking one fills the draft.
+  const commandMatches = draft.startsWith('/')
+    ? ASSISTANT_COMMANDS.filter((c) => `/${c.name}`.startsWith(draft.trim().split(/\s/)[0].toLowerCase()))
+    : [];
+
+  const submitDraft = (raw: string) => {
+    const text = raw.trim();
+    if (!text) return;
+    const cmd = expandSlashCommand(text);
+    if (cmd?.kind === 'help') {
+      setShowHelp(true);
+      setDraft('');
+      return;
+    }
+    if (cmd?.kind === 'needs-args') {
+      setError(`Add the details after the command, e.g. "${cmd.command!.description.split('e.g. ')[1] ?? `/${cmd.command!.name} ...`}".`);
+      return;
+    }
+    sendMutation.mutate(cmd?.kind === 'send' ? cmd.message! : text);
+  };
 
   const { data: listData } = useQuery({
     queryKey: ['ai-conversations', profile.id],
@@ -107,9 +130,14 @@ export function AiPage() {
 
       <div className="card flex flex-col" style={{ minHeight: '26rem' }}>
         <h2 className="text-base font-semibold text-ink mb-1">Ask PareCare</h2>
-        <p className="text-sm text-muted mb-4">
+        <p className="text-sm text-muted mb-1">
           An assistant that knows {careName}'s situation. Ask about next steps,
           entitlements, or how to approach hard conversations.
+        </p>
+        <p className="text-xs text-muted mb-4">
+          Quick commands: type <span className="font-mono text-ink">/</span> to see them, or{' '}
+          <span className="font-mono text-ink">/help</span> for the full list, e.g.{' '}
+          <span className="font-mono text-ink">/dose took all my morning meds at 8</span>.
         </p>
 
         {!activeId ? (
@@ -139,6 +167,13 @@ export function AiPage() {
                 </div>
               </>
             ) : null}
+            {showHelp ? (
+              <div className="flex justify-start">
+                <div className="max-w-[80%] rounded-lg px-3 py-2 text-sm bg-surface-2 text-ink whitespace-pre-wrap">
+                  {commandHelpText()}
+                </div>
+              </div>
+            ) : null}
             <div ref={bottomRef} />
           </div>
         )}
@@ -152,32 +187,51 @@ export function AiPage() {
         ) : null}
 
         {activeId && (!activeConversation || activeConversation.is_own) ? (
-          <form
-            className="flex gap-2 items-end"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (draft.trim()) sendMutation.mutate(draft.trim());
-            }}
-          >
-            <div className="flex-1">
-              <Textarea
-                aria-label="Ask a question"
-                placeholder="Ask anything about the care journey…"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                rows={2}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    if (draft.trim()) sendMutation.mutate(draft.trim());
-                  }
-                }}
-              />
-            </div>
-            <Button type="submit" loading={sendMutation.isPending} disabled={!draft.trim()}>
-              Send
-            </Button>
-          </form>
+          <div>
+            {commandMatches.length > 0 ? (
+              <ul className="mb-2 rounded-md border border-border bg-card divide-y divide-border max-h-48 overflow-y-auto">
+                {commandMatches.map((c) => (
+                  <li key={c.name}>
+                    <button
+                      type="button"
+                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-surface-2"
+                      onClick={() => setDraft(`/${c.name} `)}
+                    >
+                      <span className="font-mono text-ink">/{c.name}</span>{' '}
+                      <span className="text-muted">{c.hint}</span>
+                      <span className="block text-xs text-muted">{c.description}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <form
+              className="flex gap-2 items-end"
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitDraft(draft);
+              }}
+            >
+              <div className="flex-1">
+                <Textarea
+                  aria-label="Ask a question"
+                  placeholder="Ask anything, or type / for quick commands…"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  rows={2}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      submitDraft(draft);
+                    }
+                  }}
+                />
+              </div>
+              <Button type="submit" loading={sendMutation.isPending} disabled={!draft.trim()}>
+                Send
+              </Button>
+            </form>
+          </div>
         ) : null}
       </div>
     </div>

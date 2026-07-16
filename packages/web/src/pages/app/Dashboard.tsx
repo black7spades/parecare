@@ -446,7 +446,9 @@ function itemBrief(it: AttentionItem): string {
         + `Write the actual repeat request here now (a clear subject and body) addressed to their pharmacy or prescriber from the record. `
         + `Only ask me for a detail if it is genuinely missing. Do not change anything yourself; once it is arranged, ask me whether to update the supply.`;
     case 'unrecorded_dose':
-      return `Let's record the doses due for ${who}${it.detail ? `: ${it.detail}` : ''}. Check the record and walk me through logging each one.`;
+      return `Record all the doses due for ${who} now${it.detail ? `: ${it.detail}` : ''}. `
+        + `Log every one of them in a single action at their scheduled times, using the exact medication names from the record. `
+        + `Do not ask me to confirm each one and do not walk me through them one at a time; just log them and tell me what you recorded.`;
     case 'stale_question':
       return `Let's follow up the open question(s) for ${who} that have had no reply. ${useRecord}Draft the actual message to chase an answer here now.`;
     case 'unresolved_outcome':
