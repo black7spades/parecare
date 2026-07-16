@@ -135,12 +135,20 @@ async function buildSection(profileId: string, section: PlanSection): Promise<Pl
       }));
     }
     case 'medications': {
-      const rows = await db('medications').where({ care_profile_id: profileId }).orderBy('name');
+      // The medication's name lives on the shared catalogue, not the
+      // medication row (migration 023) — same join the medications route
+      // uses. Dose amount and measure are two data points, two fields.
+      const rows = await db('medications as m')
+        .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
+        .where('m.care_profile_id', profileId)
+        .orderBy('c.name')
+        .select('m.*', 'c.name as name');
       return rows.map((r) => ({
         key: `medications:${r.id}`,
         fields: {
           name: r.name,
-          dose: r.dose ?? null,
+          dose_amount: r.dose_amount ?? null,
+          dose_unit: r.dose_unit ?? null,
           route: r.route ?? null,
           frequency: r.frequency ?? null,
           // One multi-valued field: the daily schedule times.
@@ -165,9 +173,15 @@ async function buildSection(profileId: string, section: PlanSection): Promise<Pl
       }));
     }
     case 'providers': {
-      const rows = await db('providers').where({ care_profile_id: profileId }).orderBy('name');
+      // Providers are account-scoped (migration 047); the tie to a care
+      // profile lives on care_profile_providers.
+      const rows = await db('care_profile_providers as cpp')
+        .join('providers as p', 'cpp.provider_id', 'p.id')
+        .where({ 'cpp.care_profile_id': profileId })
+        .orderBy('p.name')
+        .select('p.*', 'cpp.provider_id');
       return rows.map((r) => ({
-        key: `providers:${r.id}`,
+        key: `providers:${r.provider_id}`,
         fields: {
           name: r.name,
           provider_type: r.provider_type ?? null,
@@ -820,7 +834,10 @@ export interface BaselineGaps {
 export async function baselineGaps(profileId: string): Promise<BaselineGaps> {
   const [allergyCount, gpCount, plan] = await Promise.all([
     db('allergies').where({ care_profile_id: profileId }).count<{ count: string }[]>('id as count'),
-    db('providers').where({ care_profile_id: profileId, provider_type: 'gp' }).count<{ count: string }[]>('id as count'),
+    db('care_profile_providers as cpp')
+      .join('providers as p', 'cpp.provider_id', 'p.id')
+      .where({ 'cpp.care_profile_id': profileId, 'p.provider_type': 'gp' })
+      .count<{ count: string }[]>('cpp.id as count'),
     db('care_plans').where({ care_profile_id: profileId }).first(),
   ]);
   const contacts = plan?.emergency_contacts;
