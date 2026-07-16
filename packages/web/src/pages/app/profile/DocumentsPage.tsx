@@ -8,6 +8,7 @@ import { Modal } from '../../../components/ui/Modal';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
 import { DOCUMENT_CATEGORIES, documentCategoryLabel, type CareDocument } from '../../../lib/care';
+import { PagePurpose } from '../../../components/PagePurpose';
 import { useProfile } from './ProfileLayout';
 
 function formatSize(bytes: number | null): string {
@@ -121,7 +122,10 @@ export function DocumentsPage() {
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_20rem] items-start">
       <div className="card">
-        <h2 className="text-base font-semibold text-ink mb-4">Document repository</h2>
+        <div className="flex items-center gap-2 mb-4">
+          <h2 className="text-base font-semibold text-ink">Document repository</h2>
+          <PagePurpose kind="entry" />
+        </div>
 
         <DataToolbar
           search={dv.search}

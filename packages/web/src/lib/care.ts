@@ -253,6 +253,7 @@ export const DOCUMENT_CATEGORIES = [
   { value: 'medical_record', label: 'Medical record / certificate' },
   { value: 'facility_contract', label: 'Facility contract' },
   { value: 'financial', label: 'Financial' },
+  { value: 'care_plan', label: 'Care plan' },
   { value: 'other', label: 'Other' },
 ] as const;
 
@@ -1043,4 +1044,144 @@ export interface CarePlan {
   advance_care_directive: boolean;
   advance_care_directive_location: string | null;
   emergency_contacts: EmergencyContact[];
+}
+
+// --- The versioned care plan document ------------------------------------
+
+/** One entry in a plan section; every fact is its own field. */
+export interface PlanEntry {
+  key: string;
+  fields: Record<string, string | number | boolean | null>;
+}
+
+export interface PlanContent {
+  sections: Record<string, PlanEntry[]>;
+}
+
+export const PLAN_SECTION_LABELS: Record<string, string> = {
+  allergies: 'Allergies',
+  conditions: 'Conditions',
+  medications: 'Medications',
+  treatments: 'Treatments',
+  needs: 'Day-to-day needs',
+  directive: 'Advance care directive',
+  emergency_contacts: 'Emergency contacts',
+  providers: 'Providers',
+};
+
+export const planSectionLabel = (s: string) => PLAN_SECTION_LABELS[s] ?? s;
+
+export const PLAN_VERSION_STATUSES = [
+  { value: 'draft', label: 'Draft' },
+  { value: 'awaiting_signoff', label: 'Awaiting sign-off' },
+  { value: 'published', label: 'Published' },
+] as const;
+
+export const planVersionStatusLabel = (s: string) =>
+  PLAN_VERSION_STATUSES.find((x) => x.value === s)?.label ?? s;
+
+export interface PlanVersionMeta {
+  id: string;
+  version: number;
+  status: string;
+  content_hash: string;
+  changelog: string | null;
+  author_account_id: string | null;
+  author_name: string | null;
+  applied_event_ids: string[];
+  document_id: string | null;
+  restored_from_version: number | null;
+  locked: boolean;
+  created_at: string;
+  published_at: string | null;
+  signature_count: number;
+}
+
+export interface PlanPermissions {
+  view: boolean;
+  comment: boolean;
+  edit: boolean;
+  sign: boolean;
+}
+
+export interface PlanChange {
+  id: string;
+  op: 'add' | 'modify' | 'remove';
+  section: string;
+  entry_key: string;
+  before: Record<string, string | number | boolean | null> | null;
+  after: Record<string, string | number | boolean | null> | null;
+  source_event_ids: string[];
+  created_at: string;
+  version: number;
+  version_status?: string;
+  actor_name: string | null;
+}
+
+export interface PlanSignature {
+  id: string;
+  signer_account_id?: string | null;
+  signer_name: string;
+  signed_at: string;
+  signature_hash: string;
+  consent?: boolean;
+}
+
+export interface PlanReview {
+  id: string;
+  invited_email: string | null;
+  invited_name: string | null;
+  can_comment: boolean;
+  can_approve: boolean;
+  status: string;
+  comment: string | null;
+  created_at: string;
+  responded_at: string | null;
+  expires_at: string;
+}
+
+export interface PlanAccessRow {
+  id: string;
+  account_id: string | null;
+  account_name?: string | null;
+  account_email?: string | null;
+  email: string | null;
+  access_role: string;
+  can_view: boolean;
+  can_comment: boolean;
+  can_edit: boolean;
+  can_sign: boolean;
+}
+
+export const PLAN_ACCESS_ROLES = [
+  { value: 'lead_coordinator', label: 'Lead coordinator' },
+  { value: 'provider', label: 'Assigned provider' },
+  { value: 'carer', label: 'Nominated carer' },
+  { value: 'emergency_contact', label: 'Emergency contact' },
+  { value: 'shared', label: 'Explicit share' },
+] as const;
+
+export const planAccessRoleLabel = (v: string) =>
+  PLAN_ACCESS_ROLES.find((x) => x.value === v)?.label ?? v;
+
+export interface PlanPendingEvent {
+  id: string;
+  source_table: string;
+  action: string;
+  summary: string | null;
+  created_at: string;
+}
+
+export interface PlanBaselineGaps {
+  allergies: boolean;
+  emergency_contacts: boolean;
+  gp: boolean;
+  needs: boolean;
+}
+
+export interface PlanPendingInfo {
+  pending_events: PlanPendingEvent[];
+  has_versions: boolean;
+  awaiting_signoff: PlanVersionMeta | null;
+  baseline_gaps: PlanBaselineGaps;
 }

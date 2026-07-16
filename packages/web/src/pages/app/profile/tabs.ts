@@ -41,9 +41,11 @@ export const PROFILE_NAV: ProfileNavGroup[] = [
     label: 'Conditions',
     items: [
       { key: 'conditions', to: 'conditions', label: 'Conditions' },
+      { key: 'allergies', to: 'allergies', label: 'Allergies' },
       { key: 'neurotypes', to: 'neurotypes', label: 'Neurotypes' },
       { key: 'medications', to: 'medications', label: 'Medications' },
       { key: 'treatments', to: 'treatments', label: 'Treatments' },
+      { key: 'care-needs', to: 'care-needs', label: 'Care needs' },
     ],
   },
   {

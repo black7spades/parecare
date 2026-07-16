@@ -8,6 +8,7 @@ import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
+import { PagePurpose } from '../../../components/PagePurpose';
 import {
   PROVIDER_TYPES,
   POA_TYPES,
@@ -80,7 +81,10 @@ export function ProvidersPage() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-base font-semibold text-ink">Care providers</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold text-ink">Care providers</h2>
+            <PagePurpose kind="entry" />
+          </div>
           <p className="text-sm text-muted">Doctors, facilities and services involved in care, with contact details in one place.</p>
         </div>
         {canEdit ? (
