@@ -23,6 +23,8 @@ import { EmergencySheetPage } from './pages/app/profile/EmergencySheetPage';
 import { DocumentsPage } from './pages/app/profile/DocumentsPage';
 import { QuestionsPage } from './pages/app/profile/QuestionsPage';
 import { ProvidersPage } from './pages/app/profile/ProvidersPage';
+import { NeurotypePage } from './pages/app/profile/NeurotypePage';
+import { TreatmentsPage } from './pages/app/profile/TreatmentsPage';
 import { ActivityPage } from './pages/app/profile/ActivityPage';
 import { AiPage } from './pages/app/profile/AiPage';
 import { DirectoryProvidersPage } from './pages/app/DirectoryProvidersPage';
@@ -102,9 +104,9 @@ export const router = createBrowserRouter([
           { path: 'circle', element: <CirclePage /> },
           { path: 'plan', element: <PlanPage /> },
           { path: 'conditions', element: <ConditionsPage /> },
+          { path: 'neurotypes', element: <NeurotypePage /> },
           { path: 'medications', element: <MedicationsPage /> },
-          // The section is named Treatments; both paths land on the same page
-          { path: 'treatments', element: <MedicationsPage /> },
+          { path: 'treatments', element: <TreatmentsPage /> },
           { path: 'tasks', element: <TasksPage /> },
           { path: 'health-status', element: <Navigate to="../conditions" replace /> },
           { path: 'appointments', element: <AppointmentsPage /> },
