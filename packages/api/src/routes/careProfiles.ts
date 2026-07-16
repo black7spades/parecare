@@ -286,15 +286,20 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
        ORDER BY j.started_at ASC`,
       [ids]
     ),
-    // Active health statuses for traffic-light border and dashboard display.
+    // Unresolved acute conditions for the traffic-light border and dashboard
+    // display. Health status lives on conditions now; the acute categories
+    // are the ones that come and go, so lifelong conditions do not keep a
+    // profile permanently flagged.
     db.raw(
-      `SELECT hs.care_profile_id, hs.id, hs.name, hs.category, hs.status,
-              hs.is_contagious, hs.isolation_required, hs.onset_date,
-              (SELECT count(*)::int FROM health_status_symptoms s
-               WHERE s.health_status_id = hs.id AND s.resolved_at IS NULL) AS active_symptom_count
-       FROM health_statuses hs
-       WHERE hs.care_profile_id = ANY(?) AND hs.status != 'resolved'
-       ORDER BY hs.created_at ASC`,
+      `SELECT mc.care_profile_id, mc.id, mc.name, mc.category, mc.status,
+              mc.is_contagious, mc.isolation_required, mc.started_on AS onset_date,
+              (SELECT count(*)::int FROM condition_symptoms s
+               WHERE s.condition_id = mc.id AND s.resolved_at IS NULL) AS active_symptom_count
+       FROM medical_conditions mc
+       WHERE mc.care_profile_id = ANY(?)
+         AND mc.status != 'resolved'
+         AND mc.category IN ('illness', 'acute_illness', 'chronic_flare', 'injury', 'post_operative', 'recovery')
+       ORDER BY mc.created_at ASC`,
       [ids]
     ),
   ]);

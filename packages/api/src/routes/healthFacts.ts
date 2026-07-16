@@ -426,7 +426,22 @@ conditionsRouter.get('/:conditionId/symptoms', requireAuth, async (req, res) => 
   const symptoms = await db('condition_symptoms')
     .where({ condition_id: req.params['conditionId'] })
     .orderBy('noted_at', 'desc');
-  res.json({ symptoms });
+  // Each symptom carries its severity readings, oldest first, so the
+  // course of the illness reads left to right.
+  const readings = symptoms.length
+    ? await db('condition_symptom_readings')
+        .whereIn('symptom_id', symptoms.map((s) => s.id))
+        .orderBy('recorded_at', 'asc')
+    : [];
+  const readingsBySymptom = new Map<string, unknown[]>();
+  for (const r of readings) {
+    const arr = readingsBySymptom.get(r.symptom_id) ?? [];
+    arr.push(r);
+    readingsBySymptom.set(r.symptom_id, arr);
+  }
+  res.json({
+    symptoms: symptoms.map((s) => ({ ...s, readings: readingsBySymptom.get(s.id) ?? [] })),
+  });
 });
 
 conditionsRouter.post('/:conditionId/symptoms', requireAuth, async (req, res) => {
@@ -447,6 +462,12 @@ conditionsRouter.post('/:conditionId/symptoms', requireAuth, async (req, res) =>
       ...parsed.data,
     })
     .returning('*');
+  // The starting severity is the first reading in the symptom's course.
+  await db('condition_symptom_readings').insert({
+    symptom_id: symptom.id,
+    severity: symptom.severity,
+    recorded_at: symptom.noted_at,
+  });
   res.status(201).json({ symptom });
 });
 
@@ -464,13 +485,23 @@ conditionsRouter.patch('/:conditionId/symptoms/:symptomId', requireAuth, async (
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
+  const before = await db('condition_symptoms')
+    .where({ id: req.params['symptomId'], condition_id: req.params['conditionId'] })
+    .first();
+  if (!before) {
+    res.status(404).json({ error: 'Symptom not found', code: 'NOT_FOUND' });
+    return;
+  }
   const [symptom] = await db('condition_symptoms')
     .where({ id: req.params['symptomId'], condition_id: req.params['conditionId'] })
     .update({ ...allowed.data, updated_at: db.fn.now() })
     .returning('*');
-  if (!symptom) {
-    res.status(404).json({ error: 'Symptom not found', code: 'NOT_FOUND' });
-    return;
+  // A severity change is a new dated reading in the symptom's course.
+  if (allowed.data.severity !== undefined && allowed.data.severity !== before.severity) {
+    await db('condition_symptom_readings').insert({
+      symptom_id: symptom.id,
+      severity: allowed.data.severity,
+    });
   }
   res.json({ symptom });
 });

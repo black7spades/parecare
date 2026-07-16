@@ -223,13 +223,11 @@ registerSection({
     fields: [
       { key: 'name', label: 'Name', type: 'text' },
       { key: 'category', label: 'Category', type: 'enum', enumValues: ['illness', 'injury', 'post_operative', 'recovery', 'mental_health', 'chronic_flare', 'acute_illness', 'other'] },
-      { key: 'status', label: 'Status', type: 'enum', enumValues: ['active', 'monitoring', 'resolving', 'resolved'] },
+      { key: 'status', label: 'Status', type: 'enum', enumValues: ['active', 'improving', 'managed', 'resolved'] },
       { key: 'onset_date', label: 'Onset date', type: 'date' },
-      { key: 'expected_resolution_date', label: 'Expected resolution', type: 'date' },
-      { key: 'actual_resolution_date', label: 'Actual resolution', type: 'date' },
+      { key: 'actual_resolution_date', label: 'Resolved on', type: 'date' },
       { key: 'is_contagious', label: 'Contagious', type: 'boolean' },
       { key: 'isolation_required', label: 'Isolation required', type: 'boolean' },
-      { key: 'escalation_notes', label: 'Escalation notes', type: 'text' },
       { key: 'region', label: 'Region or area', type: 'text' },
       { key: 'duration_days', label: 'Duration in days', type: 'number' },
       { key: 'symptoms', label: 'Symptoms', type: 'text' },
@@ -250,8 +248,8 @@ registerSection({
       {
         key: 'status', label: 'Status', type: 'multi-select', options: [
           { value: 'active', label: 'Active' },
-          { value: 'monitoring', label: 'Monitoring' },
-          { value: 'resolving', label: 'Resolving' },
+          { value: 'improving', label: 'Improving' },
+          { value: 'managed', label: 'Managed' },
           { value: 'resolved', label: 'Resolved' },
         ],
       },
@@ -261,51 +259,52 @@ registerSection({
     supportsDateRange: true,
     crossProfileCapable: true,
   },
+  // Health status lives on conditions now; this section reads the acute
+  // categories from medical_conditions and their tracked symptoms.
   async fetch({ profileIds, filters, dateRange, db }) {
-    let query = db('health_statuses as hs')
-      .join('care_profiles as cp', 'cp.id', 'hs.care_profile_id')
-      .whereIn('hs.care_profile_id', profileIds);
+    let query = db('medical_conditions as mc')
+      .join('care_profiles as cp', 'cp.id', 'mc.care_profile_id')
+      .whereIn('mc.care_profile_id', profileIds)
+      .whereNotNull('mc.category');
     if (Array.isArray(filters['category']) && filters['category'].length) {
-      query = query.whereIn('hs.category', filters['category'] as string[]);
+      query = query.whereIn('mc.category', filters['category'] as string[]);
     }
     if (Array.isArray(filters['status']) && filters['status'].length) {
-      query = query.whereIn('hs.status', filters['status'] as string[]);
+      query = query.whereIn('mc.status', filters['status'] as string[]);
     }
-    if (filters['is_contagious'] === true) query = query.where('hs.is_contagious', true);
-    if (filters['isolation_required'] === true) query = query.where('hs.isolation_required', true);
+    if (filters['is_contagious'] === true) query = query.where('mc.is_contagious', true);
+    if (filters['isolation_required'] === true) query = query.where('mc.isolation_required', true);
     if (dateRange) {
-      query = query.where('hs.onset_date', '>=', dateRange.from).where('hs.onset_date', '<=', dateRange.to);
+      query = query.where('mc.started_on', '>=', dateRange.from).where('mc.started_on', '<=', dateRange.to);
     }
-    const rows = await query.select('hs.*', 'cp.full_name as _profile_name').orderBy('hs.onset_date', 'desc');
-    const hsIds = rows.map((r) => r.id);
-    const symptoms = hsIds.length
-      ? await db('health_status_symptoms').whereIn('health_status_id', hsIds).orderBy('noted_at', 'asc')
+    const rows = await query.select('mc.*', 'cp.full_name as _profile_name').orderBy('mc.started_on', 'desc');
+    const ids = rows.map((r) => r.id);
+    const symptoms = ids.length
+      ? await db('condition_symptoms').whereIn('condition_id', ids).orderBy('noted_at', 'asc')
       : [];
-    const symptomsByHs = new Map<string, Array<{ name: string; severity: number }>>();
+    const symptomsByCondition = new Map<string, Array<{ name: string; severity: number }>>();
     for (const s of symptoms) {
-      const arr = symptomsByHs.get(s.health_status_id) ?? [];
+      const arr = symptomsByCondition.get(s.condition_id) ?? [];
       arr.push({ name: s.name, severity: s.severity });
-      symptomsByHs.set(s.health_status_id, arr);
+      symptomsByCondition.set(s.condition_id, arr);
     }
     return rows.map((r) => {
       const now = new Date();
-      const onset = r.onset_date ? new Date(r.onset_date) : null;
-      const resolved = r.actual_resolution_date ? new Date(r.actual_resolution_date) : null;
+      const onset = r.started_on ? new Date(r.started_on) : null;
+      const resolved = r.resolved_on ? new Date(r.resolved_on) : null;
       const end = resolved ?? (r.status !== 'resolved' ? now : null);
       const duration = onset && end ? Math.ceil((end.getTime() - onset.getTime()) / (24 * 3600 * 1000)) : null;
-      const syms = symptomsByHs.get(r.id) ?? [];
+      const syms = symptomsByCondition.get(r.id) ?? [];
       return {
         _profile_id: r.care_profile_id,
         _profile_name: r._profile_name,
         name: r.name,
         category: r.category,
         status: r.status,
-        onset_date: r.onset_date,
-        expected_resolution_date: r.expected_resolution_date,
-        actual_resolution_date: r.actual_resolution_date,
+        onset_date: r.started_on,
+        actual_resolution_date: r.resolved_on,
         is_contagious: r.is_contagious,
         isolation_required: r.isolation_required,
-        escalation_notes: r.escalation_notes,
         region: r.region,
         duration_days: duration,
         symptoms: syms.map((s) => `${s.name} (severity ${s.severity}/5)`).join(', '),
