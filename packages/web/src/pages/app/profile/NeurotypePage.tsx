@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
-import { Input, Textarea } from '../../../components/ui/Input';
+import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { CatalogueCombo } from '../../../components/CatalogueCombo';
 import { useProfile } from './ProfileLayout';
@@ -143,9 +143,6 @@ function NeurotypeCard({
               </div>
             ) : null}
           </div>
-          {condition.notes ? (
-            <p className="text-sm text-muted mt-2">{condition.notes}</p>
-          ) : null}
         </div>
         {canEdit ? (
           <div className="flex items-center gap-1 shrink-0">
@@ -188,7 +185,6 @@ function NeurotypeEditor({
   const [diagnosisStatus, setDiagnosisStatus] = useState(condition?.diagnosis_status ?? '');
   const [diagnosisDate, setDiagnosisDate] = useState(condition?.diagnosis_date ?? '');
   const [severity, setSeverity] = useState(condition?.severity ?? '');
-  const [notes, setNotes] = useState(condition?.notes ?? '');
   const [error, setError] = useState('');
 
   // Provider: pick existing or add new
@@ -253,7 +249,6 @@ function NeurotypeEditor({
           diagnosis_date?: string;
           diagnosing_provider?: string;
           severity?: string;
-          notes?: string;
         };
       }>(`/care-profiles/${profileId}/conditions/extract-from-document`, {
         document_id: docId,
@@ -265,7 +260,6 @@ function NeurotypeEditor({
       if (e.diagnosis_date && !diagnosisDate) setDiagnosisDate(e.diagnosis_date);
       if (e.diagnosing_provider && !diagnosingProvider) setDiagnosingProvider(e.diagnosing_provider);
       if (e.severity && !severity) setSeverity(e.severity);
-      if (e.notes && !notes) setNotes(e.notes);
       if (!diagnosisStatus) setDiagnosisStatus('formal');
     } catch {
       // Extraction is optional; if it fails, the user fills fields manually
@@ -316,7 +310,6 @@ function NeurotypeEditor({
         diagnosing_provider: diagnosingProvider.trim() || null,
         diagnosis_document_id: finalDocId,
         severity: severity || null,
-        notes: notes.trim() || null,
         expected_duration: 'lifelong' as const,
         condition_type: 'disability' as const,
         is_temporary: false,
@@ -540,9 +533,6 @@ function NeurotypeEditor({
             Upload or choose a formal diagnosis report. PareCare will try to read the document and fill in the details automatically.
           </p>
         </div>
-
-        {/* Notes */}
-        <Textarea label="Notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
 
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
