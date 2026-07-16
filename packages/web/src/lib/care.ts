@@ -504,6 +504,8 @@ export interface ConditionSymptom {
   noted_at: string;
   resolved_at: string | null;
   notes: string | null;
+  /** Dated severity readings, oldest first: the course of the symptom. */
+  readings?: { id: string; severity: number; recorded_at: string }[];
 }
 
 export interface MedicalCondition {

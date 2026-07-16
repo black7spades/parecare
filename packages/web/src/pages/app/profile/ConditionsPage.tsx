@@ -847,16 +847,34 @@ function FunctionsSection({ profileId, condition }: { profileId: string; conditi
 
 function SymptomsSection({ profileId, condition }: { profileId: string; condition: MedicalCondition }) {
   const queryClient = useQueryClient();
-  const symptoms = condition.symptoms ?? [];
-  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['conditions', profileId] });
+
+  // Symptoms are fetched live rather than read from the condition prop, so
+  // a symptom added a moment ago is visible immediately and never entered
+  // twice because nobody could tell whether it saved.
+  const { data, isLoading } = useQuery({
+    queryKey: ['symptoms', condition.id],
+    queryFn: () =>
+      api.get<{ symptoms: ConditionSymptom[] }>(
+        `/care-profiles/${profileId}/conditions/${condition.id}/symptoms`
+      ),
+  });
+  const symptoms = data?.symptoms ?? [];
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['symptoms', condition.id] });
+    void queryClient.invalidateQueries({ queryKey: ['conditions', profileId] });
+  };
 
   return (
     <div className="border-t border-border pt-3">
       <h3 className="text-sm font-semibold text-ink mb-1">Symptoms</h3>
       <p className="text-xs text-muted mb-2">
-        Track the symptoms of this condition. Each symptom has a severity from 1 (mild) to 5 (severe).
+        Track how this condition feels over time. Severity runs from 1 (mild) to 5 (severe); slide it up
+        or down as things progress and every change is kept as a dated reading.
       </p>
-      {symptoms.length === 0 ? (
+      {isLoading ? (
+        <p className="text-sm text-muted">Loading...</p>
+      ) : symptoms.length === 0 ? (
         <p className="text-sm text-muted">No symptoms recorded yet.</p>
       ) : (
         <div className="space-y-1">
@@ -887,6 +905,18 @@ function SymptomRow({
   conditionId: string;
   onChanged: () => void;
 }) {
+  // The slider moves freely while dragging; the change is saved on release.
+  const [severity, setSeverity] = useState(symptom.severity);
+  useEffect(() => setSeverity(symptom.severity), [symptom.severity]);
+
+  const severityMutation = useMutation({
+    mutationFn: (value: number) =>
+      api.patch(`/care-profiles/${profileId}/conditions/${conditionId}/symptoms/${symptom.id}`, {
+        severity: value,
+      }),
+    onSuccess: onChanged,
+  });
+
   const resolveMutation = useMutation({
     mutationFn: () =>
       api.patch(`/care-profiles/${profileId}/conditions/${conditionId}/symptoms/${symptom.id}`, {
@@ -901,23 +931,58 @@ function SymptomRow({
     onSuccess: onChanged,
   });
 
+  const commit = () => {
+    if (severity !== symptom.severity) severityMutation.mutate(severity);
+  };
+
+  const readings = symptom.readings ?? [];
+
   return (
-    <div className="flex items-center gap-3 py-1.5 text-sm border-b border-border last:border-0">
-      <span className={`font-medium ${symptom.resolved_at ? 'line-through text-muted' : 'text-ink'}`}>
-        {symptom.name}
-      </span>
-      <span className="text-xs text-muted">
-        {symptom.severity}/5 {SEVERITY_LABELS[symptom.severity - 1]}
-      </span>
-      <span className="text-xs text-muted ml-auto">
-        {format(new Date(symptom.noted_at), 'd MMM yyyy')}
-      </span>
-      <Button size="xs" variant="ghost" onClick={() => resolveMutation.mutate()}>
-        {symptom.resolved_at ? 'Reopen' : 'Resolve'}
-      </Button>
-      <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate()}>
-        Remove
-      </Button>
+    <div className="py-2 border-b border-border last:border-0">
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <span className={`font-medium ${symptom.resolved_at ? 'line-through text-muted' : 'text-ink'}`}>
+          {symptom.name}
+        </span>
+        <span className="text-xs text-muted whitespace-nowrap">
+          since {format(new Date(symptom.noted_at), 'd MMM')}
+        </span>
+        {symptom.resolved_at ? null : (
+          <span className="flex items-center gap-2 flex-1 min-w-[10rem] max-w-xs">
+            <input
+              type="range"
+              min={1}
+              max={5}
+              step={1}
+              value={severity}
+              aria-label={`Severity of ${symptom.name}`}
+              className="flex-1 accent-primary"
+              onChange={(e) => setSeverity(Number(e.target.value))}
+              onMouseUp={commit}
+              onTouchEnd={commit}
+              onKeyUp={commit}
+            />
+            <span className="text-xs text-muted whitespace-nowrap w-20">
+              {severity}/5 {SEVERITY_LABELS[severity - 1]}
+            </span>
+          </span>
+        )}
+        <span className="flex items-center gap-1 ml-auto">
+          <Button size="xs" variant="ghost" onClick={() => resolveMutation.mutate()}>
+            {symptom.resolved_at ? 'Reopen' : 'Resolve'}
+          </Button>
+          <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate()}>
+            Remove
+          </Button>
+        </span>
+      </div>
+      {readings.length > 1 ? (
+        <p className="text-xs text-muted mt-1">
+          Course:{' '}
+          {readings
+            .map((r) => `${r.severity} (${format(new Date(r.recorded_at), 'd MMM')})`)
+            .join(' → ')}
+        </p>
+      ) : null}
     </div>
   );
 }

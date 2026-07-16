@@ -157,7 +157,7 @@ export const SYSTEM_PRESETS: Omit<ReportPreset, 'id' | 'created_at' | 'updated_a
         { key: 'allergies', fields: [], filters: {} },
         { key: 'medical_conditions', fields: [], filters: { status: ['active', 'improving', 'managed'] } },
         { key: 'medications', fields: ['name', 'dose', 'route', 'frequency', 'schedule_times', 'instructions', 'critical'], filters: { active: true } },
-        { key: 'health_statuses', fields: ['name', 'category', 'status', 'onset_date', 'duration_days', 'symptoms', 'is_contagious'], filters: { status: ['active', 'monitoring', 'resolving'] } },
+        { key: 'health_statuses', fields: ['name', 'category', 'status', 'onset_date', 'duration_days', 'symptoms', 'is_contagious'], filters: { status: ['active', 'improving', 'managed'] } },
         { key: 'care_plan', fields: ['dietary_requirements', 'mobility_aids', 'communication_needs', 'advance_care_directive'], filters: {} },
       ],
       dateRangePreset: '90d',
@@ -189,7 +189,7 @@ export const SYSTEM_PRESETS: Omit<ReportPreset, 'id' | 'created_at' | 'updated_a
     config: {
       sections: [
         { key: 'demographics', fields: ['full_name', 'age', 'current_phase'], filters: {} },
-        { key: 'health_statuses', fields: ['name', 'category', 'status', 'onset_date', 'expected_resolution_date', 'duration_days', 'is_contagious', 'isolation_required', 'region', 'symptoms'], filters: { status: ['active', 'monitoring', 'resolving'] } },
+        { key: 'health_statuses', fields: ['name', 'category', 'status', 'onset_date', 'duration_days', 'is_contagious', 'isolation_required', 'region', 'symptoms'], filters: { status: ['active', 'improving', 'managed'] } },
         { key: 'medical_conditions', fields: ['name', 'status'], filters: { status: ['active'] } },
       ],
       dateRangePreset: '30d',
@@ -227,7 +227,7 @@ export const SYSTEM_PRESETS: Omit<ReportPreset, 'id' | 'created_at' | 'updated_a
         { key: 'allergies', fields: [], filters: {} },
         { key: 'medical_conditions', fields: ['name', 'status', 'notes'], filters: { status: ['active', 'improving', 'managed'] } },
         { key: 'medications', fields: ['name', 'dose', 'route', 'frequency', 'schedule_times', 'instructions', 'critical', 'as_needed', 'with_food'], filters: { active: true } },
-        { key: 'health_statuses', fields: ['name', 'category', 'status', 'onset_date', 'is_contagious', 'isolation_required', 'symptoms', 'escalation_notes'], filters: { status: ['active', 'monitoring'] } },
+        { key: 'health_statuses', fields: ['name', 'category', 'status', 'onset_date', 'is_contagious', 'isolation_required', 'symptoms'], filters: { status: ['active', 'improving'] } },
         { key: 'care_plan', fields: [], filters: {} },
         { key: 'treatments', fields: ['treatment_name', 'treatment_category', 'notes'], filters: {} },
         { key: 'care_circle', fields: ['display_name', 'role', 'relationship', 'permission'], filters: {} },
@@ -246,7 +246,7 @@ export const SYSTEM_PRESETS: Omit<ReportPreset, 'id' | 'created_at' | 'updated_a
     config: {
       sections: [
         { key: 'demographics', fields: ['full_name', 'age', 'current_phase'], filters: { kind: 'person' } },
-        { key: 'health_statuses', fields: ['name', 'category', 'status', 'is_contagious', 'isolation_required', 'region'], filters: { status: ['active', 'monitoring'] } },
+        { key: 'health_statuses', fields: ['name', 'category', 'status', 'is_contagious', 'isolation_required', 'region'], filters: { status: ['active', 'improving'] } },
         { key: 'medications', fields: ['name', 'critical', 'supply_remaining'], filters: { active: true } },
         { key: 'tasks', fields: ['title', 'next_due_at', 'completed'], filters: { incomplete: true } },
       ],

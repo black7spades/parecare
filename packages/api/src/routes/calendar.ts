@@ -127,45 +127,39 @@ async function expandBirthdayEvents(profileId: string, from: Date, to: Date): Pr
   return events;
 }
 
+// Sickness milestones on the calendar come from acute conditions: when an
+// illness or injury started, and when it resolved. Health status lives on
+// conditions now, not the retired health_statuses table.
 async function expandHealthStatusEvents(profileId: string, from: Date, to: Date): Promise<CalendarEvent[]> {
-  const statuses = await db('health_statuses')
+  const conditions = await db('medical_conditions')
     .where({ care_profile_id: profileId })
-    .select('id', 'name', 'onset_date', 'expected_resolution_date', 'actual_resolution_date', 'status');
+    .whereIn('category', ['illness', 'acute_illness', 'chronic_flare', 'injury', 'post_operative', 'recovery'])
+    .select('id', 'name', 'started_on', 'resolved_on', 'status');
 
   const events: CalendarEvent[] = [];
   const fromStr = from.toISOString().slice(0, 10);
   const toStr = to.toISOString().slice(0, 10);
 
-  for (const hs of statuses) {
-    const onset = String(hs.onset_date).slice(0, 10);
-    if (onset >= fromStr && onset <= toStr) {
-      events.push({
-        id: `hs-onset-${hs.id}`,
-        title: `🤒 ${hs.name} onset`,
-        next_due_at: new Date(onset + 'T00:00:00Z').toISOString(),
-        completed: false,
-        kind: 'health_status',
-      });
-    }
-    if (hs.expected_resolution_date) {
-      const exp = String(hs.expected_resolution_date).slice(0, 10);
-      if (exp >= fromStr && exp <= toStr) {
+  for (const c of conditions) {
+    if (c.started_on) {
+      const onset = String(c.started_on).slice(0, 10);
+      if (onset >= fromStr && onset <= toStr) {
         events.push({
-          id: `hs-expected-${hs.id}`,
-          title: `🤒 ${hs.name} expected resolution`,
-          next_due_at: new Date(exp + 'T00:00:00Z').toISOString(),
-          completed: hs.status === 'resolved',
+          id: `hs-onset-${c.id}`,
+          title: `🤒 ${c.name} started`,
+          next_due_at: new Date(onset + 'T00:00:00Z').toISOString(),
+          completed: false,
           kind: 'health_status',
         });
       }
     }
-    if (hs.actual_resolution_date) {
-      const actual = String(hs.actual_resolution_date).slice(0, 10);
-      if (actual >= fromStr && actual <= toStr) {
+    if (c.resolved_on) {
+      const resolved = String(c.resolved_on).slice(0, 10);
+      if (resolved >= fromStr && resolved <= toStr) {
         events.push({
-          id: `hs-resolved-${hs.id}`,
-          title: `✅ ${hs.name} resolved`,
-          next_due_at: new Date(actual + 'T00:00:00Z').toISOString(),
+          id: `hs-resolved-${c.id}`,
+          title: `✅ ${c.name} resolved`,
+          next_due_at: new Date(resolved + 'T00:00:00Z').toISOString(),
           completed: true,
           kind: 'health_status',
         });

@@ -9,7 +9,7 @@ import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { Avatar } from '../../components/ui/Avatar';
 import { browserTimeZone } from '../../lib/datetime';
-import { POA_TYPES, providerTypeLabel, healthStatusStatusLabel, type Provider } from '../../lib/care';
+import { POA_TYPES, conditionStatusLabel, providerTypeLabel, type Provider } from '../../lib/care';
 
 interface AttentionItem {
   profile_id: string;
@@ -674,7 +674,7 @@ function ProfileCard({
                         {hs.name}
                         {hs.is_contagious ? ' · Contagious' : ''}
                         {hs.isolation_required ? ' · Isolating' : ''}
-                        {!hs.is_contagious && !hs.isolation_required ? ` · ${healthStatusStatusLabel(hs.status)}` : ''}
+                        {!hs.is_contagious && !hs.isolation_required ? ` · ${conditionStatusLabel(hs.status)}` : ''}
                       </span>
                     ))
                   : p.journeys.length > 0
