@@ -13,6 +13,7 @@ import {
   RELATIONSHIPS,
   conditionStatusLabel,
   providerTypeLabel,
+  totalOnHand,
   type Allergy,
   type CareDocument,
   type CarePlan,
@@ -722,7 +723,7 @@ function MedicationsTables({ profileId }: { profileId: string }) {
       if (key === 'name') return m.name;
       if (key === 'dose') return m.dose;
       if (key === 'schedule') return schedule(m.schedule_times, m.frequency, m.as_needed);
-      if (key === 'supply') return m.supply_remaining;
+      if (key === 'supply') return totalOnHand(m);
       return m.active;
     }
   );
@@ -755,7 +756,7 @@ function MedicationsTables({ profileId }: { profileId: string }) {
                   <td className="py-2 pr-3 font-medium text-ink">{m.name}</td>
                   <td className="py-2 pr-3 text-ink">{m.dose ?? ''}</td>
                   <td className="py-2 pr-3 text-ink">{schedule(m.schedule_times, m.frequency, m.as_needed)}</td>
-                  <td className="py-2 pr-3 text-ink">{m.supply_remaining ?? ''}</td>
+                  <td className="py-2 pr-3 text-ink">{totalOnHand(m) ?? ''}</td>
                   <td className="py-2 pr-3 text-muted">{m.active ? 'Active' : 'Stopped'}</td>
                 </tr>
               ))}

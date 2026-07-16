@@ -131,7 +131,7 @@ export async function gatherNotifications(
       .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
       .whereIn('m.care_profile_id', profileIds)
       .where('m.active', true)
-      .select('m.id', 'm.care_profile_id', 'm.supply', 'm.supply_remaining', 'm.schedule_times', 'm.critical', 'm.updated_at', 'c.name'),
+      .select('m.id', 'm.care_profile_id', 'm.supply', 'm.supply_remaining', 'm.packs_on_hand', 'm.schedule_times', 'm.critical', 'm.updated_at', 'c.name'),
     db('medication_administrations')
       .whereIn('care_profile_id', profileIds)
       .where('administered_at', '>=', startOfDay)
@@ -173,7 +173,10 @@ export async function gatherNotifications(
     const critical = !!m.critical;
 
     if (prefs.supply && m.supply_remaining !== null && m.supply_remaining !== undefined) {
-      const remaining = Number(m.supply_remaining);
+      // Unopened packs count towards what is on hand.
+      const packUnits =
+        m.packs_on_hand != null && m.supply != null ? Number(m.packs_on_hand) * Number(m.supply) : 0;
+      const remaining = Number(m.supply_remaining) + packUnits;
       const total = Number(m.supply);
       // Low means five or fewer doses left, or under a fifth of the supply.
       const lowThreshold = Number.isFinite(total) && total > 0 ? Math.max(5, total * 0.2) : 5;

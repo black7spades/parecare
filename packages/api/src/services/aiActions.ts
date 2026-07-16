@@ -3,7 +3,7 @@ import { db } from '../config/database';
 import type { Account, CareAccess, CareCircleMember, CareProfile } from '../types';
 import { parseZonedTime, formatInZone } from '../lib/timezone';
 import { matchProfileNames, type NameCandidate } from '../lib/nameMatch';
-import { perDoseDrawdown } from './medicationSupply';
+import { drawDownOnHand, perDoseDrawdown } from './medicationSupply';
 
 /**
  * Actions the assistant can carry out on the user's behalf: logging a care
@@ -420,13 +420,7 @@ async function recordOneMedication(
   if (GIVEN.has(entry.status)) {
     // Draw supply down by units taken each time; the dose volume only counts
     // for measured, liquid-style forms. Shared with the REST record path.
-    const amount = perDoseDrawdown(med);
-    if (amount > 0) {
-      await db('medications')
-        .where({ id: med.id })
-        .whereNotNull('supply_remaining')
-        .update({ supply_remaining: db.raw('GREATEST(0, supply_remaining - ?)', [amount]) });
-    }
+    await drawDownOnHand(med.id, perDoseDrawdown(med));
   }
   await audit(profileId, account.id, 'medications', `${med.name} ${entry.status}`);
   const at = formatInZone(administeredAt, timeZone);

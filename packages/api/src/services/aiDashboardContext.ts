@@ -129,7 +129,7 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
       .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
       .whereIn('m.care_profile_id', ids)
       .where('m.active', true)
-      .select('m.care_profile_id', 'm.id', 'c.name as name', 'm.dose', 'm.schedule_times', 'm.supply_remaining')
+      .select('m.care_profile_id', 'm.id', 'c.name as name', 'm.dose', 'm.schedule_times', 'm.supply', 'm.supply_remaining', 'm.packs_on_hand')
       .orderBy('c.name', 'asc'),
     db('medication_administrations')
       .whereIn('care_profile_id', ids)
@@ -178,7 +178,7 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
 
   const medsMap = new Map<string, Array<{ name: string; dose: string | null; schedule_times: string[] }>>();
   const outOfStockMap = new Map<string, Array<{ id: string; name: string }>>();
-  for (const m of meds as Array<{ care_profile_id: string; id: string; name: string; dose: string | null; schedule_times: unknown; supply_remaining: string | number | null }>) {
+  for (const m of meds as Array<{ care_profile_id: string; id: string; name: string; dose: string | null; schedule_times: unknown; supply: string | number | null; supply_remaining: string | number | null; packs_on_hand: string | number | null }>) {
     const arr = medsMap.get(m.care_profile_id) ?? [];
     arr.push({
       name: m.name,
@@ -186,9 +186,11 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
       schedule_times: Array.isArray(m.schedule_times) ? (m.schedule_times as string[]) : [],
     });
     medsMap.set(m.care_profile_id, arr);
-    // Supply is tracked only when a number is set; zero or below means a
-    // repeat is needed before the next dose.
-    if (m.supply_remaining !== null && m.supply_remaining !== undefined && Number(m.supply_remaining) <= 0) {
+    // Supply is tracked only when a number is set; zero or below, counting
+    // unopened packs, means a repeat is needed before the next dose.
+    const packUnits =
+      m.packs_on_hand != null && m.supply != null ? Number(m.packs_on_hand) * Number(m.supply) : 0;
+    if (m.supply_remaining !== null && m.supply_remaining !== undefined && Number(m.supply_remaining) + packUnits <= 0) {
       const out = outOfStockMap.get(m.care_profile_id) ?? [];
       out.push({ id: m.id, name: m.name });
       outOfStockMap.set(m.care_profile_id, out);

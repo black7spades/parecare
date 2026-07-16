@@ -19,6 +19,7 @@ import {
   medStatusDescription,
   regimenLine,
   supplyLabel,
+  totalOnHand,
   type MedicalCondition,
   type MedicationRecord,
 } from '../../../lib/care';
@@ -165,8 +166,8 @@ export function MedicationsPage() {
               resource="medications"
               canImport={canManageMeds}
               onImported={invalidate}
-              templateHeaders={['Name', 'Units per dose', 'Dose', 'Type', 'Route', 'With food', 'As needed', 'Times', 'Instructions', 'Supply in units', 'Active']}
-              templateSample={['Metformin', '1', '500 mg', 'Tablet', 'By mouth', 'true', 'false', '08:00; 20:00', 'Take with a full glass of water', '60', 'true']}
+              templateHeaders={['Name', 'Units per dose', 'Dose', 'Type', 'Route', 'With food', 'As needed', 'Times', 'Instructions', 'Supply in units', 'Packs on hand', 'Active']}
+              templateSample={['Metformin', '1', '500 mg', 'Tablet', 'By mouth', 'true', 'false', '08:00; 20:00', 'Take with a full glass of water', '60', '2', 'true']}
             />
             {canManageMeds ? <Button onClick={() => setAddOpen(true)}>Add medication</Button> : null}
           </div>
@@ -211,15 +212,17 @@ export function MedicationsPage() {
                   <th className="px-4 py-3 font-medium">Dose</th>
                   <th className="px-4 py-3 font-medium">Route</th>
                   <th className="px-4 py-3 font-medium">Schedule</th>
+                  <th className="px-4 py-3 font-medium">Packs on hand</th>
                   <th className="px-4 py-3 font-medium">Supply left</th>
                   <th className="px-4 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {dv.view.length === 0 ? (
-                  <tr><td colSpan={canSelect ? 8 : 7} className="px-4 py-8 text-center text-muted">{meds.length === 0 ? 'No medications recorded yet.' : 'No medications match your search or filters.'}</td></tr>
+                  <tr><td colSpan={canSelect ? 9 : 8} className="px-4 py-8 text-center text-muted">{meds.length === 0 ? 'No medications recorded yet.' : 'No medications match your search or filters.'}</td></tr>
                 ) : dv.view.map((m) => {
-                  const remaining = m.supply_remaining;
+                  // What's on hand overall: loose units plus unopened packs.
+                  const remaining = totalOnHand(m);
                   return (
                   <tr key={m.id} className={`border-b border-border last:border-0 ${m.active ? '' : 'opacity-60'}`}>
                     {canSelect ? (
@@ -244,6 +247,7 @@ export function MedicationsPage() {
                       ) : null}
                       {m.instructions ? <div className="text-xs">{m.instructions}</div> : null}
                     </td>
+                    <td className="px-4 py-3 text-muted">{m.packs_on_hand != null ? fmtNum(m.packs_on_hand) : '—'}</td>
                     <td className="px-4 py-3">
                       {remaining == null ? (
                         <span className="text-muted">—</span>
@@ -372,6 +376,7 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
   const [slots, setSlots] = useState<string[]>(initialTimes.length ? initialTimes : ['08:00']);
   const [packSize, setPackSize] = useState(med?.supply != null ? String(med.supply) : '');
   const [remaining, setRemaining] = useState(med?.supply_remaining != null ? String(med.supply_remaining) : '');
+  const [packs, setPacks] = useState(med?.packs_on_hand != null ? String(med.packs_on_hand) : '');
   const [repeatsDue, setRepeatsDue] = useState(med?.repeats_due ?? '');
   const [error, setError] = useState('');
 
@@ -429,6 +434,7 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
         schedule_times: asNeeded ? [] : slots.slice(0, perDay),
         supply: packSize.trim() === '' ? null : Number(packSize),
         supply_remaining: remaining.trim() === '' ? null : Number(remaining),
+        packs_on_hand: packs.trim() === '' ? null : Number(packs),
         repeats_due: repeatsDue || null,
       };
       return med ? api.patch(`/care-profiles/${profileId}/medications/${med.id}`, body) : api.post(`/care-profiles/${profileId}/medications`, body);
@@ -539,8 +545,10 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
           </p>
           <p className="text-sm text-ink leading-8">
             We have{' '}
-            <input className={inlineInput} aria-label="Amount left" type="number" min="0" step="any" value={remaining} onChange={(e) => setRemaining(e.target.value)} />{' '}
-            {supplyWord} left.
+            <input className={inlineInput} aria-label="Unopened packs on hand" type="number" min="0" step="any" value={packs} onChange={(e) => setPacks(e.target.value)} />{' '}
+            unopened {packs.trim() === '1' ? containerWord : `${containerWord}s`} and{' '}
+            <input className={inlineInput} aria-label="Amount left in the open pack" type="number" min="0" step="any" value={remaining} onChange={(e) => setRemaining(e.target.value)} />{' '}
+            {supplyWord} in the open {containerWord}.
           </p>
           <p className="text-sm text-ink leading-8">
             Repeats due:{' '}
@@ -549,7 +557,8 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
           <p className="text-xs text-muted mt-1">
             {typeMeta?.measured
               ? `Each dose given counts the ${supplyWord} on hand down by the dose volume.`
-              : 'Each dose given counts the units on hand down by the number taken each time.'}
+              : 'Each dose given counts the units on hand down by the number taken each time.'}{' '}
+            When the open {containerWord} runs out, the next unopened one is opened automatically.
           </p>
         </section>
 

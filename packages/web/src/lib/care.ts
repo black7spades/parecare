@@ -686,7 +686,10 @@ export interface MedicationRecord {
   instructions: string | null;
   /** Counted in units: a full pack provides this many. */
   supply: number | null;
+  /** Loose units left in the open pack. */
   supply_remaining: number | null;
+  /** Unopened full packs on hand, on top of the loose units. */
+  packs_on_hand: number | null;
   /** When a repeat prescription is next due. */
   repeats_due: string | null;
   /** Dangerous to miss: overdue and out-of-stock alerts are urgent. */
@@ -751,6 +754,20 @@ export function medUnitsLabel(count: number, form: string | null): string {
  * in its dose measure ("195 mL"); a tablet is stocked by count
  * ("3 Tablets"). The right unit for the right kind of medicine.
  */
+/**
+ * Everything on hand: the loose units in the open pack plus the units in
+ * every unopened pack. Null when supply is not tracked for this medication.
+ */
+export function totalOnHand(m: {
+  supply: number | null;
+  supply_remaining: number | null;
+  packs_on_hand: number | null;
+}): number | null {
+  if (m.supply_remaining == null) return null;
+  const packUnits = m.packs_on_hand != null && m.supply != null ? m.packs_on_hand * m.supply : 0;
+  return m.supply_remaining + packUnits;
+}
+
 export function supplyLabel(count: number, m: { form: string | null; dose_unit: string | null }): string {
   const type = MED_TYPES.find((t) => t.value.toLowerCase() === (m.form ?? '').toLowerCase());
   if (type?.measured) {
