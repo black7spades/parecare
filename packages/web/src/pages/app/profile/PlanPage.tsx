@@ -82,6 +82,7 @@ export function PlanPage() {
   const [inviteVersion, setInviteVersion] = useState<PlanVersionMeta | null>(null);
   const [accessOpen, setAccessOpen] = useState(false);
   const [confirmRevert, setConfirmRevert] = useState<PlanVersionMeta | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [error, setError] = useState('');
 
   const { data: pendingData, isLoading: pendingLoading } = useQuery({
@@ -148,6 +149,18 @@ export function PlanPage() {
       invalidate();
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not restore the version.'),
+  });
+  const deleteAllMutation = useMutation({
+    mutationFn: () => api.delete(`/care-profiles/${profile.id}/plan/versions`),
+    onSuccess: () => {
+      setConfirmDeleteAll(false);
+      setError('');
+      invalidate();
+    },
+    onError: (err) => {
+      setConfirmDeleteAll(false);
+      setError(err instanceof Error ? err.message : 'Could not delete the care plan.');
+    },
   });
 
   const exportPdf = async (v: PlanVersionMeta) => {
@@ -283,6 +296,24 @@ export function PlanPage() {
             onExport={(v) => void exportPdf(v)}
             onRevert={setConfirmRevert}
           />
+
+          {canEdit ? (
+            <div className="card border-l-4 border-l-red-500">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-red-700 dark:text-red-300">Delete care plan</h3>
+                  <p className="text-xs text-muted">
+                    Wipes every version, its changelog, signatures, review links, access grants and the plan
+                    documents filed in Documents. The recorded facts stay; the next Generate starts from a
+                    fresh version 1. Only the profile owner or an admin can do this.
+                  </p>
+                </div>
+                <Button variant="danger" onClick={() => setConfirmDeleteAll(true)}>
+                  Delete care plan
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </>
       )}
 
@@ -324,6 +355,31 @@ export function PlanPage() {
       ) : null}
 
       {accessOpen ? <AccessModal profileId={profile.id} onClose={() => setAccessOpen(false)} /> : null}
+
+      <Modal open={confirmDeleteAll} onClose={() => setConfirmDeleteAll(false)} title="Delete the entire care plan">
+        <p className="text-sm text-ink mb-2">
+          Are you sure? This permanently deletes, for {careName}:
+        </p>
+        <ul className="text-sm text-muted list-disc pl-5 space-y-0.5 mb-3">
+          <li>all {versions.length} plan {versions.length === 1 ? 'version' : 'versions'} and the full changelog</li>
+          <li>every signature and pending review link</li>
+          <li>all care plan access grants</li>
+          <li>the plan documents filed in Documents</li>
+          <li>any recorded changes waiting to go into the plan</li>
+        </ul>
+        <p className="text-sm text-muted mb-4">
+          This cannot be undone. The facts themselves, such as allergies, conditions and medications, are
+          not touched, and a new version 1 can be generated afterwards.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmDeleteAll(false)}>
+            Cancel
+          </Button>
+          <Button variant="danger" loading={deleteAllMutation.isPending} onClick={() => deleteAllMutation.mutate()}>
+            Delete care plan
+          </Button>
+        </div>
+      </Modal>
 
       <Modal open={confirmRevert !== null} onClose={() => setConfirmRevert(null)} title="Restore version">
         <p className="text-sm text-muted mb-4">

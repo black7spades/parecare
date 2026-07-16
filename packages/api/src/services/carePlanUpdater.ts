@@ -1194,6 +1194,32 @@ export async function rejectVersion(versionId: string, profileId: string): Promi
   if (doc) await deleteFile(doc.file_url).catch(() => {});
 }
 
+/**
+ * Wipes every care plan artifact for a profile: all versions (their
+ * changes, signatures and review links cascade with them), all recorded
+ * plan events, all explicit access grants, and the version documents
+ * filed in Documents together with their stored files. The recorded
+ * facts (allergies, conditions, medications, and so on) are untouched;
+ * the next Generate starts again from a fresh version 1.
+ */
+export async function deleteCarePlan(profileId: string): Promise<number> {
+  const versions = await db('care_plan_versions')
+    .where({ care_profile_id: profileId })
+    .select('id', 'document_id');
+  const docIds = versions.map((v) => v.document_id).filter(Boolean) as string[];
+  const docs = docIds.length ? await db('documents').whereIn('id', docIds).select('id', 'file_url') : [];
+  await db.transaction(async (trx) => {
+    await trx('care_plan_events').where({ care_profile_id: profileId }).delete();
+    await trx('care_plan_versions').where({ care_profile_id: profileId }).delete();
+    await trx('care_plan_access').where({ care_profile_id: profileId }).delete();
+    if (docIds.length) await trx('documents').whereIn('id', docIds).delete();
+  });
+  for (const d of docs) {
+    await deleteFile(d.file_url).catch(() => {});
+  }
+  return versions.length;
+}
+
 // ---------------------------------------------------------------------------
 // First-run baseline gaps
 

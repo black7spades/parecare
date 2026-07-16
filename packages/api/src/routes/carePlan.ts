@@ -8,6 +8,7 @@ import {
   applyPending,
   approveVersion,
   baselineGaps,
+  deleteCarePlan,
   generateBaseline,
   newReviewToken,
   parseContent,
@@ -283,6 +284,31 @@ carePlanRouter.post('/versions/generate', requireAuth, async (req, res) => {
     result: { status: result.status, applied: result.applied },
     version: result.version ? versionMeta(result.version) : null,
   });
+});
+
+/**
+ * The full reset: every version, change, event, signature, review link,
+ * access grant and filed plan document is removed. Owner or platform
+ * admin only — this is the destructive escape hatch, and the recorded
+ * facts themselves are untouched.
+ */
+carePlanRouter.delete('/versions', requireAuth, async (req, res) => {
+  const level = req.careAccess?.level;
+  if (level !== 'owner' && level !== 'admin') {
+    res.status(403).json({
+      error: 'Only the profile owner or an admin can delete the care plan',
+      code: 'OWNER_ONLY',
+    });
+    return;
+  }
+  const removed = await deleteCarePlan(String(req.params['id']));
+  logPlanAudit(
+    String(req.params['id']),
+    req.account!.id,
+    'deleted',
+    `Care plan deleted: ${removed} ${removed === 1 ? 'version' : 'versions'} and all plan records removed`
+  );
+  res.json({ message: 'Care plan deleted.', removed });
 });
 
 async function findVersion(req: Request) {
