@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
-import { Input, Textarea } from '../../../components/ui/Input';
+import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { CatalogueCombo } from '../../../components/CatalogueCombo';
 import { useDataView, type DataFilter, type DataSort } from '../../../components/data/useDataView';
@@ -19,22 +18,19 @@ import {
   FUNCTION_DOMAINS,
   LIMITATION_LEVELS,
   TEMPORAL_PATTERNS,
-  TREATMENT_CATEGORIES,
-  TREATMENT_STATUS_OPTIONS,
   codeSystemLabel,
   conditionCategoryLabel,
   conditionStatusLabel,
   conditionTypeLabel,
   functionDomainLabel,
   temporalPatternLabel,
-  treatmentCategoryLabel,
-  treatmentStatusLabel,
   type ConditionCode,
   type ConditionFunction,
   type ConditionSymptom,
   type MedicalCondition,
 } from '../../../lib/care';
 import { useProfile } from './ProfileLayout';
+import { ManagedWithSection, persistManagedRows, type ManagedRow } from './ManagedWith';
 
 const inputClass =
   'w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -340,6 +336,7 @@ export function ConditionsPage() {
       {adding ? (
         <ConditionEditor
           profileId={profile.id}
+          careName={careName}
           condition={null}
           onClose={() => setAdding(false)}
           onSaved={(saved) => {
@@ -352,6 +349,7 @@ export function ConditionsPage() {
       {editing ? (
         <ConditionEditor
           profileId={profile.id}
+          careName={careName}
           condition={editing}
           onClose={() => {
             setEditing(null);
@@ -434,16 +432,19 @@ function SortableHeader({
 
 function ConditionEditor({
   profileId,
+  careName,
   condition,
   onClose,
   onSaved,
 }: {
   profileId: string;
+  careName: string;
   condition: MedicalCondition | null;
   onClose: () => void;
   onSaved: (saved: MedicalCondition) => void;
 }) {
   const isNew = condition === null;
+  const queryClient = useQueryClient();
   const [name, setName] = useState(condition?.name ?? '');
   const [category, setCategory] = useState(condition?.category ?? '');
   const [conditionType, setConditionType] = useState(condition?.condition_type ?? '');
@@ -456,7 +457,7 @@ function ConditionEditor({
   const [isContagious, setIsContagious] = useState(condition?.is_contagious ?? false);
   const [isolationRequired, setIsolationRequired] = useState(condition?.isolation_required ?? false);
   const [region, setRegion] = useState(condition?.region ?? '');
-  const [notes, setNotes] = useState(condition?.notes ?? '');
+  const [managedRows, setManagedRows] = useState<ManagedRow[]>([]);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -473,13 +474,13 @@ function ConditionEditor({
     setIsContagious(condition.is_contagious ?? false);
     setIsolationRequired(condition.isolation_required ?? false);
     setRegion(condition.region ?? '');
-    setNotes(condition.notes ?? '');
+    setManagedRows([]);
   }, [condition]);
 
   const showIllnessFields = category === 'illness' || category === 'acute_illness' || category === 'chronic_flare';
 
   const saveMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const body = {
         name: name.trim(),
         category: category || null,
@@ -493,32 +494,40 @@ function ConditionEditor({
         is_contagious: isContagious,
         isolation_required: isolationRequired,
         region: region.trim() || null,
-        notes: notes.trim() || null,
       };
-      return isNew
-        ? api.post<{ condition: MedicalCondition }>(`/care-profiles/${profileId}/conditions`, body)
-        : api.patch<{ condition: MedicalCondition }>(`/care-profiles/${profileId}/conditions/${condition.id}`, body);
+      const res = isNew
+        ? await api.post<{ condition: MedicalCondition }>(`/care-profiles/${profileId}/conditions`, body)
+        : await api.patch<{ condition: MedicalCondition }>(`/care-profiles/${profileId}/conditions/${condition.id}`, body);
+      // Everything managing the condition is saved once the condition exists.
+      await persistManagedRows(profileId, res.condition.id, managedRows);
+      return res;
     },
-    onSuccess: (res) => onSaved(res.condition),
+    onSuccess: (res) => {
+      setManagedRows([]);
+      void queryClient.invalidateQueries({ queryKey: ['medications', profileId] });
+      void queryClient.invalidateQueries({ queryKey: ['treatments', profileId] });
+      onSaved(res.condition);
+    },
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not save the condition.'),
   });
 
   return (
     <Modal open onClose={onClose} title={isNew ? 'Add condition' : `Edit ${condition.name}`} wide>
       <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-ink">
+          <span className="font-medium">{careName}</span>
+          <span>has</span>
+          <CatalogueCombo
+            endpoint="/condition-catalogue"
+            ariaLabel="Condition name"
+            placeholder="Type to search, e.g. Type 2 diabetes"
+            initial={name}
+            keepValue
+            onPick={setName}
+            widthClass="w-64"
+          />
+        </div>
         <div className="grid sm:grid-cols-2 gap-3">
-          <div>
-            <span className="block text-sm font-medium text-ink mb-1">Condition</span>
-            <CatalogueCombo
-              endpoint="/condition-catalogue"
-              ariaLabel="Condition name"
-              placeholder="Type to search, e.g. Type 2 diabetes"
-              initial={name}
-              keepValue
-              onPick={setName}
-              widthClass="w-full"
-            />
-          </div>
           <label className="block">
             <span className="block text-sm font-medium text-ink mb-1">Category</span>
             <select className={inputClass} value={category} onChange={(e) => setCategory(e.target.value)}>
@@ -622,7 +631,15 @@ function ConditionEditor({
             />
           ) : null}
         </div>
-        <Textarea label="Notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+
+        <ManagedWithSection
+          profileId={profileId}
+          careName={careName}
+          conditionName={name}
+          condition={condition}
+          rows={managedRows}
+          onRowsChange={setManagedRows}
+        />
 
         {!isNew ? (
           <>
@@ -630,8 +647,6 @@ function ConditionEditor({
             <FunctionsSection profileId={profileId} condition={condition} />
           </>
         ) : null}
-
-        <TreatmentPlanSection profileId={profileId} condition={condition} isNew={isNew} />
 
         {showIllnessFields && !isNew ? (
           <SymptomsSection profileId={profileId} condition={condition} />
@@ -824,140 +839,6 @@ function FunctionsSection({ profileId, condition }: { profileId: string; conditi
       <div className="flex justify-end mt-2">
         <Button size="sm" variant="secondary" loading={addMutation.isPending} onClick={() => addMutation.mutate()}>
           Add impact
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function TreatmentPlanSection({
-  profileId,
-  condition,
-  isNew,
-}: {
-  profileId: string;
-  condition: MedicalCondition | null;
-  isNew: boolean;
-}) {
-  const queryClient = useQueryClient();
-  const [treatments, setTreatments] = useState(condition?.treatments ?? []);
-  const [name, setName] = useState('');
-  const [treatmentCategory, setTreatmentCategory] = useState('therapy');
-  const [treatmentStatus, setTreatmentStatus] = useState('active');
-  const [reviewDate, setReviewDate] = useState('');
-
-  const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: ['conditions', profileId] });
-    void queryClient.invalidateQueries({ queryKey: ['treatments', profileId] });
-  };
-
-  const addMutation = useMutation({
-    mutationFn: () =>
-      api.post<{ treatment: { id: string; name: string; category: string; current_status: string; last_review_date: string | null; active: boolean } }>(
-        `/care-profiles/${profileId}/treatments`,
-        {
-          name: name.trim(),
-          category: treatmentCategory,
-          current_status: treatmentStatus,
-          last_review_date: reviewDate || null,
-          medical_condition_id: condition?.id ?? null,
-        }
-      ),
-    onSuccess: (res) => {
-      setTreatments([...treatments, res.treatment]);
-      setName('');
-      setReviewDate('');
-      invalidate();
-    },
-  });
-
-  const statusMutation = useMutation({
-    mutationFn: ({ id, current_status }: { id: string; current_status: string }) =>
-      api.patch(`/care-profiles/${profileId}/treatments/${id}`, { current_status }),
-    onSuccess: (_res, vars) => {
-      setTreatments(treatments.map((t) => (t.id === vars.id ? { ...t, current_status: vars.current_status } : t)));
-      invalidate();
-    },
-  });
-
-  return (
-    <div className="border-t border-border pt-3">
-      <h3 className="text-sm font-semibold text-ink mb-1">Treatment plan</h3>
-      <p className="text-xs text-muted mb-2">
-        {isNew
-          ? 'Add treatments for this condition. They will also appear on the Treatments page.'
-          : 'Everything managing this condition. Medications are prescribed on the Treatments page and appear here once linked to this condition.'}
-      </p>
-      <div className="space-y-1.5">
-        {!isNew && (condition?.medications ?? []).map((m, i) => (
-          <div key={`med-${i}`} className="flex items-center gap-2 text-sm">
-            <span className="badge bg-surface-2 text-muted text-xs w-28 justify-center">Medication</span>
-            <span className="text-ink">{m.name}</span>
-            <span className="text-muted">{m.active ? 'Active' : 'Stopped'}</span>
-            <Link to="../medications" className="ml-auto text-xs text-primary hover:underline">
-              Manage
-            </Link>
-          </div>
-        ))}
-        {treatments.map((t) => (
-          <div key={t.id} className="flex items-center gap-2 text-sm">
-            <span className="badge bg-surface-2 text-muted text-xs w-28 justify-center">{treatmentCategoryLabel(t.category)}</span>
-            <span className="text-ink">{t.name}</span>
-            {t.last_review_date ? (
-              <span className="text-muted text-xs">reviewed {fmtDate(t.last_review_date)}</span>
-            ) : null}
-            <select
-              aria-label={`Status of ${t.name}`}
-              className="ml-auto rounded-md border border-border bg-card px-2 py-1 text-xs"
-              value={t.current_status}
-              onChange={(e) => statusMutation.mutate({ id: t.id, current_status: e.target.value })}
-            >
-              {TREATMENT_STATUS_OPTIONS.map((s) => (
-                <option key={s.value} value={s.value}>{treatmentStatusLabel(s.value)}</option>
-              ))}
-            </select>
-          </div>
-        ))}
-        {treatments.length === 0 && (condition?.medications ?? []).length === 0 ? (
-          <p className="text-sm text-muted">Nothing managing this condition yet.</p>
-        ) : null}
-      </div>
-      <div className="grid sm:grid-cols-2 gap-2 mt-2">
-        <div>
-          <Input
-            label="Treatment"
-            placeholder="e.g. Physiotherapy, knee replacement, walking frame"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </div>
-        <label className="block">
-          <span className="block text-xs text-muted mb-1">Kind</span>
-          <select className={inputClass} value={treatmentCategory} onChange={(e) => setTreatmentCategory(e.target.value)}>
-            {TREATMENT_CATEGORIES.map((c) => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="block text-xs text-muted mb-1">Status</span>
-          <select className={inputClass} value={treatmentStatus} onChange={(e) => setTreatmentStatus(e.target.value)}>
-            {TREATMENT_STATUS_OPTIONS.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-          </select>
-        </label>
-        <Input label="Last reviewed" type="date" value={reviewDate} onChange={(e) => setReviewDate(e.target.value)} />
-      </div>
-      <div className="flex justify-end mt-2">
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={!name.trim() || (isNew && !condition)}
-          loading={addMutation.isPending}
-          onClick={() => addMutation.mutate()}
-        >
-          Add treatment
         </Button>
       </div>
     </div>
