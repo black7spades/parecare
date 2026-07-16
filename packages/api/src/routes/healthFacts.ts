@@ -489,3 +489,55 @@ conditionsRouter.delete('/:conditionId/symptoms/:symptomId', requireAuth, async 
   }
   res.json({ message: 'Symptom removed.' });
 });
+
+const extractSchema = z.object({
+  document_id: z.string().uuid(),
+  category: z.string().optional(),
+});
+
+conditionsRouter.post('/extract-from-document', requireAuth, async (req, res) => {
+  const parsed = extractSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+
+  const doc = await db('documents')
+    .where({ id: parsed.data.document_id, care_profile_id: req.params['id'] })
+    .first();
+  if (!doc) {
+    res.status(404).json({ error: 'Document not found', code: 'NOT_FOUND' });
+    return;
+  }
+
+  const { isAiConfigured, complete } = await import('../services/aiProvider');
+  if (!isAiConfigured()) {
+    res.json({ extracted: {} });
+    return;
+  }
+
+  const category = parsed.data.category ?? 'condition';
+  const systemPrompt =
+    `You are a medical document analyser for a care coordination platform. ` +
+    `A user has uploaded or selected a document labelled "${doc.label}" (${doc.mime_type ?? 'unknown type'}). ` +
+    `Extract structured data from the document metadata. ` +
+    `Return ONLY a JSON object with these optional fields: ` +
+    `name (condition name), neurotype (one of: autism, adhd, dyslexia, dyspraxia, dyscalculia, tourette, ocd, spd, other), ` +
+    `diagnosis_date (YYYY-MM-DD), diagnosing_provider (name of clinician/practice), ` +
+    `severity (mild/moderate/severe), notes (brief summary). ` +
+    `Only include fields you can confidently determine. Return {} if nothing can be extracted.`;
+
+  try {
+    const result = await complete(
+      systemPrompt,
+      [{ role: 'user', content: `Document: "${doc.label}". Category: ${category}. Please extract any available data.` }],
+      1024,
+      'chat',
+    );
+    const jsonMatch = result.text.match(/\{[\s\S]*\}/);
+    const extracted = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+    res.json({ extracted });
+  } catch {
+    res.json({ extracted: {} });
+  }
+});
