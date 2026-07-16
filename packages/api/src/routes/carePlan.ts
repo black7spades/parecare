@@ -339,6 +339,7 @@ carePlanRouter.get('/versions/:versionId', requireAuth, async (req, res) => {
     version: {
       ...versionMeta(version, { author_name: author?.display_name ?? null, signature_count: signatures.length }),
       content: parseContent(version.content),
+      report: version.report ?? null,
     },
     changes: changes.map((c) => ({ ...c, source_event_ids: parseIds(c.source_event_ids) })),
     signatures: signatures.map((s) => ({
@@ -443,6 +444,7 @@ carePlanRouter.get('/versions/:versionId/export', requireAuth, async (req, res) 
     hash: version.content_hash,
     createdAt: new Date(version.created_at),
     content: parseContent(version.content),
+    report: version.report ?? null,
     changelog: version.changelog,
     signatures,
   });
@@ -732,6 +734,7 @@ planReviewsRouter.get('/:token', async (req, res) => {
       version: version.version,
       status: version.status,
       content: parseContent(version.content),
+      report: version.report ?? null,
       content_hash: version.content_hash,
       changelog: version.changelog,
       created_at: version.created_at,

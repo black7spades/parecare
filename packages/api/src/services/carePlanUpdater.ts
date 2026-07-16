@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'crypto';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { uploadFile, deleteFile } from './storage';
+import { composeReport, reportToHtml } from './carePlanReport';
 
 /**
  * Event-driven incremental care-plan updater.
@@ -337,14 +338,20 @@ function diffOps(current: PlanContent, truth: Record<string, PlanEntry[]>, secti
 // synthesizer where configured (strict machine-readable output enforced),
 // with a deterministic fallback so the sections always exist.
 
-interface NarrativeSources {
+export interface NarrativeSources {
   name: string;
   conditions: Array<{
     name: string;
     status: string | null;
     severity: string | null;
     category: string | null;
+    condition_type: string | null;
+    started_on: string | null;
+    resolved_on: string | null;
     contagious: boolean;
+    /** For neurotype conditions: the formal diagnosis facts, never invented. */
+    neurotype: string | null;
+    diagnosis_status: string | null;
     medications: string[];
     treatments: string[];
   }>;
@@ -352,12 +359,38 @@ interface NarrativeSources {
   dietary_requirements: string[];
   mobility_aids: string[];
   communication_needs: string[];
-  medications: Array<{ name: string; dose_amount: string | null; dose_unit: string | null; schedule_times: string | null }>;
+  medications: Array<{
+    name: string;
+    dose_amount: string | null;
+    dose_unit: string | null;
+    route: string | null;
+    frequency: string | null;
+    schedule_times: string | null;
+    as_needed: boolean;
+    active: boolean;
+    for_condition: string | null;
+  }>;
+  treatments: Array<{
+    name: string;
+    category: string | null;
+    frequency: string | null;
+    as_needed: boolean;
+    active: boolean;
+    for_condition: string | null;
+  }>;
+  providers: Array<{
+    name: string;
+    provider_type: string | null;
+    organisation: string | null;
+    phone: string | null;
+    email: string | null;
+  }>;
+  emergency_contacts: Array<{ name: string; relationship: string | null; phone: string | null }>;
   recent_care_logs: Array<{ entry_type: string; title: string | null; body: string; occurred_at: string }>;
 }
 
-async function gatherNarrativeSources(profileId: string): Promise<NarrativeSources> {
-  const [profile, conditions, meds, treatments, allergies, plan, logs] = await Promise.all([
+export async function gatherNarrativeSources(profileId: string): Promise<NarrativeSources> {
+  const [profile, conditions, meds, treatments, allergies, plan, providers, logs] = await Promise.all([
     db('care_profiles').where({ id: profileId }).first(),
     db('medical_conditions').where({ care_profile_id: profileId }).orderBy('name'),
     db('medications as m')
@@ -367,11 +400,17 @@ async function gatherNarrativeSources(profileId: string): Promise<NarrativeSourc
     db('treatments').where({ care_profile_id: profileId }),
     db('allergies').where({ care_profile_id: profileId }).orderBy('substance'),
     db('care_plans').where({ care_profile_id: profileId }).first(),
+    db('care_profile_providers as cpp')
+      .join('providers as p', 'cpp.provider_id', 'p.id')
+      .where({ 'cpp.care_profile_id': profileId })
+      .orderBy('p.name')
+      .select('p.name', 'p.provider_type', 'p.organisation', 'p.phone', 'p.email'),
     db('care_log_entries')
       .where({ care_profile_id: profileId })
       .orderBy('occurred_at', 'desc')
       .limit(20),
   ]);
+  const conditionNameById = new Map<string, string>(conditions.map((c) => [c.id as string, c.name as string]));
   const medsByCondition = new Map<string, string[]>();
   for (const m of meds) {
     if (!m.medical_condition_id) continue;
@@ -385,6 +424,19 @@ async function gatherNarrativeSources(profileId: string): Promise<NarrativeSourc
       t.name,
     ]);
   }
+  const contacts = ((): Array<{ name?: string; relationship?: string; phone?: string }> => {
+    const raw = plan?.emergency_contacts;
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  })();
   return {
     name: profile?.full_name ?? 'this person',
     conditions: conditions.map((c) => ({
@@ -392,7 +444,12 @@ async function gatherNarrativeSources(profileId: string): Promise<NarrativeSourc
       status: c.status ?? null,
       severity: c.severity ?? null,
       category: c.category ?? null,
+      condition_type: c.condition_type ?? null,
+      started_on: dateOnly(c.started_on),
+      resolved_on: dateOnly(c.resolved_on),
       contagious: !!c.is_contagious,
+      neurotype: c.neurotype ?? null,
+      diagnosis_status: c.diagnosis_status ?? null,
       medications: medsByCondition.get(c.id) ?? [],
       treatments: treatmentsByCondition.get(c.id) ?? [],
     })),
@@ -404,8 +461,31 @@ async function gatherNarrativeSources(profileId: string): Promise<NarrativeSourc
       name: m.name,
       dose_amount: m.dose_amount ?? null,
       dose_unit: m.dose_unit ?? null,
+      route: m.route ?? null,
+      frequency: m.frequency ?? null,
       schedule_times: asStringArray(m.schedule_times).join(', ') || null,
+      as_needed: !!m.as_needed,
+      active: !!m.active,
+      for_condition: m.medical_condition_id ? conditionNameById.get(m.medical_condition_id) ?? null : null,
     })),
+    treatments: treatments.map((t) => ({
+      name: t.name,
+      category: t.category ?? null,
+      frequency: t.frequency ?? null,
+      as_needed: !!t.as_needed,
+      active: !!t.active,
+      for_condition: t.medical_condition_id ? conditionNameById.get(t.medical_condition_id) ?? null : null,
+    })),
+    providers: providers.map((p) => ({
+      name: p.name,
+      provider_type: p.provider_type ?? null,
+      organisation: p.organisation ?? null,
+      phone: p.phone ?? null,
+      email: p.email ?? null,
+    })),
+    emergency_contacts: contacts
+      .filter((c) => c.name)
+      .map((c) => ({ name: c.name!, relationship: c.relationship ?? null, phone: c.phone ?? null })),
     recent_care_logs: logs.map((l) => ({
       entry_type: l.entry_type,
       title: l.title ?? null,
@@ -808,7 +888,8 @@ function renderHtml(
   hash: string,
   createdAt: Date,
   content: PlanContent,
-  changelog: string | null
+  changelog: string | null,
+  report: string
 ): string {
   const sections = PLAN_SECTIONS.filter((s) => (content.sections[s] ?? []).length > 0)
     .map((s) => {
@@ -831,15 +912,21 @@ function renderHtml(
     })
     .join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>Care plan for ${esc(profileName)}, version ${version}</title>
-<style>body{font-family:system-ui,sans-serif;max-width:52rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}
-h1{font-size:1.4rem}h2{font-size:1.05rem;margin-top:1.5rem}table{border-collapse:collapse;width:100%;font-size:.85rem}
+<style>body{font-family:system-ui,sans-serif;max-width:52rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a;line-height:1.5}
+h1{font-size:1.5rem;margin-bottom:0}h2{font-size:1.05rem;margin-top:1.5rem}h3{font-size:.95rem;margin-top:1rem}
+.masthead{margin:.1rem 0;font-size:1rem}table{border-collapse:collapse;width:100%;font-size:.85rem}
 th,td{border:1px solid #ccc;padding:.35rem .5rem;text-align:left}th{background:#f3f3f3}
-.meta{color:#666;font-size:.8rem}.changes{white-space:pre-wrap;font-size:.85rem;background:#f8f8f8;padding:.75rem;border-radius:.375rem}</style>
+.meta{color:#666;font-size:.8rem}.changes{white-space:pre-wrap;font-size:.85rem;background:#f8f8f8;padding:.75rem;border-radius:.375rem}
+.appendix{margin-top:2.5rem;border-top:2px solid #ccc;padding-top:1rem}</style>
 </head><body>
-<h1>Care plan for ${esc(profileName)}</h1>
-<p class="meta">Version ${version} &middot; Created ${createdAt.toISOString()} &middot; Integrity hash ${hash}</p>
+${reportToHtml(report)}
+<p class="meta">Integrity hash SHA-256 ${hash} &middot; Created ${createdAt.toISOString()}</p>
+<div class="appendix">
+<h2>Appendix: data record</h2>
+<p class="meta">The structured facts this report was written from, one column per data point.</p>
 ${changelog ? `<h2>What changed in this version</h2><div class="changes">${esc(changelog)}</div>` : ''}
 ${sections}
+</div>
 <p class="meta">Document generated by PareCare. Version ${version}. SHA-256 ${hash}.</p>
 </body></html>`;
 }
@@ -855,6 +942,7 @@ export interface VersionRow {
   content: PlanContent;
   content_hash: string;
   changelog: string | null;
+  report: string | null;
   author_account_id: string | null;
   applied_event_ids: string[];
   document_id: string | null;
@@ -910,7 +998,17 @@ async function createVersion(input: CreateVersionInput): Promise<VersionRow> {
   const versionNumber = (input.base?.version ?? 0) + 1;
   const hash = contentHash(versionNumber, input.content);
   const name = await profileName(input.profileId);
-  const html = renderHtml(name, versionNumber, hash, new Date(), input.content, input.changelog);
+  const createdAt = new Date();
+  // The prose clinical report: the same data structure written as a
+  // narrative document. Composed fresh for every version.
+  const report = await composeReport({
+    profileName: name,
+    version: versionNumber,
+    createdAt,
+    content: input.content,
+    sources: await gatherNarrativeSources(input.profileId),
+  });
+  const html = renderHtml(name, versionNumber, hash, createdAt, input.content, input.changelog, report);
   const fileUrl = await uploadFile(
     Buffer.from(html, 'utf8'),
     `${input.profileId}/care-plan-v${versionNumber}-${hash.slice(0, 12)}.html`,
@@ -944,6 +1042,7 @@ async function createVersion(input: CreateVersionInput): Promise<VersionRow> {
           content: trx.raw('?::jsonb', [JSON.stringify(input.content)]),
           content_hash: hash,
           changelog: input.changelog || null,
+          report,
           author_account_id: input.actorId,
           applied_event_ids: trx.raw('?::jsonb', [JSON.stringify(input.eventIds)]),
           document_id: doc.id,

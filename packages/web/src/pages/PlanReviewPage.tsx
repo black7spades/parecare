@@ -5,6 +5,7 @@ import { format } from 'date-fns';
 import { api } from '../api/client';
 import { Button } from '../components/ui/Button';
 import { Textarea } from '../components/ui/Input';
+import { ProseReport } from '../components/ProseReport';
 import {
   PLAN_NARRATIVE_SECTIONS,
   PLAN_SECTION_ORDER,
@@ -34,6 +35,7 @@ interface ReviewPayload {
     version: number;
     status: string;
     content: PlanContent;
+    report: string | null;
     content_hash: string;
     changelog: string | null;
     created_at: string;
@@ -53,6 +55,7 @@ export function PlanReviewPage() {
   const { token } = useParams<{ token: string }>();
   const queryClient = useQueryClient();
   const [comment, setComment] = useState('');
+  const [showRecord, setShowRecord] = useState(false);
   const [error, setError] = useState('');
 
   const { data, isLoading, isError } = useQuery({
@@ -117,6 +120,12 @@ export function PlanReviewPage() {
         ) : null}
       </div>
 
+      {version.report ? (
+        <div className="card">
+          <ProseReport report={version.report} />
+        </div>
+      ) : null}
+
       {version.changelog ? (
         <div className="card">
           <h2 className="text-sm font-semibold text-ink mb-1">What changed in this version</h2>
@@ -124,7 +133,21 @@ export function PlanReviewPage() {
         </div>
       ) : null}
 
-      {sections.map((s) => {
+      {version.report ? (
+        <div className="card">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-ink">Data record</h2>
+              <p className="text-xs text-muted">The structured facts the report above was written from.</p>
+            </div>
+            <Button size="xs" variant="ghost" onClick={() => setShowRecord((v) => !v)}>
+              {showRecord ? 'Hide' : 'Show'}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {(version.report ? (showRecord ? sections : []) : sections).map((s) => {
         const entries = version.content.sections[s] ?? [];
         const fieldNames = [...new Set(entries.flatMap((e: PlanEntry) => Object.keys(e.fields)))];
         return (
