@@ -8,6 +8,7 @@ import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { AllergyModal } from '../../../components/AllergyModal';
 import { PagePurpose } from '../../../components/PagePurpose';
+import { ProseReport } from '../../../components/ProseReport';
 import { OptionChips } from '../../../components/CatalogueCombo';
 import { useAuthStore } from '../../../stores/auth';
 import { useProfile } from './ProfileLayout';
@@ -668,7 +669,7 @@ function ContentSections({ content }: { content: PlanContent }) {
 }
 
 interface VersionDetail {
-  version: PlanVersionMeta & { content: PlanContent };
+  version: PlanVersionMeta & { content: PlanContent; report: string | null };
   changes: PlanChange[];
   signatures: PlanSignature[];
   reviews: PlanReview[];
@@ -684,6 +685,7 @@ function VersionViewer({
   meta: PlanVersionMeta;
   onClose: () => void;
 }) {
+  const [showRecord, setShowRecord] = useState(false);
   const { data, isLoading } = useQuery({
     queryKey: ['plan-version', profileId, meta.id],
     queryFn: () => api.get<VersionDetail>(`/care-profiles/${profileId}/plan/versions/${meta.id}`),
@@ -700,6 +702,7 @@ function VersionViewer({
             {data.version.author_name ? ` by ${data.version.author_name}` : ''} · SHA-256{' '}
             {data.version.content_hash}
           </p>
+          {data.version.report ? <ProseReport report={data.version.report} /> : null}
           {data.version.changelog ? (
             <div>
               <h4 className="text-sm font-semibold text-ink mb-1">What changed in this version</h4>
@@ -708,7 +711,26 @@ function VersionViewer({
               </pre>
             </div>
           ) : null}
-          <ContentSections content={data.version.content} />
+          {data.version.report ? (
+            <div className="border-t border-border pt-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-sm font-semibold text-ink">Data record</h4>
+                  <p className="text-xs text-muted">The structured facts this report was written from.</p>
+                </div>
+                <Button size="xs" variant="ghost" onClick={() => setShowRecord((v) => !v)}>
+                  {showRecord ? 'Hide' : 'Show'}
+                </Button>
+              </div>
+              {showRecord ? (
+                <div className="mt-3">
+                  <ContentSections content={data.version.content} />
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <ContentSections content={data.version.content} />
+          )}
           {data.signatures.length > 0 ? (
             <div>
               <h4 className="text-sm font-semibold text-ink mb-1">Signatures</h4>
