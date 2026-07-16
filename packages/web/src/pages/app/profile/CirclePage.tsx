@@ -5,7 +5,7 @@ import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
-import { POA_TYPES, poaLabel, type CircleMember } from '../../../lib/care';
+import { CIRCLE_ROLES, POA_TYPES, poaLabel, type CircleMember } from '../../../lib/care';
 import { RelationshipSelect } from '../../../components/RelationshipSelect';
 import { useProfile } from './ProfileLayout';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
@@ -500,12 +500,9 @@ function InviteModal({
             value={role}
             onChange={(e) => setRole(e.target.value)}
           >
-            <option value="family">Family</option>
-            <option value="friend">Friend</option>
-            <option value="carer">Carer</option>
-            <option value="organisation">Organisation</option>
-            <option value="legal">Legal representative</option>
-            <option value="other">Other</option>
+            {CIRCLE_ROLES.map((r) => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
           </select>
         </div>
         <RelationshipSelect label="Who is the person in care to them? (optional)" value={relationship} onChange={setRelationship} />

@@ -7,7 +7,7 @@ import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
-import { DOCUMENT_CATEGORIES, documentCategoryLabel, type CareDocument } from '../../../lib/care';
+import { CIRCLE_ROLES, circleRoleLabel, DOCUMENT_CATEGORIES, documentCategoryLabel, type CareDocument, type CircleMember } from '../../../lib/care';
 import { PagePurpose } from '../../../components/PagePurpose';
 import { useProfile } from './ProfileLayout';
 
@@ -15,6 +15,20 @@ function formatSize(bytes: number | null): string {
   if (!bytes) return '';
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** A member's name, flagged while their invite is still pending. */
+const memberName = (m: CircleMember): string =>
+  m.invite_accepted ? m.display_name : `${m.display_name} (invite pending)`;
+
+const membersWithRole = (members: CircleMember[], role: string): CircleMember[] =>
+  members.filter((m) => m.role === role);
+
+function restrictedVisibilityTitle(roles: string[], members: CircleMember[]): string {
+  const names = members.filter((m) => roles.includes(m.role)).map(memberName);
+  return names.length > 0
+    ? `Only the profile owner and these people can see it: ${names.join(', ')}`
+    : 'Only the profile owner can see it. Nobody in the care circle has the selected roles yet.';
 }
 
 const sizeValue = (d: CareDocument): number => d.file_size_bytes ?? 0;
@@ -47,6 +61,12 @@ export function DocumentsPage() {
   });
   const documents = data?.documents ?? [];
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['documents', profile.id] });
+
+  const { data: circleData } = useQuery({
+    queryKey: ['circle', profile.id],
+    queryFn: () => api.get<{ members: CircleMember[] }>(`/care-profiles/${profile.id}/circle`),
+  });
+  const members = circleData?.members ?? [];
 
   const uploadMutation = useMutation({
     mutationFn: () => {
@@ -202,12 +222,14 @@ export function DocumentsPage() {
                       {(doc.visible_to_roles?.length ?? 0) > 0 ? (
                         <span
                           className="badge bg-amber-50 text-amber-700 text-xs"
-                          title={`Visible to the owner and: ${doc.visible_to_roles!.join(', ')}`}
+                          title={restrictedVisibilityTitle(doc.visible_to_roles!, members)}
                         >
-                          Restricted
+                          {doc.visible_to_roles!.map(circleRoleLabel).join(', ')}
                         </span>
                       ) : (
-                        <span className="text-xs text-muted">Everyone</span>
+                        <span className="text-xs text-muted" title="Everyone in the care circle can see it.">
+                          Everyone
+                        </span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
@@ -291,19 +313,19 @@ export function DocumentsPage() {
           </label>
           {restrictedRoles.length > 0 ? (
             <div className="mt-2 space-y-1 pl-6">
-              {['family', 'carer', 'legal', 'organisation'].map((role) => (
-                <label key={role} className="flex items-center gap-2 text-sm text-ink capitalize">
+              {CIRCLE_ROLES.map(({ value, label: roleLabel }) => (
+                <label key={value} className="flex items-center gap-2 text-sm text-ink">
                   <input
                     type="checkbox"
                     className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                    checked={restrictedRoles.includes(role)}
+                    checked={restrictedRoles.includes(value)}
                     onChange={(e) =>
                       setRestrictedRoles((prev) =>
-                        e.target.checked ? [...prev, role] : prev.filter((r) => r !== role)
+                        e.target.checked ? [...prev, value] : prev.filter((r) => r !== value)
                       )
                     }
                   />
-                  {role}
+                  {roleLabel}
                 </label>
               ))}
               <p className="text-xs text-muted">The profile owner always has access.</p>
@@ -355,8 +377,10 @@ export function DocumentsPage() {
 
       {editing ? (
         <EditDocumentModal
+          key={editing.id}
           profileId={profile.id}
           doc={editing}
+          members={members}
           onClose={() => { setEditing(null); setBulkEditQueue([]); }}
           onSaved={() => {
             invalidate();
@@ -376,23 +400,33 @@ export function DocumentsPage() {
   );
 }
 
-function EditDocumentModal({ profileId, doc, onClose, onSaved }: { profileId: string; doc: CareDocument; onClose: () => void; onSaved: () => void }) {
+function EditDocumentModal({ profileId, doc, members, onClose, onSaved }: { profileId: string; doc: CareDocument; members: CircleMember[]; onClose: () => void; onSaved: () => void }) {
   const [editLabel, setEditLabel] = useState(doc.label);
   const [editCategory, setEditCategory] = useState(doc.category);
+  const [restricted, setRestricted] = useState((doc.visible_to_roles?.length ?? 0) > 0);
+  const [roles, setRoles] = useState<string[]>(doc.visible_to_roles ?? []);
   const [editError, setEditError] = useState('');
+
+  // Standard roles plus any custom roles already in use in this circle.
+  const knownRoles = [...new Set([...CIRCLE_ROLES.map((r) => r.value), ...members.map((m) => m.role)])];
+  const addableRoles = knownRoles.filter((r) => !roles.includes(r));
+  const everyoneNames = members.map(memberName);
 
   const mutation = useMutation({
     mutationFn: () => api.patch(`/care-profiles/${profileId}/documents/${doc.id}`, {
       label: editLabel.trim(),
       category: editCategory,
+      visible_to_roles: restricted ? roles : [],
     }),
     onSuccess: onSaved,
     onError: (err) => setEditError(err instanceof Error ? err.message : 'Failed to save'),
   });
 
+  const canSave = !!editLabel.trim() && (!restricted || roles.length > 0);
+
   return (
     <Modal open onClose={onClose} title="Edit document">
-      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (editLabel.trim()) mutation.mutate(); }}>
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (canSave) mutation.mutate(); }}>
         <Input label="Label" value={editLabel} onChange={(e) => setEditLabel(e.target.value)} required />
         <div>
           <label htmlFor="edit-doc-category" className="block text-sm font-medium text-ink mb-1">Category</label>
@@ -407,10 +441,82 @@ function EditDocumentModal({ profileId, doc, onClose, onSaved }: { profileId: st
             ))}
           </select>
         </div>
+        <div>
+          <span className="block text-sm font-medium text-ink mb-1">Who can see it</span>
+          <label className="flex items-center gap-2 text-sm text-ink">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+              checked={restricted}
+              onChange={(e) => {
+                setRestricted(e.target.checked);
+                if (!e.target.checked) setRoles([]);
+              }}
+            />
+            Restrict to selected roles
+          </label>
+          {restricted ? (
+            <div className="mt-2 space-y-2 pl-6">
+              {roles.length > 0 ? (
+                <ul className="space-y-1">
+                  {roles.map((role) => {
+                    const names = membersWithRole(members, role).map(memberName);
+                    return (
+                      <li key={role} className="flex items-start justify-between gap-2 rounded-md border border-border px-3 py-2">
+                        <div className="min-w-0">
+                          <span className="text-sm text-ink">{circleRoleLabel(role)}</span>
+                          <p className="text-xs text-muted break-words">
+                            {names.length > 0 ? names.join(', ') : 'Nobody in the care circle has this role yet.'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          aria-label={`Remove access for ${circleRoleLabel(role)}`}
+                          title={`Remove access for ${circleRoleLabel(role)}`}
+                          className="text-muted hover:text-red-600 text-sm px-1 shrink-0"
+                          onClick={() => setRoles((prev) => prev.filter((r) => r !== role))}
+                        >
+                          ✕
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="text-xs text-red-600">
+                  No roles selected: only the profile owner would keep access, which is not supported yet. Add a role, or untick the box to let everyone in the circle see it.
+                </p>
+              )}
+              {addableRoles.length > 0 ? (
+                <select
+                  aria-label="Add a role"
+                  className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  value=""
+                  onChange={(e) => {
+                    const role = e.target.value;
+                    if (role) setRoles((prev) => [...prev, role]);
+                  }}
+                >
+                  <option value="">Add a role…</option>
+                  {addableRoles.map((r) => (
+                    <option key={r} value={r}>{circleRoleLabel(r)}</option>
+                  ))}
+                </select>
+              ) : null}
+              <p className="text-xs text-muted">The profile owner always has access.</p>
+            </div>
+          ) : (
+            <p className="mt-1 text-xs text-muted pl-6">
+              {everyoneNames.length > 0
+                ? `Everyone in the care circle can see it: the profile owner and ${everyoneNames.join(', ')}.`
+                : 'Everyone in the care circle can see it. Right now that is only the profile owner.'}
+            </p>
+          )}
+        </div>
         {editError ? <p className="text-sm text-red-600">{editError}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={mutation.isPending} disabled={!editLabel.trim()}>Save</Button>
+          <Button type="submit" loading={mutation.isPending} disabled={!canSave}>Save</Button>
         </div>
       </form>
     </Modal>

@@ -188,6 +188,19 @@ export const RELATIONSHIPS = [
   'Resident',
 ] as const;
 
+/** Standard care circle roles. Members can also carry a custom role string. */
+export const CIRCLE_ROLES = [
+  { value: 'family', label: 'Family' },
+  { value: 'friend', label: 'Friend' },
+  { value: 'carer', label: 'Carer' },
+  { value: 'organisation', label: 'Organisation' },
+  { value: 'legal', label: 'Legal representative' },
+  { value: 'other', label: 'Other' },
+] as const;
+
+export const circleRoleLabel = (role: string) =>
+  CIRCLE_ROLES.find((r) => r.value === role)?.label ?? role.charAt(0).toUpperCase() + role.slice(1);
+
 export interface CircleMember {
   id: string;
   account_id: string | null;
