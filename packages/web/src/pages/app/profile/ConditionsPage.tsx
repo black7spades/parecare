@@ -29,6 +29,7 @@ import {
   type ConditionSymptom,
   type MedicalCondition,
 } from '../../../lib/care';
+import { PagePurpose } from '../../../components/PagePurpose';
 import { useProfile } from './ProfileLayout';
 import { ManagedWithSection, persistManagedRows, type ManagedRow } from './ManagedWith';
 
@@ -198,7 +199,10 @@ export function ConditionsPage() {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-base font-semibold text-ink">Conditions</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold text-ink">Conditions</h2>
+            <PagePurpose kind="entry" />
+          </div>
           <p className="text-sm text-muted">
             Everything {careName} lives with: illnesses, injuries, recovery, disabilities, and long-term
             conditions, each with their category, severity, diagnosis codes, treatments, and symptoms.

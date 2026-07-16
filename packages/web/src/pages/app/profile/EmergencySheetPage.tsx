@@ -4,6 +4,7 @@ import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { PoaBadge } from '../../../components/PoaBadge';
+import { PagePurpose } from '../../../components/PagePurpose';
 import { useProfile } from './ProfileLayout';
 import { poaLabel, providerTypeLabel, type Allergy, type CarePlan, type CircleMember, type MedicalCondition, type MedicationRecord, type Provider } from '../../../lib/care';
 
@@ -57,9 +58,12 @@ export function EmergencySheetPage() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between print:hidden">
-        <p className="text-sm text-muted">
-          A one-page summary for paramedics, hospital staff, or anyone stepping in. Keep a printed copy on the fridge.
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm text-muted">
+            A one-page summary for paramedics, hospital staff, or anyone stepping in. Keep a printed copy on the fridge.
+          </p>
+          <PagePurpose kind="output" />
+        </div>
         <Button onClick={() => window.print()}>Print</Button>
       </div>
 
@@ -81,8 +85,8 @@ export function EmergencySheetPage() {
           {allergies.length === 0 ? (
             <p className="text-sm">
               No known allergies recorded.{' '}
-              <Link to="../plan" className="text-primary hover:underline print:hidden">
-                Record them on the care plan
+              <Link to="../allergies" className="text-primary hover:underline print:hidden">
+                Record them on the Allergies page
               </Link>
             </p>
           ) : (
@@ -101,7 +105,7 @@ export function EmergencySheetPage() {
 
         <Section title="Emergency contacts">
           {contacts.length === 0 ? (
-            <Empty to="../plan" action="Add them on the care plan" />
+            <Empty to="../care-needs" action="Add them on the Care needs page" />
           ) : (
             contacts.map((c, i) => (
               <p key={i} className="text-sm">

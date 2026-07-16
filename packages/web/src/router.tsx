@@ -17,6 +17,9 @@ import { CalendarPage } from './pages/app/profile/CalendarPage';
 import { MessagesPage } from './pages/app/profile/MessagesPage';
 import { AchievementsPage, MemoryBookPage } from './pages/app/profile/MemoryBookPage';
 import { ConditionsPage } from './pages/app/profile/ConditionsPage';
+import { AllergiesPage } from './pages/app/profile/AllergiesPage';
+import { CareNeedsPage } from './pages/app/profile/CareNeedsPage';
+import { PlanReviewPage } from './pages/PlanReviewPage';
 import { AppointmentsPage } from './pages/app/profile/AppointmentsPage';
 import { MarPage } from './pages/app/profile/MarPage';
 import { EmergencySheetPage } from './pages/app/profile/EmergencySheetPage';
@@ -77,6 +80,8 @@ export const router = createBrowserRouter([
   { path: '/register', element: <Register /> },
   { path: '/auth/callback', element: <OAuthCallback /> },
   { path: '/invite/:token', element: <InvitePage /> },
+  // Public: the secure-link receiving end of a care plan review invitation.
+  { path: '/plan-review/:token', element: <PlanReviewPage /> },
   {
     path: '/',
     element: (
@@ -104,6 +109,8 @@ export const router = createBrowserRouter([
           { path: 'circle', element: <CirclePage /> },
           { path: 'plan', element: <PlanPage /> },
           { path: 'conditions', element: <ConditionsPage /> },
+          { path: 'allergies', element: <AllergiesPage /> },
+          { path: 'care-needs', element: <CareNeedsPage /> },
           { path: 'neurotypes', element: <NeurotypePage /> },
           { path: 'medications', element: <MedicationsPage /> },
           { path: 'treatments', element: <TreatmentsPage /> },

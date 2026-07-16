@@ -12,7 +12,7 @@ import { careProfilesRouter } from './routes/careProfiles';
 import { careCircleRouter } from './routes/careCircle';
 import { invitationsRouter } from './routes/invitations';
 import { careLogRouter } from './routes/careLog';
-import { carePlanRouter } from './routes/carePlan';
+import { carePlanRouter, planReviewsRouter } from './routes/carePlan';
 import { checklistsRouter } from './routes/checklists';
 import { questionsRouter } from './routes/questions';
 import { documentsRouter } from './routes/documents';
@@ -47,6 +47,7 @@ import { errorHandler, notFound } from './middleware/errorHandler';
 import { requireAuth } from './middleware/auth';
 import { requireCareProfileAccess } from './middleware/subscriptionGate';
 import { auditTrail, blockViewerWrites } from './middleware/permissions';
+import { capturePlanEvents } from './middleware/carePlanEvents';
 import { activityRouter } from './routes/activity';
 import { healthStatusesRouter } from './routes/healthStatuses';
 import { appointmentsRouter } from './routes/appointments';
@@ -125,19 +126,23 @@ v1.use('/care-profiles', careProfilesRouter);
 const profileAccess = [requireAuth, requireCareProfileAccess, blockViewerWrites, auditTrail];
 v1.use('/care-profiles/:id/circle', ...profileAccess, careCircleRouter);
 v1.use('/care-profiles/:id/log', ...profileAccess, careLogRouter);
-v1.use('/care-profiles/:id/plan', ...profileAccess, carePlanRouter);
+// Changes to the watched source tables (conditions, allergies,
+// medications, treatments, providers, and the care-needs record) are
+// recorded as care plan events, which the incremental updater later
+// applies to the versioned plan as minimal deltas.
+v1.use('/care-profiles/:id/plan', ...profileAccess, capturePlanEvents('plan'), carePlanRouter);
 v1.use('/care-profiles/:id/checklists', ...profileAccess, checklistsRouter);
 v1.use('/care-profiles/:id/journeys', ...profileAccess, journeysRouter);
-v1.use('/care-profiles/:id/allergies', ...profileAccess, allergiesRouter);
-v1.use('/care-profiles/:id/conditions', ...profileAccess, conditionsRouter);
+v1.use('/care-profiles/:id/allergies', ...profileAccess, capturePlanEvents('allergies'), allergiesRouter);
+v1.use('/care-profiles/:id/conditions', ...profileAccess, capturePlanEvents('conditions'), conditionsRouter);
 v1.use('/care-profiles/:id/questions', ...profileAccess, questionsRouter);
 v1.use('/care-profiles/:id/documents', ...profileAccess, documentsRouter);
-v1.use('/care-profiles/:id/providers', ...profileAccess, providersRouter);
+v1.use('/care-profiles/:id/providers', ...profileAccess, capturePlanEvents('providers'), providersRouter);
 v1.use('/providers/search', providerSearchRouter);
 v1.use('/directory', directoryRouter);
 v1.use('/care-profiles/:id/reminders', ...profileAccess, remindersRouter);
-v1.use('/care-profiles/:id/medications', ...profileAccess, medicationsRouter);
-v1.use('/care-profiles/:id/treatments', ...profileAccess, treatmentsRouter);
+v1.use('/care-profiles/:id/medications', ...profileAccess, capturePlanEvents('medications'), medicationsRouter);
+v1.use('/care-profiles/:id/treatments', ...profileAccess, capturePlanEvents('treatments'), treatmentsRouter);
 v1.use('/care-profiles/:id/ai', ...profileAccess, aiRouter);
 v1.use('/care-profiles/:id/messages', ...profileAccess, messagesRouter);
 v1.use('/care-profiles/:id/memory-book', ...profileAccess, memoryBookRouter);
@@ -151,6 +156,9 @@ v1.use('/reports', reportsRouter);
 v1.use('/care-profiles/:id/calendar', ...profileAccess, calendarRouter);
 // Public: token-authenticated read-only calendar feed for Google/Outlook
 v1.use('/calendar', icsRouter);
+// Public: secure-link receiving end of care plan review invitations. The
+// token is the credential; every view, comment and approval is audited.
+v1.use('/plan-reviews', planReviewsRouter);
 // Public: device-key-authenticated ingestion, so machines (CPAP units,
 // meter bridges) push their own readings straight into the observation log.
 v1.use('/device', deviceRouter);

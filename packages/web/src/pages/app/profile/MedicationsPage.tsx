@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
+import { PagePurpose } from '../../../components/PagePurpose';
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
@@ -154,6 +155,7 @@ export function MedicationsPage() {
               <span>Medications</span>
               <span className="text-xs font-normal text-muted">{meds.length} on file · {listOpen ? 'hide' : 'manage'}</span>
             </button>
+            <span className="ml-2"><PagePurpose kind="entry" /></span>
           </h2>
           <p className="mt-1 text-sm text-muted">
             {careName}'s current regimen. Add, edit and organise medications here; log and review doses in the record below.
