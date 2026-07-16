@@ -80,6 +80,7 @@ const CARE_PHASES = [
 const PROVIDER_TYPES = [
   'gp',
   'specialist',
+  'psychologist',
   'pharmacy',
   'care_facility',
   'allied_health',

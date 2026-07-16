@@ -7,7 +7,13 @@ import { useDataView, type DataSort, type DataFilter } from '../../components/da
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
-import { PROVIDER_TYPES, providerTypeLabel, type Provider } from '../../lib/care';
+import {
+  PROVIDER_TYPES,
+  customProviderTypes,
+  providerTypeFilterOptions,
+  providerTypeLabel,
+  type Provider,
+} from '../../lib/care';
 
 interface LinkedProfile {
   profile_id: string;
@@ -23,15 +29,6 @@ const SORTS: DataSort<DirectoryProvider>[] = [
   { key: 'name', label: 'Name', compare: (a, b) => a.name.localeCompare(b.name) },
   { key: 'type', label: 'Type', compare: (a, b) => providerTypeLabel(a.provider_type).localeCompare(providerTypeLabel(b.provider_type)) },
   { key: 'profiles', label: 'Linked profiles', compare: (a, b) => (b.linked_profiles?.length ?? 0) - (a.linked_profiles?.length ?? 0) },
-];
-
-const FILTERS: DataFilter<DirectoryProvider>[] = [
-  {
-    key: 'type',
-    label: 'Type',
-    options: PROVIDER_TYPES.map((t) => ({ value: t.value, label: t.label })),
-    match: (row, value) => row.provider_type === value,
-  },
 ];
 
 export function DirectoryProvidersPage() {
@@ -51,12 +48,22 @@ export function DirectoryProvidersPage() {
   const canEdit = data?.can_edit ?? false;
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['directory-providers'] });
 
+  // The type filter offers custom types actually in use, not just built-ins.
+  const filters: DataFilter<DirectoryProvider>[] = [
+    {
+      key: 'type',
+      label: 'Type',
+      options: providerTypeFilterOptions(providers),
+      match: (row, value) => row.provider_type === value,
+    },
+  ];
+
   const dv = useDataView<DirectoryProvider>({
     rows: providers,
     getId: (p) => p.id,
     searchText: (p) => [p.name, p.organisation, p.phone, p.email, p.address, providerTypeLabel(p.provider_type)].filter(Boolean).join(' '),
     sorts: SORTS,
-    filters: FILTERS,
+    filters,
   });
 
   const deleteMutation = useMutation({
@@ -100,7 +107,7 @@ export function DirectoryProvidersPage() {
             sorts={SORTS}
             sortKey={dv.sortKey}
             onSort={dv.setSortKey}
-            filters={FILTERS}
+            filters={filters}
             filterValues={dv.filterValues}
             onFilter={dv.setFilter}
             selectedCount={dv.selectedRows.length}
@@ -208,6 +215,7 @@ export function DirectoryProvidersPage() {
       <DirectoryProviderEditor
         open={editorOpen}
         provider={editing}
+        typeSuggestions={customProviderTypes(providers)}
         onClose={() => { setEditorOpen(false); setBulkEditQueue([]); }}
         onSaved={() => {
           invalidate();
@@ -353,11 +361,13 @@ function BulkLinkDialog({
 function DirectoryProviderEditor({
   open,
   provider,
+  typeSuggestions,
   onClose,
   onSaved,
 }: {
   open: boolean;
   provider: DirectoryProvider | null;
+  typeSuggestions: string[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -430,13 +440,22 @@ function DirectoryProviderEditor({
             ))}
           </select>
           {type === 'other' ? (
-            <Input
-              label="Custom type"
-              placeholder="e.g. Naturopath, Osteopath"
-              value={customType}
-              onChange={(e) => setCustomType(e.target.value)}
-              className="mt-2"
-            />
+            <>
+              <Input
+                label="Custom type"
+                placeholder="e.g. Naturopath, Osteopath"
+                value={customType}
+                onChange={(e) => setCustomType(e.target.value)}
+                className="mt-2"
+                list="directory-custom-provider-types"
+                hint={typeSuggestions.length > 0 ? 'Pick an existing custom type to reuse it, or type a new one.' : undefined}
+              />
+              <datalist id="directory-custom-provider-types">
+                {typeSuggestions.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
+            </>
           ) : null}
         </div>
         <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />

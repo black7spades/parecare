@@ -273,6 +273,7 @@ export interface CareDocument {
 export const PROVIDER_TYPES = [
   { value: 'gp', label: 'GP' },
   { value: 'specialist', label: 'Specialist' },
+  { value: 'psychologist', label: 'Psychologist' },
   { value: 'vet', label: 'Vet' },
   { value: 'pharmacy', label: 'Pharmacy' },
   { value: 'care_facility', label: 'Care facility' },
@@ -285,6 +286,27 @@ export const PROVIDER_TYPES = [
 
 export const providerTypeLabel = (type: string) =>
   PROVIDER_TYPES.find((t) => t.value === type)?.label ?? type;
+
+/** The free-typed provider types in use, beyond the built-in list. */
+export function customProviderTypes(rows: Array<{ provider_type: string }>): string[] {
+  const known = new Set<string>(PROVIDER_TYPES.map((t) => t.value));
+  return [...new Set(rows.map((r) => r.provider_type).filter((t) => !!t && !known.has(t)))].sort(
+    (a, b) => a.localeCompare(b)
+  );
+}
+
+/**
+ * Filter options for provider type: the built-in list plus any custom
+ * types actually in use, so a custom-typed provider stays filterable.
+ */
+export function providerTypeFilterOptions(
+  rows: Array<{ provider_type: string }>
+): { value: string; label: string }[] {
+  return [
+    ...PROVIDER_TYPES.map((t) => ({ value: t.value, label: t.label })),
+    ...customProviderTypes(rows).map((c) => ({ value: c, label: c })),
+  ];
+}
 
 export interface Provider {
   id: string;
