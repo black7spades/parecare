@@ -16,24 +16,33 @@ const upload = multer({
 
 export const documentsRouter = Router({ mergeParams: true });
 
+const documentCategory = z.enum([
+  'poa',
+  'will',
+  'advance_care_directive',
+  'insurance',
+  'identity',
+  'medical_record',
+  'facility_contract',
+  'financial',
+  'care_plan',
+  'other',
+]);
+
 const documentMeta = z.object({
-  category: z.enum([
-    'poa',
-    'will',
-    'advance_care_directive',
-    'insurance',
-    'identity',
-    'medical_record',
-    'facility_contract',
-    'financial',
-    'other',
-  ]),
+  category: documentCategory,
   label: z.string().min(1).max(255),
   // Multipart forms deliver a single value as a string and repeated values
   // as an array — accept both.
   visible_to_roles: z
     .preprocess((v) => (typeof v === 'string' ? [v] : v), z.array(z.string()))
     .optional(),
+});
+
+const documentUpdate = z.object({
+  category: documentCategory.optional(),
+  label: z.string().min(1).max(255).optional(),
+  visible_to_roles: z.array(z.string().min(1).max(100)).max(50).optional(),
 });
 
 // Empty visible_to_roles = visible to the whole circle; otherwise only the
@@ -136,6 +145,33 @@ documentsRouter.get('/:docId/file', requireAuth, async (req, res) => {
       res.status(404).json({ error: 'File missing from storage', code: 'NOT_FOUND' });
     }
   });
+});
+
+documentsRouter.patch('/:docId', requireAuth, async (req, res) => {
+  const parsed = documentUpdate.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+
+  const doc = await db<Document>('documents')
+    .where({ id: req.params['docId'], care_profile_id: req.params['id'] })
+    .first();
+  if (!doc || !canSeeDocument(req, doc)) {
+    res.status(404).json({ error: 'Document not found', code: 'NOT_FOUND' });
+    return;
+  }
+
+  if (Object.keys(parsed.data).length === 0) {
+    res.json({ document: doc });
+    return;
+  }
+
+  const [updated] = await db<Document>('documents')
+    .where({ id: doc.id })
+    .update(parsed.data)
+    .returning('*');
+  res.json({ document: updated });
 });
 
 documentsRouter.delete('/:docId', requireAuth, async (req, res) => {
