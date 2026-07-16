@@ -5,7 +5,14 @@ import { format } from 'date-fns';
 import { api } from '../api/client';
 import { Button } from '../components/ui/Button';
 import { Textarea } from '../components/ui/Input';
-import { planSectionLabel, planVersionStatusLabel, type PlanContent, type PlanEntry } from '../lib/care';
+import {
+  PLAN_NARRATIVE_SECTIONS,
+  PLAN_SECTION_ORDER,
+  planSectionLabel,
+  planVersionStatusLabel,
+  type PlanContent,
+  type PlanEntry,
+} from '../lib/care';
 
 /**
  * The public receiving end of a care plan review invitation. The secure
@@ -88,9 +95,11 @@ export function PlanReviewPage() {
 
   const { review, version, profile_name } = data;
   const responded = review.status === 'approved' || review.status === 'declined';
-  const sections = Object.keys(version.content.sections).filter(
-    (s) => (version.content.sections[s] ?? []).length > 0
+  const known = PLAN_SECTION_ORDER.filter((s) => (version.content.sections[s] ?? []).length > 0);
+  const extras = Object.keys(version.content.sections).filter(
+    (s) => !PLAN_SECTION_ORDER.includes(s) && (version.content.sections[s] ?? []).length > 0
   );
+  const sections = [...known, ...extras];
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-5">
@@ -120,7 +129,12 @@ export function PlanReviewPage() {
         const fieldNames = [...new Set(entries.flatMap((e: PlanEntry) => Object.keys(e.fields)))];
         return (
           <div key={s} className="card">
-            <h2 className="text-sm font-semibold text-ink mb-2">{planSectionLabel(s)}</h2>
+            <div className="flex items-baseline justify-between gap-2 mb-2">
+              <h2 className="text-sm font-semibold text-ink">{planSectionLabel(s)}</h2>
+              {PLAN_NARRATIVE_SECTIONS.has(s) ? (
+                <span className="text-xs text-muted">Synthesized from the recorded facts</span>
+              ) : null}
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>

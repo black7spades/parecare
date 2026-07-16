@@ -43,7 +43,18 @@ export interface DeltaOp {
   fields?: Record<string, string | number | boolean | null>;
 }
 
+/**
+ * Section order is presentation order. The synthesized clinical narrative
+ * (goals and preferences first, then the strategies that pursue them, the
+ * risks to watch, and when the plan must be reviewed) leads the document,
+ * as care-plan frameworks such as the Australian Government's Support at
+ * Home program expect; the factual record follows as the evidence base.
+ */
 export const PLAN_SECTIONS = [
+  'goals',
+  'strategies',
+  'risks',
+  'review',
   'allergies',
   'conditions',
   'medications',
@@ -55,7 +66,28 @@ export const PLAN_SECTIONS = [
 ] as const;
 export type PlanSection = (typeof PLAN_SECTIONS)[number];
 
+/** Sections written by the plan editor, not sourced from a table. */
+export const NARRATIVE_SECTIONS = ['goals', 'strategies', 'risks', 'review'] as const;
+type NarrativeSection = (typeof NARRATIVE_SECTIONS)[number];
+
+/** Sections that mirror a source table row for row. */
+export const FACTUAL_SECTIONS = [
+  'allergies',
+  'conditions',
+  'medications',
+  'treatments',
+  'needs',
+  'directive',
+  'emergency_contacts',
+  'providers',
+] as const;
+type FactualSection = (typeof FACTUAL_SECTIONS)[number];
+
 export const SECTION_LABELS: Record<PlanSection, string> = {
+  goals: 'Goals and preferences',
+  strategies: 'Care strategies',
+  risks: 'Risks and considerations',
+  review: 'Review schedule',
   allergies: 'Allergies',
   conditions: 'Conditions',
   medications: 'Medications',
@@ -66,7 +98,7 @@ export const SECTION_LABELS: Record<PlanSection, string> = {
   providers: 'Providers',
 };
 
-/** Which plan sections a change to a source table can affect. */
+/** Which factual plan sections a change to a source table can affect. */
 const SECTIONS_BY_SOURCE: Record<string, PlanSection[]> = {
   conditions: ['conditions'],
   allergies: ['allergies'],
@@ -74,6 +106,9 @@ const SECTIONS_BY_SOURCE: Record<string, PlanSection[]> = {
   treatments: ['treatments'],
   providers: ['providers'],
   plan: ['needs', 'directive', 'emergency_contacts'],
+  // Care log entries carry no factual section of their own, but feed the
+  // synthesized risk narrative (incidents, observations).
+  log: [],
 };
 
 /** Sections where a modify or remove is clinically risky enough to need review. */
@@ -108,7 +143,7 @@ const asStringArray = (v: unknown): string[] => {
 // ---------------------------------------------------------------------------
 // Section builders: the database truth for each section, entry by entry
 
-async function buildSection(profileId: string, section: PlanSection): Promise<PlanEntry[]> {
+async function buildSection(profileId: string, section: FactualSection): Promise<PlanEntry[]> {
   switch (section) {
     case 'allergies': {
       const rows = await db('allergies').where({ care_profile_id: profileId }).orderBy('substance');
@@ -251,7 +286,7 @@ async function buildSection(profileId: string, section: PlanSection): Promise<Pl
   }
 }
 
-async function buildTruth(profileId: string, sections: PlanSection[]): Promise<Record<string, PlanEntry[]>> {
+async function buildTruth(profileId: string, sections: FactualSection[]): Promise<Record<string, PlanEntry[]>> {
   const truth: Record<string, PlanEntry[]> = {};
   for (const section of sections) {
     truth[section] = await buildSection(profileId, section);
@@ -262,8 +297,13 @@ async function buildTruth(profileId: string, sections: PlanSection[]): Promise<R
 // ---------------------------------------------------------------------------
 // Deterministic diff: the ground truth delta for the touched sections
 
+// Postgres jsonb does not preserve key order, so stored fields must be
+// compared canonically or every round-trip would look like a change.
+const canonFields = (f: PlanEntry['fields']): string =>
+  JSON.stringify(Object.fromEntries(Object.entries(f).sort(([a], [b]) => a.localeCompare(b))));
+
 const sameFields = (a: PlanEntry['fields'], b: PlanEntry['fields']): boolean =>
-  JSON.stringify(a) === JSON.stringify(b);
+  canonFields(a) === canonFields(b);
 
 function diffOps(current: PlanContent, truth: Record<string, PlanEntry[]>, sections: PlanSection[]): DeltaOp[] {
   const ops: DeltaOp[] = [];
@@ -283,6 +323,312 @@ function diffOps(current: PlanContent, truth: Record<string, PlanEntry[]>, secti
     }
   }
   return ops;
+}
+
+// ---------------------------------------------------------------------------
+// The synthesized clinical narrative
+//
+// Frameworks such as the Australian Government's Support at Home program
+// expect a care plan to lead with the participant's goals, preferences
+// and choices, connect each condition to the services and strategies that
+// address it, assess risk proactively, and be reviewed at least every 12
+// months or when a significant event occurs. The plan editor below turns
+// the factual record into that narrative: the LLM is the editor and
+// synthesizer where configured (strict machine-readable output enforced),
+// with a deterministic fallback so the sections always exist.
+
+interface NarrativeSources {
+  name: string;
+  conditions: Array<{
+    name: string;
+    status: string | null;
+    severity: string | null;
+    category: string | null;
+    contagious: boolean;
+    medications: string[];
+    treatments: string[];
+  }>;
+  allergies: Array<{ substance: string; reaction: string | null }>;
+  dietary_requirements: string[];
+  mobility_aids: string[];
+  communication_needs: string[];
+  medications: Array<{ name: string; dose_amount: string | null; dose_unit: string | null; schedule_times: string | null }>;
+  recent_care_logs: Array<{ entry_type: string; title: string | null; body: string; occurred_at: string }>;
+}
+
+async function gatherNarrativeSources(profileId: string): Promise<NarrativeSources> {
+  const [profile, conditions, meds, treatments, allergies, plan, logs] = await Promise.all([
+    db('care_profiles').where({ id: profileId }).first(),
+    db('medical_conditions').where({ care_profile_id: profileId }).orderBy('name'),
+    db('medications as m')
+      .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
+      .where('m.care_profile_id', profileId)
+      .select('m.*', 'c.name as name'),
+    db('treatments').where({ care_profile_id: profileId }),
+    db('allergies').where({ care_profile_id: profileId }).orderBy('substance'),
+    db('care_plans').where({ care_profile_id: profileId }).first(),
+    db('care_log_entries')
+      .where({ care_profile_id: profileId })
+      .orderBy('occurred_at', 'desc')
+      .limit(20),
+  ]);
+  const medsByCondition = new Map<string, string[]>();
+  for (const m of meds) {
+    if (!m.medical_condition_id) continue;
+    medsByCondition.set(m.medical_condition_id, [...(medsByCondition.get(m.medical_condition_id) ?? []), m.name]);
+  }
+  const treatmentsByCondition = new Map<string, string[]>();
+  for (const t of treatments) {
+    if (!t.medical_condition_id) continue;
+    treatmentsByCondition.set(t.medical_condition_id, [
+      ...(treatmentsByCondition.get(t.medical_condition_id) ?? []),
+      t.name,
+    ]);
+  }
+  return {
+    name: profile?.full_name ?? 'this person',
+    conditions: conditions.map((c) => ({
+      name: c.name,
+      status: c.status ?? null,
+      severity: c.severity ?? null,
+      category: c.category ?? null,
+      contagious: !!c.is_contagious,
+      medications: medsByCondition.get(c.id) ?? [],
+      treatments: treatmentsByCondition.get(c.id) ?? [],
+    })),
+    allergies: allergies.map((a) => ({ substance: a.substance, reaction: a.reaction ?? null })),
+    dietary_requirements: asStringArray(plan?.dietary_requirements),
+    mobility_aids: asStringArray(plan?.mobility_aids),
+    communication_needs: asStringArray(plan?.communication_needs),
+    medications: meds.map((m) => ({
+      name: m.name,
+      dose_amount: m.dose_amount ?? null,
+      dose_unit: m.dose_unit ?? null,
+      schedule_times: asStringArray(m.schedule_times).join(', ') || null,
+    })),
+    recent_care_logs: logs.map((l) => ({
+      entry_type: l.entry_type,
+      title: l.title ?? null,
+      body: String(l.body ?? '').slice(0, 500),
+      occurred_at: new Date(l.occurred_at).toISOString(),
+    })),
+  };
+}
+
+const narrativeSchema = z.object({
+  goals: z
+    .array(
+      z.object({
+        goal: z.string().min(1).max(500),
+        basis: z.string().max(500).optional().nullable(),
+      })
+    )
+    .max(10),
+  strategies: z
+    .array(
+      z.object({
+        condition: z.string().max(255).optional().nullable(),
+        goal: z.string().min(1).max(500),
+        strategy: z.string().min(1).max(1000),
+        supported_by: z.string().max(500).optional().nullable(),
+      })
+    )
+    .max(15),
+  risks: z
+    .array(
+      z.object({
+        risk: z.string().min(1).max(500),
+        level: z.enum(['high', 'medium', 'low']),
+        source: z.string().max(255).optional().nullable(),
+        watch_for: z.string().max(500).optional().nullable(),
+      })
+    )
+    .max(15),
+  review_triggers: z
+    .array(
+      z.object({
+        trigger: z.string().min(1).max(500),
+        action: z.string().max(500).optional().nullable(),
+      })
+    )
+    .max(10),
+});
+type Narrative = z.infer<typeof narrativeSchema>;
+
+/**
+ * The narrative every plan gets even with no AI configured: goals from
+ * the recorded conditions and needs, strategies from the recorded
+ * condition-to-treatment ties, risks from allergies and condition flags,
+ * and the standard Support at Home review triggers.
+ */
+function fallbackNarrative(src: NarrativeSources): Narrative {
+  const goals: Narrative['goals'] = [];
+  const liveConditions = src.conditions.filter((c) => c.status !== 'resolved');
+  for (const c of liveConditions) {
+    goals.push({ goal: `Manage ${c.name}`, basis: `Recorded condition${c.status ? `, currently ${c.status}` : ''}` });
+  }
+  for (const d of src.dietary_requirements) {
+    goals.push({ goal: `Keep to a ${d.toLowerCase()} diet`, basis: 'Recorded dietary requirement' });
+  }
+  for (const m of src.mobility_aids) {
+    goals.push({ goal: `Stay mobile and independent with the ${m.toLowerCase()}`, basis: 'Recorded mobility aid' });
+  }
+  if (goals.length === 0) {
+    goals.push({
+      goal: `Maintain ${src.name}'s health, independence and quality of life at home`,
+      basis: 'Default goal. Record conditions and day-to-day needs to personalise it.',
+    });
+  }
+
+  const strategies: Narrative['strategies'] = liveConditions.map((c) => {
+    const parts: string[] = [];
+    if (c.medications.length > 0) parts.push(`Medication: ${c.medications.join(', ')}`);
+    if (c.treatments.length > 0) parts.push(`Therapy: ${c.treatments.join(', ')}`);
+    return {
+      condition: c.name,
+      goal: `Manage ${c.name}`,
+      strategy: parts.length > 0 ? parts.join('. ') : 'Monitoring. No linked medication or treatment is recorded yet.',
+      supported_by:
+        src.dietary_requirements.length > 0 ? `Dietary compliance: ${src.dietary_requirements.join(', ')}` : null,
+    };
+  });
+
+  const risks: Narrative['risks'] = [];
+  for (const a of src.allergies) {
+    risks.push({
+      risk: `Allergy to ${a.substance}`,
+      level: 'high',
+      source: 'Allergies',
+      watch_for: a.reaction ? `Must not be given ${a.substance}. Reaction: ${a.reaction}` : `Must not be given ${a.substance}`,
+    });
+  }
+  for (const c of liveConditions) {
+    if (c.contagious) {
+      risks.push({
+        risk: `${c.name} is contagious`,
+        level: 'medium',
+        source: 'Conditions',
+        watch_for: 'Follow hygiene and isolation guidance until it resolves',
+      });
+    }
+    if (c.severity === 'severe' || c.severity === 'profound') {
+      risks.push({
+        risk: `${c.name} is ${c.severity}`,
+        level: 'high',
+        source: 'Conditions',
+        watch_for: 'Escalate promptly if it worsens',
+      });
+    }
+  }
+
+  const review_triggers: Narrative['review_triggers'] = [
+    { trigger: 'A hospital admission, a fall, or another significant health event', action: 'Review the plan straight away' },
+    { trigger: 'A new diagnosis, or a recorded condition worsens or changes status', action: 'Review the affected goals and strategies' },
+    { trigger: 'A new medication, a medication change, or a new allergy is recorded', action: 'Review medication strategies and risks' },
+    { trigger: 'A dietary requirement or day-to-day need can no longer be met', action: 'Review the supports behind the affected goal' },
+  ];
+
+  return { goals, strategies, risks, review_triggers };
+}
+
+/**
+ * The plan editor. When an AI provider is configured it synthesizes the
+ * narrative from the recorded facts and recent care log entries, and must
+ * return strict machine-readable JSON; anything malformed falls back to
+ * the deterministic narrative. The factual sections stay authoritative
+ * either way — the narrative interprets, it never contradicts the record
+ * as stored.
+ */
+async function synthesizeNarrative(profileId: string): Promise<Record<NarrativeSection, PlanEntry[]>> {
+  const src = await gatherNarrativeSources(profileId);
+  let narrative = fallbackNarrative(src);
+
+  try {
+    const { isAiConfigured, complete } = await import('./aiProvider');
+    if (isAiConfigured()) {
+      const system =
+        'You are the care plan editor for a care coordination platform. You synthesize the recorded ' +
+        'facts into the clinical narrative of a care plan meeting frameworks like the Australian ' +
+        "Government's Support at Home program. Requirements: " +
+        "1) GOALS: state the person's goals, preferences and choices up front, specific to them, " +
+        'never generic (e.g. "maintain functional independence with the walking frame", "manage ' +
+        'Hypertension", "enjoy a low-salt diet"). ' +
+        '2) STRATEGIES: connect each condition to the services, medications or treatments that address ' +
+        'it and say HOW the goal is pursued (e.g. "To meet the goal of Hypertension management, the ' +
+        'primary strategy is pharmacological intervention (Amlodipine, Perindopril) supported by ' +
+        'dietary compliance (low salt)"). ' +
+        '3) RISKS: proactively infer risks from the allergies, conditions, medications and recent care ' +
+        'log entries, each with a level (high/medium/low), its source, and what carers should watch ' +
+        'for (e.g. oedema associated with Amlodipine intake requires vigilance during morning routines). ' +
+        '4) REVIEW TRIGGERS: list the concrete events that must trigger a plan review before the ' +
+        'standard 12-month review (hospital admission, fall, new diagnosis, a condition status change, ' +
+        'a breach of a dietary requirement, a significant care log incident). ' +
+        'Write in plain language a family carer can follow; refer to the person by name; never invent ' +
+        'facts that are not in the data. Return ONLY strict JSON, no prose, matching: ' +
+        '{"goals":[{"goal":"...","basis":"..."}],' +
+        '"strategies":[{"condition":"...","goal":"...","strategy":"...","supported_by":"..."}],' +
+        '"risks":[{"risk":"...","level":"high|medium|low","source":"...","watch_for":"..."}],' +
+        '"review_triggers":[{"trigger":"...","action":"..."}]}';
+      const result = await complete(system, [{ role: 'user', content: JSON.stringify(src) }], 4096, 'chat');
+      const jsonMatch = result.text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = narrativeSchema.safeParse(JSON.parse(jsonMatch[0]));
+        if (parsed.success) narrative = parsed.data;
+      }
+    }
+  } catch (err) {
+    console.warn('Care plan narrative synthesis failed, using deterministic narrative:', (err as Error).message);
+  }
+
+  // The standard review anchor is never left to the model: at least every
+  // 12 months from this version.
+  const due = new Date();
+  due.setMonth(due.getMonth() + 12);
+
+  const dedup = (entries: PlanEntry[]): PlanEntry[] => {
+    const seen = new Set<string>();
+    return entries.filter((e) => (seen.has(e.key) ? false : (seen.add(e.key), true)));
+  };
+
+  return {
+    goals: dedup(
+      narrative.goals.map((g) => ({
+        key: `goals:${slug(g.goal)}`,
+        fields: { goal: g.goal, basis: g.basis ?? null },
+      }))
+    ),
+    strategies: dedup(
+      narrative.strategies.map((s) => ({
+        key: `strategies:${slug(s.condition ?? s.goal)}`,
+        fields: {
+          condition: s.condition ?? null,
+          goal: s.goal,
+          strategy: s.strategy,
+          supported_by: s.supported_by ?? null,
+        },
+      }))
+    ),
+    risks: dedup(
+      narrative.risks.map((r) => ({
+        key: `risks:${slug(r.risk)}`,
+        fields: { risk: r.risk, level: r.level, source: r.source ?? null, watch_for: r.watch_for ?? null },
+      }))
+    ),
+    review: dedup([
+      {
+        key: 'review:standard',
+        fields: {
+          review_type: 'Standard',
+          due_by: due.toISOString().slice(0, 10),
+          reason: 'Reviewed with the participant at least once every 12 months',
+        },
+      },
+      ...narrative.review_triggers.map((t) => ({
+        key: `review:trigger:${slug(t.trigger)}`,
+        fields: { review_type: 'Triggered', trigger: t.trigger, action: t.action ?? null },
+      })),
+    ]),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -416,7 +762,17 @@ const contentHash = (version: number, content: PlanContent): string =>
 
 const entryName = (fields: PlanEntry['fields'] | undefined | null): string => {
   if (!fields) return '';
-  const v = fields['substance'] ?? fields['name'] ?? fields['value'] ?? fields['location'] ?? '';
+  const v =
+    fields['substance'] ??
+    fields['name'] ??
+    fields['goal'] ??
+    fields['risk'] ??
+    fields['trigger'] ??
+    fields['condition'] ??
+    fields['review_type'] ??
+    fields['value'] ??
+    fields['location'] ??
+    '';
   return typeof v === 'string' ? v : String(v ?? '');
 };
 
@@ -639,7 +995,11 @@ export async function pendingEvents(profileId: string): Promise<PendingEvent[]> 
  * tables and marks any queued events as covered by it.
  */
 export async function generateBaseline(profileId: string, actorId: string | null): Promise<VersionRow> {
-  const truth = await buildTruth(profileId, [...PLAN_SECTIONS]);
+  const factual = await buildTruth(profileId, [...FACTUAL_SECTIONS]);
+  const narrative = await synthesizeNarrative(profileId);
+  // Sections are stored in presentation order: narrative first.
+  const truth: Record<string, PlanEntry[]> = {};
+  for (const s of PLAN_SECTIONS) truth[s] = (narrative as Record<string, PlanEntry[]>)[s] ?? factual[s] ?? [];
   const content: PlanContent = { sections: truth };
   const events = await pendingEvents(profileId);
   const empty: PlanContent = { sections: {} };
@@ -690,9 +1050,21 @@ export async function applyPending(profileId: string, actorId: string | null): P
 
   const touched = [
     ...new Set(events.flatMap((e) => SECTIONS_BY_SOURCE[e.source_table] ?? [])),
-  ] as PlanSection[];
+  ] as FactualSection[];
   const truth = await buildTruth(profileId, touched);
-  const ops = await proposeDelta(events, base.content, truth, touched);
+  const factualOps = await proposeDelta(events, base.content, truth, touched);
+
+  // The narrative is re-synthesized whenever the facts changed, or when a
+  // care log entry arrived (incidents feed the risk narrative). Its delta
+  // is diffed and recorded like any other change, so goals, strategies,
+  // risks and review triggers evolve incrementally too.
+  const afterFacts = applyOps(base.content, factualOps);
+  let narrativeOps: DeltaOp[] = [];
+  if (factualOps.length > 0 || events.some((e) => e.source_table === 'log')) {
+    const narrative = await synthesizeNarrative(profileId);
+    narrativeOps = diffOps(afterFacts, narrative, [...NARRATIVE_SECTIONS]);
+  }
+  const ops = [...factualOps, ...narrativeOps];
 
   const eventIds = events.map((e) => e.id);
   if (ops.length === 0) {
@@ -702,10 +1074,12 @@ export async function applyPending(profileId: string, actorId: string | null): P
     return { version: null, applied: events.length, status: 'no_changes' };
   }
 
-  const highRisk = ops.some(
+  // Only factual operations count towards the review rules: the narrative
+  // legitimately rewords several entries whenever a fact changes.
+  const highRisk = factualOps.some(
     (op) => op.op !== 'add' && HIGH_RISK_SECTIONS.has(op.section as PlanSection)
   );
-  const needsReview = highRisk || ops.length > LARGE_DELTA_OPS || base.locked;
+  const needsReview = highRisk || factualOps.length > LARGE_DELTA_OPS || base.locked;
   const status: 'published' | 'awaiting_signoff' = needsReview ? 'awaiting_signoff' : 'published';
 
   const beforeByKey = new Map<string, PlanEntry>();
@@ -714,7 +1088,7 @@ export async function applyPending(profileId: string, actorId: string | null): P
   }
   const changelog = ops.map((op) => describeOp(op, beforeByKey.get(op.key)?.fields ?? null)).join('\n');
 
-  const content = applyOps(base.content, ops);
+  const content = applyOps(afterFacts, narrativeOps);
   const version = await createVersion({
     profileId,
     actorId,

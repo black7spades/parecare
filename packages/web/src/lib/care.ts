@@ -1059,6 +1059,10 @@ export interface PlanContent {
 }
 
 export const PLAN_SECTION_LABELS: Record<string, string> = {
+  goals: 'Goals and preferences',
+  strategies: 'Care strategies',
+  risks: 'Risks and considerations',
+  review: 'Review schedule',
   allergies: 'Allergies',
   conditions: 'Conditions',
   medications: 'Medications',
@@ -1068,6 +1072,25 @@ export const PLAN_SECTION_LABELS: Record<string, string> = {
   emergency_contacts: 'Emergency contacts',
   providers: 'Providers',
 };
+
+/** Presentation order: the synthesized narrative leads, the record follows. */
+export const PLAN_SECTION_ORDER = [
+  'goals',
+  'strategies',
+  'risks',
+  'review',
+  'allergies',
+  'conditions',
+  'medications',
+  'treatments',
+  'needs',
+  'directive',
+  'emergency_contacts',
+  'providers',
+];
+
+/** Sections written by the plan editor from the recorded facts. */
+export const PLAN_NARRATIVE_SECTIONS = new Set(['goals', 'strategies', 'risks', 'review']);
 
 export const planSectionLabel = (s: string) => PLAN_SECTION_LABELS[s] ?? s;
 
