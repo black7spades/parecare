@@ -125,7 +125,9 @@ v1.use('/care-profiles', careProfilesRouter);
 // (plus conversation), and every successful change lands in the audit log.
 const profileAccess = [requireAuth, requireCareProfileAccess, blockViewerWrites, auditTrail];
 v1.use('/care-profiles/:id/circle', ...profileAccess, careCircleRouter);
-v1.use('/care-profiles/:id/log', ...profileAccess, careLogRouter);
+// Care log entries are watched too: incidents and observations feed the
+// synthesized risk narrative of the care plan.
+v1.use('/care-profiles/:id/log', ...profileAccess, capturePlanEvents('log'), careLogRouter);
 // Changes to the watched source tables (conditions, allergies,
 // medications, treatments, providers, and the care-needs record) are
 // recorded as care plan events, which the incremental updater later

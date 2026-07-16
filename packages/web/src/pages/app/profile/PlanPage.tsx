@@ -13,6 +13,8 @@ import { useAuthStore } from '../../../stores/auth';
 import { useProfile } from './ProfileLayout';
 import {
   PLAN_ACCESS_ROLES,
+  PLAN_NARRATIVE_SECTIONS,
+  PLAN_SECTION_ORDER,
   RELATIONSHIPS,
   planAccessRoleLabel,
   planSectionLabel,
@@ -51,16 +53,7 @@ const SECTION_MANAGE_LINKS: Record<string, { to: string; label: string }> = {
   providers: { to: '../providers', label: 'Providers page' },
 };
 
-const SECTION_ORDER = [
-  'allergies',
-  'conditions',
-  'medications',
-  'treatments',
-  'needs',
-  'directive',
-  'emergency_contacts',
-  'providers',
-];
+const SECTION_ORDER = PLAN_SECTION_ORDER;
 
 const fieldLabel = (f: string): string => f.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
@@ -574,11 +567,14 @@ function ContentSections({ content }: { content: PlanContent }) {
         const entries = content.sections[s] ?? [];
         const fieldNames = [...new Set(entries.flatMap((e: PlanEntry) => Object.keys(e.fields)))];
         const manage = SECTION_MANAGE_LINKS[s];
+        const synthesized = PLAN_NARRATIVE_SECTIONS.has(s);
         return (
           <div key={s}>
             <div className="flex items-baseline justify-between gap-2">
               <h4 className="text-sm font-semibold text-ink">{planSectionLabel(s)}</h4>
-              {manage ? (
+              {synthesized ? (
+                <span className="text-xs text-muted">Synthesized from the recorded facts</span>
+              ) : manage ? (
                 <Link to={manage.to} className="text-xs text-primary hover:underline">
                   Manage on the {manage.label}
                 </Link>
