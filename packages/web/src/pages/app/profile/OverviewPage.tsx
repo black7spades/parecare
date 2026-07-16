@@ -214,7 +214,6 @@ export function OverviewPage() {
             onToggle={toggleCollapse}
             onMove={moveCard}
             order={cardOrder}
-            hideWhenEmpty
           >
             <NeurotypesOverview profileId={profile.id} careName={careName} />
           </CollapsibleCard>
@@ -253,7 +252,6 @@ export function OverviewPage() {
             onToggle={toggleCollapse}
             onMove={moveCard}
             order={cardOrder}
-            hideWhenEmpty
           >
             <ProfileAttention profileId={profile.id} />
           </CollapsibleCard>
@@ -269,7 +267,6 @@ export function OverviewPage() {
             onToggle={toggleCollapse}
             onMove={moveCard}
             order={cardOrder}
-            hideWhenEmpty
           >
             <UpcomingEvents profileId={profile.id} />
           </CollapsibleCard>
@@ -285,7 +282,6 @@ export function OverviewPage() {
             onToggle={toggleCollapse}
             onMove={moveCard}
             order={cardOrder}
-            hideWhenEmpty
           >
             <HealthStatusOverview profileId={profile.id} />
           </CollapsibleCard>
@@ -405,7 +401,6 @@ function CollapsibleCard({
   onToggle,
   onMove,
   order,
-  hideWhenEmpty,
   children,
 }: {
   cardKey: CardKey;
@@ -415,14 +410,11 @@ function CollapsibleCard({
   onToggle: (key: CardKey) => void;
   onMove: (key: CardKey, dir: -1 | 1) => void;
   order: CardKey[];
-  hideWhenEmpty?: boolean;
   children: React.ReactNode;
 }) {
   const idx = order.indexOf(cardKey);
   const isFirst = idx === 0;
   const isLast = idx === order.length - 1;
-
-  if (hideWhenEmpty && collapsed) return null;
 
   return (
     <div className="card">
@@ -694,7 +686,9 @@ function UpcomingEvents({ profileId }: { profileId: string }) {
       ),
   });
   const events = (data?.events ?? []).filter((e) => e.kind !== 'medication' && !e.completed).slice(0, 6);
-  if (events.length === 0) return null;
+  if (events.length === 0) {
+    return <p className="text-sm text-muted">Nothing scheduled in the next two weeks.</p>;
+  }
 
   return (
     <div>
@@ -769,7 +763,9 @@ function ProfileAttention({ profileId }: { profileId: string }) {
   });
   const items = (data?.items ?? []).filter((i) => i.profile_id === profileId);
 
-  if (items.length === 0) return null;
+  if (items.length === 0) {
+    return <p className="text-sm text-muted">Nothing needs attention today.</p>;
+  }
 
   return (
     <ul className="divide-y divide-border">

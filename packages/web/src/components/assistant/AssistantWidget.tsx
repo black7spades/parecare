@@ -3,6 +3,7 @@ import { useMatch, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../../api/client';
 import { describeAiError } from '../../lib/aiErrors';
+import { ASSISTANT_COMMANDS, commandHelpText, expandSlashCommand } from '../../lib/assistantCommands';
 import { browserTimeZone } from '../../lib/datetime';
 import { useAssistantStore } from '../../stores/assistant';
 import { useAuthStore } from '../../stores/auth';
@@ -241,6 +242,7 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
 
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
+  const [showHelp, setShowHelp] = useState(false);
   const [pendingReply, setPendingReply] = useState<string | null>(null);
   const [convId, setConvId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -470,8 +472,24 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
 
   function send() {
     const content = draft.trim();
-    if (content && resumeReady && !sendMutation.isPending) sendMutation.mutate({ content });
+    if (!content || !resumeReady || sendMutation.isPending) return;
+    const cmd = expandSlashCommand(content);
+    if (cmd?.kind === 'help') {
+      setShowHelp(true);
+      setDraft('');
+      return;
+    }
+    if (cmd?.kind === 'needs-args') {
+      setError(`Add the details after /${cmd.command!.name}, or type /help to see how each command works.`);
+      return;
+    }
+    sendMutation.mutate({ content: cmd?.kind === 'send' ? cmd.message! : content });
   }
+
+  // Typing "/" offers the quick commands; picking one fills the draft.
+  const commandMatches = draft.startsWith('/')
+    ? ASSISTANT_COMMANDS.filter((c) => `/${c.name}`.startsWith(draft.trim().split(/\s/)[0].toLowerCase()))
+    : [];
 
   if (!open) {
     return (
@@ -608,10 +626,34 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
             </div>
           </>
         ) : null}
+        {showHelp ? (
+          <div className="flex justify-start">
+            <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-surface-2 text-ink whitespace-pre-wrap">
+              {commandHelpText()}
+            </div>
+          </div>
+        ) : null}
         <div ref={bottomRef} />
       </div>
 
       {error ? <p className="text-xs text-red-600 px-3 pb-1">{error}</p> : null}
+
+      {commandMatches.length > 0 ? (
+        <ul className="mx-3 mb-1 rounded-md border border-border bg-card divide-y divide-border max-h-40 overflow-y-auto shrink-0">
+          {commandMatches.map((c) => (
+            <li key={c.name}>
+              <button
+                type="button"
+                className="w-full text-left px-3 py-1.5 text-sm hover:bg-surface-2"
+                onClick={() => setDraft(`/${c.name} `)}
+              >
+                <span className="font-mono text-ink">/{c.name}</span>{' '}
+                <span className="text-muted">{c.hint}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
 
       <form
         className="flex gap-2 items-end border-t border-border p-3 shrink-0"

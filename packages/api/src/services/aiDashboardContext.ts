@@ -329,7 +329,7 @@ export interface AttentionItem {
   kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'unresolved_outcome';
   label: string;
   detail: string | null;
-  section: 'tasks' | 'medications' | 'questions';
+  section: 'tasks' | 'medications' | 'mar' | 'questions';
   /** A stable identifier for this item, for React keys and for dismissal. */
   key: string;
   /** Pressing enough to lead the list and stand out. */
@@ -407,7 +407,8 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
         kind: 'unrecorded_dose',
         label: s.overdueMedications.length === 1 ? 'A dose is not yet recorded today' : 'Doses are not yet recorded today',
         detail: s.overdueMedications.join(', '),
-        section: 'medications',
+        // Doses are logged on the Medication record page, not the list.
+        section: 'mar',
         key: `unrecorded_dose:${s.profile.id}`,
         urgent: false,
         dismissible: false,

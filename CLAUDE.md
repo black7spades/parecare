@@ -55,6 +55,19 @@ fields, but prefer structure whenever the values are queryable.
 When adding or reviewing any feature, check every table, form, DB column and
 export against this rule before shipping.
 
+**AI actions must track the data model.** Whenever a table, column or status
+vocabulary changes (a migration, a renamed field, a new feature like packs or
+symptom readings), update in the same change:
+
+- the action schemas and executors in `packages/api/src/services/aiActions.ts`
+- the action documentation in both system prompts in
+  `packages/api/src/services/ai.ts`
+- the slash commands in `packages/web/src/lib/assistantCommands.ts` if a new
+  action deserves one
+
+An AI action writing to a stale model silently corrupts records; this check is
+mandatory, not optional.
+
 ## UI style guide
 
 **Every UI change must comply with `packages/web/STYLE_GUIDE.md`.** Read it
