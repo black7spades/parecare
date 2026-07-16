@@ -162,23 +162,68 @@ const COMMON_TREATMENTS: Record<string, { kind: string; name: string }[]> = {
   ],
 };
 
+// Classic Levenshtein edit distance, for allergy screening below.
+function editDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const curr = [i];
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j]! + 1, curr[j - 1]! + 1, prev[j - 1]! + cost);
+    }
+    prev = curr;
+  }
+  return prev[n]!;
+}
+
+/**
+ * Whether a suggested treatment could be the thing a person is allergic
+ * to. Deliberately over-cautious: a substring match either way, or a
+ * close spelling (so a recorded allergy to "amlopidine" still blocks a
+ * suggestion of "Amlodipine"). Suppressing a safe suggestion costs
+ * nothing; suggesting an allergen is dangerous.
+ */
+function conflictsWithAllergy(suggestionName: string, allergen: string): boolean {
+  const s = suggestionName.trim().toLowerCase();
+  const a = allergen.trim().toLowerCase();
+  if (!s || !a) return false;
+  if (s.includes(a) || a.includes(s)) return true;
+  const dist = editDistance(s, a);
+  return 1 - dist / Math.max(s.length, a.length) >= 0.75;
+}
+
 // Suggest common treatments for a condition by name. Matches loosely so
-// "Essential hypertension" still suggests the hypertension set.
+// "Essential hypertension" still suggests the hypertension set. When a
+// profile is given, anything the person is allergic to is never suggested.
 conditionCatalogueRouter.get('/common-treatments', requireAuth, async (req, res) => {
   const name = String(req.query['condition'] ?? '').trim().toLowerCase();
   if (!name) {
     res.json({ suggestions: [] });
     return;
   }
-  const exact = COMMON_TREATMENTS[name];
-  if (exact) {
-    res.json({ suggestions: exact });
-    return;
+  let suggestions = COMMON_TREATMENTS[name];
+  if (!suggestions) {
+    const partial = Object.entries(COMMON_TREATMENTS).find(
+      ([key]) => name.includes(key) || key.includes(name)
+    );
+    suggestions = partial ? partial[1] : [];
   }
-  const partial = Object.entries(COMMON_TREATMENTS).find(
-    ([key]) => name.includes(key) || key.includes(name)
-  );
-  res.json({ suggestions: partial ? partial[1] : [] });
+
+  const profileId = String(req.query['profile_id'] ?? '').trim();
+  if (profileId && suggestions.length > 0) {
+    const allergies = (await db('allergies')
+      .where({ care_profile_id: profileId })
+      .select('substance')) as Array<{ substance: string }>;
+    suggestions = suggestions.filter(
+      (s) => !allergies.some((al) => conflictsWithAllergy(s.name, al.substance))
+    );
+  }
+
+  res.json({ suggestions });
 });
 
 conditionCatalogueRouter.get('/', requireAuth, async (req, res) => {

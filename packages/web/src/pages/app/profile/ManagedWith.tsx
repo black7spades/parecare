@@ -11,6 +11,7 @@ import {
   TREATMENT_STATUS_OPTIONS,
   treatmentCategoryLabel,
   treatmentStatusLabel,
+  type Allergy,
   type MedicalCondition,
 } from '../../../lib/care';
 
@@ -151,22 +152,38 @@ export function ManagedWithSection({
   };
 
   // How this condition is commonly managed, offered as one-tap rows.
+  // The server screens the list against this person's recorded allergies,
+  // so nothing they are allergic to is ever suggested.
   const { data: suggestionData } = useQuery({
-    queryKey: ['common-treatments', conditionName],
+    queryKey: ['common-treatments', profileId, conditionName],
     queryFn: () =>
       api.get<{ suggestions: { kind: string; name: string }[] }>(
-        `/condition-catalogue/common-treatments?condition=${encodeURIComponent(conditionName)}`
+        `/condition-catalogue/common-treatments?condition=${encodeURIComponent(conditionName)}&profile_id=${encodeURIComponent(profileId)}`
       ),
     enabled: conditionName.trim().length > 1,
   });
+
+  // This person's allergies, to warn when a typed medication matches one.
+  const { data: allergyData } = useQuery({
+    queryKey: ['allergies', profileId],
+    queryFn: () => api.get<{ allergies: Allergy[] }>(`/care-profiles/${profileId}/allergies`),
+  });
+  const allergies = allergyData?.allergies ?? [];
+
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [dismissedAll, setDismissedAll] = useState(false);
+
   const existingMeds = condition?.medications ?? [];
   const existingTreatments = condition?.treatments ?? [];
-  const suggestions = (suggestionData?.suggestions ?? []).filter(
-    (s) =>
-      !rows.some((r) => r.name.trim().toLowerCase() === s.name.toLowerCase()) &&
-      !existingMeds.some((m) => m.name.toLowerCase() === s.name.toLowerCase()) &&
-      !existingTreatments.some((t) => t.name.toLowerCase() === s.name.toLowerCase())
-  );
+  const suggestions = dismissedAll
+    ? []
+    : (suggestionData?.suggestions ?? []).filter(
+        (s) =>
+          !dismissed.has(s.name) &&
+          !rows.some((r) => r.name.trim().toLowerCase() === s.name.toLowerCase()) &&
+          !existingMeds.some((m) => m.name.toLowerCase() === s.name.toLowerCase()) &&
+          !existingTreatments.some((t) => t.name.toLowerCase() === s.name.toLowerCase())
+      );
 
   const unlinkMed = useMutation({
     mutationFn: (medId: string) =>
@@ -201,21 +218,38 @@ export function ManagedWithSection({
 
       {suggestions.length > 0 ? (
         <div className="mb-3">
-          <p className="text-xs text-muted mb-1.5">
-            Commonly used for {conditionName.trim().toLowerCase()}. Tap to add one; every detail stays
-            editable.
-          </p>
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <p className="text-xs text-muted">
+              Commonly used for {conditionName.trim().toLowerCase()}. Tap to add one; every detail stays
+              editable. Anything {careName} is allergic to is never suggested.
+            </p>
+            <Button size="xs" variant="ghost" onClick={() => setDismissedAll(true)}>
+              Dismiss all
+            </Button>
+          </div>
           <div className="flex flex-wrap gap-1.5">
             {suggestions.map((s) => (
-              <button
+              <span
                 key={`${s.kind}-${s.name}`}
-                type="button"
-                className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-2 px-2.5 py-1 text-xs text-ink hover:border-primary hover:text-primary"
-                onClick={() => addRow(s.kind, s.name)}
+                className="inline-flex items-center rounded-full border border-border bg-surface-2 text-xs text-ink"
               >
-                <span aria-hidden>+</span> {s.name}
-                <span className="text-muted">· {rowKindLabel(s.kind)}</span>
-              </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 pl-2.5 py-1 hover:text-primary"
+                  onClick={() => addRow(s.kind, s.name)}
+                >
+                  <span aria-hidden>+</span> {s.name}
+                  <span className="text-muted">· {rowKindLabel(s.kind)}</span>
+                </button>
+                <button
+                  type="button"
+                  className="px-2 py-1 text-muted hover:text-ink"
+                  aria-label={`Dismiss ${s.name}`}
+                  onClick={() => setDismissed((prev) => new Set(prev).add(s.name))}
+                >
+                  <span aria-hidden>×</span>
+                </button>
+              </span>
             ))}
           </div>
         </div>
@@ -277,6 +311,8 @@ export function ManagedWithSection({
             key={row.key}
             row={row}
             index={i}
+            careName={careName}
+            allergies={allergies}
             onChange={(patch) => setRow(row.key, patch)}
             onRemove={() => removeRow(row.key)}
           />
@@ -298,11 +334,15 @@ export function ManagedWithSection({
 function ManagedRowCard({
   row,
   index,
+  careName,
+  allergies,
   onChange,
   onRemove,
 }: {
   row: ManagedRow;
   index: number;
+  careName: string;
+  allergies: Allergy[];
   onChange: (patch: Partial<ManagedRow>) => void;
   onRemove: () => void;
 }) {
@@ -328,7 +368,7 @@ function ManagedRowCard({
       </div>
 
       {row.kind === 'medication' ? (
-        <MedicationRowFields row={row} onChange={onChange} />
+        <MedicationRowFields row={row} careName={careName} allergies={allergies} onChange={onChange} />
       ) : (
         <TreatmentRowFields row={row} onChange={onChange} />
       )}
@@ -342,9 +382,13 @@ function ManagedRowCard({
  */
 function MedicationRowFields({
   row,
+  careName,
+  allergies,
   onChange,
 }: {
   row: ManagedRow;
+  careName: string;
+  allergies: Allergy[];
   onChange: (patch: Partial<ManagedRow>) => void;
 }) {
   const typeMeta = MED_TYPES.find((t) => t.value.toLowerCase() === row.form.toLowerCase());
@@ -376,7 +420,12 @@ function MedicationRowFields({
 
   return (
     <div className="space-y-3">
-      <MedicationNameCombo value={row.name} onChange={(name) => onChange({ name })} />
+      <MedicationNameCombo
+        value={row.name}
+        careName={careName}
+        allergies={allergies}
+        onChange={(name) => onChange({ name })}
+      />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <label className="block">
@@ -587,10 +636,34 @@ function TreatmentRowFields({
  * match nudges the user to reuse the existing entry instead of creating
  * a near-duplicate.
  */
-function MedicationNameCombo({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function MedicationNameCombo({
+  value,
+  careName,
+  allergies,
+  onChange,
+}: {
+  value: string;
+  careName: string;
+  allergies: Allergy[];
+  onChange: (v: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const boxRef = useRef<HTMLDivElement>(null);
+
+  // Screen the typed name against recorded allergies, over-cautiously:
+  // a substring match either way or a close spelling both warn.
+  const typed = value.trim().toLowerCase();
+  const allergyHit =
+    typed.length > 2
+      ? allergies.find((a) => {
+          const sub = a.substance.trim().toLowerCase();
+          return (
+            sub.length > 0 &&
+            (typed.includes(sub) || sub.includes(typed) || similarity(typed, sub) >= 0.75)
+          );
+        })
+      : undefined;
 
   const { data } = useQuery({
     queryKey: ['medication-catalogue'],
@@ -674,6 +747,13 @@ function MedicationNameCombo({ value, onChange }: { value: string; onChange: (v:
             </li>
           ))}
         </ul>
+      ) : null}
+      {allergyHit ? (
+        <p className="text-xs font-medium text-red-700 dark:text-red-300 mt-1" role="alert">
+          Warning: {careName} has a recorded allergy to {allergyHit.substance}
+          {allergyHit.reaction ? ` (${allergyHit.reaction})` : ''}. Check with a clinician before
+          adding this medication.
+        </p>
       ) : null}
       {nearMatch ? (
         <div className="flex items-center gap-2 mt-1">
