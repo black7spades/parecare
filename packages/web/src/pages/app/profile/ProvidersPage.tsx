@@ -8,7 +8,14 @@ import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
-import { PROVIDER_TYPES, POA_TYPES, providerTypeLabel, type Provider } from '../../../lib/care';
+import {
+  PROVIDER_TYPES,
+  POA_TYPES,
+  customProviderTypes,
+  providerTypeFilterOptions,
+  providerTypeLabel,
+  type Provider,
+} from '../../../lib/care';
 import { useProfile } from './ProfileLayout';
 
 const SORTS: DataSort<Provider>[] = [
@@ -16,14 +23,6 @@ const SORTS: DataSort<Provider>[] = [
   { key: 'type', label: 'Type', compare: (a, b) => providerTypeLabel(a.provider_type).localeCompare(providerTypeLabel(b.provider_type)) },
 ];
 
-const FILTERS: DataFilter<Provider>[] = [
-  {
-    key: 'type',
-    label: 'Type',
-    options: PROVIDER_TYPES.map((t) => ({ value: t.value, label: t.label })),
-    match: (row, value) => row.provider_type === value,
-  },
-];
 
 export function ProvidersPage() {
   const { profile, canEdit } = useProfile();
@@ -41,12 +40,22 @@ export function ProvidersPage() {
   const providers = data?.providers ?? [];
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['providers', profile.id] });
 
+  // The type filter offers custom types actually in use, not just built-ins.
+  const filters: DataFilter<Provider>[] = [
+    {
+      key: 'type',
+      label: 'Type',
+      options: providerTypeFilterOptions(providers),
+      match: (row, value) => row.provider_type === value,
+    },
+  ];
+
   const dv = useDataView<Provider>({
     rows: providers,
     getId: (p) => p.id,
     searchText: (p) => [p.name, p.organisation, p.phone, p.email, p.address, providerTypeLabel(p.provider_type)].filter(Boolean).join(' '),
     sorts: SORTS,
-    filters: FILTERS,
+    filters,
   });
 
   const removeMutation = useMutation({
@@ -100,7 +109,7 @@ export function ProvidersPage() {
             sorts={SORTS}
             sortKey={dv.sortKey}
             onSort={dv.setSortKey}
-            filters={FILTERS}
+            filters={filters}
             filterValues={dv.filterValues}
             onFilter={dv.setFilter}
             selectedCount={dv.selectedRows.length}
@@ -217,6 +226,7 @@ export function ProvidersPage() {
         profileId={profile.id}
         open={editorOpen}
         provider={editing}
+        typeSuggestions={customProviderTypes(providers)}
         onClose={() => { setEditorOpen(false); setBulkEditQueue([]); }}
         onSaved={() => {
           invalidate();
@@ -334,12 +344,14 @@ function ProviderEditor({
   profileId,
   open,
   provider,
+  typeSuggestions,
   onClose,
   onSaved,
 }: {
   profileId: string;
   open: boolean;
   provider: Provider | null;
+  typeSuggestions: string[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -422,13 +434,22 @@ function ProviderEditor({
             ))}
           </select>
           {type === 'other' ? (
-            <Input
-              label="Custom type"
-              placeholder="e.g. Naturopath, Osteopath"
-              value={customType}
-              onChange={(e) => setCustomType(e.target.value)}
-              className="mt-2"
-            />
+            <>
+              <Input
+                label="Custom type"
+                placeholder="e.g. Naturopath, Osteopath"
+                value={customType}
+                onChange={(e) => setCustomType(e.target.value)}
+                className="mt-2"
+                list="custom-provider-types"
+                hint={typeSuggestions.length > 0 ? 'Pick an existing custom type to reuse it, or type a new one.' : undefined}
+              />
+              <datalist id="custom-provider-types">
+                {typeSuggestions.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
+            </>
           ) : null}
         </div>
         <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
