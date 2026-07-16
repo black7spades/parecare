@@ -45,6 +45,7 @@ export interface ManagedRow {
   slots: string[];
   packSize: string;
   remaining: string;
+  packs: string;
   repeatsDue: string;
   // Treatment details.
   status: string;
@@ -70,6 +71,7 @@ export function emptyManagedRow(kind = 'medication', name = ''): ManagedRow {
     slots: ['08:00'],
     packSize: '',
     remaining: '',
+    packs: '',
     repeatsDue: '',
     status: 'active',
     reviewDate: '',
@@ -103,6 +105,7 @@ export async function persistManagedRows(
         schedule_times: asNeeded ? [] : r.slots.slice(0, r.perDay),
         supply: r.packSize.trim() === '' ? null : Number(r.packSize),
         supply_remaining: r.remaining.trim() === '' ? null : Number(r.remaining),
+        packs_on_hand: r.packs.trim() === '' ? null : Number(r.packs),
         repeats_due: r.repeatsDue || null,
       });
     } else {
@@ -483,7 +486,7 @@ function MedicationRowFields({
         <p className="text-xs text-muted">Zero times a day means taken only as needed.</p>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <label className="block">
           <span className="block text-xs text-muted mb-1">A full pack provides ({supplyWord})</span>
           <input
@@ -496,7 +499,18 @@ function MedicationRowFields({
           />
         </label>
         <label className="block">
-          <span className="block text-xs text-muted mb-1">On hand now ({supplyWord})</span>
+          <span className="block text-xs text-muted mb-1">Unopened packs on hand</span>
+          <input
+            className={`${smallInput} w-full`}
+            type="number"
+            min="0"
+            step="any"
+            value={row.packs}
+            onChange={(e) => onChange({ packs: e.target.value })}
+          />
+        </label>
+        <label className="block">
+          <span className="block text-xs text-muted mb-1">In the open pack ({supplyWord})</span>
           <input
             className={`${smallInput} w-full`}
             type="number"

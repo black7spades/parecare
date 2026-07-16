@@ -7,7 +7,7 @@ import { requireProfileOwner } from '../middleware/permissions';
 import { exportRecords, importRecords, type PortDescriptor, type PortFormat } from '../services/dataPort';
 import { resolveCatalogueId } from './medicationCatalogue';
 import { getMarRetentionMonths } from '../config/settings';
-import { perDoseDrawdown } from '../services/medicationSupply';
+import { drawDownOnHand, perDoseDrawdown } from '../services/medicationSupply';
 
 export const medicationsRouter = Router({ mergeParams: true });
 
@@ -45,6 +45,8 @@ const medSchema = z.object({
   supply: z.coerce.number().min(0).max(1e9).optional().nullable(),
   // How many units are on hand now. Independently editable.
   supply_remaining: z.coerce.number().min(0).max(1e9).optional().nullable(),
+  // Unopened full packs on hand, on top of the loose units above.
+  packs_on_hand: z.coerce.number().min(0).max(1e6).optional().nullable(),
   repeats_due: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   // Dangerous to miss (stopping suddenly is harmful): overdue and
   // out-of-stock alerts for this medication are urgent.
@@ -95,6 +97,7 @@ interface MedRow {
   schedule_times: string[] | null;
   supply: number | null;
   supply_remaining: number | null;
+  packs_on_hand: number | null;
   repeats_due: string | null;
   active: boolean;
 }
@@ -111,6 +114,7 @@ interface MedInsert {
   frequency: string | null;
   schedule_times: string[];
   supply: number | null;
+  packs_on_hand: number | null;
   repeats_due: string | null;
   active: boolean;
 }
@@ -135,6 +139,7 @@ const serializeMed = <T extends Record<string, unknown>>(m: T): T =>
     ...m,
     supply: numOrNull(m['supply']),
     supply_remaining: numOrNull(m['supply_remaining']),
+    packs_on_hand: numOrNull(m['packs_on_hand']),
     units_per_dose: numOrNull(m['units_per_dose']),
     repeats_due: dateOrNull(m['repeats_due']),
   });
@@ -181,6 +186,7 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
     { key: 'schedule_times', header: 'Times', aliases: ['schedule', 'schedule times', 'time'], toCell: (r) => (r.schedule_times ?? []).join('; ') },
     { key: 'supply', header: 'A full pack provides', aliases: ['supply', 'stock', 'quantity', 'on hand', 'supply in units', 'pack size'], toCell: (r) => (r.supply ?? '').toString() },
     { key: 'supply_remaining', header: 'Units left', aliases: ['remaining', 'supply remaining'], toCell: (r) => (r.supply_remaining ?? '').toString() },
+    { key: 'packs_on_hand', header: 'Packs on hand', aliases: ['packs', 'packs left', 'unopened packs'], toCell: (r) => (r.packs_on_hand ?? '').toString() },
     { key: 'repeats_due', header: 'Repeats due', aliases: ['repeat', 'repeat due'], toCell: (r) => r.repeats_due ?? '' },
     { key: 'active', header: 'Active', aliases: ['status'], toCell: (r) => (r.active ? 'true' : 'false') },
   ],
@@ -216,6 +222,10 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
         frequency: blank(raw['frequency']),
         schedule_times: parseTimes(raw['schedule_times']),
         supply: Number.isFinite(supplyNum) ? supplyNum : null,
+        packs_on_hand: (() => {
+          const packsNum = parseFloat(String(raw['packs_on_hand'] ?? '').replace(/[^0-9.]/g, ''));
+          return Number.isFinite(packsNum) ? packsNum : null;
+        })(),
         repeats_due: repeats && /^\d{4}-\d{2}-\d{2}$/.test(repeats) ? repeats : null,
         active: parseActive(raw['active']),
       },
@@ -289,6 +299,7 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner, async (req, 
       frequency: r.frequency,
       supply: r.supply,
       supply_remaining: r.supply,
+      packs_on_hand: r.packs_on_hand,
       repeats_due: r.repeats_due,
       active: r.active,
       schedule_times: r.schedule_times.length
@@ -362,6 +373,7 @@ medicationsRouter.post('/', requireAuth, requireProfileOwner, async (req, res) =
       supply: parsed.data.supply ?? null,
       // Start with what's on hand if given, otherwise a full pack.
       supply_remaining: parsed.data.supply_remaining ?? parsed.data.supply ?? null,
+      packs_on_hand: parsed.data.packs_on_hand ?? null,
       schedule_times: parsed.data.schedule_times ? db.raw('?::jsonb', [JSON.stringify(parsed.data.schedule_times)]) : null,
     })
     .returning('id');
@@ -382,9 +394,10 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner, async (req,
   if (parsed.data.schedule_times !== undefined) {
     update['schedule_times'] = parsed.data.schedule_times ? db.raw('?::jsonb', [JSON.stringify(parsed.data.schedule_times)]) : null;
   }
-  // Pack size and units-on-hand are edited independently.
+  // Pack size, units-on-hand and packs-on-hand are edited independently.
   if (parsed.data.supply !== undefined) update['supply'] = parsed.data.supply;
   if (parsed.data.supply_remaining !== undefined) update['supply_remaining'] = parsed.data.supply_remaining;
+  if (parsed.data.packs_on_hand !== undefined) update['packs_on_hand'] = parsed.data.packs_on_hand;
   // Changing the drug identity re-points the medication at a catalogue entry.
   if (parsed.data.name !== undefined) {
     update['medication_catalogue_id'] = await resolveCatalogueId(parsed.data.name, parsed.data.form ?? null, req.account!.id);
@@ -399,7 +412,10 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner, async (req,
   }
   // Restocking clears any "out of stock" acknowledgement, so the urgent alert
   // recurs if this medication runs out again later.
-  if (parsed.data.supply_remaining != null && parsed.data.supply_remaining > 0) {
+  if (
+    (parsed.data.supply_remaining != null && parsed.data.supply_remaining > 0) ||
+    (parsed.data.packs_on_hand != null && parsed.data.packs_on_hand > 0)
+  ) {
     await db('attention_dismissals').where({ item_key: `out_of_stock:${req.params['medId']}` }).delete();
   }
   res.json({ medication: serializeMed(await medWithName((med as { id: string }).id)) });
@@ -545,18 +561,14 @@ const GIVEN = new Set(['given', 'self_administered']);
 const FUTURE_SKEW_MS = 60 * 1000;
 const isFutureTime = (s?: string | null): boolean => !!s && new Date(s).getTime() > Date.now() + FUTURE_SKEW_MS;
 
-// A given dose draws down the remaining supply, never below zero.
+// A given dose draws down what is on hand, opening the next unopened pack
+// automatically when the open one runs out. Shared logic in medicationSupply.
 async function drawDownSupply(
   medId: string,
   doses: number,
   med: { form: string | null; units_per_dose: unknown; dose_amount: unknown }
 ): Promise<void> {
-  const amount = doses * perDoseDrawdown(med);
-  if (amount <= 0) return;
-  await db('medications')
-    .where({ id: medId })
-    .whereNotNull('supply_remaining')
-    .update({ supply_remaining: db.raw('GREATEST(0, supply_remaining - ?)', [amount]) });
+  await drawDownOnHand(medId, doses * perDoseDrawdown(med));
 }
 
 // Deleting a recorded dose gives its supply back, capped at a full pack.
