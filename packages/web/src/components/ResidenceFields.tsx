@@ -110,7 +110,7 @@ export async function persistResidence(
   const payload = residencePayloadWith(v, providerId);
   const contact =
     isFacilityResidence(v.residence_type) && v.use_facility_as_contact && providerId
-      ? { contact_kind: 'provider', contact_provider_id: providerId, contact_account_id: null, contact_name: null, contact_relationship: null, contact_phone: null, contact_phone_type: null, contact_email: null }
+      ? { contact_kind: 'provider', contact_provider_id: providerId, contact_account_id: null, contact_profile_id: null, contact_name: null, contact_relationship: null, contact_phone: null, contact_phone_type: null, contact_email: null }
       : undefined;
   return { payload, contact };
 }

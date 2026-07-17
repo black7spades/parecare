@@ -143,9 +143,11 @@ const profileSchema = z.object({
   // Who to contact about this person: themselves, an existing platform user,
   // a new contact, or a provider (e.g. the care home they live in). Each
   // fact is its own field.
-  contact_kind: z.enum(['self', 'user', 'contact', 'provider']).optional().nullable(),
+  contact_kind: z.enum(['self', 'user', 'contact', 'provider', 'profile']).optional().nullable(),
   contact_account_id: z.string().uuid().optional().nullable(),
   contact_provider_id: z.string().uuid().optional().nullable(),
+  // The primary carer can be another person already in the system.
+  contact_profile_id: z.string().uuid().optional().nullable(),
   contact_name: z.string().max(255).optional().nullable(),
   contact_relationship: z.string().max(100).optional().nullable(),
   contact_phone: z.string().max(50).optional().nullable(),
@@ -341,6 +343,16 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
     : [];
   const contactProviderMap = new Map(contactProviders.map((p) => [p.id, p]));
 
+  // For profiles whose primary carer is another person, pull that person's
+  // name, phone and email to stand in as the contact.
+  const contactProfileIds = [
+    ...new Set(profiles.map((p) => (p as CareProfile).contact_profile_id).filter((v): v is string => !!v)),
+  ];
+  const contactProfiles = contactProfileIds.length
+    ? await db('care_profiles').whereIn('id', contactProfileIds).select('id', 'full_name', 'contact_phone', 'contact_email')
+    : [];
+  const contactProfileMap = new Map(contactProfiles.map((p) => [p.id, p]));
+
   const pinSet = new Set(pins.map((p: { care_profile_id: string }) => p.care_profile_id));
   const planMap = new Map(plans.map((p: { care_profile_id: string }) => [p.care_profile_id, p]));
   const gpPhoneMap = new Map<string, string>();
@@ -377,8 +389,9 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
     const cp = p as CareProfile;
     const linked = cp.contact_account_id ? contactAccountMap.get(cp.contact_account_id) : undefined;
     const contactProvider = cp.contact_provider_id ? contactProviderMap.get(cp.contact_provider_id) : undefined;
-    const primaryPhone = cp.contact_phone || contactProvider?.phone || gpPhoneMap.get(p.id) || contacts[0]?.phone || null;
-    const primaryEmail = cp.contact_email || contactProvider?.email || linked?.email || null;
+    const carerProfile = cp.contact_profile_id ? contactProfileMap.get(cp.contact_profile_id) : undefined;
+    const primaryPhone = cp.contact_phone || contactProvider?.phone || carerProfile?.contact_phone || gpPhoneMap.get(p.id) || contacts[0]?.phone || null;
+    const primaryEmail = cp.contact_email || contactProvider?.email || carerProfile?.contact_email || linked?.email || null;
     const contactName =
       cp.contact_kind === 'self'
         ? p.full_name
@@ -386,7 +399,9 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
           ? linked?.display_name ?? null
           : cp.contact_kind === 'provider'
             ? contactProvider?.name ?? null
-            : cp.contact_name ?? null;
+            : cp.contact_kind === 'profile'
+              ? carerProfile?.full_name ?? null
+              : cp.contact_name ?? null;
     return {
       id: p.id,
       kind: p.kind,
@@ -593,6 +608,10 @@ careProfilesRouter.post(
       res.status(400).json({ error: 'The owner must be a person in your account', code: 'INVALID_OWNER' });
       return;
     }
+    if (parsed.data.contact_kind === 'profile' && !(await ownerProfileIsValid(req.account!.id, parsed.data.contact_profile_id))) {
+      res.status(400).json({ error: 'The primary carer must be a person in your account', code: 'INVALID_CARER' });
+      return;
+    }
 
     const [profile] = await db<CareProfile>('care_profiles')
       .insert({ ...parsed.data, ...parts, full_name: composeDisplayName(parts), account_id: req.account!.id })
@@ -708,6 +727,16 @@ careProfilesRouter.get('/:id', requireAuth, async (req, res) => {
         .first()) ?? null
     : null;
 
+  // Resolve the primary carer when it is another person, so the overview can
+  // name them and use their own phone and email.
+  const contactProfile =
+    profile.contact_kind === 'profile' && profile.contact_profile_id
+      ? (await db('care_profiles')
+          .where({ id: profile.contact_profile_id })
+          .select('id', 'full_name', 'preferred_name', 'contact_phone', 'contact_email')
+          .first()) ?? null
+      : null;
+
   res.json({
     profile: {
       ...profile,
@@ -716,6 +745,7 @@ careProfilesRouter.get('/:id', requireAuth, async (req, res) => {
       contact_provider: contactProvider,
       residence_provider: residenceProvider,
       owner_profile: ownerProfile,
+      contact_profile: contactProfile,
     },
     access,
     relationship,
@@ -769,6 +799,20 @@ careProfilesRouter.patch('/:id', requireAuth, async (req, res) => {
     }
     if (!(await ownerProfileIsValid(profile.account_id, parsed.data.owner_profile_id))) {
       res.status(400).json({ error: 'The owner must be a person in the account', code: 'INVALID_OWNER' });
+      return;
+    }
+  }
+
+  // The primary carer, when it is a person, must be a person in the account
+  // and never the profile itself.
+  if (parsed.data.contact_kind === 'profile' || 'contact_profile_id' in parsed.data) {
+    const carerId = parsed.data.contact_profile_id;
+    if (carerId === profile.id) {
+      res.status(400).json({ error: 'A profile cannot be its own carer', code: 'INVALID_CARER' });
+      return;
+    }
+    if (carerId && !(await ownerProfileIsValid(profile.account_id, carerId))) {
+      res.status(400).json({ error: 'The primary carer must be a person in the account', code: 'INVALID_CARER' });
       return;
     }
   }

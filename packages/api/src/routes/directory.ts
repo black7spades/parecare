@@ -24,7 +24,7 @@ function profilesEndpoint(kind: ProfileKind) {
     const columns = [
       'cp.id', 'cp.full_name', 'cp.preferred_name', 'cp.date_of_birth',
       'cp.current_phase', 'cp.photo_url', 'cp.photo_color',
-      'cp.contact_kind', 'cp.contact_account_id',
+      'cp.contact_kind', 'cp.contact_account_id', 'cp.contact_profile_id',
       'cp.contact_name', 'cp.contact_phone', 'cp.contact_email',
       'cp.owner_relationship',
       ...(kind === 'pet' ? ['cp.species', 'cp.breed', 'cp.desexed', 'cp.microchip_number', 'cp.owner_profile_id'] as const : []),
@@ -82,6 +82,22 @@ function profilesEndpoint(kind: ProfileKind) {
       : [];
     const contactAccountMap = new Map(contactAccounts.map((a: { id: string; display_name: string; email: string }) => [a.id, a]));
 
+    // Resolve person contacts (contact_kind = 'profile'): the carer is another
+    // person, whose own name, phone and email stand in.
+    const contactProfileIds = [
+      ...new Set(
+        rows
+          .map((r: CareProfile) => r.contact_profile_id)
+          .filter((v: string | null): v is string => !!v),
+      ),
+    ];
+    const contactProfiles = contactProfileIds.length
+      ? await db('care_profiles').whereIn('id', contactProfileIds).select('id', 'full_name', 'contact_phone', 'contact_email')
+      : [];
+    const contactProfileMap = new Map(
+      contactProfiles.map((p: { id: string; full_name: string; contact_phone: string | null; contact_email: string | null }) => [p.id, p]),
+    );
+
     // GP phone fallback
     const gpPhoneMap = new Map<string, string>();
     if (ids.length > 0) {
@@ -98,16 +114,19 @@ function profilesEndpoint(kind: ProfileKind) {
 
     const profiles = rows.map((p: CareProfile) => {
       const linked = p.contact_account_id ? contactAccountMap.get(p.contact_account_id) : undefined;
+      const carer = p.contact_profile_id ? contactProfileMap.get(p.contact_profile_id) : undefined;
       const contactName =
         p.contact_kind === 'self'
           ? p.full_name
           : p.contact_kind === 'user'
             ? linked?.display_name ?? null
-            : p.contact_name ?? null;
-      const contactPhone = p.contact_phone || gpPhoneMap.get(p.id) || null;
-      const contactEmail = p.contact_email || linked?.email || null;
+            : p.contact_kind === 'profile'
+              ? carer?.full_name ?? null
+              : p.contact_name ?? null;
+      const contactPhone = p.contact_phone || carer?.contact_phone || gpPhoneMap.get(p.id) || null;
+      const contactEmail = p.contact_email || carer?.contact_email || linked?.email || null;
 
-      const { contact_kind, contact_account_id, ...rest } = p;
+      const { contact_kind, contact_account_id, contact_profile_id, ...rest } = p;
       return {
         ...rest,
         contact_name: contactName,

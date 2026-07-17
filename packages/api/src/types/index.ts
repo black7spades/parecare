@@ -103,10 +103,12 @@ export interface CareProfile {
   owner_relationship: string | null;
   /** A pet's owner: a person profile (another care_profiles row). */
   owner_profile_id: string | null;
-  /** Who to contact: 'self', 'user' (a platform account), 'contact', or 'provider' (e.g. a care home). */
-  contact_kind: 'self' | 'user' | 'contact' | 'provider' | null;
+  /** Who to contact: 'self', 'user' (a platform account), 'contact', 'provider' (e.g. a care home), or 'profile' (another person). */
+  contact_kind: 'self' | 'user' | 'contact' | 'provider' | 'profile' | null;
   contact_account_id: string | null;
   contact_provider_id: string | null;
+  /** The primary carer when they are another person in the system. */
+  contact_profile_id: string | null;
   contact_name: string | null;
   contact_relationship: string | null;
   contact_phone: string | null;
