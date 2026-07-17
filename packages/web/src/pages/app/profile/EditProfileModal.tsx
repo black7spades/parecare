@@ -7,7 +7,7 @@ import { Input, Textarea } from '../../../components/ui/Input';
 import { AvatarEditor } from '../../../components/ui/AvatarEditor';
 import { Avatar } from '../../../components/ui/Avatar';
 import { ContactDetails, contactPayload, emptyContact, type ContactValue } from '../../../components/ContactDetails';
-import { ResidenceFields, residencePayload, emptyResidence, type ResidenceValue } from '../../../components/ResidenceFields';
+import { ResidenceFields, residenceFrom, residencePayload, persistResidence, residenceNeedsPersist, emptyResidence, type ResidenceValue } from '../../../components/ResidenceFields';
 import { PET_SPECIES, type CareProfile, type Provider } from '../../../lib/care';
 
 /** Edit the person or pet in care, and their photo. Shown only to those with edit access. */
@@ -73,19 +73,7 @@ export function EditProfileModal({
       phone_type: profile.contact_phone_type ?? 'mobile',
       email: profile.contact_email ?? '',
     });
-    setResidence({
-      residence_type: profile.residence_type ?? '',
-      address_line1: profile.address_line1 ?? '',
-      address_line2: profile.address_line2 ?? '',
-      address_suburb: profile.address_suburb ?? '',
-      address_state: profile.address_state ?? '',
-      address_postcode: profile.address_postcode ?? '',
-      address_country: profile.address_country ?? '',
-      residence_provider_id: profile.residence_provider_id ?? '',
-      room_number: profile.room_number ?? '',
-      room_area_name: profile.room_area_name ?? '',
-      room_area_type: profile.room_area_type ?? '',
-    });
+    setResidence(residenceFrom(profile));
     setError('');
   }, [open, profile]);
 
@@ -97,39 +85,44 @@ export function EditProfileModal({
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['care-profile', profile.id] });
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      api.patch(
-        `/care-profiles/${profile.id}`,
-        isPet
-          ? {
-              first_name: firstName.trim(),
-              last_name: lastName.trim() || null,
-              preferred_name: preferredName.trim() || null,
-              date_of_birth: dob || null,
-              pronouns: pronouns.trim() || null,
-              species: species || null,
-              breed: breed.trim() || null,
-              desexed,
-              microchip_number: microchip.trim() || null,
-              notes: notes.trim() || null,
-              ...contactPayload(contact),
-              ...residencePayload(residence),
-            }
-          : {
-              title: title.trim() || null,
-              first_name: firstName.trim(),
-              middle_name: middleName.trim() || null,
-              last_name: lastName.trim() || null,
-              suffix: suffix.trim() || null,
-              preferred_name: preferredName.trim() || null,
-              date_of_birth: dob || null,
-              pronouns: pronouns.trim() || null,
-              ...contactPayload(contact),
-              ...residencePayload(residence),
-            }
-      ),
+    mutationFn: async () => {
+      // A facility being added inline is created first (and may become the
+      // contact); its columns then ride along with the profile update.
+      let residenceBody = residencePayload(residence);
+      let contactBody = contactPayload(contact);
+      if (residenceNeedsPersist(residence)) {
+        const { payload, contact: contactOverride } = await persistResidence(profile.id, residence);
+        residenceBody = payload;
+        if (contactOverride) contactBody = contactOverride;
+      }
+      const identity = isPet
+        ? {
+            first_name: firstName.trim(),
+            last_name: lastName.trim() || null,
+            preferred_name: preferredName.trim() || null,
+            date_of_birth: dob || null,
+            pronouns: pronouns.trim() || null,
+            species: species || null,
+            breed: breed.trim() || null,
+            desexed,
+            microchip_number: microchip.trim() || null,
+            notes: notes.trim() || null,
+          }
+        : {
+            title: title.trim() || null,
+            first_name: firstName.trim(),
+            middle_name: middleName.trim() || null,
+            last_name: lastName.trim() || null,
+            suffix: suffix.trim() || null,
+            preferred_name: preferredName.trim() || null,
+            date_of_birth: dob || null,
+            pronouns: pronouns.trim() || null,
+          };
+      return api.patch(`/care-profiles/${profile.id}`, { ...identity, ...contactBody, ...residenceBody });
+    },
     onSuccess: () => {
       invalidate();
+      void refetchProviders();
       void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
       onClose();
     },
@@ -272,13 +265,7 @@ export function EditProfileModal({
             <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
           </>
         )}
-        <ResidenceFields
-          value={residence}
-          onChange={setResidence}
-          profileId={profile.id}
-          providers={providers}
-          onProvidersChanged={() => void refetchProviders()}
-        />
+        <ResidenceFields value={residence} onChange={setResidence} providers={providers} />
         <ContactDetails value={contact} onChange={setContact} providers={providers} />
         {isPet ? (
           <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />

@@ -247,7 +247,14 @@ export interface Provider {
   organisation: string | null;
   phone: string | null;
   email: string | null;
+  /** Composed one-line display, kept in step with the segmented parts. */
   address: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  address_suburb: string | null;
+  address_state: string | null;
+  address_postcode: string | null;
+  address_country: string | null;
   booking_link: string | null;
   directions_link: string | null;
   created_at: string | Date;

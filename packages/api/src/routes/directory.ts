@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { roleAtLeast } from '../middleware/requireRole';
+import { providerAddressFields, withComposedAddress } from './providers';
 import type { CareProfile, Provider, ProfileKind } from '../types';
 
 export const directoryRouter = Router();
@@ -121,7 +122,7 @@ const providerSchema = z.object({
   organisation: z.string().max(255).optional().nullable(),
   phone: z.string().max(50).optional().nullable(),
   email: z.string().email().optional().nullable(),
-  address: z.string().optional().nullable(),
+  ...providerAddressFields,
   booking_link: z.string().url().optional().nullable(),
   directions_link: z.string().url().optional().nullable(),
 });
@@ -185,7 +186,7 @@ directoryRouter.post('/providers', requireAuth, async (req, res) => {
   }
 
   const [provider] = await db<Provider>('providers')
-    .insert({ account_id: account.id, ...parsed.data })
+    .insert({ account_id: account.id, ...withComposedAddress(parsed.data) })
     .returning('*');
 
   res.status(201).json({ provider });
@@ -212,7 +213,7 @@ directoryRouter.patch('/providers/:id', requireAuth, async (req, res) => {
     query = query.where({ account_id: account.id });
   }
 
-  const [provider] = await query.update(parsed.data).returning('*');
+  const [provider] = await query.update(withComposedAddress(parsed.data)).returning('*');
   if (!provider) {
     res.status(404).json({ error: 'Provider not found', code: 'NOT_FOUND' });
     return;

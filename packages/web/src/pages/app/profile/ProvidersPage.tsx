@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
-import { AddressAutocomplete } from '../../../components/AddressAutocomplete';
+import { AddressFields, addressFrom, addressPayload, emptyAddress, type AddressValue } from '../../../components/AddressFields';
 import { DataToolbar } from '../../../components/data/DataToolbar';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { Button } from '../../../components/ui/Button';
@@ -365,7 +365,7 @@ function ProviderEditor({
   const [organisation, setOrganisation] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [address, setAddress] = useState('');
+  const [address, setAddress] = useState<AddressValue>(emptyAddress);
   const [bookingLink, setBookingLink] = useState('');
   const [directionsLink, setDirectionsLink] = useState('');
   const [poaType, setPoaType] = useState('');
@@ -381,7 +381,7 @@ function ProviderEditor({
     setOrganisation(provider?.organisation ?? '');
     setPhone(provider?.phone ?? '');
     setEmail(provider?.email ?? '');
-    setAddress(provider?.address ?? '');
+    setAddress(provider ? addressFrom(provider) : emptyAddress);
     setBookingLink(provider?.booking_link ?? '');
     setDirectionsLink(provider?.directions_link ?? '');
     setPoaType(provider?.poa_type ?? '');
@@ -397,7 +397,7 @@ function ProviderEditor({
         organisation: organisation.trim() || null,
         phone: phone.trim() || null,
         email: email.trim() || null,
-        address: address.trim() || null,
+        ...addressPayload(address),
         booking_link: bookingLink.trim() || null,
         directions_link: directionsLink.trim() || null,
         poa_type: poaType || null,
@@ -462,7 +462,7 @@ function ProviderEditor({
           <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
           <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
-        <AddressAutocomplete label="Address" value={address} onChange={setAddress} />
+        <AddressFields value={address} onChange={setAddress} />
         <div className="grid grid-cols-2 gap-2">
           <Input label="Booking link" type="url" placeholder="https://…" value={bookingLink} onChange={(e) => setBookingLink(e.target.value)} />
           <Input label="Directions" type="url" placeholder="https://…" value={directionsLink} onChange={(e) => setDirectionsLink(e.target.value)} />

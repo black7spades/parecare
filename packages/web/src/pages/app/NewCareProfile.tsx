@@ -9,7 +9,7 @@ import { PET_SPECIES, RELATIONSHIPS, petRelationshipFor, type CareProfile, type 
 import { matchingLifeStages, type JourneyTemplateSummary, type LifeStage } from '../../lib/journeys';
 import { RelationshipSelect } from '../../components/RelationshipSelect';
 import { ContactDetails, contactPayload, emptyContact, type ContactValue } from '../../components/ContactDetails';
-import { ResidenceFields, residencePayload, emptyResidence, type ResidenceValue } from '../../components/ResidenceFields';
+import { ResidenceFields, residencePayload, persistResidence, residenceNeedsPersist, emptyResidence, type ResidenceValue } from '../../components/ResidenceFields';
 import { useAuthStore } from '../../stores/auth';
 
 /** Pet journeys are marked by a `pet-` slug so each side can tell them apart. */
@@ -141,6 +141,12 @@ function PersonForm({ onBack }: { onBack: () => void }) {
         ...contactPayload(contact),
         ...residencePayload(residence),
       });
+      // A facility being added inline is created now that the profile exists,
+      // then linked as the residence (and, if chosen, the contact).
+      if (residenceNeedsPersist(residence)) {
+        const { payload, contact: contactOverride } = await persistResidence(data.profile.id, residence);
+        await api.patch(`/care-profiles/${data.profile.id}`, { ...payload, ...(contactOverride ?? {}) });
+      }
       await queryClient.invalidateQueries({ queryKey: ['care-profiles'] });
       // The profile exists; health details are captured as a second step.
       setCreatedProfile(data.profile);
@@ -202,7 +208,7 @@ function PersonForm({ onBack }: { onBack: () => void }) {
         <JourneyPicker dateOfBirth={dateOfBirth} dueDate={dueDate} selected={journeyIds} onChange={setJourneyIds} />
         <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
         <Input label="Primary language" value={language} onChange={(e) => setLanguage(e.target.value)} />
-        <ResidenceFields value={residence} onChange={setResidence} profileId={null} providers={[]} />
+        <ResidenceFields value={residence} onChange={setResidence} providers={[]} />
         <ContactDetails value={contact} onChange={setContact} />
         <p className="text-xs text-muted">Health details like conditions and allergies come next, on their own step.</p>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
@@ -274,6 +280,10 @@ function PetForm({ onBack }: { onBack: () => void }) {
         ...contactPayload(contact),
         ...residencePayload(residence),
       });
+      if (residenceNeedsPersist(residence)) {
+        const { payload, contact: contactOverride } = await persistResidence(data.profile.id, residence);
+        await api.patch(`/care-profiles/${data.profile.id}`, { ...payload, ...(contactOverride ?? {}) });
+      }
       await queryClient.invalidateQueries({ queryKey: ['care-profiles'] });
       navigate(`/app/${data.profile.id}`);
     } catch (err) {
@@ -360,7 +370,7 @@ function PetForm({ onBack }: { onBack: () => void }) {
           <span className="text-xs text-muted">neutered or spayed</span>
         </label>
         <PetJourneyPicker selected={journeyIds} onChange={setJourneyIds} />
-        <ResidenceFields value={residence} onChange={setResidence} profileId={null} providers={[]} />
+        <ResidenceFields value={residence} onChange={setResidence} providers={[]} />
         <ContactDetails value={contact} onChange={setContact} />
         <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
