@@ -33,6 +33,8 @@ import { lifeStagesRouter } from './routes/lifeStages';
 import { allergiesRouter, conditionsRouter } from './routes/healthFacts';
 import { conditionCatalogueRouter } from './routes/conditionCatalogue';
 import { symptomCatalogueRouter } from './routes/symptomCatalogue';
+import { substanceCatalogueRouter } from './routes/substanceCatalogue';
+import { substanceUseRouter } from './routes/substanceUse';
 import { optionCatalogueRouter } from './routes/optionCatalogue';
 import { notificationsRouter } from './routes/notifications';
 import { apiKeysRouter } from './routes/apiKeys';
@@ -106,6 +108,7 @@ v1.use('/medication-catalogue', medicationCatalogueRouter);
 // as people record conditions that are not in it yet.
 v1.use('/condition-catalogue', conditionCatalogueRouter);
 v1.use('/symptom-catalogue', symptomCatalogueRouter);
+v1.use('/substance-catalogue', substanceCatalogueRouter);
 // Shared option lists (allergens, dietary requirements, mobility aids, …)
 // backing the dropdowns that replaced free-text boxes. Read for everyone
 // signed in; grows implicitly as people save unlisted values.
@@ -152,6 +155,7 @@ v1.use('/directory', directoryRouter);
 v1.use('/care-profiles/:id/reminders', ...profileAccess, remindersRouter);
 v1.use('/care-profiles/:id/medications', ...profileAccess, capturePlanEvents('medications'), medicationsRouter);
 v1.use('/care-profiles/:id/treatments', ...profileAccess, capturePlanEvents('treatments'), treatmentsRouter);
+v1.use('/care-profiles/:id/substance-use', ...profileAccess, capturePlanEvents('substance_use'), substanceUseRouter);
 v1.use('/care-profiles/:id/ai', ...profileAccess, aiRouter);
 v1.use('/care-profiles/:id/messages', ...profileAccess, messagesRouter);
 v1.use('/care-profiles/:id/memory-book', ...profileAccess, memoryBookRouter);

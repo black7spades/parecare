@@ -5,6 +5,8 @@ import { parseZonedTime, formatInZone } from '../lib/timezone';
 import { matchProfileNames, type NameCandidate } from '../lib/nameMatch';
 import { drawDownOnHand, perDoseDrawdown } from './medicationSupply';
 import { resolveConditionCatalogueId } from '../routes/conditionCatalogue';
+import { resolveSubstanceCatalogueId, SUBSTANCE_CLASSES } from '../routes/substanceCatalogue';
+import { SUBSTANCE_STATUSES, SUBSTANCE_ROUTES } from '../routes/substanceUse';
 import { resolveSymptomCatalogueId } from '../routes/symptomCatalogue';
 import { linkAddressToProfile, syncProfileResidence, RESIDENCE_KIND } from './addresses';
 
@@ -188,6 +190,37 @@ const resolveConditionSchema = z.object({
   resolved_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
 });
 
+const addSubstanceSchema = z.object({
+  type: z.literal('add_substance'),
+  substance: z.string().min(1).max(255),
+  substance_class: z.enum(SUBSTANCE_CLASSES).optional().nullable(),
+  status: z.enum(SUBSTANCE_STATUSES).optional().nullable(),
+  route: z.enum(SUBSTANCE_ROUTES).optional().nullable(),
+  quantity: z.string().max(100).optional().nullable(),
+  quantity_unit: z.string().max(60).optional().nullable(),
+  frequency: z.string().max(120).optional().nullable(),
+  started_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  quit_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  notes: z.string().max(4000).optional().nullable(),
+});
+
+const updateSubstanceSchema = z.object({
+  type: z.literal('update_substance'),
+  substance: z.string().min(1).max(255),
+  status: z.enum(SUBSTANCE_STATUSES).optional().nullable(),
+  route: z.enum(SUBSTANCE_ROUTES).optional().nullable(),
+  quantity: z.string().max(100).optional().nullable(),
+  quantity_unit: z.string().max(60).optional().nullable(),
+  frequency: z.string().max(120).optional().nullable(),
+  quit_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  notes: z.string().max(4000).optional().nullable(),
+});
+
+const removeSubstanceSchema = z.object({
+  type: z.literal('remove_substance'),
+  substance: z.string().min(1).max(255),
+});
+
 // The acute illness tracker: record a symptom on a condition, or move an
 // existing symptom's severity up or down as things progress.
 const addSymptomSchema = z.object({
@@ -306,6 +339,9 @@ export const actionSchema = z.discriminatedUnion('type', [
   removeAllergySchema,
   addConditionSchema,
   removeConditionSchema,
+  addSubstanceSchema,
+  updateSubstanceSchema,
+  removeSubstanceSchema,
   resolveConditionSchema,
   addSymptomSchema,
   updateSymptomSchema,
@@ -403,8 +439,6 @@ export const crossProfileActionSchema = z.discriminatedUnion('type', [
 ]);
 export type CrossProfileAction = z.infer<typeof crossProfileActionSchema>;
 
-const ACTION_BLOCK_RE = /```parecare-action\s*\n([\s\S]*?)```/g;
-
 export interface ExtractedActions<T = AssistantAction> {
   /** The reply with action blocks removed. */
   cleanedReply: string;
@@ -412,39 +446,113 @@ export interface ExtractedActions<T = AssistantAction> {
   parseErrors: string[];
 }
 
+// Any fenced code block: ``` or ~~~ (three or more), an optional info string,
+// then a body, then a matching closing fence. Model-agnostic on purpose —
+// the action is carried by the JSON inside, not by a single exact fence.
+const FENCE_RE = /(`{3,}|~{3,})[ \t]*([^\n]*?)[ \t]*\r?\n([\s\S]*?)\r?\n?[ \t]*\1[ \t]*(?=\r?\n|$)/g;
+
+// An info string that explicitly marks a PareCare action, tolerating the ways
+// models spell it: parecare-action, parecare_action, "parecare action".
+const ACTION_INFO_RE = /parecare[\s_-]*action/i;
+
+// Which generic (non-action-labelled) fences we are willing to read as
+// actions when their JSON validates: an unlabelled block or a json block.
+const GENERIC_INFO_RE = /^(json|json5|jsonc)?$/i;
+
+/** Validate one candidate against the schema, collecting the action or an error. */
+function takeCandidate<T>(
+  raw: unknown,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+  actions: T[],
+  parseErrors: string[],
+): boolean {
+  const parsed = schema.safeParse(raw);
+  if (parsed.success) {
+    actions.push(parsed.data);
+    return true;
+  }
+  const attempted =
+    String((raw as { type?: unknown; action?: unknown })?.type ?? (raw as { action?: unknown })?.action ?? '')
+      .replace(/_/g, ' ') || 'take an unrecognised action';
+  const first = parsed.error.issues[0];
+  const where = first?.path?.length ? ` (problem with "${first.path.join('.')}": ${first.message.toLowerCase()})` : '';
+  console.warn('Assistant action validation failed:', attempted, parsed.error.format());
+  parseErrors.push(
+    `Pare tried to ${attempted} but that action could not be validated${where}, so it was not carried out. Try asking again in different words.`,
+  );
+  return false;
+}
+
 /**
- * Pull every fenced parecare-action block out of a reply and validate it
+ * Pull every action the assistant proposed out of a reply and validate it
  * against the given schema. Shared by the profile-level assistant and the
  * dashboard assistant, which understand different action sets.
+ *
+ * This is deliberately tolerant of how a model fences its action JSON, so
+ * that swapping the AI provider or model does not silently stop actions from
+ * being carried out. It accepts:
+ *   - an explicit fence whose info string names a parecare action, in any of
+ *     its spellings (the block is always consumed, and a bad one reports why);
+ *   - a plain ```json or unlabelled fence whose entire contents validate as
+ *     one action or an array of actions (consumed only when it validates, so
+ *     ordinary example JSON is left in the reply untouched).
+ * A single block may carry one action object or an array of them.
  */
 export function extractActionBlocks<T>(reply: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>): ExtractedActions<T> {
   const actions: T[] = [];
   const parseErrors: string[] = [];
-  let cleanedReply = reply.replace(ACTION_BLOCK_RE, (_whole, json: string) => {
-    try {
-      const raw = JSON.parse(json);
-      const parsed = schema.safeParse(raw);
-      if (parsed.success) actions.push(parsed.data);
-      else {
-        const attempted = String(raw?.type ?? raw?.action ?? '').replace(/_/g, ' ') || 'take an unrecognised action';
-        // Name the field that failed, so the user (and Pare, on the next
-        // turn) can see exactly what was wrong instead of a dead end.
-        const first = parsed.error.issues[0];
-        const where = first?.path?.length ? ` (problem with "${first.path.join('.')}": ${first.message.toLowerCase()})` : '';
-        console.warn('Assistant action validation failed:', attempted, parsed.error.format());
-        parseErrors.push(
-          `Pare tried to ${attempted} but that action could not be validated${where}, so it was not carried out. Try asking again in different words.`
-        );
-      }
-    } catch {
-      parseErrors.push('Pare suggested an action that could not be read, so it was not carried out.');
+
+  let out = '';
+  let cursor = 0;
+  for (const m of reply.matchAll(FENCE_RE)) {
+    const whole = m[0];
+    const info = (m[2] ?? '').trim();
+    const body = (m[3] ?? '').trim();
+    const start = m.index ?? 0;
+
+    const isActionFence = ACTION_INFO_RE.test(info);
+    const isGenericFence = GENERIC_INFO_RE.test(info);
+    if (!isActionFence && !isGenericFence) {
+      // A fenced block that is clearly something else (e.g. ```sql): leave it.
+      continue;
     }
-    return '';
-  });
-  // A reply cut off mid-action (provider token limit) leaves an opening
-  // fence with no closing one. Never show the half-written JSON to the
-  // user, and say plainly that nothing was recorded for it.
-  const dangling = cleanedReply.indexOf('```parecare-action');
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      if (isActionFence) {
+        out += reply.slice(cursor, start);
+        cursor = start + whole.length;
+        parseErrors.push('Pare suggested an action that could not be read, so it was not carried out.');
+      }
+      continue;
+    }
+
+    const candidates = Array.isArray(parsed) ? parsed : [parsed];
+    if (isActionFence) {
+      // An explicit action block is always consumed; each item is validated.
+      out += reply.slice(cursor, start);
+      cursor = start + whole.length;
+      for (const c of candidates) takeCandidate(c, schema, actions, parseErrors);
+    } else {
+      // A generic block is only treated as actions when everything in it
+      // validates; otherwise it is ordinary content and stays in the reply.
+      const allValid = candidates.length > 0 && candidates.every((c) => schema.safeParse(c).success);
+      if (allValid) {
+        out += reply.slice(cursor, start);
+        cursor = start + whole.length;
+        for (const c of candidates) takeCandidate(c, schema, actions, parseErrors);
+      }
+    }
+  }
+  out += reply.slice(cursor);
+  let cleanedReply = out;
+
+  // A reply cut off mid-action (provider token limit) leaves an opening fence
+  // with no closing one, so the loop above never matched it. Never show the
+  // half-written JSON; say plainly that nothing was recorded for it.
+  const dangling = cleanedReply.search(/(`{3,}|~{3,})[ \t]*[^\n]*parecare[\s_-]*action/i);
   if (dangling !== -1) {
     cleanedReply = cleanedReply.slice(0, dangling);
     parseErrors.push('The reply was cut off before this could be recorded, so nothing was saved. Please ask again.');
@@ -742,6 +850,63 @@ async function executeOne(
       if (!row) return `No condition called "${action.name}" was on the record.`;
       await audit(profileId, account.id, 'conditions', `resolved ${action.name}`);
       return `Marked ${row.name} as resolved on ${resolvedOn}.`;
+    }
+    case 'add_substance': {
+      const name = action.substance.trim();
+      const catalogueId = await resolveSubstanceCatalogueId(name, action.substance_class, account.id).catch(() => null);
+      if (!catalogueId) return `Could not record ${name}.`;
+      try {
+        await db('substance_use').insert({
+          care_profile_id: profileId,
+          substance_catalogue_id: catalogueId,
+          status: action.status ?? 'active',
+          route: action.route ?? null,
+          quantity: action.quantity ?? null,
+          quantity_unit: action.quantity_unit ?? null,
+          frequency: action.frequency ?? null,
+          started_on: action.started_on ?? null,
+          quit_on: action.quit_on ?? null,
+          notes: action.notes ?? null,
+        });
+      } catch (err) {
+        if ((err as { code?: string }).code === '23505') return `${name} is already recorded for this person. Use update_substance to change it.`;
+        throw err;
+      }
+      await audit(profileId, account.id, 'substance_use', `added substance ${name}`);
+      return `Recorded ${name} under substance use.`;
+    }
+    case 'update_substance': {
+      const record = await db('substance_use as su')
+        .join('substance_catalogue as sc', 'su.substance_catalogue_id', 'sc.id')
+        .where('su.care_profile_id', profileId)
+        .whereRaw('lower(sc.name) = lower(?)', [action.substance.trim()])
+        .select('su.id', 'sc.name as name')
+        .first();
+      if (!record) return `No substance called "${action.substance}" is recorded for this person.`;
+      const updates: Record<string, unknown> = {};
+      if (action.status !== undefined) updates['status'] = action.status;
+      if (action.route !== undefined) updates['route'] = action.route;
+      if (action.quantity !== undefined) updates['quantity'] = action.quantity;
+      if (action.quantity_unit !== undefined) updates['quantity_unit'] = action.quantity_unit;
+      if (action.frequency !== undefined) updates['frequency'] = action.frequency;
+      if (action.quit_on !== undefined) updates['quit_on'] = action.quit_on;
+      if (action.notes !== undefined) updates['notes'] = action.notes;
+      if (Object.keys(updates).length === 0) return `No changes to make to ${record.name}.`;
+      await db('substance_use').where({ id: record.id }).update({ ...updates, updated_at: db.fn.now() });
+      await audit(profileId, account.id, 'substance_use', `updated substance ${record.name}`);
+      return `Updated ${record.name}.`;
+    }
+    case 'remove_substance': {
+      const record = await db('substance_use as su')
+        .join('substance_catalogue as sc', 'su.substance_catalogue_id', 'sc.id')
+        .where('su.care_profile_id', profileId)
+        .whereRaw('lower(sc.name) = lower(?)', [action.substance.trim()])
+        .select('su.id', 'sc.name as name')
+        .first();
+      if (!record) return `No substance called "${action.substance}" is recorded for this person.`;
+      await db('substance_use').where({ id: record.id }).del();
+      await audit(profileId, account.id, 'substance_use', `removed substance ${record.name}`);
+      return `Removed ${record.name} from substance use.`;
     }
     case 'add_symptom': {
       const condition = await db('medical_conditions')
