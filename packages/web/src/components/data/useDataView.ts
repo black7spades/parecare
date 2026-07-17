@@ -14,7 +14,10 @@ import { useMemo, useState } from 'react';
 export interface DataSort<T> {
   key: string;
   label: string;
+  /** Ascending comparator; the hook reverses it for descending. */
   compare: (a: T, b: T) => number;
+  /** Direction applied when this sort is first chosen. Defaults to 'asc'. */
+  defaultDir?: 'asc' | 'desc';
 }
 
 export interface DataFilter<T> {
@@ -38,6 +41,7 @@ interface UseDataViewOptions<T> {
 export function useDataView<T>({ rows, getId, searchText, sorts = [], filters = [], defaultPageSize = 10 }: UseDataViewOptions<T>) {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState(sorts[0]?.key ?? '');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(sorts[0]?.defaultDir ?? 'asc');
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
@@ -52,9 +56,12 @@ export function useDataView<T>({ rows, getId, searchText, sorts = [], filters = 
       if (v) out = out.filter((r) => f.match(r, v));
     }
     const sort = sorts.find((s) => s.key === sortKey);
-    if (sort) out = [...out].sort(sort.compare);
+    if (sort) {
+      out = [...out].sort(sort.compare);
+      if (sortDir === 'desc') out.reverse();
+    }
     return out;
-  }, [rows, search, sortKey, filterValues, sorts, filters, searchText]);
+  }, [rows, search, sortKey, sortDir, filterValues, sorts, filters, searchText]);
 
   const totalFiltered = filtered.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
@@ -73,6 +80,18 @@ export function useDataView<T>({ rows, getId, searchText, sorts = [], filters = 
   const handleSearch = (v: string) => {
     setSearch(v);
     setPage(1);
+  };
+
+  // Choosing a sort (from a dropdown) starts at its natural direction;
+  // clicking the same column header again flips it.
+  const handleSetSortKey = (key: string) => {
+    setSortKey(key);
+    setSortDir(sorts.find((s) => s.key === key)?.defaultDir ?? 'asc');
+  };
+
+  const toggleSort = (key: string) => {
+    if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else handleSetSortKey(key);
   };
 
   const handleSetPageSize = (size: number) => {
@@ -104,7 +123,7 @@ export function useDataView<T>({ rows, getId, searchText, sorts = [], filters = 
 
   return {
     search, setSearch: handleSearch,
-    sortKey, setSortKey,
+    sortKey, setSortKey: handleSetSortKey, sortDir, toggleSort,
     filterValues, setFilter,
     view,
     filtered,
