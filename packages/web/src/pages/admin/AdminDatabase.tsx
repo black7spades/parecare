@@ -84,11 +84,14 @@ function SortableHeader({
  */
 function RowModal({
   schema,
+  label,
   row,
   onClose,
   onSaved,
 }: {
   schema: DbTableSchema;
+  /** The friendly name shown in the dialog title, e.g. "Conditions catalogue". */
+  label: string;
   row: DbRow | null;
   onClose: () => void;
   onSaved: () => void;
@@ -156,7 +159,7 @@ function RowModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={isEdit ? `Edit row in ${schema.table}` : `Add row to ${schema.table}`} wide>
+    <Modal open onClose={onClose} title={isEdit ? `Edit row in ${label}` : `Add row to ${label}`} wide>
       <div className="space-y-4">
         <p className="text-xs text-muted">
           {isEdit
@@ -337,61 +340,80 @@ export function AdminDatabase() {
     }
   }
 
-  const filteredTables = tables.filter((t) => t.name.toLowerCase().includes(tableFilter.toLowerCase()));
+  const filteredTables = tables.filter(
+    (t) =>
+      t.label.toLowerCase().includes(tableFilter.toLowerCase()) ||
+      t.name.toLowerCase().includes(tableFilter.toLowerCase())
+  );
+  const groups = [...new Set(filteredTables.map((t) => t.group))];
   const totalPages = Math.max(1, Math.ceil(total / perPage));
   const hasPk = (schema?.primary_key.length ?? 0) > 0;
+  const tableLabel = tables.find((t) => t.name === table)?.label ?? table;
 
   return (
     <div>
       <div className="mb-4">
-        <h1 className="text-xl font-semibold text-ink">Database tools</h1>
-        <p className="text-sm text-muted">Browse, edit, import and export every table in the database.</p>
+        <h1 className="text-xl font-semibold text-ink">Data tools</h1>
+        <p className="text-sm text-muted">
+          Tidy the data behind the app: fix a misspelt name in a shared catalogue or correct a care record. Only
+          the lists and records already managed in the main navigation are shown here.
+        </p>
       </div>
 
       <div
-        className="mb-6 rounded-md border-l-4 border-red-400 bg-red-50 dark:bg-red-900/10 px-4 py-3 text-sm text-red-700 dark:text-red-300"
+        className="mb-6 rounded-md border-l-4 border-amber-400 bg-amber-50 dark:bg-amber-900/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300"
         role="note"
       >
-        Changes made here are written straight to the database. They skip the usual application checks and the audit
-        log, and deleting a row also deletes anything that depends on it. There is no undo.
+        Edits apply to live records immediately. Fixing a value is safe; be careful with Delete, which permanently
+        removes the row and anything recorded against it.
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[16rem_1fr] gap-6 items-start">
         <aside className="card p-0 overflow-hidden lg:sticky lg:top-4">
           <div className="p-3 border-b border-border">
-            <h2 className="text-sm font-semibold text-ink mb-2">Tables</h2>
+            <h2 className="text-sm font-semibold text-ink mb-2">Lists and records</h2>
             <Input
-              placeholder="Filter tables…"
+              placeholder="Filter…"
               value={tableFilter}
               onChange={(e) => setTableFilter(e.target.value)}
-              aria-label="Filter tables"
+              aria-label="Filter lists and records"
             />
           </div>
-          <ul className="max-h-[60vh] overflow-y-auto">
-            {filteredTables.map((t) => (
-              <li key={t.name}>
-                <button
-                  type="button"
-                  className={`w-full flex items-center justify-between px-3 py-2 text-left text-sm border-b border-border last:border-0 transition-colors ${
-                    t.name === table ? 'bg-primary-50 text-primary font-medium' : 'text-ink hover:bg-surface-2'
-                  }`}
-                  onClick={() => openTable(t.name)}
-                >
-                  <span className="truncate">{t.name}</span>
-                  <span className="text-xs text-muted ml-2 shrink-0">{t.approx_rows.toLocaleString()}</span>
-                </button>
-              </li>
+          <div className="max-h-[60vh] overflow-y-auto">
+            {groups.map((group) => (
+              <div key={group}>
+                <h3 className="px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide text-muted">{group}</h3>
+                <ul>
+                  {filteredTables
+                    .filter((t) => t.group === group)
+                    .map((t) => (
+                      <li key={t.name}>
+                        <button
+                          type="button"
+                          title={t.name}
+                          className={`w-full flex items-center justify-between px-3 py-2 text-left text-sm border-b border-border last:border-0 transition-colors ${
+                            t.name === table ? 'bg-primary-50 text-primary font-medium' : 'text-ink hover:bg-surface-2'
+                          }`}
+                          onClick={() => openTable(t.name)}
+                        >
+                          <span className="truncate">{t.label}</span>
+                          <span className="text-xs text-muted ml-2 shrink-0">{t.approx_rows.toLocaleString()}</span>
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+              </div>
             ))}
-            {filteredTables.length === 0 ? <li className="px-3 py-4 text-sm text-muted">No tables match.</li> : null}
-          </ul>
+            {filteredTables.length === 0 ? <p className="px-3 py-4 text-sm text-muted">No tables match.</p> : null}
+          </div>
           <p className="px-3 py-2 text-xs text-muted border-t border-border">Row counts are estimates.</p>
         </aside>
 
         <section className="min-w-0">
           {!table ? (
-            <div className="card py-12 text-center text-sm text-muted">Choose a table on the left to view its rows.</div>
+            <div className="card py-12 text-center text-sm text-muted">Choose a list on the left to view its rows.</div>
           ) : !schema ? (
-            <div className="card py-12 text-center text-sm text-muted">Loading table…</div>
+            <div className="card py-12 text-center text-sm text-muted">Loading…</div>
           ) : (
             <>
               <div className="mb-3 flex flex-col sm:flex-row sm:items-center gap-2">
@@ -400,7 +422,7 @@ export function AdminDatabase() {
                     placeholder="Search all columns…"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    aria-label={`Search rows in ${table}`}
+                    aria-label={`Search rows in ${tableLabel}`}
                   />
                 </div>
                 <label className="flex items-center gap-2 text-xs text-muted whitespace-nowrap">
@@ -518,11 +540,15 @@ export function AdminDatabase() {
         </section>
       </div>
 
-      {schema && adding ? <RowModal schema={schema} row={null} onClose={() => setAdding(false)} onSaved={loadRows} /> : null}
-      {schema && editing ? <RowModal schema={schema} row={editing} onClose={() => setEditing(null)} onSaved={loadRows} /> : null}
+      {schema && adding ? (
+        <RowModal schema={schema} label={tableLabel} row={null} onClose={() => setAdding(false)} onSaved={loadRows} />
+      ) : null}
+      {schema && editing ? (
+        <RowModal schema={schema} label={tableLabel} row={editing} onClose={() => setEditing(null)} onSaved={loadRows} />
+      ) : null}
 
       {schema && deleting ? (
-        <Modal open onClose={() => setDeleting(null)} title={`Delete row from ${schema.table}`}>
+        <Modal open onClose={() => setDeleting(null)} title={`Delete row from ${tableLabel}`}>
           <div className="space-y-4">
             <p className="text-sm text-ink">
               This permanently destroys the row and anything that depends on it. There is no undo.

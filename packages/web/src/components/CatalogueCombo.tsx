@@ -88,6 +88,9 @@ export function CatalogueCombo({
         onChange={(e) => {
           setSearch(e.target.value);
           setOpen(true);
+          // In edit-in-place mode the typed text IS the value: correcting a
+          // misspelt name must stick even when no suggestion is clicked.
+          if (keepValue) onPick(e.target.value);
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={(e) => {
