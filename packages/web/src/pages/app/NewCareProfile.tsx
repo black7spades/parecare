@@ -233,11 +233,19 @@ function PetForm({ onBack }: { onBack: () => void }) {
   // Once the carer edits the relationship, stop overwriting it from species.
   const [relationshipTouched, setRelationshipTouched] = useState(false);
   const [notes, setNotes] = useState('');
+  const [ownerId, setOwnerId] = useState('');
   const [createdProfile, setCreatedProfile] = useState<CareProfile | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  // People this pet can be owned by: existing person profiles.
+  const { data: peopleData } = useQuery({
+    queryKey: ['owner-people'],
+    queryFn: () => api.get<{ profiles: { id: string; full_name: string; preferred_name: string | null; kind: string }[] }>('/care-profiles/summary'),
+  });
+  const people = (peopleData?.profiles ?? []).filter((p) => p.kind === 'person');
 
   const displayName = [name, familyName].map((p) => p.trim()).filter(Boolean).join(' ');
   const relationshipValue = relationshipTouched ? relationship : species ? petRelationshipFor(species) : relationship;
@@ -263,6 +271,7 @@ function PetForm({ onBack }: { onBack: () => void }) {
         date_of_birth: dateOfBirth || null,
         microchip_number: microchip.trim() || null,
         owner_relationship: relationshipValue.trim() || null,
+        owner_profile_id: ownerId || null,
         notes: notes || null,
         // Only the pet journeys chosen here; never the human ageing journey.
         journey_template_ids: journeyIds,
@@ -352,6 +361,27 @@ function PetForm({ onBack }: { onBack: () => void }) {
           Desexed
           <span className="text-xs text-muted">neutered or spayed</span>
         </label>
+        <div>
+          <label htmlFor="pet-owner" className="block text-sm font-medium text-ink mb-1">
+            Owner
+          </label>
+          <select
+            id="pet-owner"
+            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            value={ownerId}
+            onChange={(e) => setOwnerId(e.target.value)}
+          >
+            <option value="">No owner set</option>
+            {people.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.preferred_name || p.full_name}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-muted">
+            {people.length > 0 ? 'The person who owns this pet, chosen from your people.' : 'Add a person first to set them as the owner.'}
+          </p>
+        </div>
         <PetJourneyPicker selected={journeyIds} onChange={setJourneyIds} />
         <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         <p className="text-xs text-muted">Next we will set up who cares for them, plus conditions, allergies and their vet.</p>

@@ -194,12 +194,16 @@ export function OverviewPage() {
             order={cardOrder}
           >
             {isPet ? (
-              <PetDetails
-                species={profile.species}
-                breed={profile.breed}
-                desexed={profile.desexed}
-                microchip={profile.microchip_number}
-              />
+              <div className="space-y-4">
+                <PetDetails
+                  species={profile.species}
+                  breed={profile.breed}
+                  desexed={profile.desexed}
+                  microchip={profile.microchip_number}
+                  owner={profile.owner_profile ?? null}
+                />
+                <ProfileContact profile={profile} />
+              </div>
             ) : (
               <ProfileContact profile={profile} />
             )}
@@ -866,17 +870,29 @@ function PetDetails({
   breed,
   desexed,
   microchip,
+  owner,
 }: {
   species: string | null;
   breed: string | null;
   desexed: boolean;
   microchip: string | null;
+  owner: { id: string; full_name: string; preferred_name: string | null } | null;
 }) {
   const rows: { label: string; value: React.ReactNode }[] = [];
   if (species) rows.push({ label: 'Species', value: species });
   if (breed) rows.push({ label: 'Breed', value: breed });
   rows.push({ label: 'Desexed', value: desexed ? 'Yes' : 'No' });
   if (microchip) rows.push({ label: 'Microchip', value: microchip });
+  if (owner) {
+    rows.push({
+      label: 'Owner',
+      value: (
+        <Link to={`/app/${owner.id}`} className="text-primary hover:underline">
+          {owner.preferred_name || owner.full_name}
+        </Link>
+      ),
+    });
+  }
   return (
     <dl className="grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-2">
       {rows.map((r) => (
