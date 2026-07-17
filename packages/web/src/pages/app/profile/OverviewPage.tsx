@@ -2,12 +2,13 @@ import { useCallback, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
-import { browserTimeZone } from '../../../lib/datetime';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
+import { AttentionPanel } from '../../../components/AttentionPanel';
 import { HealthStatusOverview } from './HealthStatusOverview';
+import { CurrentHealthSection } from './CurrentHealthSection';
 import { CareLogSection } from './CareLogSection';
 import { CardAiSummary } from './CardAiSummary';
 import { useProfile } from './ProfileLayout';
@@ -277,6 +278,7 @@ export function OverviewPage() {
           >
             <div className="space-y-3">
               <CardAiSummary profileId={profile.id} cardKey="health" canEdit={canEdit} />
+              <CurrentHealthSection profileId={profile.id} canEdit={canEdit} careName={careName} />
               <HealthStatusOverview profileId={profile.id} />
             </div>
           </CollapsibleCard>
@@ -306,7 +308,7 @@ export function OverviewPage() {
 
   return (
     <div className="space-y-6">
-      <AttentionBanner profileId={profile.id} />
+      <AttentionPanel profileId={profile.id} />
 
       <div className="flex justify-end">
         <Button
@@ -773,60 +775,6 @@ function ProfileContact({ profile }: { profile: CareProfile }) {
         </div>
       ))}
     </dl>
-  );
-}
-
-interface AttentionItem {
-  profile_id: string;
-  profile_name: string;
-  kind: string;
-  label: string;
-  detail: string | null;
-  section: string;
-  key: string;
-  urgent: boolean;
-  dismissible: boolean;
-}
-
-/**
- * A discreet strip above the overview cards: only appears when something
- * needs attention, and each item links straight to the section where it
- * can be dealt with. Urgent items tint the strip red.
- */
-function AttentionBanner({ profileId }: { profileId: string }) {
-  const tz = browserTimeZone();
-  const { data } = useQuery({
-    queryKey: ['pare-attention'],
-    queryFn: () => api.get<{ count: number; items: AttentionItem[] }>(`/ai/dashboard/attention${tz ? `?tz=${encodeURIComponent(tz)}` : ''}`),
-  });
-  const items = (data?.items ?? []).filter((i) => i.profile_id === profileId);
-
-  if (items.length === 0) return null;
-
-  const hasUrgent = items.some((i) => i.urgent);
-
-  return (
-    <div
-      className={`flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-md border px-3 py-2 ${
-        hasUrgent
-          ? 'border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-900/10'
-          : 'border-border bg-surface-2'
-      }`}
-    >
-      <span className="text-xs font-medium text-muted whitespace-nowrap">Needs attention</span>
-      {items.map((it) => (
-        <Link
-          key={it.key}
-          to={it.section}
-          className={`text-sm hover:underline ${
-            it.urgent ? 'text-red-700 dark:text-red-300 font-medium' : 'text-ink'
-          }`}
-        >
-          {it.label}
-          {it.detail ? <span className={it.urgent ? '' : 'text-muted'}> · {it.detail}</span> : null}
-        </Link>
-      ))}
-    </div>
   );
 }
 

@@ -8,20 +8,8 @@ import { useAssistantStore } from '../../stores/assistant';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { Avatar } from '../../components/ui/Avatar';
-import { browserTimeZone } from '../../lib/datetime';
 import { POA_TYPES, conditionStatusLabel, providerTypeLabel, type Provider } from '../../lib/care';
-
-interface AttentionItem {
-  profile_id: string;
-  profile_name: string;
-  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'unresolved_outcome';
-  label: string;
-  detail: string | null;
-  section: 'tasks' | 'medications' | 'questions';
-  key: string;
-  urgent: boolean;
-  dismissible: boolean;
-}
+import { AttentionPanel } from '../../components/AttentionPanel';
 
 interface SummaryJourney {
   id: string;
@@ -115,19 +103,6 @@ export function Dashboard() {
     queryFn: () => api.get<{ profiles: ProfileSummary[] }>('/care-profiles/summary'),
   });
   const profiles = data?.profiles ?? [];
-
-  // What needs attention today: overdue tasks, unrecorded doses, stale
-  // questions. Listed in full above the profile cards, so the user never
-  // has to open the assistant to find out what is pressing.
-  const { data: attentionData } = useQuery({
-    queryKey: ['pare-attention'],
-    queryFn: () =>
-      api.get<{ count: number; items: AttentionItem[] }>(
-        `/ai/dashboard/attention${browserTimeZone() ? `?tz=${encodeURIComponent(browserTimeZone()!)}` : ''}`
-      ),
-    enabled: profiles.length > 0,
-  });
-  const attentionItems = attentionData?.items ?? [];
 
   const pinMutation = useMutation({
     mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
@@ -224,7 +199,7 @@ export function Dashboard() {
         )
       ) : (
         <>
-          {attentionItems.length > 0 ? <AttentionPanel items={attentionItems} /> : null}
+          <AttentionPanel />
           <div className="flex flex-wrap items-center gap-2 text-sm">
             {profiles.length > 1 ? (
               <>
@@ -414,156 +389,6 @@ function PareWelcomeCard() {
           Create a care profile directly
         </Link>
       </p>
-    </div>
-  );
-}
-
-const ATTENTION_ICON: Record<AttentionItem['kind'], string> = {
-  overdue_task: '⏰',
-  unrecorded_dose: '💊',
-  stale_question: '❓',
-  out_of_stock: '📦',
-  unresolved_outcome: '⚠️',
-};
-
-/**
- * A precise brief handed to Pare when the user asks to deal with an item
- * together: what it is, who it is for, and the annoying steps to carry out,
- * so Pare drafts the message, gives a ready-to-send version and helps close
- * the item out.
- */
-function itemBrief(it: AttentionItem): string {
-  const who = it.profile_name;
-  const useRecord = `First look through ${who}'s record you have been given — providers and their contact details, the care plan, recent notes and related tasks — and use what is there. `;
-  switch (it.kind) {
-    case 'overdue_task':
-      return `Let's do this for ${who}: "${it.label}"${it.detail ? ` (${it.detail})` : ''}. ${useRecord}`
-        + `If it needs an email or message, write the actual draft here now (a clear subject and body) addressed to the right provider or contact from the record. `
-        + `Only if something essential is genuinely not on file (like a missing email address) ask me for just that. Do not say you are drafting without showing the draft. `
-        + `Do not mark the task complete yourself; once it is sent, offer me a confirm button to mark it done.`;
-    case 'out_of_stock':
-      return `${who} has run out of ${it.detail ?? 'a medication'}. ${useRecord}`
-        + `Write the actual repeat request here now (a clear subject and body) addressed to their pharmacy or prescriber from the record. `
-        + `Only ask me for a detail if it is genuinely missing. Do not change anything yourself; once it is arranged, ask me whether to update the supply.`;
-    case 'unrecorded_dose':
-      return `Record all the doses due for ${who} now${it.detail ? `: ${it.detail}` : ''}. `
-        + `Log every one of them in a single action at their scheduled times, using the exact medication names from the record. `
-        + `Do not ask me to confirm each one and do not walk me through them one at a time; just log them and tell me what you recorded.`;
-    case 'stale_question':
-      return `Let's follow up the open question(s) for ${who} that have had no reply. ${useRecord}Draft the actual message to chase an answer here now.`;
-    case 'unresolved_outcome':
-      return `A task for ${who} was completed with a poor outcome: "${it.detail ?? it.label}". ${useRecord}Help me work out what went wrong and what to do next.`;
-    default:
-      return `Help me deal with this for ${who}: ${it.label}. ${useRecord}`;
-  }
-}
-
-/**
- * The things needing attention today, listed in full so the user can see
- * and act on each one without opening the assistant. Urgent items lead and
- * stand out. Each row has exactly two controls per the style guide: "Ask
- * Pare" opens the assistant primed with that item's brief, and "Dismiss"
- * sets a dismissible item aside behind an "are you sure?" confirm. The
- * panel header has one control, the Hide and Show collapse toggle.
- */
-function AttentionPanel({ items }: { items: AttentionItem[] }) {
-  const openWithMessage = useAssistantStore((s) => s.openWithMessage);
-  const queryClient = useQueryClient();
-  const [collapsed, setCollapsed] = useState(false);
-  const [confirmDismiss, setConfirmDismiss] = useState<AttentionItem | null>(null);
-
-  const dismiss = useMutation({
-    mutationFn: (key: string) => api.post('/ai/dashboard/attention/dismiss', { key }),
-    onSuccess: () => {
-      setConfirmDismiss(null);
-      void queryClient.invalidateQueries({ queryKey: ['pare-attention'] });
-    },
-  });
-
-  return (
-    <div className="card py-3 px-4">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="text-sm font-semibold text-ink">Needs attention today</span>
-        <span className="text-xs text-muted">
-          {items.length === 1 ? '1 thing' : `${items.length} things`}
-        </span>
-        <div className="ml-auto">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setCollapsed((v) => !v)}
-            aria-expanded={!collapsed}
-          >
-            {collapsed ? 'Show' : 'Hide'}
-          </Button>
-        </div>
-      </div>
-      {!collapsed ? (
-        <ul className="mt-2 divide-y divide-border">
-          {items.map((it) => (
-            <li
-              key={it.key}
-              className={`flex flex-wrap items-start gap-x-3 gap-y-2 py-2 -mx-2 px-2 rounded ${
-                it.urgent ? 'border-l-2 border-red-500 bg-red-50 dark:bg-red-900/10' : ''
-              }`}
-            >
-              <Link
-                to={`/app/${it.profile_id}/${it.section}`}
-                className="flex items-start gap-2 min-w-0 flex-1 text-sm hover:underline"
-              >
-                <span aria-hidden className="mt-0.5">{ATTENTION_ICON[it.kind]}</span>
-                <span className="min-w-0">
-                  <span className="font-medium text-ink">{it.profile_name}</span>
-                  <span className={it.urgent ? 'text-red-700 dark:text-red-300' : 'text-muted'}> · {it.label}</span>
-                  {it.detail ? <span className={it.urgent ? 'text-red-700 dark:text-red-300' : 'text-muted'}> ({it.detail})</span> : null}
-                  {it.urgent ? (
-                    <span className="ml-2 align-middle rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">
-                      Urgent
-                    </span>
-                  ) : null}
-                </span>
-              </Link>
-              <div className="flex items-center gap-1 shrink-0">
-                {it.dismissible ? (
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    className="whitespace-nowrap"
-                    onClick={() => setConfirmDismiss(it)}
-                  >
-                    Dismiss
-                  </Button>
-                ) : null}
-                <Button
-                  size="xs"
-                  variant="secondary"
-                  className="whitespace-nowrap"
-                  onClick={() => openWithMessage(itemBrief(it), it.profile_id)}
-                >
-                  Ask Pare
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      <Modal open={confirmDismiss !== null} onClose={() => setConfirmDismiss(null)} title="Dismiss this alert">
-        <p className="text-sm text-muted mb-4">
-          Set aside{' '}
-          <span className="font-medium text-ink">
-            {confirmDismiss?.detail ?? confirmDismiss?.label}
-          </span>{' '}
-          for <span className="font-medium text-ink">{confirmDismiss?.profile_name}</span>? This is an urgent item.
-          It will stop showing here until the medication is restocked, so only dismiss it if you have the repeat in hand.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmDismiss(null)}>Cancel</Button>
-          <Button variant="danger" loading={dismiss.isPending} onClick={() => confirmDismiss && dismiss.mutate(confirmDismiss.key)}>
-            Yes, dismiss
-          </Button>
-        </div>
-      </Modal>
     </div>
   );
 }

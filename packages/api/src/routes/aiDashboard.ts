@@ -6,7 +6,8 @@ import { requireAccountRight } from '../middleware/accountRights';
 import { requireFeature } from '../middleware/subscriptionGate';
 import { sendDashboardMessage } from '../services/ai';
 import type { ChatMessage } from '../services/ai';
-import { buildDashboardContext, countAttentionItems, gatherAttentionItems } from '../services/aiDashboardContext';
+import { accessibleProfiles, buildDashboardContext, countAttentionItems, gatherAttentionItems, getDismissedKeys } from '../services/aiDashboardContext';
+import { gatherHealthAlerts } from '../services/healthAlerts';
 import { buildProfileContext } from '../services/aiContext';
 import { extractDashboardActions, splitDashboardActions, executeDashboardActions } from '../services/aiDashboardActions';
 import { executeCrossProfileActions } from '../services/aiActions';
@@ -31,6 +32,24 @@ aiDashboardRouter.get('/attention', requireAuth, async (req, res) => {
   const tz = typeof req.query['tz'] === 'string' ? req.query['tz'] : (req.account!.timezone ?? null);
   const items = await gatherAttentionItems(req.account!.id, tz);
   res.json({ count: items.length, items });
+});
+
+/**
+ * Health alerts across everyone in the account's care: illnesses whose
+ * symptoms have stayed above moderate for days, and injuries still
+ * unresolved months on. Rendered as banners on the Homeboard and on each
+ * person's overview, with their GP's details to hand. Dismissals share the
+ * attention mechanism below.
+ */
+aiDashboardRouter.get('/health-alerts', requireAuth, async (req, res) => {
+  const [profiles, dismissed] = await Promise.all([
+    accessibleProfiles(req.account!.id),
+    getDismissedKeys(req.account!.id),
+  ]);
+  const alerts = await gatherHealthAlerts(
+    profiles.map((p) => ({ id: p.id, name: p.preferred_name ?? p.full_name }))
+  );
+  res.json({ alerts: alerts.filter((a) => !dismissed.has(a.key)) });
 });
 
 /**
