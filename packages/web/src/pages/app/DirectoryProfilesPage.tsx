@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { DataToolbar } from '../../components/data/DataToolbar';
+import { SortableTh } from '../../components/data/SortableTh';
 import { useDataView, type DataSort, type DataFilter } from '../../components/data/useDataView';
 import { Avatar } from '../../components/ui/Avatar';
 import { ageFrom, phaseLabel, CARE_PHASES, type ProfileKind } from '../../lib/care';
@@ -32,15 +33,24 @@ interface DirectoryProfile {
   circle_members: CircleMember[] | null;
 }
 
+const contactText = (p: DirectoryProfile) => (p.contact_name ?? p.contact_phone ?? p.contact_email ?? '');
+const circleCount = (p: DirectoryProfile) => p.circle_members?.length ?? 0;
+
 const PEOPLE_SORTS: DataSort<DirectoryProfile>[] = [
   { key: 'name', label: 'Name', compare: (a, b) => a.full_name.localeCompare(b.full_name) },
   { key: 'age', label: 'Age', compare: (a, b) => (ageFrom(b.date_of_birth) ?? -1) - (ageFrom(a.date_of_birth) ?? -1) },
+  { key: 'dob', label: 'Date of birth', compare: (a, b) => (a.date_of_birth ?? '').localeCompare(b.date_of_birth ?? '') },
   { key: 'phase', label: 'Phase', compare: (a, b) => phaseLabel(a.current_phase).localeCompare(phaseLabel(b.current_phase)) },
+  { key: 'contact', label: 'Contact', compare: (a, b) => contactText(a).localeCompare(contactText(b)) },
+  { key: 'circle', label: 'Care circle', compare: (a, b) => circleCount(b) - circleCount(a) },
 ];
 
 const PETS_SORTS: DataSort<DirectoryProfile>[] = [
   { key: 'name', label: 'Name', compare: (a, b) => a.full_name.localeCompare(b.full_name) },
   { key: 'species', label: 'Species', compare: (a, b) => (a.species ?? '').localeCompare(b.species ?? '') },
+  { key: 'breed', label: 'Breed', compare: (a, b) => (a.breed ?? '').localeCompare(b.breed ?? '') },
+  { key: 'contact', label: 'Contact', compare: (a, b) => contactText(a).localeCompare(contactText(b)) },
+  { key: 'circle', label: 'Care circle', compare: (a, b) => circleCount(b) - circleCount(a) },
 ];
 
 const PEOPLE_FILTERS: DataFilter<DirectoryProfile>[] = [
@@ -150,21 +160,21 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
           <table className="w-full text-sm">
             <thead className="border-b border-border">
               <tr className="text-left text-xs text-muted">
-                <th className="px-3 py-2 font-medium">Name</th>
+                <SortableTh label="Name" sortKey="name" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 {isPeople ? (
                   <>
-                    <th className="px-3 py-2 font-medium">Age</th>
-                    <th className="px-3 py-2 font-medium">Date of birth</th>
-                    <th className="px-3 py-2 font-medium">Phase</th>
+                    <SortableTh label="Age" sortKey="age" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                    <SortableTh label="Date of birth" sortKey="dob" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                    <SortableTh label="Phase" sortKey="phase" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                   </>
                 ) : (
                   <>
-                    <th className="px-3 py-2 font-medium">Species</th>
-                    <th className="px-3 py-2 font-medium">Breed</th>
+                    <SortableTh label="Species" sortKey="species" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                    <SortableTh label="Breed" sortKey="breed" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                   </>
                 )}
-                <th className="px-3 py-2 font-medium">Contact</th>
-                <th className="px-3 py-2 font-medium">Care circle</th>
+                <SortableTh label="Contact" sortKey="contact" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Care circle" sortKey="circle" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
               </tr>
             </thead>
             <tbody>

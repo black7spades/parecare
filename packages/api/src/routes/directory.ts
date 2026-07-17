@@ -4,6 +4,7 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { roleAtLeast } from '../middleware/requireRole';
 import { providerAddressFields, withComposedAddress } from './providers';
+import { addressColumns, ADDRESS_PART_KEYS } from '../services/addresses';
 import type { CareProfile, Provider, ProfileKind } from '../types';
 
 export const directoryRouter = Router();
@@ -328,5 +329,179 @@ directoryRouter.post('/providers/:id/bulk-unlink', requireAuth, async (req, res)
     .whereIn('care_profile_id', parsed.data.profile_ids)
     .delete();
 
+  res.json({ unlinked: removed });
+});
+
+// ---------------------------------------------------------------------------
+// Address directory: the reusable address book, the same shape as providers.
+
+const addressSchema = z.object({
+  label: z.string().max(255).optional().nullable(),
+  address_line1: z.string().max(255).optional().nullable(),
+  address_line2: z.string().max(255).optional().nullable(),
+  address_suburb: z.string().max(120).optional().nullable(),
+  address_state: z.string().max(120).optional().nullable(),
+  address_postcode: z.string().max(20).optional().nullable(),
+  address_country: z.string().max(120).optional().nullable(),
+});
+
+/**
+ * List addresses for the directory, with the profiles each is linked to.
+ *   super_admin  => every address
+ *   admin        => their account's addresses
+ *   user/viewer  => addresses linked to profiles they can access (read-only)
+ */
+directoryRouter.get('/addresses', requireAuth, async (req, res) => {
+  const account = req.account!;
+
+  let query = db('addresses as a')
+    .select(
+      'a.*',
+      db.raw(`(
+        SELECT json_agg(json_build_object(
+          'profile_id', cpa.care_profile_id,
+          'profile_name', cp.full_name,
+          'address_kind', cpa.address_kind
+        ) ORDER BY cp.full_name)
+        FROM care_profile_addresses cpa
+        JOIN care_profiles cp ON cp.id = cpa.care_profile_id
+        WHERE cpa.address_id = a.id
+      ) AS linked_profiles`)
+    )
+    .orderBy('a.formatted', 'asc');
+
+  if (roleAtLeast(account.role, 'super_admin')) {
+    // See everything
+  } else if (roleAtLeast(account.role, 'admin')) {
+    query = query.where('a.account_id', account.id);
+  } else {
+    query = query
+      .join('care_profile_addresses as cpa', 'cpa.address_id', 'a.id')
+      .join('care_circle_members as ccm', 'ccm.care_profile_id', 'cpa.care_profile_id')
+      .where('ccm.account_id', account.id)
+      .where('ccm.invite_accepted', true)
+      .groupBy('a.id');
+  }
+
+  const addresses = await query;
+  const canEdit = roleAtLeast(account.role, 'admin');
+  res.json({ addresses, can_edit: canEdit });
+});
+
+directoryRouter.post('/addresses', requireAuth, async (req, res) => {
+  const account = req.account!;
+  if (!roleAtLeast(account.role, 'admin')) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+  const parsed = addressSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
+    return;
+  }
+  if (!ADDRESS_PART_KEYS.some((k) => (parsed.data as Record<string, unknown>)[k])) {
+    res.status(400).json({ error: 'Provide an address', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const [address] = await db('addresses')
+    .insert({ account_id: account.id, ...addressColumns(parsed.data, parsed.data.label) })
+    .returning('*');
+  res.status(201).json({ address });
+});
+
+directoryRouter.patch('/addresses/:id', requireAuth, async (req, res) => {
+  const account = req.account!;
+  if (!roleAtLeast(account.role, 'admin')) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+  const parsed = addressSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  let query = db('addresses').where({ id: req.params['id'] });
+  if (!roleAtLeast(account.role, 'super_admin')) query = query.where({ account_id: account.id });
+  const current = await query.clone().first();
+  if (!current) {
+    res.status(404).json({ error: 'Address not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const merged = { ...current, ...parsed.data };
+  const [address] = await query.update({ ...addressColumns(merged, merged.label), updated_at: db.fn.now() }).returning('*');
+  res.json({ address });
+});
+
+directoryRouter.delete('/addresses/:id', requireAuth, async (req, res) => {
+  const account = req.account!;
+  if (!roleAtLeast(account.role, 'admin')) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+  let query = db('addresses').where({ id: req.params['id'] });
+  if (!roleAtLeast(account.role, 'super_admin')) query = query.where({ account_id: account.id });
+  const affected = await query.delete();
+  if (!affected) {
+    res.status(404).json({ error: 'Address not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ message: 'Address deleted.' });
+});
+
+/** Bulk link an address to multiple care profiles, like providers. */
+directoryRouter.post('/addresses/:id/bulk-link', requireAuth, async (req, res) => {
+  const account = req.account!;
+  if (!roleAtLeast(account.role, 'admin')) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+  const parsed = z.object({ profile_ids: z.array(z.string().uuid()).min(1).max(100) }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
+    return;
+  }
+  const address = await db('addresses').where({ id: req.params['id'] }).first();
+  if (!address) {
+    res.status(404).json({ error: 'Address not found', code: 'NOT_FOUND' });
+    return;
+  }
+  if (!roleAtLeast(account.role, 'super_admin') && address.account_id !== account.id) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+
+  const { profile_ids } = parsed.data;
+  const accessRows = roleAtLeast(account.role, 'super_admin')
+    ? await db('care_profiles').whereIn('id', profile_ids).select('id')
+    : await db('care_profiles').whereIn('id', profile_ids).where({ account_id: account.id }).select('id');
+  const accessibleIds = accessRows.map((r) => r.id);
+
+  const existing = await db('care_profile_addresses')
+    .where({ address_id: address.id })
+    .whereIn('care_profile_id', accessibleIds)
+    .select('care_profile_id');
+  const existingSet = new Set(existing.map((r) => r.care_profile_id));
+  const toInsert = accessibleIds.filter((id) => !existingSet.has(id));
+  if (toInsert.length > 0) {
+    await db('care_profile_addresses').insert(toInsert.map((pid) => ({ care_profile_id: pid, address_id: address.id })));
+  }
+  res.json({ linked: toInsert.length, already_linked: existingSet.size, skipped: profile_ids.length - accessibleIds.length });
+});
+
+directoryRouter.post('/addresses/:id/bulk-unlink', requireAuth, async (req, res) => {
+  const account = req.account!;
+  if (!roleAtLeast(account.role, 'admin')) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+  const parsed = z.object({ profile_ids: z.array(z.string().uuid()).min(1).max(100) }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
+    return;
+  }
+  const removed = await db('care_profile_addresses')
+    .where({ address_id: req.params['id'] })
+    .whereIn('care_profile_id', parsed.data.profile_ids)
+    .delete();
   res.json({ unlinked: removed });
 });

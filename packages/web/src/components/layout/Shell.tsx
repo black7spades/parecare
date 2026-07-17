@@ -19,6 +19,41 @@ interface PinnedProfile {
   preferred_name: string | null;
   photo_url: string | null;
   photo_color: string | null;
+  sort_order: number;
+  last_activity: string | null;
+}
+
+type PinArrangement = 'recent' | 'az' | 'za' | 'custom';
+
+const PIN_ARRANGE_KEY = 'parecare-pin-arrangement';
+const PIN_ARRANGE_OPTIONS: Array<{ value: PinArrangement; label: string }> = [
+  { value: 'recent', label: 'Recent activity' },
+  { value: 'az', label: 'A to Z' },
+  { value: 'za', label: 'Z to A' },
+  { value: 'custom', label: 'Custom order' },
+];
+
+function readPinArrangement(): PinArrangement {
+  const v = localStorage.getItem(PIN_ARRANGE_KEY);
+  return v === 'az' || v === 'za' || v === 'custom' || v === 'recent' ? v : 'recent';
+}
+
+const pinName = (p: PinnedProfile) => p.preferred_name || p.full_name;
+
+function arrangePins(pins: PinnedProfile[], arrangement: PinArrangement): PinnedProfile[] {
+  const list = [...pins];
+  switch (arrangement) {
+    case 'az':
+      return list.sort((a, b) => pinName(a).localeCompare(pinName(b)));
+    case 'za':
+      return list.sort((a, b) => pinName(b).localeCompare(pinName(a)));
+    case 'recent':
+      return list.sort((a, b) => (b.last_activity ?? '').localeCompare(a.last_activity ?? ''));
+    case 'custom':
+    default:
+      // The server already orders by sort_order; keep it as-is.
+      return list;
+  }
 }
 
 function TierBadge() {
@@ -235,6 +270,138 @@ function ProfileSidebarNav({ profileId }: { profileId: string }) {
   );
 }
 
+/**
+ * The top-level "Pinned" list in the main nav: this carer's pinned care
+ * profiles, arranged by most recent activity, name, or a manually fixed
+ * custom order. In custom order each row gains up and down controls to move
+ * it and a control to unpin it; the order is saved for this carer.
+ */
+function PinnedProfilesNav({ pinned }: { pinned: PinnedProfile[] }) {
+  const queryClient = useQueryClient();
+  const [arrangement, setArrangement] = useState<PinArrangement>(readPinArrangement);
+
+  const setArrange = (next: PinArrangement) => {
+    setArrangement(next);
+    localStorage.setItem(PIN_ARRANGE_KEY, next);
+  };
+
+  const saveOrder = useMutation({
+    mutationFn: (ids: string[]) => api.put('/care-profiles/pins/order', { ids }),
+    onMutate: async (ids: string[]) => {
+      await queryClient.cancelQueries({ queryKey: ['pinned-profiles'] });
+      const prev = queryClient.getQueryData<{ profiles: PinnedProfile[] }>(['pinned-profiles']);
+      if (prev) {
+        const byId = new Map(prev.profiles.map((p) => [p.id, p]));
+        const reordered = ids
+          .map((id, i) => {
+            const p = byId.get(id);
+            return p ? { ...p, sort_order: i } : null;
+          })
+          .filter((p): p is PinnedProfile => !!p);
+        queryClient.setQueryData(['pinned-profiles'], { profiles: reordered });
+      }
+      return { prev };
+    },
+    onError: (_e, _ids, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(['pinned-profiles'], ctx.prev);
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ['pinned-profiles'] }),
+  });
+
+  const unpin = useMutation({
+    mutationFn: (id: string) => api.delete(`/care-profiles/${id}/pin`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['pinned-profiles'] });
+      void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
+    },
+  });
+
+  if (pinned.length === 0) return null;
+
+  const ordered = arrangePins(pinned, arrangement);
+  const isCustom = arrangement === 'custom';
+
+  const move = (index: number, delta: number) => {
+    const target = index + delta;
+    if (target < 0 || target >= ordered.length) return;
+    const ids = ordered.map((p) => p.id);
+    const [moved] = ids.splice(index, 1);
+    ids.splice(target, 0, moved);
+    saveOrder.mutate(ids);
+  };
+
+  return (
+    <>
+      <div className={`${navHeadingClass} flex items-center justify-between gap-1`}>
+        <span>Pinned</span>
+        <select
+          aria-label="Arrange pinned people"
+          value={arrangement}
+          onChange={(e) => setArrange(e.target.value as PinArrangement)}
+          className="text-[11px] font-medium bg-transparent text-muted hover:text-ink focus:text-ink border-0 rounded px-1 py-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary normal-case tracking-normal"
+        >
+          {PIN_ARRANGE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      {ordered.map((p, i) => (
+        <div key={p.id} className="flex items-center gap-1">
+          <NavLink
+            to={`/app/${p.id}`}
+            className={({ isActive }) => `${navLinkClass({ isActive })} flex-1 min-w-0`}
+          >
+            <Avatar accountId={p.id} name={p.full_name} avatarUrl={p.photo_url} color={p.photo_color} fetchPath={`/care-profiles/${p.id}/photo`} size={22} />
+            <span className="truncate">{pinName(p)}</span>
+          </NavLink>
+          {isCustom ? (
+            <div className="flex items-center shrink-0">
+              <button
+                type="button"
+                aria-label={`Move ${pinName(p)} up`}
+                title="Move up"
+                disabled={i === 0}
+                onClick={() => move(i, -1)}
+                className="p-1 rounded text-muted hover:text-ink hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <polyline points="6 15 12 9 18 15" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                aria-label={`Move ${pinName(p)} down`}
+                title="Move down"
+                disabled={i === ordered.length - 1}
+                onClick={() => move(i, 1)}
+                className="p-1 rounded text-muted hover:text-ink hover:bg-surface-2 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                aria-label={`Unpin ${pinName(p)}`}
+                title="Unpin"
+                onClick={() => unpin.mutate(p.id)}
+                className="p-1 rounded text-muted hover:text-red-700 dark:hover:text-red-300 hover:bg-surface-2 transition-colors"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function Shell() {
   const updateAccount = useAuthStore((s) => s.updateAccount);
   const role = useAuthStore((s) => s.account?.role);
@@ -313,21 +480,14 @@ export function Shell() {
       <NavLink to="/app/directory/providers" className={navLinkClass}>
         Providers
       </NavLink>
+      <NavLink to="/app/directory/addresses" className={navLinkClass}>
+        Addresses
+      </NavLink>
       <div className={navHeadingClass}>Tools</div>
       <NavLink to="/app/reports" className={navLinkClass}>
         Reports
       </NavLink>
-      {pinned.length > 0 ? (
-        <>
-          <div className={navHeadingClass}>Pinned</div>
-          {pinned.map((p) => (
-            <NavLink key={p.id} to={`/app/${p.id}`} className={navLinkClass}>
-              <Avatar accountId={p.id} name={p.full_name} avatarUrl={p.photo_url} color={p.photo_color} fetchPath={`/care-profiles/${p.id}/photo`} size={22} />
-              <span className="truncate">{p.preferred_name || p.full_name}</span>
-            </NavLink>
-          ))}
-        </>
-      ) : null}
+      <PinnedProfilesNav pinned={pinned} />
     </>
   );
 

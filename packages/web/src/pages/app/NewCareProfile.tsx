@@ -4,12 +4,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { Input, Textarea } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
-import { CatalogueCombo, OptionChips } from '../../components/CatalogueCombo';
-import { PET_SPECIES, RELATIONSHIPS, petRelationshipFor, type CareProfile, type ProfileKind } from '../../lib/care';
+import { PET_SPECIES, petRelationshipFor, type CareProfile, type ProfileKind } from '../../lib/care';
 import { matchingLifeStages, type JourneyTemplateSummary, type LifeStage } from '../../lib/journeys';
 import { RelationshipSelect } from '../../components/RelationshipSelect';
-import { ContactDetails, contactPayload, emptyContact, type ContactValue } from '../../components/ContactDetails';
-import { ResidenceFields, residencePayload, persistResidence, residenceNeedsPersist, emptyResidence, type ResidenceValue } from '../../components/ResidenceFields';
+import { ProfileOnboarding } from './ProfileOnboarding';
 import { useAuthStore } from '../../stores/auth';
 
 /** Pet journeys are marked by a `pet-` slug so each side can tell them apart. */
@@ -107,8 +105,6 @@ function PersonForm({ onBack }: { onBack: () => void }) {
   const [relationship, setRelationship] = useState('');
   const [pronouns, setPronouns] = useState('');
   const [language, setLanguage] = useState('');
-  const [contact, setContact] = useState<ContactValue>(emptyContact);
-  const [residence, setResidence] = useState<ResidenceValue>(emptyResidence);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const navigate = useNavigate();
@@ -138,17 +134,9 @@ function PersonForm({ onBack }: { onBack: () => void }) {
         pronouns: pronouns || null,
         primary_language: language || null,
         journey_template_ids: journeyIds,
-        ...contactPayload(contact),
-        ...residencePayload(residence),
       });
-      // A facility being added inline is created now that the profile exists,
-      // then linked as the residence (and, if chosen, the contact).
-      if (residenceNeedsPersist(residence)) {
-        const { payload, contact: contactOverride } = await persistResidence(data.profile.id, residence);
-        await api.patch(`/care-profiles/${data.profile.id}`, { ...payload, ...(contactOverride ?? {}) });
-      }
       await queryClient.invalidateQueries({ queryKey: ['care-profiles'] });
-      // The profile exists; health details are captured as a second step.
+      // The profile exists; the guided setup runs next.
       setCreatedProfile(data.profile);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create profile');
@@ -158,7 +146,7 @@ function PersonForm({ onBack }: { onBack: () => void }) {
   }
 
   if (createdProfile) {
-    return <HealthSetupStep profile={createdProfile} onDone={() => navigate(`/app/${createdProfile.id}`)} />;
+    return <ProfileOnboarding profile={createdProfile} onDone={() => navigate(`/app/${createdProfile.id}`)} />;
   }
 
   return (
@@ -208,9 +196,7 @@ function PersonForm({ onBack }: { onBack: () => void }) {
         <JourneyPicker dateOfBirth={dateOfBirth} dueDate={dueDate} selected={journeyIds} onChange={setJourneyIds} />
         <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
         <Input label="Primary language" value={language} onChange={(e) => setLanguage(e.target.value)} />
-        <ResidenceFields value={residence} onChange={setResidence} providers={[]} />
-        <ContactDetails value={contact} onChange={setContact} />
-        <p className="text-xs text-muted">Health details like conditions and allergies come next, on their own step.</p>
+        <p className="text-xs text-muted">Next we will set up who cares for them, plus conditions, allergies and contacts.</p>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Link to="/app">
@@ -247,8 +233,7 @@ function PetForm({ onBack }: { onBack: () => void }) {
   // Once the carer edits the relationship, stop overwriting it from species.
   const [relationshipTouched, setRelationshipTouched] = useState(false);
   const [notes, setNotes] = useState('');
-  const [contact, setContact] = useState<ContactValue>(emptyContact);
-  const [residence, setResidence] = useState<ResidenceValue>(emptyResidence);
+  const [createdProfile, setCreatedProfile] = useState<CareProfile | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const navigate = useNavigate();
@@ -256,6 +241,10 @@ function PetForm({ onBack }: { onBack: () => void }) {
 
   const displayName = [name, familyName].map((p) => p.trim()).filter(Boolean).join(' ');
   const relationshipValue = relationshipTouched ? relationship : species ? petRelationshipFor(species) : relationship;
+
+  if (createdProfile) {
+    return <ProfileOnboarding profile={createdProfile} onDone={() => navigate(`/app/${createdProfile.id}`)} />;
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -277,15 +266,9 @@ function PetForm({ onBack }: { onBack: () => void }) {
         notes: notes || null,
         // Only the pet journeys chosen here; never the human ageing journey.
         journey_template_ids: journeyIds,
-        ...contactPayload(contact),
-        ...residencePayload(residence),
       });
-      if (residenceNeedsPersist(residence)) {
-        const { payload, contact: contactOverride } = await persistResidence(data.profile.id, residence);
-        await api.patch(`/care-profiles/${data.profile.id}`, { ...payload, ...(contactOverride ?? {}) });
-      }
       await queryClient.invalidateQueries({ queryKey: ['care-profiles'] });
-      navigate(`/app/${data.profile.id}`);
+      setCreatedProfile(data.profile);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create profile');
     } finally {
@@ -370,9 +353,8 @@ function PetForm({ onBack }: { onBack: () => void }) {
           <span className="text-xs text-muted">neutered or spayed</span>
         </label>
         <PetJourneyPicker selected={journeyIds} onChange={setJourneyIds} />
-        <ResidenceFields value={residence} onChange={setResidence} providers={[]} />
-        <ContactDetails value={contact} onChange={setContact} />
         <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+        <p className="text-xs text-muted">Next we will set up who cares for them, plus conditions, allergies and their vet.</p>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Link to="/app">
@@ -385,239 +367,6 @@ function PetForm({ onBack }: { onBack: () => void }) {
           </Button>
         </div>
       </form>
-    </div>
-  );
-}
-
-/**
- * The second onboarding step for a person: the health facts the care plan
- * surfaces, captured up front. Conditions, allergens and reactions, and
- * every day-to-day need come from the shared catalogues, so typing offers
- * suggestions and anything new joins the lists for everyone. Entirely
- * skippable; everything here can be added later from its own page.
- */
-function HealthSetupStep({ profile, onDone }: { profile: CareProfile; onDone: () => void }) {
-  const firstName = profile.preferred_name ?? profile.first_name ?? profile.full_name;
-  const [conditions, setConditions] = useState<string[]>([]);
-  const [allergies, setAllergies] = useState<{ substance: string; reaction: string }[]>([]);
-  const [allergySubstance, setAllergySubstance] = useState('');
-  const [allergyReaction, setAllergyReaction] = useState('');
-  const [dietary, setDietary] = useState<string[]>([]);
-  const [mobility, setMobility] = useState<string[]>([]);
-  const [communication, setCommunication] = useState<string[]>([]);
-  const [gpName, setGpName] = useState('');
-  const [gpPractice, setGpPractice] = useState('');
-  const [gpPhone, setGpPhone] = useState('');
-  const [directive, setDirective] = useState(false);
-  const [directiveLocation, setDirectiveLocation] = useState('');
-  const [contactName, setContactName] = useState('');
-  const [contactRelationship, setContactRelationship] = useState('');
-  const [contactPhone, setContactPhone] = useState('');
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  const selectClass =
-    'block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
-
-  const addAllergy = () => {
-    if (!allergySubstance.trim()) return;
-    setAllergies((prev) => [...prev, { substance: allergySubstance.trim(), reaction: allergyReaction.trim() }]);
-    setAllergySubstance('');
-    setAllergyReaction('');
-  };
-
-  async function finish() {
-    setError('');
-    setSaving(true);
-    try {
-      await Promise.all([
-        ...conditions.map((name) => api.post(`/care-profiles/${profile.id}/conditions`, { name })),
-        ...allergies.map((a) =>
-          api.post(`/care-profiles/${profile.id}/allergies`, { substance: a.substance, reaction: a.reaction || null })
-        ),
-        gpName.trim()
-          ? api.post(`/care-profiles/${profile.id}/providers`, {
-              provider_type: 'gp',
-              name: gpName.trim(),
-              organisation: gpPractice.trim() || null,
-              phone: gpPhone.trim() || null,
-            })
-          : Promise.resolve(),
-      ]);
-      const hasPlanFacts =
-        dietary.length > 0 ||
-        mobility.length > 0 ||
-        communication.length > 0 ||
-        directive ||
-        (contactName.trim() && contactPhone.trim());
-      if (hasPlanFacts) {
-        await api.put(`/care-profiles/${profile.id}/plan`, {
-          dietary_requirements: dietary,
-          mobility_aids: mobility,
-          communication_needs: communication,
-          advance_care_directive: directive,
-          advance_care_directive_location: directive ? directiveLocation.trim() || null : null,
-          emergency_contacts:
-            contactName.trim() && contactPhone.trim()
-              ? [{ name: contactName.trim(), relationship: contactRelationship || undefined, phone: contactPhone.trim() }]
-              : [],
-        });
-      }
-      onDone();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save health details');
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="max-w-xl">
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-ink">Health details for {firstName}</h1>
-        <p className="text-sm text-muted">
-          These feed the care plan and the emergency sheet. All optional, and everything can be added or changed later.
-        </p>
-      </div>
-
-      <div className="card space-y-5">
-        <div>
-          <span className="block text-sm font-medium text-ink mb-1">Conditions</span>
-          <div className="flex flex-wrap items-center gap-2">
-            {conditions.map((c) => (
-              <span key={c} className="badge bg-surface-2 text-ink text-xs flex items-center gap-1">
-                {c}
-                <button type="button" aria-label={`Remove ${c}`} className="text-muted hover:text-red-600" onClick={() => setConditions(conditions.filter((x) => x !== c))}>
-                  ✕
-                </button>
-              </span>
-            ))}
-            <CatalogueCombo
-              endpoint="/condition-catalogue"
-              ariaLabel="Add a condition"
-              placeholder="e.g. Autism"
-              exclude={conditions}
-              onPick={(name) => {
-                if (!conditions.includes(name)) setConditions([...conditions, name]);
-              }}
-            />
-          </div>
-        </div>
-
-        <div>
-          <span className="block text-sm font-medium text-ink mb-1">Allergies</span>
-          {allergies.length > 0 ? (
-            <ul className="mb-2 space-y-1">
-              {allergies.map((a, i) => (
-                <li key={`${a.substance}-${i}`} className="flex items-center gap-2 text-sm">
-                  <span className="badge bg-red-50 text-red-700 text-xs">{a.substance}</span>
-                  <span className="text-ink flex-1">{a.reaction}</span>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${a.substance}`}
-                    className="text-muted hover:text-red-600"
-                    onClick={() => setAllergies(allergies.filter((_, idx) => idx !== i))}
-                  >
-                    ✕
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <div className="flex flex-wrap items-center gap-2">
-            <CatalogueCombo
-              endpoint="/option-catalogue?category=allergen"
-              ariaLabel="Allergic to"
-              placeholder="Allergic to, e.g. Penicillin"
-              exclude={allergies.map((a) => a.substance)}
-              keepValue
-              initial={allergySubstance}
-              onPick={setAllergySubstance}
-            />
-            <CatalogueCombo
-              endpoint="/option-catalogue?category=allergy_reaction"
-              ariaLabel="Reaction"
-              placeholder="Reaction, e.g. rash"
-              keepValue
-              initial={allergyReaction}
-              onPick={setAllergyReaction}
-            />
-            <Button type="button" variant="secondary" size="sm" disabled={!allergySubstance.trim()} onClick={addAllergy}>
-              Add
-            </Button>
-          </div>
-        </div>
-
-        <OptionChips label="Dietary requirements" category="dietary_requirement" values={dietary} onChange={setDietary} canEdit addLabel="e.g. Low salt" />
-        <OptionChips label="Mobility aids" category="mobility_aid" values={mobility} onChange={setMobility} canEdit addLabel="e.g. Walking frame" />
-        <OptionChips label="Communication needs" category="communication_need" values={communication} onChange={setCommunication} canEdit addLabel="e.g. Wears hearing aids" />
-
-        <div>
-          <span className="block text-sm font-medium text-ink mb-1">GP</span>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <Input aria-label="GP name" placeholder="Name" value={gpName} onChange={(e) => setGpName(e.target.value)} />
-            <Input aria-label="GP practice" placeholder="Practice" value={gpPractice} onChange={(e) => setGpPractice(e.target.value)} />
-            <Input aria-label="GP phone" type="tel" placeholder="Phone" value={gpPhone} onChange={(e) => setGpPhone(e.target.value)} />
-          </div>
-          <p className="mt-1 text-xs text-muted">Saved to the providers list.</p>
-        </div>
-
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 text-sm text-ink">
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-              checked={directive}
-              onChange={(e) => setDirective(e.target.checked)}
-            />
-            An advance care directive is in place
-          </label>
-          {directive ? (
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted">Where it is kept:</span>
-              <CatalogueCombo
-                endpoint="/option-catalogue?category=directive_location"
-                ariaLabel="Where the directive is kept"
-                placeholder="e.g. With the GP"
-                keepValue
-                initial={directiveLocation}
-                onPick={setDirectiveLocation}
-                widthClass="w-56"
-              />
-            </div>
-          ) : null}
-        </div>
-
-        <div>
-          <span className="block text-sm font-medium text-ink mb-1">Emergency contact</span>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <Input aria-label="Emergency contact name" placeholder="Name" value={contactName} onChange={(e) => setContactName(e.target.value)} />
-            <select
-              aria-label="Emergency contact relationship"
-              className={selectClass}
-              value={contactRelationship}
-              onChange={(e) => setContactRelationship(e.target.value)}
-            >
-              <option value="">Relationship</option>
-              {RELATIONSHIPS.filter((r) => r !== 'Myself').map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-            <Input aria-label="Emergency contact phone" type="tel" placeholder="Phone" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} />
-          </div>
-        </div>
-
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onDone} disabled={saving}>
-            Skip for now
-          </Button>
-          <Button type="button" loading={saving} onClick={finish}>
-            Finish
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }

@@ -17,6 +17,7 @@ import { checklistsRouter } from './routes/checklists';
 import { questionsRouter } from './routes/questions';
 import { documentsRouter } from './routes/documents';
 import { providersRouter, providerSearchRouter } from './routes/providers';
+import { addressesRouter } from './routes/addresses';
 import { directoryRouter } from './routes/directory';
 import { remindersRouter } from './routes/reminders';
 import { aiRouter } from './routes/ai';
@@ -145,6 +146,7 @@ v1.use('/care-profiles/:id/conditions', ...profileAccess, capturePlanEvents('con
 v1.use('/care-profiles/:id/questions', ...profileAccess, questionsRouter);
 v1.use('/care-profiles/:id/documents', ...profileAccess, documentsRouter);
 v1.use('/care-profiles/:id/providers', ...profileAccess, capturePlanEvents('providers'), providersRouter);
+v1.use('/care-profiles/:id/addresses', ...profileAccess, addressesRouter);
 v1.use('/providers/search', providerSearchRouter);
 v1.use('/directory', directoryRouter);
 v1.use('/care-profiles/:id/reminders', ...profileAccess, remindersRouter);
