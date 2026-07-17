@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
+import { isCurrentHealthCondition } from '../services/healthAlerts';
 
 /**
  * Stored AI summaries for the overview cards of a care profile. A summary
@@ -74,16 +75,59 @@ async function buildContext(cardKey: CardKey, profileId: string, careName: strin
   }
 
   if (cardKey === 'health') {
+    // What the Current health card shows: unresolved illnesses, injuries
+    // and recoveries from the conditions record, with each symptom's
+    // severity course from its dated readings.
+    const conditions = (
+      await db('medical_conditions')
+        .where({ care_profile_id: profileId })
+        .whereNull('resolved_on')
+        .where((qb) => qb.whereNull('status').orWhereNot('status', 'resolved'))
+        .orderBy('started_on', 'desc')
+    ).filter(isCurrentHealthCondition);
+    const conditionIds = conditions.map((c) => c.id as string);
+    const symptoms = conditionIds.length
+      ? await db('condition_symptoms').whereIn('condition_id', conditionIds).whereNull('resolved_at')
+      : [];
+    const readings = symptoms.length
+      ? await db('condition_symptom_readings')
+          .whereIn('symptom_id', symptoms.map((s) => s.id as string))
+          .orderBy('recorded_at', 'asc')
+      : [];
+    const conditionLines = conditions.map((c) => {
+      const syms = symptoms
+        .filter((s) => s.condition_id === c.id)
+        .map((s) => {
+          const course = readings
+            .filter((r) => r.symptom_id === s.id)
+            .map((r) => `${r.severity} on ${String(r.recorded_at).slice(0, 10)}`)
+            .join(' -> ');
+          return `${s.name}: now ${s.severity}/10${course ? ` (course: ${course})` : ''}`;
+        });
+      const qualifiers = [c.category, c.status].filter(Boolean).join(', ');
+      return [
+        `- ${c.name}${qualifiers ? ` (${qualifiers})` : ''}${c.started_on ? `, since ${String(c.started_on).slice(0, 10)}` : ''}`,
+        c.is_contagious ? '  contagious' : null,
+        c.isolation_required ? '  isolation required' : null,
+        syms.length > 0 ? `  current symptoms (severity on a 1 to 10 scale): ${syms.join('; ')}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n');
+    });
+
+    // Anything still recorded in the older health-status list is part of
+    // the picture too, until it resolves.
     const statuses = await db('health_statuses')
       .where({ care_profile_id: profileId })
       .whereNot('status', 'resolved')
       .orderBy('onset_date', 'desc');
-    if (statuses.length === 0) return null;
-    const symptoms = await db('health_status_symptoms')
-      .whereIn('health_status_id', statuses.map((s) => s.id as string))
-      .whereNull('resolved_at');
-    const lines = statuses.map((s) => {
-      const syms = symptoms.filter((x) => x.health_status_id === s.id).map((x) => x.name);
+    const statusSymptoms = statuses.length
+      ? await db('health_status_symptoms')
+          .whereIn('health_status_id', statuses.map((s) => s.id as string))
+          .whereNull('resolved_at')
+      : [];
+    const statusLines = statuses.map((s) => {
+      const syms = statusSymptoms.filter((x) => x.health_status_id === s.id).map((x) => x.name);
       return [
         `- ${s.name} (${s.category}, ${s.status}, since ${String(s.onset_date).slice(0, 10)})`,
         s.is_contagious ? '  contagious' : null,
@@ -93,6 +137,9 @@ async function buildContext(cardKey: CardKey, profileId: string, careName: strin
         .filter(Boolean)
         .join('\n');
     });
+
+    const lines = [...conditionLines, ...statusLines];
+    if (lines.length === 0) return null;
     return `Current health issues for ${careName}:\n${lines.join('\n')}`;
   }
 
