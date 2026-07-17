@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
@@ -52,6 +53,7 @@ export function DocumentsPage() {
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState<CareDocument | null>(null);
   const [editing, setEditing] = useState<CareDocument | null>(null);
+  const [viewing, setViewing] = useState<CareDocument | null>(null);
   const [confirmBulk, setConfirmBulk] = useState(false);
   const [bulkEditQueue, setBulkEditQueue] = useState<CareDocument[]>([]);
 
@@ -120,6 +122,18 @@ export function DocumentsPage() {
     sorts: DOC_SORTS,
     filters: [categoryFilter],
   });
+
+  // Deep link: ?doc=<id> arrives from links elsewhere in the profile
+  // (e.g. a diagnosis document on the overview). Filter the table to that
+  // document and highlight its row.
+  const [searchParams] = useSearchParams();
+  const linkedDocId = searchParams.get('doc');
+  const { setSearch } = dv;
+  useEffect(() => {
+    if (!linkedDocId) return;
+    const doc = documents.find((d) => d.id === linkedDocId);
+    if (doc) setSearch(doc.label);
+  }, [linkedDocId, documents, setSearch]);
 
   const bulkActions: ToolbarBulkAction[] = canEdit
     ? [
@@ -200,7 +214,10 @@ export function DocumentsPage() {
               </thead>
               <tbody>
                 {dv.view.map((doc) => (
-                  <tr key={doc.id} className="border-b border-border last:border-0">
+                  <tr
+                    key={doc.id}
+                    className={`border-b border-border last:border-0 ${doc.id === linkedDocId ? 'bg-primary-50' : ''}`}
+                  >
                     <td className="px-4 py-3">
                       <input
                         type="checkbox"
@@ -234,6 +251,9 @@ export function DocumentsPage() {
                     </td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
                       <div className="flex justify-end gap-2">
+                        <Button size="sm" variant="secondary" onClick={() => setViewing(doc)}>
+                          View
+                        </Button>
                         <Button size="sm" variant="secondary" onClick={() => void download(doc)}>
                           Download
                         </Button>
@@ -375,6 +395,16 @@ export function DocumentsPage() {
         </div>
       </Modal>
 
+      {viewing ? (
+        <DocumentViewerModal
+          key={viewing.id}
+          profileId={profile.id}
+          doc={viewing}
+          onClose={() => setViewing(null)}
+          onDownload={() => void download(viewing)}
+        />
+      ) : null}
+
       {editing ? (
         <EditDocumentModal
           key={editing.id}
@@ -397,6 +427,114 @@ export function DocumentsPage() {
         />
       ) : null}
     </div>
+  );
+}
+
+type PreviewKind = 'image' | 'pdf' | 'video' | 'audio' | 'text' | 'unsupported';
+
+const EXTENSION_KINDS: Record<string, PreviewKind> = {
+  jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', svg: 'image', bmp: 'image',
+  pdf: 'pdf',
+  mp4: 'video', webm: 'video', mov: 'video', m4v: 'video',
+  mp3: 'audio', wav: 'audio', m4a: 'audio', ogg: 'audio', flac: 'audio',
+  txt: 'text', md: 'text', csv: 'text', json: 'text', log: 'text',
+};
+
+/** What kind of inline preview a document supports, from its MIME type
+ * with the file extension as a fallback. */
+function previewKind(doc: CareDocument): PreviewKind {
+  const mime = doc.mime_type ?? '';
+  if (mime.startsWith('image/')) return 'image';
+  if (mime === 'application/pdf') return 'pdf';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime.startsWith('text/') || mime === 'application/json' || mime === 'text/csv') return 'text';
+  const ext = doc.file_url.includes('.') ? doc.file_url.slice(doc.file_url.lastIndexOf('.') + 1).toLowerCase() : '';
+  return EXTENSION_KINDS[ext] ?? 'unsupported';
+}
+
+/**
+ * Views a document inline: images, PDFs, video, audio and plain text
+ * render right in the dialog. Anything else, such as Word files, offers
+ * a download instead. The file is fetched with the authenticated API
+ * client and shown from a local object URL, which is revoked on close.
+ */
+function DocumentViewerModal({
+  profileId,
+  doc,
+  onClose,
+  onDownload,
+}: {
+  profileId: string;
+  doc: CareDocument;
+  onClose: () => void;
+  onDownload: () => void;
+}) {
+  const kind = previewKind(doc);
+  const [url, setUrl] = useState('');
+  const [text, setText] = useState('');
+  const [loading, setLoading] = useState(kind !== 'unsupported');
+  const [viewError, setViewError] = useState('');
+
+  useEffect(() => {
+    if (kind === 'unsupported') return;
+    let objectUrl = '';
+    let cancelled = false;
+    (async () => {
+      try {
+        const blob = await api.blob(`/care-profiles/${profileId}/documents/${doc.id}/file`);
+        if (cancelled) return;
+        if (kind === 'text') {
+          setText(await blob.text());
+        } else {
+          // The browser picks the renderer from the blob's type, so make
+          // sure it carries the document's recorded MIME type.
+          const typed = doc.mime_type && blob.type !== doc.mime_type ? new Blob([blob], { type: doc.mime_type }) : blob;
+          objectUrl = URL.createObjectURL(typed);
+          setUrl(objectUrl);
+        }
+      } catch (err) {
+        if (!cancelled) setViewError(err instanceof Error ? err.message : 'Could not load the file.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [profileId, doc.id, doc.mime_type, kind]);
+
+  return (
+    <Modal open onClose={onClose} title={doc.label} wide>
+      <div className="space-y-4">
+        {loading ? (
+          <p className="text-sm text-muted">Loading…</p>
+        ) : viewError ? (
+          <p className="text-sm text-red-600">{viewError}</p>
+        ) : kind === 'image' ? (
+          <img src={url} alt={doc.label} className="max-w-full max-h-[70vh] mx-auto rounded-md" />
+        ) : kind === 'pdf' ? (
+          <iframe src={url} title={doc.label} className="w-full h-[70vh] rounded-md border border-border" />
+        ) : kind === 'video' ? (
+          <video src={url} controls className="max-w-full max-h-[70vh] mx-auto rounded-md" />
+        ) : kind === 'audio' ? (
+          <audio src={url} controls className="w-full" />
+        ) : kind === 'text' ? (
+          <pre className="max-h-[70vh] overflow-auto rounded-md border border-border bg-surface-2 p-3 text-xs text-ink whitespace-pre-wrap">
+            {text}
+          </pre>
+        ) : (
+          <p className="text-sm text-muted">
+            This file type cannot be viewed here. Download it to open it on your device.
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Close</Button>
+          <Button variant="secondary" onClick={onDownload}>Download</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
