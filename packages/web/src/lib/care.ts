@@ -92,9 +92,10 @@ export interface CareProfile {
   photo_url: string | null;
   photo_color: string | null;
   notes: string | null;
-  /** Who to contact about this person: themselves, a platform user, or a new contact. */
-  contact_kind?: 'self' | 'user' | 'contact' | null;
+  /** Who to contact: themselves, a platform user, a new contact, or a provider. */
+  contact_kind?: 'self' | 'user' | 'contact' | 'provider' | null;
   contact_account_id?: string | null;
+  contact_provider_id?: string | null;
   contact_name?: string | null;
   contact_relationship?: string | null;
   contact_phone?: string | null;
@@ -103,7 +104,66 @@ export interface CareProfile {
   /** Resolved from contact_account_id when the contact is a platform user. */
   contact_account_name?: string | null;
   contact_account_email?: string | null;
+  /** Resolved provider used as the contact, when contact_kind is 'provider'. */
+  contact_provider?: ResidenceProvider | null;
+  /** Where they live, each fact its own field. */
+  residence_type?: 'private_residence' | 'care_facility' | 'retirement_village' | 'group_home' | 'hospital' | 'other' | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  address_suburb?: string | null;
+  address_state?: string | null;
+  address_postcode?: string | null;
+  address_country?: string | null;
+  residence_provider_id?: string | null;
+  room_number?: string | null;
+  room_area_name?: string | null;
+  room_area_type?: 'wing' | 'floor' | 'unit' | 'building' | 'house' | 'ward' | 'block' | 'other' | null;
+  /** Resolved facility provider, when residence_provider_id is set. */
+  residence_provider?: ResidenceProvider | null;
 }
+
+/** The provider fields the overview needs when a provider is a contact or residence. */
+export interface ResidenceProvider {
+  id: string;
+  name: string;
+  organisation: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  booking_link: string | null;
+}
+
+export const RESIDENCE_TYPES = [
+  { value: 'private_residence', label: 'Private residence' },
+  { value: 'care_facility', label: 'Care facility' },
+  { value: 'retirement_village', label: 'Retirement village' },
+  { value: 'group_home', label: 'Group home' },
+  { value: 'hospital', label: 'Hospital' },
+  { value: 'other', label: 'Other' },
+] as const;
+
+export const residenceTypeLabel = (v: string | null | undefined) =>
+  RESIDENCE_TYPES.find((t) => t.value === v)?.label ?? '';
+
+/** Residence types that live inside a facility rather than a private address. */
+export const FACILITY_RESIDENCE_TYPES = ['care_facility', 'retirement_village', 'group_home', 'hospital'] as const;
+
+export const isFacilityResidence = (v: string | null | undefined): boolean =>
+  !!v && (FACILITY_RESIDENCE_TYPES as readonly string[]).includes(v);
+
+export const ROOM_AREA_TYPES = [
+  { value: 'wing', label: 'Wing' },
+  { value: 'floor', label: 'Floor' },
+  { value: 'unit', label: 'Unit' },
+  { value: 'building', label: 'Building' },
+  { value: 'house', label: 'House' },
+  { value: 'ward', label: 'Ward' },
+  { value: 'block', label: 'Block' },
+  { value: 'other', label: 'Other' },
+] as const;
+
+export const roomAreaTypeLabel = (v: string | null | undefined) =>
+  ROOM_AREA_TYPES.find((t) => t.value === v)?.label ?? '';
 
 /** Whole years lived, from the date of birth to today. */
 export function ageFrom(dateOfBirth: string | null | undefined): number | null {
@@ -329,7 +389,14 @@ export interface Provider {
   organisation: string | null;
   phone: string | null;
   email: string | null;
+  /** Composed one-line display, kept in step with the segmented parts. */
   address: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  address_suburb?: string | null;
+  address_state?: string | null;
+  address_postcode?: string | null;
+  address_country?: string | null;
   booking_link: string | null;
   directions_link: string | null;
   poa_type: string | null;

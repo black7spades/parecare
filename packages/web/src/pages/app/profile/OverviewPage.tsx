@@ -20,6 +20,8 @@ import {
   neurotypeLabelText,
   poaLabel,
   providerTypeLabel,
+  residenceTypeLabel,
+  roomAreaTypeLabel,
   type CareDocument,
   type CareProfile,
   type CircleMember,
@@ -772,13 +774,63 @@ function EmailLink({ email }: { email: string }) {
   );
 }
 
+/** One line describing where the person lives, from a facility or a private address. */
+function residenceLines(profile: CareProfile): { label: string; value: React.ReactNode }[] {
+  const rows: { label: string; value: React.ReactNode }[] = [];
+  const fac = profile.residence_provider;
+  const kind = residenceTypeLabel(profile.residence_type);
+  if (fac) {
+    const spot = [
+      profile.room_number ? `Room ${profile.room_number}` : null,
+      profile.room_area_name ? `${profile.room_area_name}${profile.room_area_type ? ` ${roomAreaTypeLabel(profile.room_area_type)}` : ''}` : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    rows.push({
+      label: 'Lives at',
+      value: (
+        <span>
+          {fac.name}
+          {kind ? <span className="text-muted"> · {kind}</span> : null}
+          {spot ? <span className="block text-xs text-muted">{spot}</span> : null}
+          {fac.phone ? <span className="block text-xs">Facility: <PhoneLink phone={fac.phone} /></span> : null}
+        </span>
+      ),
+    });
+  } else {
+    const addr = [
+      profile.address_line1,
+      profile.address_line2,
+      profile.address_suburb,
+      profile.address_state,
+      profile.address_postcode,
+      profile.address_country,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    if (addr) {
+      rows.push({
+        label: 'Address',
+        value: (
+          <span>
+            {addr}
+            {kind ? <span className="block text-xs text-muted">{kind}</span> : null}
+          </span>
+        ),
+      });
+    } else if (kind) {
+      rows.push({ label: 'Lives in', value: kind });
+    }
+  }
+  return rows;
+}
+
 function ProfileContact({ profile }: { profile: CareProfile }) {
-  if (!profile.contact_kind) return null;
   // The phone's kind becomes the row label, so it informs without taking
   // up a row of its own.
   const phoneLabel =
     profile.contact_phone_type === 'mobile' ? 'Mobile' : profile.contact_phone_type === 'home' ? 'Home phone' : 'Phone';
-  const rows: { label: string; value: React.ReactNode }[] = [];
+  const rows: { label: string; value: React.ReactNode }[] = [...residenceLines(profile)];
   if (profile.contact_kind === 'self') {
     rows.push({ label: 'Contact', value: 'Themselves' });
     if (profile.contact_phone) rows.push({ label: phoneLabel, value: <PhoneLink phone={profile.contact_phone} /> });
@@ -786,7 +838,12 @@ function ProfileContact({ profile }: { profile: CareProfile }) {
   } else if (profile.contact_kind === 'user') {
     if (profile.contact_account_name) rows.push({ label: 'Contact', value: profile.contact_account_name });
     if (profile.contact_account_email) rows.push({ label: 'Email', value: <EmailLink email={profile.contact_account_email} /> });
-  } else {
+  } else if (profile.contact_kind === 'provider' && profile.contact_provider) {
+    const p = profile.contact_provider;
+    rows.push({ label: 'Contact via', value: p.name });
+    if (p.phone) rows.push({ label: 'Phone', value: <PhoneLink phone={p.phone} /> });
+    if (p.email) rows.push({ label: 'Email', value: <EmailLink email={p.email} /> });
+  } else if (profile.contact_kind === 'contact') {
     if (profile.contact_name) rows.push({ label: 'Contact', value: profile.contact_name });
     if (profile.contact_relationship) rows.push({ label: 'Relationship', value: profile.contact_relationship });
     if (profile.contact_phone) rows.push({ label: phoneLabel, value: <PhoneLink phone={profile.contact_phone} /> });

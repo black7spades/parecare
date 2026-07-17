@@ -91,6 +91,41 @@ export async function buildProfileContext(
   const displayName = profile.full_name;
   const years = age(profile.date_of_birth);
 
+  // Where they live and who to contact, resolved from the linked providers
+  // already loaded above, so "where is she / how do I reach her" is answerable.
+  const providerOf = (id: string | null | undefined) => (id ? providers.find((p) => p.id === id) : undefined);
+  const residenceProvider = providerOf(profile.residence_provider_id);
+  const roomParts = [
+    profile.room_number ? `room ${profile.room_number}` : null,
+    profile.room_area_name ? `${profile.room_area_name}${profile.room_area_type ? ` ${profile.room_area_type}` : ''}` : null,
+  ].filter(Boolean);
+  const RESIDENCE_LABELS: Record<string, string> = {
+    private_residence: 'private residence',
+    care_facility: 'care facility',
+    retirement_village: 'retirement village',
+    group_home: 'group home',
+    hospital: 'hospital',
+    other: 'other',
+  };
+  const addressLine = [profile.address_line1, profile.address_line2, profile.address_suburb, profile.address_state, profile.address_postcode]
+    .filter(Boolean)
+    .join(', ');
+  const residenceLine = residenceProvider
+    ? `Lives at: ${residenceProvider.name}${roomParts.length ? ` (${roomParts.join(', ')})` : ''}${profile.residence_type ? ` — ${RESIDENCE_LABELS[profile.residence_type] ?? profile.residence_type}` : ''}${residenceProvider.phone ? `, phone ${residenceProvider.phone}` : ''}`
+    : addressLine
+      ? `Lives at: ${addressLine}${profile.residence_type ? ` — ${RESIDENCE_LABELS[profile.residence_type] ?? profile.residence_type}` : ''}`
+      : null;
+
+  const contactProvider = providerOf(profile.contact_provider_id);
+  const contactLine =
+    profile.contact_kind === 'provider' && contactProvider
+      ? `Contact via: ${contactProvider.name}${contactProvider.phone ? `, phone ${contactProvider.phone}` : ''}${contactProvider.email ? `, email ${contactProvider.email}` : ''}`
+      : profile.contact_kind === 'contact' && profile.contact_name
+        ? `Contact: ${profile.contact_name}${profile.contact_relationship ? ` (${profile.contact_relationship})` : ''}${profile.contact_phone ? `, phone ${profile.contact_phone}` : ''}`
+        : profile.contact_kind === 'self' && profile.contact_phone
+          ? `Contact: themselves${profile.contact_phone ? `, phone ${profile.contact_phone}` : ''}`
+          : null;
+
   sections.push(
     [
       `## Person`,
@@ -99,6 +134,8 @@ export async function buildProfileContext(
       profile.pronouns ? `Pronouns: ${profile.pronouns}` : null,
       profile.primary_language ? `Primary language: ${profile.primary_language}` : null,
       `Care phase: ${String(profile.current_phase).replace(/_/g, ' ')}`,
+      residenceLine,
+      contactLine,
       profile.notes ? `Profile notes: ${profile.notes}` : null,
     ]
       .filter(Boolean)

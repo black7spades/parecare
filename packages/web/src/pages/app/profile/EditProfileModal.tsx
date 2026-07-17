@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Modal } from '../../../components/ui/Modal';
 import { Button } from '../../../components/ui/Button';
@@ -7,7 +7,8 @@ import { Input, Textarea } from '../../../components/ui/Input';
 import { AvatarEditor } from '../../../components/ui/AvatarEditor';
 import { Avatar } from '../../../components/ui/Avatar';
 import { ContactDetails, contactPayload, emptyContact, type ContactValue } from '../../../components/ContactDetails';
-import { PET_SPECIES, type CareProfile } from '../../../lib/care';
+import { ResidenceFields, residenceFrom, residencePayload, persistResidence, residenceNeedsPersist, emptyResidence, type ResidenceValue } from '../../../components/ResidenceFields';
+import { PET_SPECIES, type CareProfile, type Provider } from '../../../lib/care';
 
 /** Edit the person or pet in care, and their photo. Shown only to those with edit access. */
 export function EditProfileModal({
@@ -35,9 +36,17 @@ export function EditProfileModal({
   const [desexed, setDesexed] = useState(false);
   const [microchip, setMicrochip] = useState('');
   const [contact, setContact] = useState<ContactValue>(emptyContact);
+  const [residence, setResidence] = useState<ResidenceValue>(emptyResidence);
   const [error, setError] = useState('');
   const [photoOpen, setPhotoOpen] = useState(false);
   const [photoError, setPhotoError] = useState('');
+
+  const { data: providersData, refetch: refetchProviders } = useQuery({
+    queryKey: ['providers', profile.id],
+    queryFn: () => api.get<{ providers: Provider[] }>(`/care-profiles/${profile.id}/providers`),
+    enabled: open,
+  });
+  const providers = providersData?.providers ?? [];
 
   useEffect(() => {
     if (!open) return;
@@ -57,12 +66,14 @@ export function EditProfileModal({
     setContact({
       kind: profile.contact_kind ?? '',
       account_id: profile.contact_account_id ?? '',
+      provider_id: profile.contact_provider_id ?? '',
       name: profile.contact_name ?? '',
       relationship: profile.contact_relationship ?? '',
       phone: profile.contact_phone ?? '',
       phone_type: profile.contact_phone_type ?? 'mobile',
       email: profile.contact_email ?? '',
     });
+    setResidence(residenceFrom(profile));
     setError('');
   }, [open, profile]);
 
@@ -74,37 +85,44 @@ export function EditProfileModal({
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['care-profile', profile.id] });
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      api.patch(
-        `/care-profiles/${profile.id}`,
-        isPet
-          ? {
-              first_name: firstName.trim(),
-              last_name: lastName.trim() || null,
-              preferred_name: preferredName.trim() || null,
-              date_of_birth: dob || null,
-              pronouns: pronouns.trim() || null,
-              species: species || null,
-              breed: breed.trim() || null,
-              desexed,
-              microchip_number: microchip.trim() || null,
-              notes: notes.trim() || null,
-              ...contactPayload(contact),
-            }
-          : {
-              title: title.trim() || null,
-              first_name: firstName.trim(),
-              middle_name: middleName.trim() || null,
-              last_name: lastName.trim() || null,
-              suffix: suffix.trim() || null,
-              preferred_name: preferredName.trim() || null,
-              date_of_birth: dob || null,
-              pronouns: pronouns.trim() || null,
-              ...contactPayload(contact),
-            }
-      ),
+    mutationFn: async () => {
+      // A facility being added inline is created first (and may become the
+      // contact); its columns then ride along with the profile update.
+      let residenceBody = residencePayload(residence);
+      let contactBody = contactPayload(contact);
+      if (residenceNeedsPersist(residence)) {
+        const { payload, contact: contactOverride } = await persistResidence(profile.id, residence);
+        residenceBody = payload;
+        if (contactOverride) contactBody = contactOverride;
+      }
+      const identity = isPet
+        ? {
+            first_name: firstName.trim(),
+            last_name: lastName.trim() || null,
+            preferred_name: preferredName.trim() || null,
+            date_of_birth: dob || null,
+            pronouns: pronouns.trim() || null,
+            species: species || null,
+            breed: breed.trim() || null,
+            desexed,
+            microchip_number: microchip.trim() || null,
+            notes: notes.trim() || null,
+          }
+        : {
+            title: title.trim() || null,
+            first_name: firstName.trim(),
+            middle_name: middleName.trim() || null,
+            last_name: lastName.trim() || null,
+            suffix: suffix.trim() || null,
+            preferred_name: preferredName.trim() || null,
+            date_of_birth: dob || null,
+            pronouns: pronouns.trim() || null,
+          };
+      return api.patch(`/care-profiles/${profile.id}`, { ...identity, ...contactBody, ...residenceBody });
+    },
     onSuccess: () => {
       invalidate();
+      void refetchProviders();
       void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
       onClose();
     },
@@ -247,7 +265,8 @@ export function EditProfileModal({
             <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
           </>
         )}
-        <ContactDetails value={contact} onChange={setContact} />
+        <ResidenceFields value={residence} onChange={setResidence} providers={providers} />
+        <ContactDetails value={contact} onChange={setContact} providers={providers} />
         {isPet ? (
           <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         ) : null}

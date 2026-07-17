@@ -1,21 +1,24 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { Input } from './ui/Input';
-import { RELATIONSHIPS } from '../lib/care';
+import { RELATIONSHIPS, type Provider } from '../lib/care';
 
 /**
- * "Who should we contact about this person?" A conditional field set with
- * three paths, so each contact is captured as its own discrete facts:
+ * "Who should we contact about this person?" A conditional field set, so
+ * each contact is captured as its own discrete facts:
  *  - Themselves: the person's own phone and email.
  *  - Someone already using PareCare: picked from the people this account
  *    already shares care with.
  *  - A new contact: their name, relationship, phone (home or mobile) and
  *    email. They can be invited to log in later.
+ *  - A provider: e.g. the care home they live in. Reaching them means
+ *    phoning the provider, whose details stand in for a personal number.
  */
 
 export interface ContactValue {
-  kind: '' | 'self' | 'user' | 'contact';
+  kind: '' | 'self' | 'user' | 'contact' | 'provider';
   account_id: string;
+  provider_id: string;
   name: string;
   relationship: string;
   phone: string;
@@ -26,6 +29,7 @@ export interface ContactValue {
 export const emptyContact: ContactValue = {
   kind: '',
   account_id: '',
+  provider_id: '',
   name: '',
   relationship: '',
   phone: '',
@@ -44,6 +48,7 @@ export function contactPayload(v: ContactValue): Record<string, string | null> {
   const base = {
     contact_kind: null as string | null,
     contact_account_id: null as string | null,
+    contact_provider_id: null as string | null,
     contact_name: null as string | null,
     contact_relationship: null as string | null,
     contact_phone: null as string | null,
@@ -62,6 +67,9 @@ export function contactPayload(v: ContactValue): Record<string, string | null> {
   if (v.kind === 'user') {
     return { ...base, contact_kind: v.account_id ? 'user' : null, contact_account_id: v.account_id || null };
   }
+  if (v.kind === 'provider') {
+    return { ...base, contact_kind: v.provider_id ? 'provider' : null, contact_provider_id: v.provider_id || null };
+  }
   if (v.kind === 'contact') {
     return {
       ...base,
@@ -76,7 +84,16 @@ export function contactPayload(v: ContactValue): Record<string, string | null> {
   return base;
 }
 
-export function ContactDetails({ value, onChange }: { value: ContactValue; onChange: (v: ContactValue) => void }) {
+export function ContactDetails({
+  value,
+  onChange,
+  providers = [],
+}: {
+  value: ContactValue;
+  onChange: (v: ContactValue) => void;
+  /** Providers linked to this profile, so one can stand in as the contact. */
+  providers?: Provider[];
+}) {
   const set = (patch: Partial<ContactValue>) => onChange({ ...value, ...patch });
 
   const { data } = useQuery({
@@ -121,8 +138,26 @@ export function ContactDetails({ value, onChange }: { value: ContactValue; onCha
           <option value="self">Themselves</option>
           <option value="user">Someone already using PareCare</option>
           <option value="contact">A new contact</option>
+          {providers.length > 0 ? <option value="provider">A provider, such as their care home</option> : null}
         </select>
       </div>
+
+      {value.kind === 'provider' ? (
+        <div>
+          <label htmlFor="contact-provider" className="block text-sm font-medium text-ink mb-1">
+            Provider
+          </label>
+          <select id="contact-provider" className={inputClass} value={value.provider_id} onChange={(e) => set({ provider_id: e.target.value })}>
+            <option value="">Choose a provider</option>
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted mt-1">Their phone and email will be used to reach this person.</p>
+        </div>
+      ) : null}
 
       {value.kind === 'self' ? (
         <>

@@ -1,8 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 
+/** The structured pieces a picked address breaks into, each its own field. */
+export interface StructuredAddress {
+  line1: string;
+  line2: string;
+  suburb: string;
+  state: string;
+  postcode: string;
+  country: string;
+}
+
 interface Suggestion {
   place_id: number;
   display_name: string;
+  address?: Record<string, string>;
 }
 
 interface AddressAutocompleteProps {
@@ -10,9 +21,32 @@ interface AddressAutocompleteProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  /**
+   * When given, the finder requests structured address detail and calls
+   * this with the broken-out parts on pick, so a segmented form can fill
+   * each field. The free-text `onChange` still fires for the raw box.
+   */
+  onPickStructured?: (parts: StructuredAddress) => void;
 }
 
-export function AddressAutocomplete({ label, value, onChange, placeholder = 'Start typing an address…' }: AddressAutocompleteProps) {
+/** Map Nominatim's address object to our segmented fields. */
+function toStructured(a: Record<string, string> | undefined): StructuredAddress {
+  const g = (...keys: string[]) => {
+    for (const k of keys) if (a?.[k]) return a[k];
+    return '';
+  };
+  const houseAndRoad = [g('house_number'), g('road')].filter(Boolean).join(' ');
+  return {
+    line1: houseAndRoad || g('building', 'amenity', 'shop'),
+    line2: g('building', 'amenity') && houseAndRoad ? g('building', 'amenity') : '',
+    suburb: g('suburb', 'city', 'town', 'village', 'hamlet', 'municipality'),
+    state: g('state', 'province', 'region'),
+    postcode: g('postcode'),
+    country: g('country'),
+  };
+}
+
+export function AddressAutocomplete({ label, value, onChange, placeholder = 'Start typing an address…', onPickStructured }: AddressAutocompleteProps) {
   const [open, setOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [highlight, setHighlight] = useState(0);
@@ -42,7 +76,7 @@ export function AddressAutocomplete({ label, value, onChange, placeholder = 'Sta
       abortRef.current = controller;
       setLoading(true);
       try {
-        const params = new URLSearchParams({ q: q.trim(), format: 'json', addressdetails: '0', limit: '6' });
+        const params = new URLSearchParams({ q: q.trim(), format: 'json', addressdetails: onPickStructured ? '1' : '0', limit: '6' });
         const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
           signal: controller.signal,
           headers: { 'Accept-Language': navigator.language },
@@ -59,8 +93,9 @@ export function AddressAutocomplete({ label, value, onChange, placeholder = 'Sta
     }, 300);
   };
 
-  const pick = (name: string) => {
-    onChange(name);
+  const pick = (s: Suggestion) => {
+    onChange(s.display_name);
+    if (onPickStructured) onPickStructured(toStructured(s.address));
     setOpen(false);
     setSuggestions([]);
   };
@@ -99,7 +134,7 @@ export function AddressAutocomplete({ label, value, onChange, placeholder = 'Sta
             setHighlight((h) => Math.max(h - 1, 0));
           } else if (e.key === 'Enter' && open && suggestions[highlight]) {
             e.preventDefault();
-            pick(suggestions[highlight].display_name);
+            pick(suggestions[highlight]);
           } else if (e.key === 'Escape') {
             setOpen(false);
           }
@@ -113,7 +148,7 @@ export function AddressAutocomplete({ label, value, onChange, placeholder = 'Sta
                 type="button"
                 className={`w-full text-left px-3 py-1.5 text-sm ${i === highlight ? 'bg-primary-50 text-primary' : 'text-ink hover:bg-surface-2'}`}
                 onMouseEnter={() => setHighlight(i)}
-                onClick={() => pick(s.display_name)}
+                onClick={() => pick(s)}
               >
                 {s.display_name}
               </button>
