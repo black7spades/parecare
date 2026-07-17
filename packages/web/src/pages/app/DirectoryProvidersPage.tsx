@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { AddressFields, addressFrom, addressPayload, emptyAddress, type AddressValue } from '../../components/AddressFields';
 import { DataToolbar } from '../../components/data/DataToolbar';
+import { SortableTh } from '../../components/data/SortableTh';
 import { useDataView, type DataSort, type DataFilter } from '../../components/data/useDataView';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -28,6 +29,8 @@ interface DirectoryProvider extends Provider {
 const SORTS: DataSort<DirectoryProvider>[] = [
   { key: 'name', label: 'Name', compare: (a, b) => a.name.localeCompare(b.name) },
   { key: 'type', label: 'Type', compare: (a, b) => providerTypeLabel(a.provider_type).localeCompare(providerTypeLabel(b.provider_type)) },
+  { key: 'phone', label: 'Phone', compare: (a, b) => (a.phone ?? '').localeCompare(b.phone ?? '') },
+  { key: 'address', label: 'Address', compare: (a, b) => (a.address ?? '').localeCompare(b.address ?? '') },
   { key: 'profiles', label: 'Linked profiles', compare: (a, b) => (b.linked_profiles?.length ?? 0) - (a.linked_profiles?.length ?? 0) },
 ];
 
@@ -152,11 +155,11 @@ export function DirectoryProvidersPage() {
                       checked={dv.allSelected} onChange={dv.toggleAll} />
                   </th>
                 ) : null}
-                <th className="px-3 py-2 font-medium">Name</th>
-                <th className="px-3 py-2 font-medium">Type</th>
-                <th className="px-3 py-2 font-medium">Phone</th>
-                <th className="px-3 py-2 font-medium">Address</th>
-                <th className="px-3 py-2 font-medium">Linked to</th>
+                <SortableTh label="Name" sortKey="name" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Type" sortKey="type" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Phone" sortKey="phone" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Address" sortKey="address" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Linked to" sortKey="profiles" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 {canEdit ? <th className="px-3 py-2 w-36" /> : null}
               </tr>
             </thead>

@@ -31,6 +31,7 @@ import { TreatmentsPage } from './pages/app/profile/TreatmentsPage';
 import { ActivityPage } from './pages/app/profile/ActivityPage';
 import { AiPage } from './pages/app/profile/AiPage';
 import { DirectoryProvidersPage } from './pages/app/DirectoryProvidersPage';
+import { DirectoryAddressesPage } from './pages/app/DirectoryAddressesPage';
 import { DirectoryPeoplePage, DirectoryPetsPage } from './pages/app/DirectoryProfilesPage';
 import { InvitePage } from './pages/InvitePage';
 import { SubscriptionPage } from './pages/account/Subscription';
@@ -97,6 +98,7 @@ export const router = createBrowserRouter([
       { path: 'app/directory/people', element: <DirectoryPeoplePage /> },
       { path: 'app/directory/pets', element: <DirectoryPetsPage /> },
       { path: 'app/directory/providers', element: <DirectoryProvidersPage /> },
+      { path: 'app/directory/addresses', element: <DirectoryAddressesPage /> },
       { path: 'app/reports', element: <ReportGeneratorPage /> },
       {
         path: 'app/:profileId',

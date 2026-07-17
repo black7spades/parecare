@@ -8,6 +8,7 @@ import { requireAuth } from '../middleware/auth';
 import { requireAccountRight } from '../middleware/accountRights';
 import { requireCountBelow } from '../middleware/subscriptionGate';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
+import { resolveAddress, linkAddressToProfile } from '../services/addresses';
 import {
   enrolProfileInTemplate,
   findLegacyJourney,
@@ -715,6 +716,16 @@ careProfilesRouter.patch('/:id', requireAuth, async (req, res) => {
     .where({ id: req.params['id'] })
     .update({ ...update, updated_at: db.fn.now() })
     .returning('*');
+
+  // A private residence address entered here joins the shared address book
+  // and is linked to this profile, so every address in the system is
+  // reachable from the Addresses directory. Best effort; never blocks a save.
+  try {
+    const addressId = await resolveAddress(updated.account_id, updated, updated.preferred_name ?? updated.full_name);
+    if (addressId) await linkAddressToProfile(updated.id, addressId, 'residence');
+  } catch (err) {
+    console.warn('Address book capture failed:', (err as Error).message);
+  }
 
   res.json({ profile: updated });
 });

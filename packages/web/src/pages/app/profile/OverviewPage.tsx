@@ -793,7 +793,6 @@ function residenceLines(profile: CareProfile): { label: string; value: React.Rea
           {fac.name}
           {kind ? <span className="text-muted"> · {kind}</span> : null}
           {spot ? <span className="block text-xs text-muted">{spot}</span> : null}
-          {fac.phone ? <span className="block text-xs">Facility: <PhoneLink phone={fac.phone} /></span> : null}
         </span>
       ),
     });

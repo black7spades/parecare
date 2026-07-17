@@ -313,6 +313,9 @@ export function Shell() {
       <NavLink to="/app/directory/providers" className={navLinkClass}>
         Providers
       </NavLink>
+      <NavLink to="/app/directory/addresses" className={navLinkClass}>
+        Addresses
+      </NavLink>
       <div className={navHeadingClass}>Tools</div>
       <NavLink to="/app/reports" className={navLinkClass}>
         Reports
