@@ -663,10 +663,14 @@ careProfilesRouter.patch('/:id', requireAuth, async (req, res) => {
   res.json({ profile: updated });
 });
 
+// Archive: reversible. The owner can archive their own profiles; platform
+// admins can archive any, so the Homeboard's bulk actions work for the
+// staff running a home.
 careProfilesRouter.delete('/:id', requireAuth, async (req, res) => {
-  const affected = await db('care_profiles')
-    .where({ id: req.params['id'], account_id: req.account!.id })
-    .update({ archived: true, updated_at: db.fn.now() });
+  const isAdmin = req.account!.role === 'admin' || req.account!.role === 'super_admin';
+  const query = db('care_profiles').where({ id: req.params['id'] });
+  if (!isAdmin) query.where({ account_id: req.account!.id });
+  const affected = await query.update({ archived: true, updated_at: db.fn.now() });
 
   if (!affected) {
     res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });

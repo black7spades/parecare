@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { SymptomCourseChart } from './SymptomCourseChart';
 import type { ConditionSymptom } from '../../../lib/care';
 
 /** The word for a point on the 1 to 10 severity scale. */
@@ -56,18 +57,21 @@ export function SymptomsSection({
       ) : symptoms.length === 0 ? (
         <p className="text-sm text-muted">No symptoms recorded yet.</p>
       ) : (
-        <div className="space-y-1">
-          {symptoms.map((sym) => (
-            <SymptomRow
-              key={sym.id}
-              symptom={sym}
-              profileId={profileId}
-              conditionId={conditionId}
-              canEdit={canEdit}
-              onChanged={invalidate}
-            />
-          ))}
-        </div>
+        <>
+          <div className="space-y-1">
+            {symptoms.map((sym) => (
+              <SymptomRow
+                key={sym.id}
+                symptom={sym}
+                profileId={profileId}
+                conditionId={conditionId}
+                canEdit={canEdit}
+                onChanged={invalidate}
+              />
+            ))}
+          </div>
+          <SymptomCourseChart symptoms={symptoms} />
+        </>
       )}
       {canEdit ? <SymptomForm profileId={profileId} conditionId={conditionId} onSaved={invalidate} /> : null}
     </div>
@@ -87,9 +91,11 @@ export function SymptomRow({
   canEdit?: boolean;
   onChanged: () => void;
 }) {
-  // The slider moves freely while dragging; the change is saved on release.
+  // The slider holds a pending value; nothing is logged until Save. Cancel
+  // returns it to the last saved severity, so a stray drag records nothing.
   const [severity, setSeverity] = useState(symptom.severity);
   useEffect(() => setSeverity(symptom.severity), [symptom.severity]);
+  const dirty = severity !== symptom.severity;
 
   const severityMutation = useMutation({
     mutationFn: (value: number) =>
@@ -113,12 +119,6 @@ export function SymptomRow({
     onSuccess: onChanged,
   });
 
-  const commit = () => {
-    if (severity !== symptom.severity) severityMutation.mutate(severity);
-  };
-
-  const readings = symptom.readings ?? [];
-
   return (
     <div className="py-2 border-b border-border last:border-0">
       <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -139,11 +139,8 @@ export function SymptomRow({
               aria-label={`Severity of ${symptom.name}`}
               className="flex-1 accent-primary"
               onChange={(e) => setSeverity(Number(e.target.value))}
-              onMouseUp={commit}
-              onTouchEnd={commit}
-              onKeyUp={commit}
             />
-            <span className="text-xs text-muted whitespace-nowrap w-24">
+            <span className={`text-xs whitespace-nowrap w-24 ${dirty ? 'text-ink font-medium' : 'text-muted'}`}>
               {severity}/10 {severityLabel(severity)}
             </span>
           </span>
@@ -154,23 +151,33 @@ export function SymptomRow({
         )}
         {canEdit ? (
           <span className="flex items-center gap-1 ml-auto">
-            <Button size="xs" variant="ghost" onClick={() => resolveMutation.mutate()}>
-              {symptom.resolved_at ? 'Reopen' : 'Resolve'}
-            </Button>
-            <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate()}>
-              Remove
-            </Button>
+            {dirty && !symptom.resolved_at ? (
+              <>
+                <Button size="xs" variant="ghost" onClick={() => setSeverity(symptom.severity)}>
+                  Cancel
+                </Button>
+                <Button
+                  size="xs"
+                  variant="secondary"
+                  loading={severityMutation.isPending}
+                  onClick={() => severityMutation.mutate(severity)}
+                >
+                  Save
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button size="xs" variant="ghost" onClick={() => resolveMutation.mutate()}>
+                  {symptom.resolved_at ? 'Reopen' : 'Resolve'}
+                </Button>
+                <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate()}>
+                  Remove
+                </Button>
+              </>
+            )}
           </span>
         ) : null}
       </div>
-      {readings.length > 1 ? (
-        <p className="text-xs text-muted mt-1">
-          Course:{' '}
-          {readings
-            .map((r) => `${r.severity} (${format(new Date(r.recorded_at), 'd MMM')})`)
-            .join(' → ')}
-        </p>
-      ) : null}
     </div>
   );
 }

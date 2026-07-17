@@ -146,7 +146,11 @@ aiRouter.post(
     } catch (err: unknown) {
       const appErr = err as { status?: number; code?: string; message?: string };
       if (appErr.status) {
-        res.status(appErr.status).json({
+        // Never surface the AI provider's own 401/403 as the client's: it
+        // would read as the user's session expiring and log them out. Other
+        // statuses (402 subscription, 429 rate limit) still pass through.
+        const status = appErr.status === 401 || appErr.status === 403 ? 502 : appErr.status;
+        res.status(status).json({
           error: appErr.message ?? 'AI request failed',
           code: appErr.code ?? 'AI_ERROR',
         });

@@ -7,6 +7,7 @@ import { useAuthStore } from '../../stores/auth';
 import { useAssistantStore } from '../../stores/assistant';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
+import { Input } from '../../components/ui/Input';
 import { Avatar } from '../../components/ui/Avatar';
 import { POA_TYPES, conditionStatusLabel, providerTypeLabel, type Provider } from '../../lib/care';
 import { AttentionPanel } from '../../components/AttentionPanel';
@@ -96,7 +97,13 @@ export function Dashboard() {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(new Set());
   const [bulkLinkOpen, setBulkLinkOpen] = useState(false);
-  const canEdit = account?.role === 'admin' || account?.role === 'super_admin';
+  const [editQueue, setEditQueue] = useState<ProfileSummary[]>([]);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // Only platform staff may permanently delete profiles; everyone can act on
+  // their own records for the reversible actions.
+  const isAdmin = account?.role === 'admin' || account?.role === 'super_admin';
+  const canEdit = isAdmin;
 
   const { data, isLoading } = useQuery({
     queryKey: ['care-profiles-summary'],
@@ -112,6 +119,36 @@ export function Dashboard() {
       void queryClient.invalidateQueries({ queryKey: ['pinned-profiles'] });
     },
   });
+
+  const selectedProfiles = useMemo(
+    () => profiles.filter((p) => selectedProfileIds.has(p.id)),
+    [profiles, selectedProfileIds]
+  );
+
+  // Bulk archive and permanent delete each fan out one request per profile
+  // so per-profile permission checks still apply; the server silently skips
+  // any the user may not touch.
+  const bulkArchive = useMutation({
+    mutationFn: () => Promise.allSettled([...selectedProfileIds].map((id) => api.delete(`/care-profiles/${id}`))),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
+      void queryClient.invalidateQueries({ queryKey: ['care-profiles'] });
+      setConfirmArchive(false);
+      setSelectedProfileIds(new Set());
+    },
+  });
+
+  const bulkDelete = useMutation({
+    mutationFn: () => Promise.allSettled([...selectedProfileIds].map((id) => api.delete(`/care-profiles/${id}/permanent`))),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
+      void queryClient.invalidateQueries({ queryKey: ['care-profiles'] });
+      setConfirmDelete(false);
+      setSelectedProfileIds(new Set());
+    },
+  });
+
+  const advanceEditQueue = () => setEditQueue((q) => q.slice(1));
 
   // Every distinct journey name across the people shown, for the filter.
   const journeyNames = useMemo(
@@ -246,12 +283,25 @@ export function Dashboard() {
             </div>
           </div>
 
-          {canEdit && selectedProfileIds.size > 0 ? (
-            <div className="flex items-center gap-3 px-4 py-2.5 bg-primary-50 dark:bg-primary-900/20 border border-primary/30 rounded-lg text-sm">
-              <span className="font-medium text-ink">{selectedProfileIds.size} selected</span>
-              <Button size="sm" onClick={() => setBulkLinkOpen(true)}>
-                Link provider
+          {selectedProfileIds.size > 0 ? (
+            <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 bg-primary-50 dark:bg-primary-900/20 border border-primary/30 rounded-lg text-sm">
+              <span className="font-medium text-ink mr-1">{selectedProfileIds.size} selected</span>
+              <Button size="sm" variant="secondary" onClick={() => setEditQueue(selectedProfiles)}>
+                Edit
               </Button>
+              <Button size="sm" variant="secondary" onClick={() => setConfirmArchive(true)}>
+                Archive
+              </Button>
+              {canEdit ? (
+                <Button size="sm" variant="secondary" onClick={() => setBulkLinkOpen(true)}>
+                  Link provider
+                </Button>
+              ) : null}
+              {isAdmin ? (
+                <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)}>
+                  Delete
+                </Button>
+              ) : null}
               <Button
                 size="sm"
                 variant="ghost"
@@ -298,7 +348,7 @@ export function Dashboard() {
                           })
                         }
                         onTogglePin={() => togglePin(p)}
-                        selectable={canEdit}
+                        selectable
                         selected={selectedProfileIds.has(p.id)}
                         onToggleSelect={() => toggleProfile(p.id)}
                       />
@@ -308,7 +358,7 @@ export function Dashboard() {
                   <ProfileTable
                     profiles={g.list}
                     onTogglePin={togglePin}
-                    selectable={canEdit}
+                    selectable
                     selectedIds={selectedProfileIds}
                     onToggleSelect={toggleProfile}
                     onToggleAll={(ids) =>
@@ -335,6 +385,46 @@ export function Dashboard() {
               setSelectedProfileIds(new Set());
             }}
           />
+
+          {editQueue.length > 0 ? (
+            <ProfileQuickEditModal
+              profile={editQueue[0]}
+              remaining={editQueue.length}
+              onClose={() => setEditQueue([])}
+              onSaved={advanceEditQueue}
+              onSkip={advanceEditQueue}
+            />
+          ) : null}
+
+          <Modal open={confirmArchive} onClose={() => setConfirmArchive(false)} title="Archive selected profiles">
+            <p className="text-sm text-muted mb-4">
+              Archive {selectedProfileIds.size} {selectedProfileIds.size === 1 ? 'profile' : 'profiles'}? This hides
+              them and their records from the homeboard. Nothing is deleted, and they can be brought back later.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setConfirmArchive(false)}>Cancel</Button>
+              <Button variant="secondary" loading={bulkArchive.isPending} onClick={() => bulkArchive.mutate()}>
+                Archive
+              </Button>
+            </div>
+          </Modal>
+
+          <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete selected profiles">
+            <div className="rounded-md border-l-4 border-red-400 bg-red-50 dark:bg-red-900/10 px-4 py-3 text-sm text-red-700 dark:text-red-300 mb-4">
+              This permanently deletes {selectedProfileIds.size} {selectedProfileIds.size === 1 ? 'profile' : 'profiles'}
+              {' '}and everything recorded for them: journeys, care log, tasks, medications, documents and the care
+              circle. This cannot be undone.
+            </div>
+            <ul className="text-sm text-ink mb-4 max-h-40 overflow-y-auto list-disc pl-5">
+              {selectedProfiles.map((p) => <li key={p.id}>{p.full_name}</li>)}
+            </ul>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+              <Button variant="danger" loading={bulkDelete.isPending} onClick={() => bulkDelete.mutate()}>
+                Delete permanently
+              </Button>
+            </div>
+          </Modal>
         </>
       )}
     </div>
@@ -575,6 +665,26 @@ function ProfileCard({
   );
 }
 
+type TableSortCol = 'name' | 'relationship' | 'health' | 'phase' | 'next' | 'updated';
+
+/** Rank a health state so a column sort can order by severity. */
+function healthRank(p: ProfileSummary): number {
+  const level = profileAlertLevel(p.health_statuses);
+  return level === 'red' ? 3 : level === 'yellow' ? 2 : level === 'green' ? 1 : 0;
+}
+
+const TABLE_COMPARATORS: Record<TableSortCol, (a: ProfileSummary, b: ProfileSummary) => number> = {
+  name: (a, b) => a.full_name.localeCompare(b.full_name),
+  relationship: (a, b) => (a.relationship ?? '').localeCompare(b.relationship ?? '') || a.full_name.localeCompare(b.full_name),
+  health: (a, b) => healthRank(a) - healthRank(b) || a.full_name.localeCompare(b.full_name),
+  phase: (a, b) =>
+    ((firstJourney(a)?.phase_sort_order ?? -1) - (firstJourney(b)?.phase_sort_order ?? -1)) ||
+    a.full_name.localeCompare(b.full_name),
+  // Missing values sort to the end regardless of direction.
+  next: (a, b) => (a.next_event ? new Date(a.next_event.next_due_at).getTime() : Infinity) - (b.next_event ? new Date(b.next_event.next_due_at).getTime() : Infinity),
+  updated: (a, b) => (b.last_activity ? new Date(b.last_activity.created_at).getTime() : 0) - (a.last_activity ? new Date(a.last_activity.created_at).getTime() : 0),
+};
+
 function ProfileTable({
   profiles,
   onTogglePin,
@@ -590,7 +700,44 @@ function ProfileTable({
   onToggleSelect?: (id: string) => void;
   onToggleAll?: (ids: string[]) => void;
 }) {
-  const allSelected = selectable && profiles.length > 0 && profiles.every((p) => selectedIds?.has(p.id));
+  // A clicked column takes over ordering; clicking it again flips direction.
+  // Until then, the incoming priority order (alerts, then pins) is kept.
+  const [sortCol, setSortCol] = useState<TableSortCol | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const toggleSort = (col: TableSortCol) => {
+    if (sortCol === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else {
+      setSortCol(col);
+      setSortDir('asc');
+    }
+  };
+  const rows = useMemo(() => {
+    if (!sortCol) return profiles;
+    const sorted = [...profiles].sort(TABLE_COMPARATORS[sortCol]);
+    return sortDir === 'desc' ? sorted.reverse() : sorted;
+  }, [profiles, sortCol, sortDir]);
+
+  const allSelected = selectable && rows.length > 0 && rows.every((p) => selectedIds?.has(p.id));
+
+  const SortableTh = ({ col, label }: { col: TableSortCol; label: string }) => {
+    const active = sortCol === col;
+    return (
+      <th className="px-3 py-2 font-medium" aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}>
+        <button
+          type="button"
+          className={`flex items-center gap-1 hover:text-ink ${active ? 'text-ink' : ''}`}
+          onClick={() => toggleSort(col)}
+          title={active ? `Sorted ${sortDir === 'asc' ? 'ascending' : 'descending'}. Click to reverse.` : `Sort by ${label.toLowerCase()}`}
+        >
+          {label}
+          <span aria-hidden="true" className={active ? '' : 'opacity-0'}>
+            {active && sortDir === 'desc' ? '▼' : '▲'}
+          </span>
+        </button>
+      </th>
+    );
+  };
+
   return (
     <div className="card p-0 overflow-x-auto">
       <table className="w-full text-sm">
@@ -602,22 +749,22 @@ function ProfileTable({
                   type="checkbox"
                   className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
                   checked={!!allSelected}
-                  onChange={() => onToggleAll?.(profiles.map((p) => p.id))}
+                  onChange={() => onToggleAll?.(rows.map((p) => p.id))}
                   aria-label="Select all"
                 />
               </th>
             ) : null}
             <th className="px-3 py-2 w-8" aria-label="Pinned" />
-            <th className="px-3 py-2 font-medium">Name</th>
-            <th className="px-3 py-2 font-medium">Relationship</th>
-            <th className="px-3 py-2 font-medium">Health</th>
-            <th className="px-3 py-2 font-medium">Phase</th>
-            <th className="px-3 py-2 font-medium">Next</th>
-            <th className="px-3 py-2 font-medium">Last update</th>
+            <SortableTh col="name" label="Name" />
+            <SortableTh col="relationship" label="Relationship" />
+            <SortableTh col="health" label="Health" />
+            <SortableTh col="phase" label="Phase" />
+            <SortableTh col="next" label="Next" />
+            <SortableTh col="updated" label="Last update" />
           </tr>
         </thead>
         <tbody>
-          {profiles.map((p) => {
+          {rows.map((p) => {
             const j = firstJourney(p);
             const alertLevel = profileAlertLevel(p.health_statuses);
             const rowBg = alertLevel ? ALERT_ROW_BG[alertLevel] : '';
@@ -688,6 +835,117 @@ function ProfileTable({
       </table>
     </div>
   );
+}
+
+/**
+ * A compact editor for one profile's identity, used by the homeboard's
+ * bulk Edit action to step through the selection. Each name part is its
+ * own field, per the data conventions; the full record's other pages
+ * handle everything else. Fetches the profile so it edits the stored
+ * parts rather than re-splitting the composed display name.
+ */
+function ProfileQuickEditModal({
+  profile,
+  remaining,
+  onClose,
+  onSaved,
+  onSkip,
+}: {
+  profile: ProfileSummary;
+  remaining: number;
+  onClose: () => void;
+  onSaved: () => void;
+  onSkip: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ['care-profile', profile.id],
+    queryFn: () => api.get<{ profile: CareProfileDetail; relationship: string | null }>(`/care-profiles/${profile.id}`),
+  });
+  const isPet = profile.kind === 'pet';
+
+  const [fields, setFields] = useState({ title: '', first_name: '', middle_name: '', last_name: '', suffix: '', preferred_name: '', relationship: '' });
+  const [error, setError] = useState('');
+  const set = (k: keyof typeof fields) => (e: React.ChangeEvent<HTMLInputElement>) => setFields((f) => ({ ...f, [k]: e.target.value }));
+
+  useEffect(() => {
+    if (!data) return;
+    const p = data.profile;
+    setFields({
+      title: p.title ?? '',
+      first_name: p.first_name ?? '',
+      middle_name: p.middle_name ?? '',
+      last_name: p.last_name ?? '',
+      suffix: p.suffix ?? '',
+      preferred_name: p.preferred_name ?? '',
+      relationship: data.relationship ?? p.owner_relationship ?? '',
+    });
+    setError('');
+  }, [data]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.patch(`/care-profiles/${profile.id}`, {
+        title: fields.title.trim() || null,
+        first_name: fields.first_name.trim(),
+        middle_name: fields.middle_name.trim() || null,
+        last_name: fields.last_name.trim() || null,
+        suffix: fields.suffix.trim() || null,
+        preferred_name: fields.preferred_name.trim() || null,
+        owner_relationship: fields.relationship.trim() || null,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
+      void queryClient.invalidateQueries({ queryKey: ['care-profile', profile.id] });
+      onSaved();
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'Could not save.'),
+  });
+
+  return (
+    <Modal open onClose={onClose} title={`Edit ${profile.full_name}`}>
+      <div className="space-y-4">
+        {remaining > 1 ? (
+          <p className="text-xs text-muted">{remaining} profiles to review. Save or skip each in turn.</p>
+        ) : null}
+        {!data ? (
+          <p className="text-sm text-muted">Loading…</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              {!isPet ? <Input label="Title" value={fields.title} onChange={set('title')} placeholder="e.g. Mr, Dr" /> : null}
+              <Input label={isPet ? 'Name' : 'First name'} value={fields.first_name} onChange={set('first_name')} />
+              {!isPet ? <Input label="Middle name" value={fields.middle_name} onChange={set('middle_name')} /> : null}
+              {!isPet ? <Input label="Last name" value={fields.last_name} onChange={set('last_name')} /> : null}
+              {!isPet ? <Input label="Suffix" value={fields.suffix} onChange={set('suffix')} placeholder="e.g. Jr" /> : null}
+            </div>
+            <Input label="Preferred name" value={fields.preferred_name} onChange={set('preferred_name')} hint="What they like to be called." />
+            <Input label="Relationship to you" value={fields.relationship} onChange={set('relationship')} placeholder="e.g. Mother, Resident" />
+            {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          </>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          {remaining > 1 ? (
+            <Button variant="ghost" onClick={onSkip}>Skip</Button>
+          ) : null}
+          <Button loading={save.isPending} disabled={!fields.first_name.trim()} onClick={() => save.mutate()}>
+            Save
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+interface CareProfileDetail {
+  title: string | null;
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
+  suffix: string | null;
+  preferred_name: string | null;
+  owner_relationship: string | null;
 }
 
 interface DirectoryProvider extends Provider {
