@@ -36,10 +36,10 @@ const sizeValue = (d: CareDocument): number => d.file_size_bytes ?? 0;
 const byName = (a: CareDocument, b: CareDocument) => a.label.localeCompare(b.label);
 
 const DOC_SORTS: DataSort<CareDocument>[] = [
-  { key: 'name', label: 'By name (A–Z)', compare: byName },
-  { key: 'date', label: 'By date (newest first)', compare: (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime() || byName(a, b) },
+  { key: 'name', label: 'By name', compare: byName },
+  { key: 'date', label: 'By date', defaultDir: 'desc', compare: (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime() || byName(a, b) },
   { key: 'category', label: 'By category', compare: (a, b) => documentCategoryLabel(a.category).localeCompare(documentCategoryLabel(b.category)) || byName(a, b) },
-  { key: 'size', label: 'By size (largest first)', compare: (a, b) => sizeValue(b) - sizeValue(a) || byName(a, b) },
+  { key: 'size', label: 'By size', defaultDir: 'desc', compare: (a, b) => sizeValue(a) - sizeValue(b) || byName(a, b) },
 ];
 
 export function DocumentsPage() {
@@ -204,10 +204,10 @@ export function DocumentsPage() {
                       onChange={dv.toggleAll}
                     />
                   </th>
-                  <th className="px-4 py-3 font-medium">Name</th>
-                  <th className="px-4 py-3 font-medium">Category</th>
-                  <th className="px-4 py-3 font-medium">Size</th>
-                  <th className="px-4 py-3 font-medium">Date</th>
+                  <SortableHeader label="Name" sortKey="name" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                  <SortableHeader label="Category" sortKey="category" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                  <SortableHeader label="Size" sortKey="size" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                  <SortableHeader label="Date" sortKey="date" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                   <th className="px-4 py-3 font-medium">Visibility</th>
                   <th className="px-4 py-3 font-medium text-right">Actions</th>
                 </tr>
@@ -430,11 +430,48 @@ export function DocumentsPage() {
   );
 }
 
-type PreviewKind = 'image' | 'pdf' | 'video' | 'audio' | 'text' | 'unsupported';
+/**
+ * A column header that sorts the table: first click sorts by the column,
+ * clicking again flips between ascending and descending. The arrow marks
+ * the active column and direction.
+ */
+function SortableHeader({
+  label,
+  sortKey,
+  activeKey,
+  dir,
+  onToggle,
+}: {
+  label: string;
+  sortKey: string;
+  activeKey: string;
+  dir: 'asc' | 'desc';
+  onToggle: (key: string) => void;
+}) {
+  const active = activeKey === sortKey;
+  return (
+    <th className="px-4 py-3 font-medium" aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}>
+      <button
+        type="button"
+        className={`flex items-center gap-1 hover:text-ink ${active ? 'text-ink' : ''}`}
+        onClick={() => onToggle(sortKey)}
+        title={active ? `Sorted ${dir === 'asc' ? 'ascending' : 'descending'}. Click to reverse.` : `Sort by ${label.toLowerCase()}`}
+      >
+        {label}
+        <span aria-hidden="true" className={active ? '' : 'opacity-0'}>
+          {active && dir === 'desc' ? '▼' : '▲'}
+        </span>
+      </button>
+    </th>
+  );
+}
+
+type PreviewKind = 'image' | 'pdf' | 'html' | 'video' | 'audio' | 'text' | 'unsupported';
 
 const EXTENSION_KINDS: Record<string, PreviewKind> = {
   jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', svg: 'image', bmp: 'image',
   pdf: 'pdf',
+  html: 'html', htm: 'html', xhtml: 'html',
   mp4: 'video', webm: 'video', mov: 'video', m4v: 'video',
   mp3: 'audio', wav: 'audio', m4a: 'audio', ogg: 'audio', flac: 'audio',
   txt: 'text', md: 'text', csv: 'text', json: 'text', log: 'text',
@@ -446,9 +483,10 @@ function previewKind(doc: CareDocument): PreviewKind {
   const mime = doc.mime_type ?? '';
   if (mime.startsWith('image/')) return 'image';
   if (mime === 'application/pdf') return 'pdf';
+  if (mime === 'text/html' || mime === 'application/xhtml+xml') return 'html';
   if (mime.startsWith('video/')) return 'video';
   if (mime.startsWith('audio/')) return 'audio';
-  if (mime.startsWith('text/') || mime === 'application/json' || mime === 'text/csv') return 'text';
+  if (mime.startsWith('text/') || mime === 'application/json') return 'text';
   const ext = doc.file_url.includes('.') ? doc.file_url.slice(doc.file_url.lastIndexOf('.') + 1).toLowerCase() : '';
   return EXTENSION_KINDS[ext] ?? 'unsupported';
 }
@@ -488,8 +526,12 @@ function DocumentViewerModal({
           setText(await blob.text());
         } else {
           // The browser picks the renderer from the blob's type, so make
-          // sure it carries the document's recorded MIME type.
-          const typed = doc.mime_type && blob.type !== doc.mime_type ? new Blob([blob], { type: doc.mime_type }) : blob;
+          // sure it carries the document's recorded MIME type. HTML files
+          // whose stored type is missing or generic still need text/html
+          // to render as a page rather than download.
+          const desiredType =
+            kind === 'html' && doc.mime_type !== 'application/xhtml+xml' ? 'text/html' : doc.mime_type;
+          const typed = desiredType && blob.type !== desiredType ? new Blob([blob], { type: desiredType }) : blob;
           objectUrl = URL.createObjectURL(typed);
           setUrl(objectUrl);
         }
@@ -516,6 +558,16 @@ function DocumentViewerModal({
           <img src={url} alt={doc.label} className="max-w-full max-h-[70vh] mx-auto rounded-md" />
         ) : kind === 'pdf' ? (
           <iframe src={url} title={doc.label} className="w-full h-[70vh] rounded-md border border-border" />
+        ) : kind === 'html' ? (
+          // Fully sandboxed: an uploaded page renders with its own styling,
+          // but its scripts, forms and navigation stay disabled so it can
+          // never act on the app or the viewer's session.
+          <iframe
+            src={url}
+            title={doc.label}
+            sandbox=""
+            className="w-full h-[70vh] rounded-md border border-border bg-white"
+          />
         ) : kind === 'video' ? (
           <video src={url} controls className="max-w-full max-h-[70vh] mx-auto rounded-md" />
         ) : kind === 'audio' ? (
