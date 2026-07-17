@@ -91,6 +91,9 @@ const serializeCondition = <T extends Record<string, unknown>>(c: T): T => ({
   ...c,
   started_on: dateOrNull(c['started_on']),
   resolved_on: dateOrNull(c['resolved_on']),
+  // Also a plain date; sending the raw timestamp broke the edit forms,
+  // whose date inputs and the schema above both expect YYYY-MM-DD.
+  diagnosis_date: dateOrNull(c['diagnosis_date']),
 });
 
 conditionsRouter.get('/', requireAuth, async (req, res) => {
@@ -228,10 +231,16 @@ function classifyCondition(data: Partial<z.infer<typeof conditionSchema>>): Part
   return out;
 }
 
+/** Name the field that failed, so the form's error is actionable. */
+const conditionValidationError = (err: z.ZodError): string => {
+  const first = err.issues[0];
+  return first && first.path.length > 0 ? `Check the ${first.path.join('.')} field: ${first.message}` : 'Invalid request';
+};
+
 conditionsRouter.post('/', requireAuth, async (req, res) => {
   const parsed = conditionSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    res.status(400).json({ error: conditionValidationError(parsed.error), code: 'VALIDATION_ERROR' });
     return;
   }
   // Every recorded condition joins the shared catalogue, so a name typed
@@ -255,7 +264,7 @@ conditionsRouter.post('/', requireAuth, async (req, res) => {
 conditionsRouter.patch('/:conditionId', requireAuth, async (req, res) => {
   const parsed = conditionSchema.partial().safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    res.status(400).json({ error: conditionValidationError(parsed.error), code: 'VALIDATION_ERROR' });
     return;
   }
   // A rename re-links the catalogue entry so suggestions follow the new name.

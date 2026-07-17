@@ -33,7 +33,7 @@ export function SystemLayout() {
         {isSuperAdmin ? (
           <>
             <NavLink to="/system/database" className={tabClass}>
-              Database
+              Data tools
             </NavLink>
             <NavLink to="/system/settings" className={tabClass}>
               Settings

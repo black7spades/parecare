@@ -2,6 +2,8 @@ import { api } from './client';
 
 export interface DbTable {
   name: string;
+  label: string;
+  group: string;
   approx_rows: number;
 }
 

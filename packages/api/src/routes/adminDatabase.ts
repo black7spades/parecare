@@ -6,19 +6,51 @@ import { requireRole } from '../middleware/requireRole';
 import { toCSV, parseCSV } from '../services/dataPort';
 
 /**
- * Super-admin database tools: browse, edit, import and export every table
- * in the Postgres database directly. Writes here bypass application rules
- * (no audit trail, no cascading business logic beyond what the schema
- * itself enforces), which is exactly the point of a break-glass tool.
+ * Super-admin data tools: browse, edit, import and export the data the app
+ * itself manages, for the "someone saved Austism and now it shows up
+ * everywhere" kind of tidy-up. Deliberately NOT the whole database: only
+ * the curated tables below are reachable; accounts, tokens, billing,
+ * audit and AI internals are not.
  *
- * Safety model: every table and column name arriving from the client is
- * checked against the live information_schema before it is used, and all
- * values travel as bound parameters, so nothing user-supplied is ever
- * spliced into SQL.
+ * Safety model: the table must be on the curated list, every table and
+ * column name arriving from the client is checked against the live
+ * information_schema before it is used, and all values travel as bound
+ * parameters, so nothing user-supplied is ever spliced into SQL.
  */
 export const adminDatabaseRouter = Router();
 
 adminDatabaseRouter.use(requireAuth, requireRole('super_admin'));
+
+/**
+ * The tables surfaced for editing: the shared catalogues that feed
+ * suggestions everywhere, and the care records behind the main
+ * navigation. One entry per table, with the label the screen shows.
+ */
+const CURATED_TABLES: Record<string, { label: string; group: string }> = {
+  // Shared catalogues: instance-wide lists that feed suggestions, so a
+  // typo here repeats everywhere until it is fixed here.
+  condition_catalogue: { label: 'Conditions catalogue', group: 'Shared catalogues' },
+  symptom_catalogue: { label: 'Symptoms catalogue', group: 'Shared catalogues' },
+  medication_catalogue: { label: 'Medications catalogue', group: 'Shared catalogues' },
+  option_catalogue: { label: 'Option lists', group: 'Shared catalogues' },
+  life_stages: { label: 'Life stages', group: 'Shared catalogues' },
+  journey_templates: { label: 'Journey templates', group: 'Shared catalogues' },
+  // Care records: the per-person data behind the profile navigation.
+  care_profiles: { label: 'Care profiles', group: 'Care records' },
+  medical_conditions: { label: 'Conditions', group: 'Care records' },
+  condition_symptoms: { label: 'Condition symptoms', group: 'Care records' },
+  allergies: { label: 'Allergies', group: 'Care records' },
+  medications: { label: 'Medications', group: 'Care records' },
+  treatments: { label: 'Treatments', group: 'Care records' },
+  appointments: { label: 'Appointments', group: 'Care records' },
+  reminders: { label: 'Tasks and reminders', group: 'Care records' },
+  providers: { label: 'Providers', group: 'Care records' },
+  care_circle_members: { label: 'Care circle members', group: 'Care records' },
+  documents: { label: 'Documents', group: 'Care records' },
+  open_questions: { label: 'Questions', group: 'Care records' },
+  care_log_entries: { label: 'Care log entries', group: 'Care records' },
+  memory_book_entries: { label: 'Memory book entries', group: 'Care records' },
+};
 
 interface ColumnInfo {
   name: string;
@@ -35,7 +67,7 @@ async function listTableNames(): Promise<string[]> {
     .where({ table_schema: 'public', table_type: 'BASE TABLE' })
     .select('table_name')
     .orderBy('table_name');
-  return rows.map((r: { table_name: string }) => r.table_name);
+  return rows.map((r: { table_name: string }) => r.table_name).filter((name) => name in CURATED_TABLES);
 }
 
 async function getColumns(table: string): Promise<ColumnInfo[]> {
@@ -128,7 +160,16 @@ adminDatabaseRouter.get('/tables', async (_req, res) => {
   // for a catalogue listing; the rows endpoint returns exact totals.
   const stats = await db.raw(`SELECT relname, n_live_tup FROM pg_stat_user_tables WHERE schemaname = 'public'`);
   const counts = new Map((stats.rows as Array<{ relname: string; n_live_tup: string }>).map((r) => [r.relname, Number(r.n_live_tup)]));
-  res.json({ tables: names.map((name) => ({ name, approx_rows: counts.get(name) ?? 0 })) });
+  const tables = names.map((name) => ({
+    name,
+    label: CURATED_TABLES[name]!.label,
+    group: CURATED_TABLES[name]!.group,
+    approx_rows: counts.get(name) ?? 0,
+  }));
+  // Catalogues first (the usual tidy-up target), then care records, each
+  // alphabetical by the label people actually see.
+  tables.sort((a, b) => b.group.localeCompare(a.group) || a.label.localeCompare(b.label));
+  res.json({ tables });
 });
 
 adminDatabaseRouter.get('/tables/:table', async (req, res) => {

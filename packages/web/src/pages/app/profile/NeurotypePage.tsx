@@ -183,7 +183,8 @@ function NeurotypeEditor({
   const [name, setName] = useState(condition?.name ?? '');
   const [neurotype, setNeurotype] = useState(condition?.neurotype ?? '');
   const [diagnosisStatus, setDiagnosisStatus] = useState(condition?.diagnosis_status ?? '');
-  const [diagnosisDate, setDiagnosisDate] = useState(condition?.diagnosis_date ?? '');
+  // Older records may carry a full timestamp; the date input needs YYYY-MM-DD.
+  const [diagnosisDate, setDiagnosisDate] = useState((condition?.diagnosis_date ?? '').slice(0, 10));
   const [severity, setSeverity] = useState(condition?.severity ?? '');
   const [error, setError] = useState('');
 
