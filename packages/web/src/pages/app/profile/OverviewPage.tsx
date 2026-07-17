@@ -9,7 +9,6 @@ import { PoaBadge } from '../../../components/PoaBadge';
 import { AttentionPanel } from '../../../components/AttentionPanel';
 import { SetPoaForm } from '../../../components/SetPoaForm';
 import { ConditionModal } from '../../../components/QuickAddModals';
-import { HealthStatusOverview } from './HealthStatusOverview';
 import { CurrentHealthSection } from './CurrentHealthSection';
 import { CareLogSection } from './CareLogSection';
 import { CardAiSummary } from './CardAiSummary';
@@ -287,7 +286,6 @@ export function OverviewPage() {
             <div className="space-y-3">
               <CardAiSummary profileId={profile.id} cardKey="health" canEdit={canEdit} />
               <CurrentHealthSection profileId={profile.id} canEdit={canEdit} careName={careName} />
-              <HealthStatusOverview profileId={profile.id} />
             </div>
           </CollapsibleCard>
         );

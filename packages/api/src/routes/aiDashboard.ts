@@ -179,7 +179,10 @@ aiDashboardRouter.post(
     } catch (err: unknown) {
       const appErr = err as { status?: number; code?: string; message?: string };
       if (appErr.status) {
-        res.status(appErr.status).json({
+        // An upstream AI 401/403 must not read as the user's session expiring
+        // and log them out; other statuses (402, 429) still pass through.
+        const status = appErr.status === 401 || appErr.status === 403 ? 502 : appErr.status;
+        res.status(status).json({
           error: appErr.message ?? 'AI request failed',
           code: appErr.code ?? 'AI_ERROR',
         });

@@ -230,7 +230,11 @@ overviewSummariesRouter.post('/:cardKey/generate', requireAuth, async (req, res)
     const summary = await upsertSummary(profileId, cardKey, content, 'ai', req.account!.id);
     res.json({ summary });
   } catch (err) {
-    const status = (err as { status?: number }).status ?? 502;
+    // The AI provider's own status must not become the client's: an upstream
+    // 401/403 (a bad or revoked key) would otherwise read as the user's
+    // session expiring and log them out. Report any AI failure as 502.
+    const upstream = (err as { status?: number }).status;
+    const status = upstream && upstream !== 401 && upstream !== 403 ? upstream : 502;
     res.status(status).json({ error: 'Could not generate the summary', code: 'AI_ERROR' });
   }
 });
