@@ -7,14 +7,14 @@ import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
 import { AttentionPanel } from '../../../components/AttentionPanel';
+import { SetPoaForm } from '../../../components/SetPoaForm';
+import { ConditionModal } from '../../../components/QuickAddModals';
 import { HealthStatusOverview } from './HealthStatusOverview';
 import { CurrentHealthSection } from './CurrentHealthSection';
 import { CareLogSection } from './CareLogSection';
 import { CardAiSummary } from './CardAiSummary';
 import { useProfile } from './ProfileLayout';
 import {
-  POA_TYPES,
-  PROVIDER_TYPES,
   conditionCategoryLabel,
   conditionStatusLabel,
   diagnosisStatusLabel,
@@ -152,6 +152,16 @@ export function OverviewPage() {
     });
   }, []);
 
+  // The header control folds or unfolds every card at once.
+  const allCollapsed = CARD_KEYS.every((k) => collapsed.has(k));
+  const toggleAllCollapsed = useCallback(() => {
+    setCollapsed((prev) => {
+      const next: Set<CardKey> = prev.size >= CARD_KEYS.length ? new Set() : new Set(CARD_KEYS);
+      localStorage.setItem('overview-collapsed', JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+
   const moveCard = useCallback((key: CardKey, dir: -1 | 1) => {
     setCardOrder((prev) => {
       const idx = prev.indexOf(key);
@@ -242,8 +252,6 @@ export function OverviewPage() {
             <PoaCard
               profileId={profile.id}
               poaHolders={poaHolders}
-              members={members}
-              providers={providers}
               isOwner={isOwner}
               careName={careName}
             />
@@ -310,7 +318,28 @@ export function OverviewPage() {
     <div className="space-y-6">
       <AttentionPanel profileId={profile.id} />
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-1">
+        <button
+          type="button"
+          aria-label={allCollapsed ? 'Expand all cards' : 'Collapse all cards'}
+          title={allCollapsed ? 'Expand all' : 'Collapse all'}
+          className="p-1.5 text-muted hover:text-ink"
+          onClick={toggleAllCollapsed}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            {allCollapsed ? (
+              <>
+                <polyline points="7 13 12 18 17 13" />
+                <polyline points="7 6 12 11 17 6" />
+              </>
+            ) : (
+              <>
+                <polyline points="17 11 12 6 7 11" />
+                <polyline points="17 18 12 13 7 18" />
+              </>
+            )}
+          </svg>
+        </button>
         <Button
           variant={editView ? 'secondary' : 'ghost'}
           size="sm"
@@ -503,6 +532,7 @@ function ConditionsOverview({
   careName: string;
 }) {
   const [viewMode, setViewMode] = useState<'summary' | 'list'>('summary');
+  const [adding, setAdding] = useState(false);
 
   const { data } = useQuery({
     queryKey: ['conditions', profileId],
@@ -516,9 +546,12 @@ function ConditionsOverview({
       <div>
         <p className="text-sm text-muted">No conditions recorded yet.</p>
         {canEdit ? (
-          <Link to="conditions" className="mt-2 inline-block">
-            <Button variant="secondary" size="sm">Add conditions</Button>
-          </Link>
+          <>
+            <Button variant="secondary" size="sm" className="mt-2" onClick={() => setAdding(true)}>
+              Add condition
+            </Button>
+            <ConditionModal profileId={profileId} open={adding} onClose={() => setAdding(false)} />
+          </>
         ) : null}
       </div>
     );
@@ -626,15 +659,11 @@ function NeurotypesOverview({
 function PoaCard({
   profileId,
   poaHolders,
-  members,
-  providers,
   isOwner,
   careName,
 }: {
   profileId: string;
   poaHolders: PoaHolder[];
-  members: CircleMember[];
-  providers: Provider[];
   isOwner: boolean;
   careName: string;
 }) {
@@ -678,13 +707,13 @@ function PoaCard({
             </div>
           ))}
         </div>
-        {isOwner ? <SetPoaInline profileId={profileId} members={members} providers={providers} compact /> : null}
+        {isOwner ? <SetPoaForm profileId={profileId} compact /> : null}
       </div>
     );
   }
 
   if (isOwner) {
-    return <SetPoaInline profileId={profileId} members={members} providers={providers} />;
+    return <SetPoaForm profileId={profileId} />;
   }
 
   return <p className="text-sm text-muted">No power of attorney recorded.</p>;
@@ -775,166 +804,6 @@ function ProfileContact({ profile }: { profile: CareProfile }) {
         </div>
       ))}
     </dl>
-  );
-}
-
-function SetPoaInline({
-  profileId,
-  members,
-  providers,
-  compact = false,
-}: {
-  profileId: string;
-  members: CircleMember[];
-  providers: Provider[];
-  compact?: boolean;
-}) {
-  const queryClient = useQueryClient();
-  const [holder, setHolder] = useState('');
-  const [orgName, setOrgName] = useState('');
-  const [orgType, setOrgType] = useState('legal');
-  const [poaType, setPoaType] = useState<string>(POA_TYPES[0].value);
-  const [error, setError] = useState('');
-  const [expanded, setExpanded] = useState(!compact);
-
-  const mutation = useMutation({
-    mutationFn: async () => {
-      let path: string;
-      let id: string;
-      if (holder === 'neworg') {
-        const created = await api.post<{ provider: Provider }>(`/care-profiles/${profileId}/providers`, {
-          provider_type: orgType,
-          name: orgName.trim(),
-        });
-        path = 'providers';
-        id = created.provider.id;
-      } else {
-        const [source, holderId] = holder.split(':');
-        path = source === 'provider' ? 'providers' : 'circle';
-        id = holderId;
-      }
-      return api.patch(`/care-profiles/${profileId}/${path}/${id}`, { poa_type: poaType });
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['circle', profileId] });
-      void queryClient.invalidateQueries({ queryKey: ['providers', profileId] });
-      setHolder('');
-      setOrgName('');
-      setError('');
-      if (compact) setExpanded(false);
-    },
-    onError: (err) => setError(err instanceof Error ? err.message : 'Could not set the power of attorney.'),
-  });
-
-  const ready = holder === 'neworg' ? orgName.trim().length > 0 : !!holder;
-
-  if (compact && !expanded) {
-    return (
-      <button type="button" onClick={() => setExpanded(true)} className="text-xs text-primary hover:underline">
-        Name another
-      </button>
-    );
-  }
-
-  const selectClass =
-    'rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
-
-  return (
-    <div className="space-y-2">
-      {!compact ? (
-        <p className="text-sm text-muted">No power of attorney recorded yet. Name whoever holds it:</p>
-      ) : null}
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-muted">Who</span>
-          <select
-            aria-label="Who holds power of attorney"
-            className={selectClass}
-            value={holder}
-            onChange={(e) => setHolder(e.target.value)}
-          >
-            <option value="">Choose a person or organisation</option>
-            {members.length > 0 ? (
-              <optgroup label="People in the care circle">
-                {members.map((m) => (
-                  <option key={m.id} value={`member:${m.id}`}>
-                    {m.display_name}
-                    {m.relationship ? ` — ${m.relationship}` : ''}
-                  </option>
-                ))}
-              </optgroup>
-            ) : null}
-            {providers.length > 0 ? (
-              <optgroup label="Organisations">
-                {providers.map((p) => (
-                  <option key={p.id} value={`provider:${p.id}`}>
-                    {p.name} — {providerTypeLabel(p.provider_type)}
-                  </option>
-                ))}
-              </optgroup>
-            ) : null}
-            <option value="neworg">An organisation not listed yet</option>
-          </select>
-        </label>
-        {holder === 'neworg' ? (
-          <>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-muted">Organisation name</span>
-              <Input
-                aria-label="Organisation name"
-                value={orgName}
-                onChange={(e) => setOrgName(e.target.value)}
-                placeholder="e.g. Smith and Co Lawyers"
-                className="w-52"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-muted">Kind of organisation</span>
-              <select aria-label="Kind of organisation" className={selectClass} value={orgType} onChange={(e) => setOrgType(e.target.value)}>
-                {PROVIDER_TYPES.filter((t) => t.value !== 'gp').map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
-        ) : null}
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-muted">Kind of authority</span>
-          <select
-            aria-label="Kind of power of attorney"
-            className={selectClass}
-            value={poaType}
-            onChange={(e) => setPoaType(e.target.value)}
-          >
-            {POA_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <Button type="button" disabled={!ready || mutation.isPending} loading={mutation.isPending} onClick={() => mutation.mutate()}>
-          Set
-        </Button>
-        {compact ? (
-          <Button type="button" variant="ghost" onClick={() => setExpanded(false)}>
-            Cancel
-          </Button>
-        ) : null}
-      </div>
-      {members.length === 0 ? (
-        <p className="text-xs text-muted">
-          To name a person, first{' '}
-          <Link to="circle" className="text-primary hover:underline">
-            invite them to the care circle
-          </Link>
-          . Organisations can be added right here.
-        </p>
-      ) : null}
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
-    </div>
   );
 }
 

@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import { useAssistantStore } from '../stores/assistant';
 import { Button } from './ui/Button';
 import { Modal } from './ui/Modal';
+import { GpModal } from './QuickAddModals';
 import { browserTimeZone } from '../lib/datetime';
 import { severityLabel } from '../pages/app/profile/ConditionSymptoms';
 
@@ -112,6 +113,7 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
   const queryClient = useQueryClient();
   const [collapsed, setCollapsed] = useState(false);
   const [confirmDismiss, setConfirmDismiss] = useState<{ key: string; who: string; what: string; warning: string } | null>(null);
+  const [addGpFor, setAddGpFor] = useState<string | null>(null);
 
   const tz = browserTimeZone();
   const { data: attentionData } = useQuery({
@@ -218,12 +220,12 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                     </Link>
                   </>
                 ) : (
-                  <span className="text-ink">
-                    Consider contacting their GP. No GP is on file yet:{' '}
-                    <Link to={`/app/${a.profile_id}/providers`} className="text-primary hover:underline">
-                      add their GP under Providers
-                    </Link>
-                  </span>
+                  <>
+                    <span className="text-ink">Consider contacting their GP. No GP is on file yet.</span>
+                    <Button size="xs" variant="secondary" onClick={() => setAddGpFor(a.profile_id)}>
+                      Add their GP
+                    </Button>
+                  </>
                 )}
               </div>
             </li>
@@ -285,6 +287,8 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
           ))}
         </ul>
       ) : null}
+
+      {addGpFor ? <GpModal profileId={addGpFor} open onClose={() => setAddGpFor(null)} /> : null}
 
       <Modal open={confirmDismiss !== null} onClose={() => setConfirmDismiss(null)} title="Dismiss this alert">
         <p className="text-sm text-muted mb-4">

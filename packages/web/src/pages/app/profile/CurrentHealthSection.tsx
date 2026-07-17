@@ -1,13 +1,22 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
+import { Button } from '../../../components/ui/Button';
+import { ConditionModal } from '../../../components/QuickAddModals';
 import {
+  CONDITION_CATEGORIES,
   conditionCategoryLabel,
   conditionStatusLabel,
   type MedicalCondition,
 } from '../../../lib/care';
 import { SymptomsSection } from './ConditionSymptoms';
+
+/** The passing-health kinds offered when recording from this card. */
+const CURRENT_HEALTH_CATEGORIES = CONDITION_CATEGORIES.filter((c) =>
+  ['illness', 'injury', 'post_operative', 'recovery', 'chronic_flare', 'acute_illness'].includes(c.value)
+);
 
 /**
  * A condition that belongs in Current Health: something the person is going
@@ -50,6 +59,7 @@ export function CurrentHealthSection({
   canEdit: boolean;
   careName: string;
 }) {
+  const [adding, setAdding] = useState(false);
   const { data } = useQuery({
     queryKey: ['conditions', profileId],
     queryFn: () => api.get<{ conditions: MedicalCondition[] }>(`/care-profiles/${profileId}/conditions`),
@@ -58,15 +68,33 @@ export function CurrentHealthSection({
     .filter(isCurrentHealthCondition)
     .sort((a, b) => (b.started_on ?? '').localeCompare(a.started_on ?? '') || a.name.localeCompare(b.name));
 
+  const addModal = (
+    <ConditionModal
+      profileId={profileId}
+      open={adding}
+      onClose={() => setAdding(false)}
+      title="Add illness or injury"
+      defaultCategory="illness"
+      categories={CURRENT_HEALTH_CATEGORIES}
+    />
+  );
+
   if (current.length === 0) {
     return (
-      <p className="text-sm text-muted">
-        Nothing going on right now. When {careName} has an illness or injury, record it under{' '}
-        <Link to="conditions" className="text-primary hover:underline">
-          Conditions
-        </Link>{' '}
-        and it will show here with its symptoms.
-      </p>
+      <div className="flex items-center gap-2 flex-wrap">
+        <p className="text-sm text-muted">
+          Nothing going on right now. When {careName} has an illness or injury, record it and it will show
+          here with its symptoms.
+        </p>
+        {canEdit ? (
+          <>
+            <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
+              Add illness or injury
+            </Button>
+            {addModal}
+          </>
+        ) : null}
+      </div>
     );
   }
 
@@ -77,10 +105,18 @@ export function CurrentHealthSection({
           Illnesses and injuries {careName} is going through right now. Slide a symptom to log how it is
           today; every change is kept as a dated reading for that illness.
         </p>
-        <Link to="conditions" className="text-xs text-primary hover:underline whitespace-nowrap">
-          Manage conditions
-        </Link>
+        <span className="flex items-center gap-2 whitespace-nowrap">
+          {canEdit ? (
+            <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
+              Add illness or injury
+            </Button>
+          ) : null}
+          <Link to="conditions" className="text-xs text-primary hover:underline">
+            Manage conditions
+          </Link>
+        </span>
       </div>
+      {addModal}
       {current.map((c) => (
         <div key={c.id} className="rounded-md border border-border p-3">
           <div className="flex items-center gap-2 flex-wrap">
