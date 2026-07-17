@@ -6,6 +6,7 @@ import { matchProfileNames, type NameCandidate } from '../lib/nameMatch';
 import { drawDownOnHand, perDoseDrawdown } from './medicationSupply';
 import { resolveConditionCatalogueId } from '../routes/conditionCatalogue';
 import { resolveSymptomCatalogueId } from '../routes/symptomCatalogue';
+import { linkAddressToProfile, syncProfileResidence, RESIDENCE_KIND } from './addresses';
 
 /**
  * Actions the assistant can carry out on the user's behalf: logging a care
@@ -256,6 +257,20 @@ const updateProviderSchema = z.object({
   directions_link: z.string().url().optional().nullable(),
 });
 
+const linkProviderSchema = z.object({
+  type: z.literal('link_provider'),
+  // The name of an existing provider in the account's directory to attach to
+  // this profile, the same way providers can be shared across people.
+  name: z.string().min(1).max(255),
+});
+
+const linkAddressSchema = z.object({
+  type: z.literal('link_address'),
+  // Text to find an existing address in the account's book by: its label, its
+  // one-line form, or a street line. Linking it records where they live.
+  address: z.string().min(1).max(500),
+});
+
 const updateCarePlanSchema = z.object({
   type: z.literal('update_care_plan'),
   dietary_requirements: z.array(z.string()).max(50).optional().nullable(),
@@ -297,6 +312,8 @@ export const actionSchema = z.discriminatedUnion('type', [
   setCarePhaseSchema,
   addProviderSchema,
   updateProviderSchema,
+  linkProviderSchema,
+  linkAddressSchema,
   updateCarePlanSchema,
   updateProfileSchema,
 ]);
@@ -855,6 +872,43 @@ async function executeOne(
       await db('providers').where({ id: provider.id }).update(updates);
       await audit(profileId, account.id, 'providers', `updated provider ${action.name}`);
       return `Updated ${action.name}'s details.`;
+    }
+    case 'link_provider': {
+      const profile = await db('care_profiles').where({ id: profileId }).select('account_id').first();
+      if (!profile) return `Could not find this profile.`;
+      const provider = await db('providers')
+        .where({ account_id: profile.account_id })
+        .whereRaw('lower(name) = lower(?)', [action.name.trim()])
+        .select('id', 'name')
+        .first();
+      if (!provider) return `Could not find a provider called "${action.name}" in the directory. Add them first, then link.`;
+      const already = await db('care_profile_providers').where({ care_profile_id: profileId, provider_id: provider.id }).first();
+      if (already) return `${provider.name} is already linked to this profile.`;
+      await db('care_profile_providers').insert({ care_profile_id: profileId, provider_id: provider.id });
+      await audit(profileId, account.id, 'providers', `linked provider ${provider.name}`);
+      return `Linked ${provider.name} to this profile.`;
+    }
+    case 'link_address': {
+      const profile = await db('care_profiles').where({ id: profileId }).select('account_id').first();
+      if (!profile) return `Could not find this profile.`;
+      const needle = action.address.trim().toLowerCase();
+      const candidates = await db('addresses').where({ account_id: profile.account_id });
+      const field = (row: Record<string, unknown>, k: string) => String(row[k] ?? '').toLowerCase();
+      const match =
+        candidates.find((a) => field(a, 'formatted') === needle || field(a, 'label') === needle) ??
+        candidates.find(
+          (a) =>
+            (field(a, 'formatted') && field(a, 'formatted').includes(needle)) ||
+            (field(a, 'label') && field(a, 'label').includes(needle)) ||
+            (field(a, 'address_line1') && field(a, 'address_line1').includes(needle))
+        );
+      if (!match) return `Could not find an address matching "${action.address}" in the directory. Add it first, then link.`;
+      const already = await db('care_profile_addresses').where({ care_profile_id: profileId, address_id: match.id }).first();
+      await linkAddressToProfile(profileId, match.id, RESIDENCE_KIND);
+      await syncProfileResidence(profileId, match);
+      await audit(profileId, account.id, 'addresses', `linked address ${match.formatted ?? match.label ?? ''}`);
+      const where = match.formatted ?? match.label ?? 'the address';
+      return already ? `${where} is now set as where they live.` : `Linked ${where} as where they live.`;
     }
     case 'update_care_plan': {
       // updated_by references a care circle member, not an account, so use

@@ -4,7 +4,7 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { roleAtLeast } from '../middleware/requireRole';
 import { providerAddressFields, withComposedAddress } from './providers';
-import { addressColumns, ADDRESS_PART_KEYS } from '../services/addresses';
+import { addressColumns, ADDRESS_PART_KEYS, RESIDENCE_KIND, syncProfileResidence, syncResidenceForAddress } from '../services/addresses';
 import type { CareProfile, Provider, ProfileKind } from '../types';
 
 export const directoryRouter = Router();
@@ -429,6 +429,9 @@ directoryRouter.patch('/addresses/:id', requireAuth, async (req, res) => {
   }
   const merged = { ...current, ...parsed.data };
   const [address] = await query.update({ ...addressColumns(merged, merged.label), updated_at: db.fn.now() }).returning('*');
+  // Editing the shared address updates it everywhere, including each person's
+  // "where they live" for whom it is their residence.
+  await syncResidenceForAddress(address.id, address);
   res.json({ address });
 });
 
@@ -483,7 +486,12 @@ directoryRouter.post('/addresses/:id/bulk-link', requireAuth, async (req, res) =
   const existingSet = new Set(existing.map((r) => r.care_profile_id));
   const toInsert = accessibleIds.filter((id) => !existingSet.has(id));
   if (toInsert.length > 0) {
-    await db('care_profile_addresses').insert(toInsert.map((pid) => ({ care_profile_id: pid, address_id: address.id })));
+    // Linking an address to a person records where they live, so link it as
+    // their residence and copy it into each profile's "where they live".
+    await db('care_profile_addresses').insert(
+      toInsert.map((pid) => ({ care_profile_id: pid, address_id: address.id, address_kind: RESIDENCE_KIND }))
+    );
+    for (const pid of toInsert) await syncProfileResidence(pid, address);
   }
   res.json({ linked: toInsert.length, already_linked: existingSet.size, skipped: profile_ids.length - accessibleIds.length });
 });

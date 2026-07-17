@@ -2,7 +2,10 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
-import { addressColumns, ADDRESS_PART_KEYS } from '../services/addresses';
+import { addressColumns, ADDRESS_PART_KEYS, RESIDENCE_KIND, syncProfileResidence } from '../services/addresses';
+
+/** Whether a link kind marks the address as where the person lives. */
+const isResidenceKind = (kind: string | null | undefined) => kind == null || kind === RESIDENCE_KIND;
 
 /**
  * Addresses linked to one care profile. Mirrors the per-profile providers
@@ -71,11 +74,14 @@ addressesRouter.post('/', requireAuth, async (req, res) => {
     addressId = (created as { id: string }).id;
   }
 
+  // An address linked to a person is where they live unless told otherwise,
+  // so default the kind to residence and keep their profile in step below.
+  const kind = parsed.data.address_kind ?? RESIDENCE_KIND;
   try {
     await db('care_profile_addresses').insert({
       care_profile_id: req.params['id'],
       address_id: addressId,
-      address_kind: parsed.data.address_kind ?? null,
+      address_kind: kind,
     });
   } catch (err) {
     if ((err as { code?: string }).code === '23505') {
@@ -83,6 +89,11 @@ addressesRouter.post('/', requireAuth, async (req, res) => {
       return;
     }
     throw err;
+  }
+
+  if (isResidenceKind(kind)) {
+    const address = await db('addresses').where({ id: addressId }).first();
+    if (address) await syncProfileResidence(req.params['id'] as string, address);
   }
 
   const [row] = await db('care_profile_addresses as cpa')
@@ -118,6 +129,13 @@ addressesRouter.patch('/:addressId', requireAuth, async (req, res) => {
   }
   if (parsed.data.address_kind !== undefined) {
     await db('care_profile_addresses').where({ id: link.id }).update({ address_kind: parsed.data.address_kind, updated_at: db.fn.now() });
+  }
+  // Keep the person's "where they live" in step: re-sync when this address is
+  // their residence, whether the parts changed or the kind became residence.
+  const effectiveKind = parsed.data.address_kind !== undefined ? parsed.data.address_kind : link.address_kind;
+  if (isResidenceKind(effectiveKind)) {
+    const address = await db('addresses').where({ id: req.params['addressId'] }).first();
+    if (address) await syncProfileResidence(req.params['id'] as string, address);
   }
   const [row] = await db('care_profile_addresses as cpa')
     .join('addresses as a', 'cpa.address_id', 'a.id')

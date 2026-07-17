@@ -75,3 +75,37 @@ export async function linkAddressToProfile(profileId: string, addressId: string,
     .onConflict(['care_profile_id', 'address_id'])
     .merge({ address_kind: kind, updated_at: db.fn.now() });
 }
+
+/** The link kind that means "this is where they live". */
+export const RESIDENCE_KIND = 'residence';
+
+/**
+ * Copy an address's segmented parts into a profile's residence columns so the
+ * "where they live" section stays in step when an address is linked as a
+ * residence. Only touches the segmented address columns; the facility, room
+ * and area fields are left alone. When no residence type is recorded yet, it
+ * is set to a private residence so the address reads as their home.
+ */
+export async function syncProfileResidence(profileId: string, parts: AddressParts): Promise<void> {
+  if (!hasAnyPart(parts)) return;
+  const profile = await db('care_profiles').where({ id: profileId }).first();
+  if (!profile) return;
+  const updates: Record<string, string | null> = {};
+  for (const k of ADDRESS_PART_KEYS) updates[k] = clean(parts[k]) || null;
+  if (!profile.residence_type) updates['residence_type'] = 'private_residence';
+  await db('care_profiles').where({ id: profileId }).update({ ...updates, updated_at: db.fn.now() });
+}
+
+/**
+ * Re-sync the residence of every profile this address is linked to as a
+ * residence. Used when the shared address is edited in the directory so the
+ * change reaches each person's "where they live".
+ */
+export async function syncResidenceForAddress(addressId: string, parts: AddressParts): Promise<void> {
+  const links = await db('care_profile_addresses')
+    .where({ address_id: addressId, address_kind: RESIDENCE_KIND })
+    .select('care_profile_id');
+  for (const link of links) {
+    await syncProfileResidence(link.care_profile_id as string, parts);
+  }
+}
