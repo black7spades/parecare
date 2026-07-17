@@ -77,6 +77,13 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
     description: 'Add a provider, e.g. /provider Dr Chen, GP at Fremantle Medical',
     expand: (a) => `Add this provider: ${a}`,
   },
+  {
+    name: 'link',
+    hint: 'a provider or address already in the directory',
+    description: 'Link an existing provider or address to this person, e.g. /link Dr Chen or /link 12 Ocean Road',
+    expand: (a) =>
+      `Link this existing entry from the directory to this profile, without creating a duplicate. It may be a provider (by name) or an address (by its label or street). If it is an address, also set it as where they live: ${a}`,
+  },
 ];
 
 export interface ExpandedCommand {
