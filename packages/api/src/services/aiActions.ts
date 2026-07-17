@@ -193,14 +193,14 @@ const addSymptomSchema = z.object({
   type: z.literal('add_symptom'),
   condition_name: z.string().min(1).max(255),
   symptom_name: z.string().min(1).max(255),
-  severity: z.number().int().min(1).max(5).default(3),
+  severity: z.number().int().min(1).max(10).default(5),
 });
 
 const updateSymptomSchema = z.object({
   type: z.literal('update_symptom'),
   symptom_name: z.string().min(1).max(255),
   condition_name: z.string().max(255).optional().nullable(),
-  severity: z.number().int().min(1).max(5).optional().nullable(),
+  severity: z.number().int().min(1).max(10).optional().nullable(),
   resolved: z.boolean().optional().nullable(),
 });
 
@@ -745,7 +745,7 @@ async function executeOne(
         recorded_at: symptom.noted_at,
       });
       await audit(profileId, account.id, 'conditions', `symptom ${action.symptom_name} on ${condition.name}`);
-      return `Recorded the symptom ${action.symptom_name} (severity ${action.severity}/5) on ${condition.name}.`;
+      return `Recorded the symptom ${action.symptom_name} (severity ${action.severity}/10) on ${condition.name}.`;
     }
     case 'update_symptom': {
       let query = db('condition_symptoms as s')

@@ -147,8 +147,8 @@ You can do anything here that can be done by hand on this person's record. The a
 - {"type": "add_allergy", "substance": required, "reaction": optional} and {"type": "remove_allergy", "substance": required}
 - {"type": "add_condition", "name": required, "category": optional, one of illness | injury | post_operative | recovery | mental_health | chronic_flare | acute_illness | disability | other, "severity": optional mild | moderate | severe | critical, "status": optional active | improving | managed | resolved, "started_on": optional YYYY-MM-DD, "notes": optional} and {"type": "remove_condition", "name": required}
 - {"type": "resolve_condition", "name": exact condition name, "resolved_on": optional YYYY-MM-DD} when an illness or injury has cleared up
-- {"type": "add_symptom", "condition_name": exact condition name, "symptom_name": required, "severity": 1 (mild) to 5 (severe), default 3} to start tracking a symptom on a condition
-- {"type": "update_symptom", "symptom_name": exact symptom name, "condition_name": optional, "severity": optional 1 to 5, "resolved": optional boolean} when a symptom gets better or worse ("the cough is worse today, maybe a 4") or clears up; every severity change is kept as a dated reading
+- {"type": "add_symptom", "condition_name": exact condition name, "symptom_name": required, "severity": 1 (mild) to 10 (severe), default 5} to start tracking a symptom on a condition
+- {"type": "update_symptom", "symptom_name": exact symptom name, "condition_name": optional, "severity": optional 1 to 10, "resolved": optional boolean} when a symptom gets better or worse ("the cough is worse today, maybe an 8") or clears up; every severity change is kept as a dated reading
 - {"type": "add_treatment", "name": required, "category": one of device | therapy | exercise | wound_care | diet | surgery | lifestyle | assistive_device | other, "condition_name": optional exact condition name} for non-medication treatments
 - {"type": "raise_question", "title": required, "body": optional}
 - {"type": "set_care_phase", "phase": one of early_concern | home_with_support | increased_dependency | transition_to_residential | residential_ongoing | end_of_life}
@@ -336,7 +336,7 @@ The profile_actions action is how you do anything else on a person's record: cha
 - {"type": "add_allergy", "substance", "reaction"?} and {"type": "remove_allergy", "substance"}
 - {"type": "add_condition", "name", "category"? (illness | injury | post_operative | recovery | mental_health | chronic_flare | acute_illness | disability | other), "severity"? (mild | moderate | severe | critical), "status"? (active | improving | managed | resolved), "started_on"? (YYYY-MM-DD), "notes"?} and {"type": "remove_condition", "name"}
 - {"type": "resolve_condition", "name", "resolved_on"?} when an illness or injury has cleared up
-- {"type": "add_symptom", "condition_name", "symptom_name", "severity": 1 to 5} and {"type": "update_symptom", "symptom_name", "condition_name"?, "severity"? (1 to 5), "resolved"?} to track how symptoms progress
+- {"type": "add_symptom", "condition_name", "symptom_name", "severity": 1 to 10} and {"type": "update_symptom", "symptom_name", "condition_name"?, "severity"? (1 to 10), "resolved"?} to track how symptoms progress
 - {"type": "add_treatment", "name", "category" (device | therapy | exercise | wound_care | diet | surgery | lifestyle | assistive_device | other), "condition_name"?}
 - {"type": "raise_question", "title", "body"?}
 - {"type": "set_care_phase", "phase": early_concern | home_with_support | increased_dependency | transition_to_residential | residential_ongoing | end_of_life}

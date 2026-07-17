@@ -5,7 +5,9 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import type { ConditionSymptom } from '../../../lib/care';
 
-export const SEVERITY_LABELS = ['Mild', 'Low', 'Moderate', 'High', 'Severe'] as const;
+/** The word for a point on the 1 to 10 severity scale. */
+export const severityLabel = (v: number): string =>
+  v <= 2 ? 'Mild' : v <= 4 ? 'Low' : v <= 6 ? 'Moderate' : v <= 8 ? 'High' : 'Severe';
 
 /**
  * The symptom tracker for one condition: each symptom with its severity
@@ -45,7 +47,7 @@ export function SymptomsSection({
       <h3 className="text-sm font-semibold text-ink mb-1">Symptoms</h3>
       {showIntro ? (
         <p className="text-xs text-muted mb-2">
-          Track how this condition feels over time. Severity runs from 1 (mild) to 5 (severe); slide it up
+          Track how this condition feels over time. Severity runs from 1 (mild) to 10 (severe); slide it up
           or down as things progress and every change is kept as a dated reading.
         </p>
       ) : null}
@@ -131,7 +133,7 @@ export function SymptomRow({
             <input
               type="range"
               min={1}
-              max={5}
+              max={10}
               step={1}
               value={severity}
               aria-label={`Severity of ${symptom.name}`}
@@ -141,13 +143,13 @@ export function SymptomRow({
               onTouchEnd={commit}
               onKeyUp={commit}
             />
-            <span className="text-xs text-muted whitespace-nowrap w-20">
-              {severity}/5 {SEVERITY_LABELS[severity - 1]}
+            <span className="text-xs text-muted whitespace-nowrap w-24">
+              {severity}/10 {severityLabel(severity)}
             </span>
           </span>
         ) : (
           <span className="text-xs text-muted whitespace-nowrap">
-            {symptom.severity}/5 {SEVERITY_LABELS[symptom.severity - 1]}
+            {symptom.severity}/10 {severityLabel(symptom.severity)}
           </span>
         )}
         {canEdit ? (
@@ -183,7 +185,7 @@ export function SymptomForm({
   onSaved: () => void;
 }) {
   const [name, setName] = useState('');
-  const [severity, setSeverity] = useState(3);
+  const [severity, setSeverity] = useState(5);
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -216,7 +218,7 @@ export function SymptomForm({
       }),
     onSuccess: () => {
       setName('');
-      setSeverity(3);
+      setSeverity(5);
       setOpen(false);
       onSaved();
     },
@@ -226,8 +228,6 @@ export function SymptomForm({
     if (!n.trim() || mutation.isPending) return;
     mutation.mutate(n.trim());
   };
-
-  const selectClass = 'block w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
   return (
     <div className="flex flex-wrap items-end gap-2 mt-3">
@@ -269,13 +269,25 @@ export function SymptomForm({
           </ul>
         ) : null}
       </div>
-      <div className="w-28">
-        <label className="block text-sm font-medium text-ink mb-1">Severity</label>
-        <select className={selectClass} value={severity} onChange={(e) => setSeverity(Number(e.target.value))}>
-          {[1, 2, 3, 4, 5].map((v) => (
-            <option key={v} value={v}>{v} - {SEVERITY_LABELS[v - 1]}</option>
-          ))}
-        </select>
+      <div className="w-56">
+        <label htmlFor="new-symptom-severity" className="block text-sm font-medium text-ink mb-1">
+          Severity
+        </label>
+        <span className="flex items-center gap-2 pb-2">
+          <input
+            id="new-symptom-severity"
+            type="range"
+            min={1}
+            max={10}
+            step={1}
+            value={severity}
+            className="flex-1 accent-primary"
+            onChange={(e) => setSeverity(Number(e.target.value))}
+          />
+          <span className="text-xs text-muted whitespace-nowrap w-24">
+            {severity}/10 {severityLabel(severity)}
+          </span>
+        </span>
       </div>
       <Button size="sm" loading={mutation.isPending} disabled={!name.trim()} onClick={() => submit(name)}>
         Add symptom

@@ -15,8 +15,8 @@ import { db } from '../config/database';
  * stable key.
  */
 
-/** Above moderate on the 1 to 5 symptom scale (3 is moderate). */
-const HIGH_SEVERITY = 4;
+/** Above moderate on the 1 to 10 symptom scale (5 to 6 is moderate). */
+const HIGH_SEVERITY = 7;
 /** How long symptoms must stay above moderate before an alert is raised. */
 const PERSISTENT_DAYS = 2;
 /** How long an injury may stay unresolved before an alert is raised. */

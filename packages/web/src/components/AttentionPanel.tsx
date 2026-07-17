@@ -6,7 +6,7 @@ import { useAssistantStore } from '../stores/assistant';
 import { Button } from './ui/Button';
 import { Modal } from './ui/Modal';
 import { browserTimeZone } from '../lib/datetime';
-import { SEVERITY_LABELS } from '../pages/app/profile/ConditionSymptoms';
+import { severityLabel } from '../pages/app/profile/ConditionSymptoms';
 
 export interface AttentionItem {
   profile_id: string;
@@ -75,7 +75,7 @@ function itemBrief(it: AttentionItem): string {
 }
 
 const symptomSummary = (a: HealthAlert): string =>
-  a.symptoms.map((s) => `${s.name} ${s.severity}/5 ${SEVERITY_LABELS[s.severity - 1] ?? ''}`.trim()).join(', ');
+  a.symptoms.map((s) => `${s.name} ${s.severity}/10 ${severityLabel(s.severity)}`).join(', ');
 
 function alertHeadline(a: HealthAlert): string {
   if (a.kind === 'persistent_symptoms') {
