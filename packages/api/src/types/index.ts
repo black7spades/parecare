@@ -101,14 +101,27 @@ export interface CareProfile {
   photo_color: string | null;
   notes: string | null;
   owner_relationship: string | null;
-  /** Who to contact about this person: 'self', 'user' (a platform account) or 'contact'. */
-  contact_kind: 'self' | 'user' | 'contact' | null;
+  /** Who to contact: 'self', 'user' (a platform account), 'contact', or 'provider' (e.g. a care home). */
+  contact_kind: 'self' | 'user' | 'contact' | 'provider' | null;
   contact_account_id: string | null;
+  contact_provider_id: string | null;
   contact_name: string | null;
   contact_relationship: string | null;
   contact_phone: string | null;
   contact_phone_type: 'home' | 'mobile' | null;
   contact_email: string | null;
+  /** Where they live, each fact its own field. */
+  residence_type: 'private_residence' | 'care_facility' | 'retirement_village' | 'group_home' | 'hospital' | 'other' | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  address_suburb: string | null;
+  address_state: string | null;
+  address_postcode: string | null;
+  address_country: string | null;
+  residence_provider_id: string | null;
+  room_number: string | null;
+  room_area_name: string | null;
+  room_area_type: 'wing' | 'floor' | 'unit' | 'building' | 'house' | 'ward' | 'block' | 'other' | null;
   archived: boolean;
   ics_token: string;
   created_at: Date;

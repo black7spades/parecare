@@ -10,7 +10,7 @@ import { AllergyModal } from '../../../components/AllergyModal';
 import { SetPoaForm } from '../../../components/SetPoaForm';
 import { ConditionModal, EmergencyContactModal, GpModal, MedicationModal } from '../../../components/QuickAddModals';
 import { useProfile } from './ProfileLayout';
-import { poaLabel, providerTypeLabel, type Allergy, type CarePlan, type CircleMember, type MedicalCondition, type MedicationRecord, type Provider } from '../../../lib/care';
+import { poaLabel, providerTypeLabel, residenceTypeLabel, roomAreaTypeLabel, type Allergy, type CarePlan, type CircleMember, type MedicalCondition, type MedicationRecord, type Provider } from '../../../lib/care';
 
 type SheetModal = 'allergy' | 'contact' | 'poa' | 'condition' | 'medication' | 'gp' | null;
 
@@ -63,6 +63,26 @@ export function EmergencySheetPage() {
   const conditions = conditionData?.conditions ?? [];
   const contacts = asArray<{ name: string; relationship?: string; phone: string }>(plan?.emergency_contacts);
 
+  // Where the person is, for anyone stepping in: a facility with the room
+  // and a phone, or a private address.
+  const residenceText = (() => {
+    const kind = residenceTypeLabel(profile.residence_type);
+    if (profile.residence_provider) {
+      const fac = profile.residence_provider;
+      const spot = [
+        profile.room_number ? `Room ${profile.room_number}` : null,
+        profile.room_area_name ? `${profile.room_area_name}${profile.room_area_type ? ` ${roomAreaTypeLabel(profile.room_area_type)}` : ''}` : null,
+      ]
+        .filter(Boolean)
+        .join(', ');
+      return [fac.name, spot || null, kind || null, fac.phone ? `Phone: ${fac.phone}` : null].filter(Boolean).join(' · ');
+    }
+    const addr = [profile.address_line1, profile.address_line2, profile.address_suburb, profile.address_state, profile.address_postcode]
+      .filter(Boolean)
+      .join(', ');
+    return addr ? [addr, kind || null].filter(Boolean).join(' · ') : kind || '';
+  })();
+
   return (
     <div>
       <div className="mb-4 flex items-center justify-between print:hidden">
@@ -88,6 +108,12 @@ export function EmergencySheetPage() {
               .join(' · ')}
           </p>
         </div>
+
+        {residenceText ? (
+          <Section title="Where they are">
+            <p className="text-sm">{residenceText}</p>
+          </Section>
+        ) : null}
 
         <Section title="Allergies, do not give">
           {allergies.length === 0 ? (

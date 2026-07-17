@@ -138,14 +138,29 @@ const profileSchema = z.object({
   // Expected babies get a profile before birth.
   due_date: z.string().optional().nullable(),
   // Who to contact about this person: themselves, an existing platform user,
-  // or a new contact. Each fact is its own field.
-  contact_kind: z.enum(['self', 'user', 'contact']).optional().nullable(),
+  // a new contact, or a provider (e.g. the care home they live in). Each
+  // fact is its own field.
+  contact_kind: z.enum(['self', 'user', 'contact', 'provider']).optional().nullable(),
   contact_account_id: z.string().uuid().optional().nullable(),
+  contact_provider_id: z.string().uuid().optional().nullable(),
   contact_name: z.string().max(255).optional().nullable(),
   contact_relationship: z.string().max(100).optional().nullable(),
   contact_phone: z.string().max(50).optional().nullable(),
   contact_phone_type: z.enum(['home', 'mobile']).optional().nullable(),
   contact_email: z.string().email().optional().nullable(),
+  // Where they live. A private address is segmented; a facility is a linked
+  // provider plus a room and named area within it.
+  residence_type: z.enum(['private_residence', 'care_facility', 'retirement_village', 'group_home', 'hospital', 'other']).optional().nullable(),
+  address_line1: z.string().max(255).optional().nullable(),
+  address_line2: z.string().max(255).optional().nullable(),
+  address_suburb: z.string().max(120).optional().nullable(),
+  address_state: z.string().max(120).optional().nullable(),
+  address_postcode: z.string().max(20).optional().nullable(),
+  address_country: z.string().max(120).optional().nullable(),
+  residence_provider_id: z.string().uuid().optional().nullable(),
+  room_number: z.string().max(50).optional().nullable(),
+  room_area_name: z.string().max(120).optional().nullable(),
+  room_area_type: z.enum(['wing', 'floor', 'unit', 'building', 'house', 'ward', 'block', 'other']).optional().nullable(),
 });
 
 careProfilesRouter.get('/', requireAuth, async (req, res) => {
@@ -313,6 +328,16 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
     : [];
   const contactAccountMap = new Map(contactAccounts.map((a) => [a.id, a]));
 
+  // For profiles contacted via a provider (e.g. a care home), pull that
+  // provider's name, phone and email to stand in as the contact.
+  const contactProviderIds = [
+    ...new Set(profiles.map((p) => (p as CareProfile).contact_provider_id).filter((v): v is string => !!v)),
+  ];
+  const contactProviders = contactProviderIds.length
+    ? await db('providers').whereIn('id', contactProviderIds).select('id', 'name', 'phone', 'email')
+    : [];
+  const contactProviderMap = new Map(contactProviders.map((p) => [p.id, p]));
+
   const pinSet = new Set(pins.map((p: { care_profile_id: string }) => p.care_profile_id));
   const planMap = new Map(plans.map((p: { care_profile_id: string }) => [p.care_profile_id, p]));
   const gpPhoneMap = new Map<string, string>();
@@ -348,14 +373,17 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
     // and emergency contact remain the fallback for a phone.
     const cp = p as CareProfile;
     const linked = cp.contact_account_id ? contactAccountMap.get(cp.contact_account_id) : undefined;
-    const primaryPhone = cp.contact_phone || gpPhoneMap.get(p.id) || contacts[0]?.phone || null;
-    const primaryEmail = cp.contact_email || linked?.email || null;
+    const contactProvider = cp.contact_provider_id ? contactProviderMap.get(cp.contact_provider_id) : undefined;
+    const primaryPhone = cp.contact_phone || contactProvider?.phone || gpPhoneMap.get(p.id) || contacts[0]?.phone || null;
+    const primaryEmail = cp.contact_email || contactProvider?.email || linked?.email || null;
     const contactName =
       cp.contact_kind === 'self'
         ? p.full_name
         : cp.contact_kind === 'user'
           ? linked?.display_name ?? null
-          : cp.contact_name ?? null;
+          : cp.contact_kind === 'provider'
+            ? contactProvider?.name ?? null
+            : cp.contact_name ?? null;
     return {
       id: p.id,
       kind: p.kind,
@@ -600,11 +628,23 @@ careProfilesRouter.get('/:id', requireAuth, async (req, res) => {
       .first();
   }
 
+  // Resolve the linked providers used as the contact and as the residence
+  // facility, so the overview can show their details without another lookup.
+  const providerIds = [profile.contact_provider_id, profile.residence_provider_id].filter((v): v is string => !!v);
+  const providerRows = providerIds.length
+    ? await db('providers').whereIn('id', providerIds).select('id', 'name', 'organisation', 'phone', 'email', 'address', 'booking_link')
+    : [];
+  const providerById = new Map(providerRows.map((r) => [r.id, r]));
+  const contactProvider = profile.contact_provider_id ? providerById.get(profile.contact_provider_id) ?? null : null;
+  const residenceProvider = profile.residence_provider_id ? providerById.get(profile.residence_provider_id) ?? null : null;
+
   res.json({
     profile: {
       ...profile,
       contact_account_name: contactAccount?.display_name ?? null,
       contact_account_email: contactAccount?.email ?? null,
+      contact_provider: contactProvider,
+      residence_provider: residenceProvider,
     },
     access,
     relationship,
@@ -632,6 +672,22 @@ careProfilesRouter.patch('/:id', requireAuth, async (req, res) => {
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
+  }
+
+  // A referenced provider (as contact or as the residence facility) must be
+  // one already linked to this profile, so a profile cannot point at an
+  // arbitrary provider it has no relationship with.
+  for (const key of ['contact_provider_id', 'residence_provider_id'] as const) {
+    const providerId = parsed.data[key];
+    if (providerId) {
+      const link = await db('care_profile_providers')
+        .where({ care_profile_id: profile.id, provider_id: providerId })
+        .first();
+      if (!link) {
+        res.status(400).json({ error: 'That provider is not linked to this profile', code: 'PROVIDER_NOT_LINKED' });
+        return;
+      }
+    }
   }
 
   const update: Record<string, unknown> = { ...parsed.data };
