@@ -45,6 +45,7 @@ export const PROFILE_NAV: ProfileNavGroup[] = [
       { key: 'neurotypes', to: 'neurotypes', label: 'Neurotypes' },
       { key: 'medications', to: 'medications', label: 'Medications' },
       { key: 'treatments', to: 'treatments', label: 'Treatments' },
+      { key: 'substance-use', to: 'substance-use', label: 'Substance use' },
       { key: 'care-needs', to: 'care-needs', label: 'Care needs' },
     ],
   },

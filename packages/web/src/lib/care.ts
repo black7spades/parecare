@@ -584,6 +584,59 @@ export const CONDITION_STATUSES = [
 export const conditionStatusLabel = (s: string) =>
   CONDITION_STATUSES.find((x) => x.value === s)?.label ?? s;
 
+/**
+ * Substance use: which substances a person takes (legal or illegal), how,
+ * how much, how often, and where each sits in a lifecycle. Each fact is its
+ * own field. The substance and its class come from the shared catalogue.
+ */
+export interface SubstanceUse {
+  id: string;
+  substance: string;
+  substance_class: string;
+  status: string;
+  route: string | null;
+  quantity: string | null;
+  quantity_unit: string | null;
+  frequency: string | null;
+  started_on: string | null;
+  quit_on: string | null;
+  notes: string | null;
+}
+
+export const SUBSTANCE_CLASSES = [
+  { value: 'nicotine', label: 'Nicotine' },
+  { value: 'alcohol', label: 'Alcohol' },
+  { value: 'cannabis', label: 'Cannabis' },
+  { value: 'opioid', label: 'Opioid' },
+  { value: 'stimulant', label: 'Stimulant' },
+  { value: 'depressant', label: 'Depressant' },
+  { value: 'hallucinogen', label: 'Hallucinogen' },
+  { value: 'inhalant', label: 'Inhalant' },
+  { value: 'other', label: 'Other' },
+] as const;
+
+export const SUBSTANCE_STATUSES = [
+  { value: 'active', label: 'Using now', description: 'Currently taking it.' },
+  { value: 'reducing', label: 'Cutting down', description: 'Using less over time.' },
+  { value: 'in_recovery', label: 'In recovery', description: 'Working to stop or stay stopped.' },
+  { value: 'in_remission', label: 'In remission', description: 'Stopped, with dependence in the past.' },
+  { value: 'former', label: 'Former use', description: 'No longer takes it.' },
+] as const;
+
+export const SUBSTANCE_ROUTES = [
+  { value: 'smoked', label: 'Smoked' },
+  { value: 'vaped', label: 'Vaped' },
+  { value: 'oral', label: 'Swallowed' },
+  { value: 'drunk', label: 'Drunk' },
+  { value: 'injected', label: 'Injected' },
+  { value: 'inhaled', label: 'Inhaled' },
+  { value: 'other', label: 'Other' },
+] as const;
+
+export const substanceClassLabel = (s: string) => SUBSTANCE_CLASSES.find((x) => x.value === s)?.label ?? s;
+export const substanceStatusLabel = (s: string) => SUBSTANCE_STATUSES.find((x) => x.value === s)?.label ?? s;
+export const substanceRouteLabel = (s: string | null) => (s ? SUBSTANCE_ROUTES.find((x) => x.value === s)?.label ?? s : '');
+
 /** What they live with, tied to the medications and treatments that manage it. */
 export interface ConditionSymptom {
   id: string;

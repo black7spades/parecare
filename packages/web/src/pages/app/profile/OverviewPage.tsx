@@ -22,20 +22,24 @@ import {
   providerTypeLabel,
   residenceTypeLabel,
   roomAreaTypeLabel,
+  substanceClassLabel,
+  substanceStatusLabel,
   type CareDocument,
   type CareProfile,
   type CircleMember,
   type MedicalCondition,
   type Provider,
+  type SubstanceUse,
 } from '../../../lib/care';
 
-const CARD_KEYS = ['profile', 'conditions', 'neurotypes', 'poa', 'upcoming', 'health', 'log'] as const;
+const CARD_KEYS = ['profile', 'conditions', 'neurotypes', 'substance-use', 'poa', 'upcoming', 'health', 'log'] as const;
 type CardKey = (typeof CARD_KEYS)[number];
 
 const CARD_LABELS: Record<CardKey, string> = {
   profile: 'Contact details',
   conditions: 'Conditions',
   neurotypes: 'Neurotypes',
+  'substance-use': 'Substance use',
   poa: 'Power of attorney',
   upcoming: 'Coming up',
   health: 'Current health',
@@ -81,6 +85,11 @@ export function OverviewPage() {
     queryFn: () => api.get<{ conditions: MedicalCondition[] }>(`/care-profiles/${profile.id}/conditions`),
   });
   const neurotypes = (conditionsData?.conditions ?? []).filter((c) => c.category === 'neurotype');
+  const { data: substanceData } = useQuery({
+    queryKey: ['substance-use', profile.id],
+    queryFn: () => api.get<{ substance_use: SubstanceUse[] }>(`/care-profiles/${profile.id}/substance-use`),
+  });
+  const substanceUse = substanceData?.substance_use ?? [];
   const { data: providersData } = useQuery({
     queryKey: ['providers', profile.id],
     queryFn: () => api.get<{ providers: Provider[] }>(`/care-profiles/${profile.id}/providers`),
@@ -239,6 +248,23 @@ export function OverviewPage() {
             order={cardOrder}
           >
             <NeurotypesOverview profileId={profile.id} careName={careName} canEdit={canEdit} neurotypes={neurotypes} />
+          </CollapsibleCard>
+        );
+      case 'substance-use':
+        // The card only exists once a substance has been recorded.
+        if (substanceUse.length === 0) return null;
+        return (
+          <CollapsibleCard
+            key={key}
+            cardKey={key}
+            label={CARD_LABELS[key]}
+            collapsed={isCollapsed}
+            editView={editView}
+            onToggle={toggleCollapse}
+            onMove={moveCard}
+            order={cardOrder}
+          >
+            <SubstanceUseSummary records={substanceUse} />
           </CollapsibleCard>
         );
       case 'poa':
@@ -874,6 +900,31 @@ function ProfileContact({ profile }: { profile: CareProfile }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+/** A compact read of substance use for the overview; full detail on the page. */
+function SubstanceUseSummary({ records }: { records: SubstanceUse[] }) {
+  return (
+    <div className="space-y-2">
+      <ul className="space-y-1.5 text-sm">
+        {records.map((r) => {
+          const amount = [r.quantity, r.quantity_unit].filter(Boolean).join(' ');
+          const detail = [amount, r.frequency].filter(Boolean).join(', ');
+          return (
+            <li key={r.id} className="flex flex-wrap items-baseline gap-x-2">
+              <span className="font-medium text-ink">{r.substance}</span>
+              <span className="badge bg-surface-2 text-muted text-xs">{substanceStatusLabel(r.status)}</span>
+              <span className="text-xs text-muted">{substanceClassLabel(r.substance_class)}</span>
+              {detail ? <span className="text-xs text-muted">· {detail}</span> : null}
+            </li>
+          );
+        })}
+      </ul>
+      <Link to="substance-use" className="text-xs text-primary hover:underline">
+        Manage substance use
+      </Link>
+    </div>
   );
 }
 

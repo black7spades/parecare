@@ -5,6 +5,8 @@ import { parseZonedTime, formatInZone } from '../lib/timezone';
 import { matchProfileNames, type NameCandidate } from '../lib/nameMatch';
 import { drawDownOnHand, perDoseDrawdown } from './medicationSupply';
 import { resolveConditionCatalogueId } from '../routes/conditionCatalogue';
+import { resolveSubstanceCatalogueId, SUBSTANCE_CLASSES } from '../routes/substanceCatalogue';
+import { SUBSTANCE_STATUSES, SUBSTANCE_ROUTES } from '../routes/substanceUse';
 import { resolveSymptomCatalogueId } from '../routes/symptomCatalogue';
 import { linkAddressToProfile, syncProfileResidence, RESIDENCE_KIND } from './addresses';
 
@@ -188,6 +190,37 @@ const resolveConditionSchema = z.object({
   resolved_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
 });
 
+const addSubstanceSchema = z.object({
+  type: z.literal('add_substance'),
+  substance: z.string().min(1).max(255),
+  substance_class: z.enum(SUBSTANCE_CLASSES).optional().nullable(),
+  status: z.enum(SUBSTANCE_STATUSES).optional().nullable(),
+  route: z.enum(SUBSTANCE_ROUTES).optional().nullable(),
+  quantity: z.string().max(100).optional().nullable(),
+  quantity_unit: z.string().max(60).optional().nullable(),
+  frequency: z.string().max(120).optional().nullable(),
+  started_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  quit_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  notes: z.string().max(4000).optional().nullable(),
+});
+
+const updateSubstanceSchema = z.object({
+  type: z.literal('update_substance'),
+  substance: z.string().min(1).max(255),
+  status: z.enum(SUBSTANCE_STATUSES).optional().nullable(),
+  route: z.enum(SUBSTANCE_ROUTES).optional().nullable(),
+  quantity: z.string().max(100).optional().nullable(),
+  quantity_unit: z.string().max(60).optional().nullable(),
+  frequency: z.string().max(120).optional().nullable(),
+  quit_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  notes: z.string().max(4000).optional().nullable(),
+});
+
+const removeSubstanceSchema = z.object({
+  type: z.literal('remove_substance'),
+  substance: z.string().min(1).max(255),
+});
+
 // The acute illness tracker: record a symptom on a condition, or move an
 // existing symptom's severity up or down as things progress.
 const addSymptomSchema = z.object({
@@ -306,6 +339,9 @@ export const actionSchema = z.discriminatedUnion('type', [
   removeAllergySchema,
   addConditionSchema,
   removeConditionSchema,
+  addSubstanceSchema,
+  updateSubstanceSchema,
+  removeSubstanceSchema,
   resolveConditionSchema,
   addSymptomSchema,
   updateSymptomSchema,
@@ -742,6 +778,63 @@ async function executeOne(
       if (!row) return `No condition called "${action.name}" was on the record.`;
       await audit(profileId, account.id, 'conditions', `resolved ${action.name}`);
       return `Marked ${row.name} as resolved on ${resolvedOn}.`;
+    }
+    case 'add_substance': {
+      const name = action.substance.trim();
+      const catalogueId = await resolveSubstanceCatalogueId(name, action.substance_class, account.id).catch(() => null);
+      if (!catalogueId) return `Could not record ${name}.`;
+      try {
+        await db('substance_use').insert({
+          care_profile_id: profileId,
+          substance_catalogue_id: catalogueId,
+          status: action.status ?? 'active',
+          route: action.route ?? null,
+          quantity: action.quantity ?? null,
+          quantity_unit: action.quantity_unit ?? null,
+          frequency: action.frequency ?? null,
+          started_on: action.started_on ?? null,
+          quit_on: action.quit_on ?? null,
+          notes: action.notes ?? null,
+        });
+      } catch (err) {
+        if ((err as { code?: string }).code === '23505') return `${name} is already recorded for this person. Use update_substance to change it.`;
+        throw err;
+      }
+      await audit(profileId, account.id, 'substance_use', `added substance ${name}`);
+      return `Recorded ${name} under substance use.`;
+    }
+    case 'update_substance': {
+      const record = await db('substance_use as su')
+        .join('substance_catalogue as sc', 'su.substance_catalogue_id', 'sc.id')
+        .where('su.care_profile_id', profileId)
+        .whereRaw('lower(sc.name) = lower(?)', [action.substance.trim()])
+        .select('su.id', 'sc.name as name')
+        .first();
+      if (!record) return `No substance called "${action.substance}" is recorded for this person.`;
+      const updates: Record<string, unknown> = {};
+      if (action.status !== undefined) updates['status'] = action.status;
+      if (action.route !== undefined) updates['route'] = action.route;
+      if (action.quantity !== undefined) updates['quantity'] = action.quantity;
+      if (action.quantity_unit !== undefined) updates['quantity_unit'] = action.quantity_unit;
+      if (action.frequency !== undefined) updates['frequency'] = action.frequency;
+      if (action.quit_on !== undefined) updates['quit_on'] = action.quit_on;
+      if (action.notes !== undefined) updates['notes'] = action.notes;
+      if (Object.keys(updates).length === 0) return `No changes to make to ${record.name}.`;
+      await db('substance_use').where({ id: record.id }).update({ ...updates, updated_at: db.fn.now() });
+      await audit(profileId, account.id, 'substance_use', `updated substance ${record.name}`);
+      return `Updated ${record.name}.`;
+    }
+    case 'remove_substance': {
+      const record = await db('substance_use as su')
+        .join('substance_catalogue as sc', 'su.substance_catalogue_id', 'sc.id')
+        .where('su.care_profile_id', profileId)
+        .whereRaw('lower(sc.name) = lower(?)', [action.substance.trim()])
+        .select('su.id', 'sc.name as name')
+        .first();
+      if (!record) return `No substance called "${action.substance}" is recorded for this person.`;
+      await db('substance_use').where({ id: record.id }).del();
+      await audit(profileId, account.id, 'substance_use', `removed substance ${record.name}`);
+      return `Removed ${record.name} from substance use.`;
     }
     case 'add_symptom': {
       const condition = await db('medical_conditions')

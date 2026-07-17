@@ -66,6 +66,12 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
     expand: (a) => `Record this allergy: ${a}`,
   },
   {
+    name: 'substance',
+    hint: 'the substance and how it is used',
+    description: 'Record substance use, e.g. /substance smokes 15 cigarettes a day',
+    expand: (a) => `Record this under substance use: ${a}`,
+  },
+  {
     name: 'question',
     hint: 'the question for the care circle',
     description: 'Raise a question, e.g. /question should we look at respite care for August?',

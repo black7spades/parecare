@@ -28,6 +28,7 @@ import { QuestionsPage } from './pages/app/profile/QuestionsPage';
 import { ProvidersPage } from './pages/app/profile/ProvidersPage';
 import { NeurotypePage } from './pages/app/profile/NeurotypePage';
 import { TreatmentsPage } from './pages/app/profile/TreatmentsPage';
+import { SubstanceUsePage } from './pages/app/profile/SubstanceUsePage';
 import { ActivityPage } from './pages/app/profile/ActivityPage';
 import { AiPage } from './pages/app/profile/AiPage';
 import { DirectoryProvidersPage } from './pages/app/DirectoryProvidersPage';
@@ -117,6 +118,7 @@ export const router = createBrowserRouter([
           { path: 'neurotypes', element: <NeurotypePage /> },
           { path: 'medications', element: <MedicationsPage /> },
           { path: 'treatments', element: <TreatmentsPage /> },
+          { path: 'substance-use', element: <SubstanceUsePage /> },
           { path: 'tasks', element: <TasksPage /> },
           { path: 'health-status', element: <Navigate to="../conditions" replace /> },
           { path: 'appointments', element: <AppointmentsPage /> },
