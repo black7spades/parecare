@@ -194,12 +194,15 @@ export function OverviewPage() {
             order={cardOrder}
           >
             {isPet ? (
-              <PetDetails
-                species={profile.species}
-                breed={profile.breed}
-                desexed={profile.desexed}
-                microchip={profile.microchip_number}
-              />
+              <div className="space-y-4">
+                <PetDetails
+                  species={profile.species}
+                  breed={profile.breed}
+                  desexed={profile.desexed}
+                  microchip={profile.microchip_number}
+                />
+                <ProfileContact profile={profile} />
+              </div>
             ) : (
               <ProfileContact profile={profile} />
             )}
