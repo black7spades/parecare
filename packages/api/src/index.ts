@@ -50,6 +50,7 @@ import { auditTrail, blockViewerWrites } from './middleware/permissions';
 import { capturePlanEvents } from './middleware/carePlanEvents';
 import { activityRouter } from './routes/activity';
 import { healthStatusesRouter } from './routes/healthStatuses';
+import { overviewSummariesRouter } from './routes/overviewSummaries';
 import { appointmentsRouter } from './routes/appointments';
 import { navPinsRouter } from './routes/navPins';
 import { reportsRouter } from './routes/reports';
@@ -150,6 +151,7 @@ v1.use('/care-profiles/:id/messages', ...profileAccess, messagesRouter);
 v1.use('/care-profiles/:id/memory-book', ...profileAccess, memoryBookRouter);
 v1.use('/care-profiles/:id/activity', ...profileAccess, activityRouter);
 v1.use('/care-profiles/:id/health-statuses', ...profileAccess, healthStatusesRouter);
+v1.use('/care-profiles/:id/overview-summaries', ...profileAccess, overviewSummariesRouter);
 v1.use('/care-profiles/:id/appointments', ...profileAccess, appointmentsRouter);
 // Pins are each carer's personal navigation order, not a change to the care
 // record: no audit entry, and viewers may arrange their own pins too.

@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
@@ -121,6 +122,18 @@ export function DocumentsPage() {
     filters: [categoryFilter],
   });
 
+  // Deep link: ?doc=<id> arrives from links elsewhere in the profile
+  // (e.g. a diagnosis document on the overview). Filter the table to that
+  // document and highlight its row.
+  const [searchParams] = useSearchParams();
+  const linkedDocId = searchParams.get('doc');
+  const { setSearch } = dv;
+  useEffect(() => {
+    if (!linkedDocId) return;
+    const doc = documents.find((d) => d.id === linkedDocId);
+    if (doc) setSearch(doc.label);
+  }, [linkedDocId, documents, setSearch]);
+
   const bulkActions: ToolbarBulkAction[] = canEdit
     ? [
         { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setBulkEditQueue(q); setEditing(q[0] ?? null); } },
@@ -200,7 +213,10 @@ export function DocumentsPage() {
               </thead>
               <tbody>
                 {dv.view.map((doc) => (
-                  <tr key={doc.id} className="border-b border-border last:border-0">
+                  <tr
+                    key={doc.id}
+                    className={`border-b border-border last:border-0 ${doc.id === linkedDocId ? 'bg-primary-50' : ''}`}
+                  >
                     <td className="px-4 py-3">
                       <input
                         type="checkbox"

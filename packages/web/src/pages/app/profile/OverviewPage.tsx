@@ -9,6 +9,7 @@ import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
 import { HealthStatusOverview } from './HealthStatusOverview';
 import { CareLogSection } from './CareLogSection';
+import { CardAiSummary } from './CardAiSummary';
 import { useProfile } from './ProfileLayout';
 import {
   POA_TYPES,
@@ -19,13 +20,14 @@ import {
   neurotypeLabelText,
   poaLabel,
   providerTypeLabel,
+  type CareDocument,
   type CareProfile,
   type CircleMember,
   type MedicalCondition,
   type Provider,
 } from '../../../lib/care';
 
-const CARD_KEYS = ['profile', 'conditions', 'neurotypes', 'poa', 'attention', 'upcoming', 'health', 'log', 'journey'] as const;
+const CARD_KEYS = ['profile', 'conditions', 'neurotypes', 'poa', 'attention', 'upcoming', 'health', 'log'] as const;
 type CardKey = (typeof CARD_KEYS)[number];
 
 const CARD_LABELS: Record<CardKey, string> = {
@@ -37,7 +39,6 @@ const CARD_LABELS: Record<CardKey, string> = {
   upcoming: 'Coming up',
   health: 'Current health',
   log: 'Care log',
-  journey: 'Care journey',
 };
 
 function loadCardOrder(): CardKey[] {
@@ -74,6 +75,11 @@ export function OverviewPage() {
     queryKey: ['circle', profile.id],
     queryFn: () => api.get<{ members: CircleMember[] }>(`/care-profiles/${profile.id}/circle`),
   });
+  const { data: conditionsData } = useQuery({
+    queryKey: ['conditions', profile.id],
+    queryFn: () => api.get<{ conditions: MedicalCondition[] }>(`/care-profiles/${profile.id}/conditions`),
+  });
+  const neurotypes = (conditionsData?.conditions ?? []).filter((c) => c.category === 'neurotype');
   const { data: providersData } = useQuery({
     queryKey: ['providers', profile.id],
     queryFn: () => api.get<{ providers: Provider[] }>(`/care-profiles/${profile.id}/providers`),
@@ -204,6 +210,8 @@ export function OverviewPage() {
           </CollapsibleCard>
         );
       case 'neurotypes':
+        // The card only exists for a neurodivergent person.
+        if (neurotypes.length === 0) return null;
         return (
           <CollapsibleCard
             key={key}
@@ -215,7 +223,7 @@ export function OverviewPage() {
             onMove={moveCard}
             order={cardOrder}
           >
-            <NeurotypesOverview profileId={profile.id} careName={careName} />
+            <NeurotypesOverview profileId={profile.id} careName={careName} canEdit={canEdit} neurotypes={neurotypes} />
           </CollapsibleCard>
         );
       case 'poa':
@@ -283,7 +291,10 @@ export function OverviewPage() {
             onMove={moveCard}
             order={cardOrder}
           >
-            <HealthStatusOverview profileId={profile.id} />
+            <div className="space-y-3">
+              <CardAiSummary profileId={profile.id} cardKey="health" canEdit={canEdit} />
+              <HealthStatusOverview profileId={profile.id} />
+            </div>
           </CollapsibleCard>
         );
       case 'log':
@@ -298,26 +309,9 @@ export function OverviewPage() {
             onMove={moveCard}
             order={cardOrder}
           >
-            <CareLogSection profileId={profile.id} canEdit={canEdit} />
-          </CollapsibleCard>
-        );
-      case 'journey':
-        return (
-          <CollapsibleCard
-            key={key}
-            cardKey={key}
-            label={CARD_LABELS[key]}
-            collapsed={isCollapsed}
-            editView={editView}
-            onToggle={toggleCollapse}
-            onMove={moveCard}
-            order={cardOrder}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-muted">Journeys, phases and milestones live on their own page.</p>
-              <Link to="journey">
-                <Button variant="secondary" size="sm">Open care journey</Button>
-              </Link>
+            <div className="space-y-3">
+              <CardAiSummary profileId={profile.id} cardKey="log" canEdit={canEdit} />
+              <CareLogSection profileId={profile.id} canEdit={canEdit} />
             </div>
           </CollapsibleCard>
         );
@@ -582,35 +576,60 @@ function ConditionsOverview({
   );
 }
 
-function NeurotypesOverview({ profileId, careName }: { profileId: string; careName: string }) {
-  const { data } = useQuery({
-    queryKey: ['conditions', profileId],
-    queryFn: () => api.get<{ conditions: MedicalCondition[] }>(`/care-profiles/${profileId}/conditions`),
+function NeurotypesOverview({
+  profileId,
+  careName,
+  canEdit,
+  neurotypes,
+}: {
+  profileId: string;
+  careName: string;
+  canEdit: boolean;
+  neurotypes: MedicalCondition[];
+}) {
+  // Labels for the linked diagnosis documents. Only documents the viewer
+  // is allowed to see come back, so a restricted document simply shows no
+  // link for that viewer.
+  const { data: docsData } = useQuery({
+    queryKey: ['documents', profileId],
+    queryFn: () => api.get<{ documents: CareDocument[] }>(`/care-profiles/${profileId}/documents`),
   });
-  const neurotypes = (data?.conditions ?? []).filter((c) => c.category === 'neurotype');
-
-  if (neurotypes.length === 0) return null;
+  const docs = docsData?.documents ?? [];
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm text-ink">
-          {careName} {neurotypes.length === 1 ? 'has a' : 'has'} neurodivergent {neurotypes.length === 1 ? 'profile' : 'profiles'}.
-        </p>
-        <Link to="conditions" className="text-xs text-primary hover:underline">
-          Manage conditions
+        <p className="text-sm text-ink">{careName} is neurodivergent.</p>
+        <Link to="neurotypes" className="text-xs text-primary hover:underline">
+          Manage neurotypes
         </Link>
       </div>
+      <CardAiSummary profileId={profileId} cardKey="neurotypes" canEdit={canEdit} autoGenerate />
       <div className="space-y-2">
-        {neurotypes.map((n) => (
-          <div key={n.id} className="flex items-start gap-3 text-sm">
-            <span className="font-medium text-ink">{n.name}</span>
-            {n.neurotype ? <span className="text-xs text-muted">{neurotypeLabelText(n.neurotype)}</span> : null}
-            {n.diagnosis_status ? (
-              <span className="text-xs text-muted">{diagnosisStatusLabel(n.diagnosis_status)}</span>
-            ) : null}
-          </div>
-        ))}
+        {neurotypes.map((n) => {
+          const doc =
+            n.diagnosis_status === 'formal' && n.diagnosis_document_id
+              ? docs.find((d) => d.id === n.diagnosis_document_id)
+              : undefined;
+          return (
+            <div key={n.id} className="flex items-start gap-3 text-sm flex-wrap">
+              <span className="font-medium text-ink">{n.name}</span>
+              {n.neurotype ? <span className="text-xs text-muted">{neurotypeLabelText(n.neurotype)}</span> : null}
+              {n.diagnosis_status ? (
+                <span className="text-xs text-muted">{diagnosisStatusLabel(n.diagnosis_status)}</span>
+              ) : null}
+              {doc ? (
+                <Link
+                  to={`documents?doc=${doc.id}`}
+                  className="text-xs text-primary hover:underline"
+                  title="Open the diagnosis document in Documents"
+                >
+                  Diagnosis document: {doc.label}
+                </Link>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Modal } from '../../../components/ui/Modal';
 import { Avatar } from '../../../components/ui/Avatar';
+import { PencilIcon } from '../../../components/ui/icons';
 import { RelationshipSelect } from '../../../components/RelationshipSelect';
 import { EditProfileModal } from './EditProfileModal';
 import { format } from 'date-fns';
@@ -144,21 +145,34 @@ export function ProfileLayout() {
                 </span>
               ) : null}
             </h1>
-            <p className="text-sm text-muted">
-              {[
-                profile.preferred_name ? `Known as ${profile.preferred_name}` : null,
-                profile.kind === 'pet' ? profile.breed : null,
-                profile.pronouns,
-                profile.date_of_birth ? `Born ${format(new Date(profile.date_of_birth), 'd MMM yyyy')}` : null,
-                profile.kind === 'pet' ? null : profile.primary_language,
-                isSelf ? null : relationship ?? null,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
+            <p className="text-sm text-muted flex flex-wrap items-center gap-x-1.5">
+              <span>
+                {[
+                  profile.preferred_name ? `Known as ${profile.preferred_name}` : null,
+                  profile.kind === 'pet' ? profile.breed : null,
+                  profile.pronouns,
+                  profile.date_of_birth ? `Born ${format(new Date(profile.date_of_birth), 'd MMM yyyy')}` : null,
+                  profile.kind === 'pet' ? null : profile.primary_language,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
+              {context.canEditProfile ? (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  aria-label="Edit profile"
+                  title="Edit profile"
+                  onClick={() => setEditOpen(true)}
+                >
+                  <PencilIcon />
+                </Button>
+              ) : null}
+              {!isSelf && relationship ? <span>· {relationship}</span> : null}
               {!isSelf ? (
                 <button
                   type="button"
-                  className="ml-1.5 text-xs text-primary hover:underline"
+                  className="text-xs text-primary hover:underline"
                   onClick={() => setRelOpen(true)}
                 >
                   change
@@ -175,9 +189,6 @@ export function ProfileLayout() {
           ) : null}
           {access === 'admin' ? (
             <span className="badge bg-amber-50 text-amber-700" title="You have admin access to this profile.">Admin access</span>
-          ) : null}
-          {context.canEditProfile ? (
-            <Button size="sm" variant="secondary" onClick={() => setEditOpen(true)}>Edit profile</Button>
           ) : null}
         </div>
       </div>
