@@ -57,9 +57,9 @@ export function MedicationsPage() {
   const [confirmBulk, setConfirmBulk] = useState(false);
   const [confirmBulkLog, setConfirmBulkLog] = useState(false);
   const [confirmSingleDelete, setConfirmSingleDelete] = useState<MedicationRecord | null>(null);
-  // The daily action happens at the record below, so the management list starts
-  // collapsed and can be expanded to add, edit or organise medications.
-  const [listOpen, setListOpen] = useState(false);
+  // The management list opens expanded so the regimen is visible at a
+  // glance; it can be collapsed to focus on the record below.
+  const [listOpen, setListOpen] = useState(true);
 
   const { data } = useQuery({
     queryKey: ['medications', profile.id],

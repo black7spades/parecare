@@ -27,7 +27,7 @@ import {
   type Provider,
 } from '../../../lib/care';
 
-const CARD_KEYS = ['profile', 'conditions', 'neurotypes', 'poa', 'attention', 'upcoming', 'health', 'log'] as const;
+const CARD_KEYS = ['profile', 'conditions', 'neurotypes', 'poa', 'upcoming', 'health', 'log'] as const;
 type CardKey = (typeof CARD_KEYS)[number];
 
 const CARD_LABELS: Record<CardKey, string> = {
@@ -35,7 +35,6 @@ const CARD_LABELS: Record<CardKey, string> = {
   conditions: 'Conditions',
   neurotypes: 'Neurotypes',
   poa: 'Power of attorney',
-  attention: 'Needs attention',
   upcoming: 'Coming up',
   health: 'Current health',
   log: 'Care log',
@@ -249,21 +248,6 @@ export function OverviewPage() {
             />
           </CollapsibleCard>
         );
-      case 'attention':
-        return (
-          <CollapsibleCard
-            key={key}
-            cardKey={key}
-            label={CARD_LABELS[key]}
-            collapsed={isCollapsed}
-            editView={editView}
-            onToggle={toggleCollapse}
-            onMove={moveCard}
-            order={cardOrder}
-          >
-            <ProfileAttention profileId={profile.id} />
-          </CollapsibleCard>
-        );
       case 'upcoming':
         return (
           <CollapsibleCard
@@ -322,6 +306,8 @@ export function OverviewPage() {
 
   return (
     <div className="space-y-6">
+      <AttentionBanner profileId={profile.id} />
+
       <div className="flex justify-end">
         <Button
           variant={editView ? 'secondary' : 'ghost'}
@@ -673,9 +659,17 @@ function PoaCard({
                 </p>
                 {h.phone || h.email ? (
                   <p className="text-xs text-muted mt-0.5">
-                    {h.phone ? `Phone: ${h.phone}` : null}
+                    {h.phone ? (
+                      <>
+                        Phone: <PhoneLink phone={h.phone} />
+                      </>
+                    ) : null}
                     {h.phone && h.email ? ' · ' : null}
-                    {h.email ? `Email: ${h.email}` : null}
+                    {h.email ? (
+                      <>
+                        Email: <EmailLink email={h.email} />
+                      </>
+                    ) : null}
                   </p>
                 ) : null}
               </div>
@@ -731,23 +725,43 @@ function UpcomingEvents({ profileId }: { profileId: string }) {
   );
 }
 
+/** A phone number as a tap-to-call link. */
+function PhoneLink({ phone }: { phone: string }) {
+  return (
+    <a href={`tel:${phone.replace(/[^\d+]/g, '')}`} className="text-primary hover:underline">
+      {phone}
+    </a>
+  );
+}
+
+/** An email address as a mailto link. */
+function EmailLink({ email }: { email: string }) {
+  return (
+    <a href={`mailto:${email}`} className="text-primary hover:underline">
+      {email}
+    </a>
+  );
+}
+
 function ProfileContact({ profile }: { profile: CareProfile }) {
   if (!profile.contact_kind) return null;
-  const rows: { label: string; value: string }[] = [];
+  // The phone's kind becomes the row label, so it informs without taking
+  // up a row of its own.
+  const phoneLabel =
+    profile.contact_phone_type === 'mobile' ? 'Mobile' : profile.contact_phone_type === 'home' ? 'Home phone' : 'Phone';
+  const rows: { label: string; value: React.ReactNode }[] = [];
   if (profile.contact_kind === 'self') {
     rows.push({ label: 'Contact', value: 'Themselves' });
-    if (profile.contact_phone) rows.push({ label: 'Phone', value: profile.contact_phone });
-    if (profile.contact_phone_type) rows.push({ label: 'Phone type', value: profile.contact_phone_type === 'mobile' ? 'Mobile' : 'Home' });
-    if (profile.contact_email) rows.push({ label: 'Email', value: profile.contact_email });
+    if (profile.contact_phone) rows.push({ label: phoneLabel, value: <PhoneLink phone={profile.contact_phone} /> });
+    if (profile.contact_email) rows.push({ label: 'Email', value: <EmailLink email={profile.contact_email} /> });
   } else if (profile.contact_kind === 'user') {
     if (profile.contact_account_name) rows.push({ label: 'Contact', value: profile.contact_account_name });
-    if (profile.contact_account_email) rows.push({ label: 'Email', value: profile.contact_account_email });
+    if (profile.contact_account_email) rows.push({ label: 'Email', value: <EmailLink email={profile.contact_account_email} /> });
   } else {
     if (profile.contact_name) rows.push({ label: 'Contact', value: profile.contact_name });
     if (profile.contact_relationship) rows.push({ label: 'Relationship', value: profile.contact_relationship });
-    if (profile.contact_phone) rows.push({ label: 'Phone', value: profile.contact_phone });
-    if (profile.contact_phone_type) rows.push({ label: 'Phone type', value: profile.contact_phone_type === 'mobile' ? 'Mobile' : 'Home' });
-    if (profile.contact_email) rows.push({ label: 'Email', value: profile.contact_email });
+    if (profile.contact_phone) rows.push({ label: phoneLabel, value: <PhoneLink phone={profile.contact_phone} /> });
+    if (profile.contact_email) rows.push({ label: 'Email', value: <EmailLink email={profile.contact_email} /> });
   }
   if (rows.length === 0) return null;
   return (
@@ -774,7 +788,12 @@ interface AttentionItem {
   dismissible: boolean;
 }
 
-function ProfileAttention({ profileId }: { profileId: string }) {
+/**
+ * A discreet strip above the overview cards: only appears when something
+ * needs attention, and each item links straight to the section where it
+ * can be dealt with. Urgent items tint the strip red.
+ */
+function AttentionBanner({ profileId }: { profileId: string }) {
   const tz = browserTimeZone();
   const { data } = useQuery({
     queryKey: ['pare-attention'],
@@ -782,21 +801,32 @@ function ProfileAttention({ profileId }: { profileId: string }) {
   });
   const items = (data?.items ?? []).filter((i) => i.profile_id === profileId);
 
-  if (items.length === 0) {
-    return <p className="text-sm text-muted">Nothing needs attention today.</p>;
-  }
+  if (items.length === 0) return null;
+
+  const hasUrgent = items.some((i) => i.urgent);
 
   return (
-    <ul className="divide-y divide-border">
+    <div
+      className={`flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-md border px-3 py-2 ${
+        hasUrgent
+          ? 'border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-900/10'
+          : 'border-border bg-surface-2'
+      }`}
+    >
+      <span className="text-xs font-medium text-muted whitespace-nowrap">Needs attention</span>
       {items.map((it) => (
-        <li key={it.key} className={`py-2 -mx-2 px-2 rounded ${it.urgent ? 'border-l-2 border-red-500 bg-red-50 dark:bg-red-900/10' : ''}`}>
-          <Link to={it.section} className="block text-sm hover:underline">
-            <span className={it.urgent ? 'text-red-700 dark:text-red-300 font-medium' : 'text-ink font-medium'}>{it.label}</span>
-            {it.detail ? <span className={it.urgent ? 'text-red-700 dark:text-red-300' : 'text-muted'}> · {it.detail}</span> : null}
-          </Link>
-        </li>
+        <Link
+          key={it.key}
+          to={it.section}
+          className={`text-sm hover:underline ${
+            it.urgent ? 'text-red-700 dark:text-red-300 font-medium' : 'text-ink'
+          }`}
+        >
+          {it.label}
+          {it.detail ? <span className={it.urgent ? '' : 'text-muted'}> · {it.detail}</span> : null}
+        </Link>
       ))}
-    </ul>
+    </div>
   );
 }
 
