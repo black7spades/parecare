@@ -27,12 +27,19 @@ function profilesEndpoint(kind: ProfileKind) {
       'cp.contact_kind', 'cp.contact_account_id',
       'cp.contact_name', 'cp.contact_phone', 'cp.contact_email',
       'cp.owner_relationship',
-      ...(kind === 'pet' ? ['cp.species', 'cp.breed', 'cp.desexed', 'cp.microchip_number'] as const : []),
+      ...(kind === 'pet' ? ['cp.species', 'cp.breed', 'cp.desexed', 'cp.microchip_number', 'cp.owner_profile_id'] as const : []),
     ];
+
+    // A pet's owner is a person profile; resolve their name for the list.
+    const ownerSelect =
+      kind === 'pet'
+        ? [db.raw(`(SELECT o.full_name FROM care_profiles o WHERE o.id = cp.owner_profile_id) AS owner_name`)]
+        : [];
 
     let query = db('care_profiles as cp')
       .select(
         ...columns,
+        ...ownerSelect,
         db.raw(`(
           SELECT json_agg(json_build_object(
             'display_name', ccm.display_name,

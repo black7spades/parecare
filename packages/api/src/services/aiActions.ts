@@ -289,6 +289,8 @@ const updateProfileSchema = z.object({
   primary_language: z.string().max(100).optional().nullable(),
   notes: z.string().optional().nullable(),
   date_of_birth: z.string().optional().nullable(),
+  // A pet's owner, named as a person already in the account (a care profile).
+  owner_name: z.string().max(255).optional().nullable(),
 });
 
 export const actionSchema = z.discriminatedUnion('type', [
@@ -933,9 +935,27 @@ async function executeOne(
       if (action.primary_language !== undefined) fields['primary_language'] = action.primary_language;
       if (action.notes !== undefined) fields['notes'] = action.notes;
       if (action.date_of_birth !== undefined) fields['date_of_birth'] = action.date_of_birth || null;
+      let ownerNote = '';
+      if (action.owner_name !== undefined) {
+        const target = await db('care_profiles').where({ id: profileId }).select('account_id', 'kind').first();
+        if (!action.owner_name) {
+          fields['owner_profile_id'] = null;
+          ownerNote = ' Cleared the owner.';
+        } else {
+          const owner = await db('care_profiles')
+            .where({ account_id: target?.account_id, kind: 'person', archived: false })
+            .whereRaw('lower(full_name) = lower(?)', [action.owner_name.trim()])
+            .select('id', 'full_name')
+            .first();
+          if (!owner) return `Could not find a person called "${action.owner_name}" to set as the owner. Add them to People first.`;
+          if (owner.id === profileId) return `A profile cannot be its own owner.`;
+          fields['owner_profile_id'] = owner.id;
+          ownerNote = ` Set the owner to ${owner.full_name}.`;
+        }
+      }
       await db('care_profiles').where({ id: profileId }).update(fields);
       await audit(profileId, account.id, 'care_profiles', 'updated profile details');
-      return `Updated the profile details.`;
+      return `Updated the profile details.${ownerNote}`;
     }
   }
 }

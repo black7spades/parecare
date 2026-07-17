@@ -135,6 +135,8 @@ const profileSchema = z.object({
   primary_language: z.string().max(100).optional().nullable(),
   notes: z.string().optional().nullable(),
   owner_relationship: z.string().max(100).optional().nullable(),
+  // A pet's owner is a person already in the system (another care profile).
+  owner_profile_id: z.string().uuid().optional().nullable(),
   photo_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().nullable(),
   // Expected babies get a profile before birth.
   due_date: z.string().optional().nullable(),
@@ -534,6 +536,20 @@ careProfilesRouter.get('/:id/photo', requireAuth, async (req, res) => {
   });
 });
 
+/**
+ * A pet's owner must be a person already in this account: a non-archived
+ * care profile of kind person that the account owns. Returns true when the
+ * id is unset (owner cleared) or valid, false when it points at something it
+ * should not (a pet, another account's profile, or a missing row).
+ */
+async function ownerProfileIsValid(accountId: string, ownerId: string | null | undefined): Promise<boolean> {
+  if (!ownerId) return true;
+  const owner = await db('care_profiles')
+    .where({ id: ownerId, account_id: accountId, kind: 'person', archived: false })
+    .first();
+  return !!owner;
+}
+
 careProfilesRouter.post(
   '/',
   requireAuth,
@@ -571,6 +587,11 @@ careProfilesRouter.post(
         return;
       }
       Object.assign(parts, splitFullName(legacyFull));
+    }
+
+    if (!(await ownerProfileIsValid(req.account!.id, parsed.data.owner_profile_id))) {
+      res.status(400).json({ error: 'The owner must be a person in your account', code: 'INVALID_OWNER' });
+      return;
     }
 
     const [profile] = await db<CareProfile>('care_profiles')
@@ -678,6 +699,15 @@ careProfilesRouter.get('/:id', requireAuth, async (req, res) => {
   const contactProvider = profile.contact_provider_id ? providerById.get(profile.contact_provider_id) ?? null : null;
   const residenceProvider = profile.residence_provider_id ? providerById.get(profile.residence_provider_id) ?? null : null;
 
+  // Resolve a pet's owner (a person profile) so the overview can name them
+  // and link through without another lookup.
+  const ownerProfile = profile.owner_profile_id
+    ? (await db('care_profiles')
+        .where({ id: profile.owner_profile_id })
+        .select('id', 'full_name', 'preferred_name')
+        .first()) ?? null
+    : null;
+
   res.json({
     profile: {
       ...profile,
@@ -685,6 +715,7 @@ careProfilesRouter.get('/:id', requireAuth, async (req, res) => {
       contact_account_email: contactAccount?.email ?? null,
       contact_provider: contactProvider,
       residence_provider: residenceProvider,
+      owner_profile: ownerProfile,
     },
     access,
     relationship,
@@ -727,6 +758,18 @@ careProfilesRouter.patch('/:id', requireAuth, async (req, res) => {
         res.status(400).json({ error: 'That provider is not linked to this profile', code: 'PROVIDER_NOT_LINKED' });
         return;
       }
+    }
+  }
+
+  // A pet's owner must be a person in the same account, and never itself.
+  if ('owner_profile_id' in parsed.data) {
+    if (parsed.data.owner_profile_id === profile.id) {
+      res.status(400).json({ error: 'A profile cannot be its own owner', code: 'INVALID_OWNER' });
+      return;
+    }
+    if (!(await ownerProfileIsValid(profile.account_id, parsed.data.owner_profile_id))) {
+      res.status(400).json({ error: 'The owner must be a person in the account', code: 'INVALID_OWNER' });
+      return;
     }
   }
 

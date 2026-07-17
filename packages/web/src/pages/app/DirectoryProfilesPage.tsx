@@ -30,6 +30,7 @@ interface DirectoryProfile {
   breed: string | null;
   desexed: boolean;
   microchip_number: string | null;
+  owner_name: string | null;
   circle_members: CircleMember[] | null;
 }
 
@@ -49,6 +50,7 @@ const PETS_SORTS: DataSort<DirectoryProfile>[] = [
   { key: 'name', label: 'Name', compare: (a, b) => a.full_name.localeCompare(b.full_name) },
   { key: 'species', label: 'Species', compare: (a, b) => (a.species ?? '').localeCompare(b.species ?? '') },
   { key: 'breed', label: 'Breed', compare: (a, b) => (a.breed ?? '').localeCompare(b.breed ?? '') },
+  { key: 'owner', label: 'Owner', compare: (a, b) => (a.owner_name ?? '').localeCompare(b.owner_name ?? '') },
   { key: 'contact', label: 'Contact', compare: (a, b) => contactText(a).localeCompare(contactText(b)) },
   { key: 'circle', label: 'Care circle', compare: (a, b) => circleCount(b) - circleCount(a) },
 ];
@@ -99,6 +101,7 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
         isPeople ? phaseLabel(p.current_phase) : null,
         p.species,
         p.breed,
+        p.owner_name,
         ...(p.circle_members ?? []).map((m) => m.display_name),
       ]
         .filter(Boolean)
@@ -171,6 +174,7 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
                   <>
                     <SortableTh label="Species" sortKey="species" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                     <SortableTh label="Breed" sortKey="breed" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                    <SortableTh label="Owner" sortKey="owner" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                   </>
                 )}
                 <SortableTh label="Contact" sortKey="contact" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
@@ -231,6 +235,9 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
                     <>
                       <td className="px-3 py-2 text-muted">{p.species || '-'}</td>
                       <td className="px-3 py-2 text-muted">{p.breed || '-'}</td>
+                      <td className="px-3 py-2">
+                        {p.owner_name ? <span className="text-ink text-xs">{p.owner_name}</span> : <span className="text-muted">-</span>}
+                      </td>
                     </>
                   )}
                   <td className="px-3 py-2">

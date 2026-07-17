@@ -157,7 +157,7 @@ You can do anything here that can be done by hand on this person's record. The a
 - {"type": "link_provider", "name": name of a provider already in the directory} to attach an existing provider to this profile without creating a duplicate (use add_provider only for a brand new provider)
 - {"type": "link_address", "address": text to find an address already in the directory, e.g. its label or street} to attach an existing address to this profile; this also records it as where they live
 - {"type": "update_care_plan", any of "dietary_requirements" (array), "mobility_aids" (array), "communication_needs" (array), "advance_care_directive" (boolean), "advance_care_directive_location"} — the GP is a provider; use the provider actions to change it
-- {"type": "update_profile", any of "preferred_name", "pronouns", "primary_language", "notes", "date_of_birth"}
+- {"type": "update_profile", any of "preferred_name", "pronouns", "primary_language", "notes", "date_of_birth", "owner_name" (for a pet: the name of a person already in People to set as the pet's owner; empty string clears it)}
 
 Rules for actions: only emit an action the user clearly asked for. If something essential is missing (which medication, when it happened), ask instead of guessing. Never emit an action for medical decisions, only for recording what the user tells you already happened or needs doing.
 
@@ -347,7 +347,7 @@ The profile_actions action is how you do anything else on a person's record: cha
 - {"type": "link_provider", "name": name of a provider already in the directory} to attach an existing provider to this profile without creating a duplicate (use add_provider only for a brand new provider)
 - {"type": "link_address", "address": text to find an address already in the directory, e.g. its label or street} to attach an existing address to this profile; this also records it as where they live
 - {"type": "update_care_plan", any of "dietary_requirements" (array), "mobility_aids" (array), "communication_needs" (array), "advance_care_directive" (boolean), "advance_care_directive_location"} — the GP is a provider; use the provider actions to change it
-- {"type": "update_profile", any of "preferred_name", "pronouns", "primary_language", "notes", "date_of_birth"}
+- {"type": "update_profile", any of "preferred_name", "pronouns", "primary_language", "notes", "date_of_birth", "owner_name" (for a pet: the name of a person already in People to set as the pet's owner; empty string clears it)}
 
 Example, "change Chris's rosuvastatin to 1am": {"type":"profile_actions","entries":[{"profile_name":"Chris Rattray","action":{"type":"update_medication","medication_name":"Rosuvastatin","schedule_times":["01:00"]}}]}. Use the currently open profile's name when the user does not name anyone.
 

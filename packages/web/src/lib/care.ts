@@ -74,6 +74,10 @@ export interface CareProfile {
   last_name: string | null;
   suffix: string | null;
   owner_relationship?: string | null;
+  /** Pet only: the id of the person profile who owns this pet. */
+  owner_profile_id?: string | null;
+  /** Pet only: resolved owner, when owner_profile_id is set. */
+  owner_profile?: { id: string; full_name: string; preferred_name: string | null } | null;
   preferred_name: string | null;
   date_of_birth: string | null;
   /** Expected babies get a profile before birth. */

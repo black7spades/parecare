@@ -35,6 +35,7 @@ export function EditProfileModal({
   const [breed, setBreed] = useState('');
   const [desexed, setDesexed] = useState(false);
   const [microchip, setMicrochip] = useState('');
+  const [ownerId, setOwnerId] = useState('');
   const [contact, setContact] = useState<ContactValue>(emptyContact);
   const [residence, setResidence] = useState<ResidenceValue>(emptyResidence);
   const [error, setError] = useState('');
@@ -47,6 +48,14 @@ export function EditProfileModal({
     enabled: open,
   });
   const providers = providersData?.providers ?? [];
+
+  // People this pet could be owned by: every person profile except this one.
+  const { data: peopleData } = useQuery({
+    queryKey: ['owner-people'],
+    queryFn: () => api.get<{ profiles: { id: string; full_name: string; preferred_name: string | null; kind: string }[] }>('/care-profiles/summary'),
+    enabled: open && isPet,
+  });
+  const people = (peopleData?.profiles ?? []).filter((p) => p.kind === 'person' && p.id !== profile.id);
 
   useEffect(() => {
     if (!open) return;
@@ -63,6 +72,7 @@ export function EditProfileModal({
     setBreed(profile.breed ?? '');
     setDesexed(!!profile.desexed);
     setMicrochip(profile.microchip_number ?? '');
+    setOwnerId(profile.owner_profile_id ?? '');
     setContact({
       kind: profile.contact_kind ?? '',
       account_id: profile.contact_account_id ?? '',
@@ -106,6 +116,7 @@ export function EditProfileModal({
             breed: breed.trim() || null,
             desexed,
             microchip_number: microchip.trim() || null,
+            owner_profile_id: ownerId || null,
             notes: notes.trim() || null,
           }
         : {
@@ -241,6 +252,25 @@ export function EditProfileModal({
               Desexed
               <span className="text-xs text-muted">neutered or spayed</span>
             </label>
+            <div>
+              <label htmlFor="edit-pet-owner" className="block text-sm font-medium text-ink mb-1">
+                Owner
+              </label>
+              <select
+                id="edit-pet-owner"
+                className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                value={ownerId}
+                onChange={(e) => setOwnerId(e.target.value)}
+              >
+                <option value="">No owner set</option>
+                {people.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.preferred_name || p.full_name}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-muted">The person who owns this pet, chosen from your people.</p>
+            </div>
           </>
         ) : (
           <>
