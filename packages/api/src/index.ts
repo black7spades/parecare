@@ -43,6 +43,7 @@ import { startReminderScheduler } from './services/scheduler';
 import { startMarArchiveScheduler } from './services/marArchive';
 import { subscriptionsRouter } from './routes/subscriptions';
 import { adminRouter } from './routes/admin';
+import { adminDatabaseRouter } from './routes/adminDatabase';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { requireAuth } from './middleware/auth';
 import { requireCareProfileAccess } from './middleware/subscriptionGate';
@@ -92,6 +93,9 @@ v1.use('/account', accountRouter);
 // Super-admin runtime settings. Must be registered before the admin router so
 // its requireRole('admin') guard doesn't shadow the super-admin-only routes.
 v1.use('/admin/settings', settingsRouter);
+// Super-admin database tools: registered before the admin router for the
+// same reason as settings.
+v1.use('/admin/database', adminDatabaseRouter);
 v1.use('/admin', adminRouter);
 v1.use('/subscriptions', subscriptionsRouter);
 // Shared, instance-wide medication catalogue (read for all; add for admins;

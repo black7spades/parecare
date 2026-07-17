@@ -41,6 +41,7 @@ import { AdminUsers } from './pages/admin/AdminUsers';
 import { AdminJourneys } from './pages/admin/AdminJourneys';
 import { AdminChats } from './pages/admin/AdminChats';
 import { AdminSettings } from './pages/admin/AdminSettings';
+import { AdminDatabase } from './pages/admin/AdminDatabase';
 import { ReportsPage } from './pages/admin/ReportsPage';
 import { ReportGeneratorPage } from './pages/app/ReportGeneratorPage';
 import { SystemLayout } from './pages/admin/SystemLayout';
@@ -148,6 +149,14 @@ export const router = createBrowserRouter([
           { path: 'journeys', element: <AdminJourneys /> },
           { path: 'chats', element: <AdminChats /> },
           { path: 'reports', element: <ReportsPage /> },
+          {
+            path: 'database',
+            element: (
+              <SuperAdminGuard>
+                <AdminDatabase />
+              </SuperAdminGuard>
+            ),
+          },
           {
             path: 'settings',
             element: (
