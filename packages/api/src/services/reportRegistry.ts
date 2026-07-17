@@ -307,7 +307,7 @@ registerSection({
         isolation_required: r.isolation_required,
         region: r.region,
         duration_days: duration,
-        symptoms: syms.map((s) => `${s.name} (severity ${s.severity}/5)`).join(', '),
+        symptoms: syms.map((s) => `${s.name} (severity ${s.severity}/10)`).join(', '),
       };
     });
   },

@@ -410,7 +410,7 @@ conditionsRouter.delete('/:conditionId/functions/:functionId', requireAuth, asyn
 
 const symptomSchema = z.object({
   name: z.string().min(1).max(255),
-  severity: z.number().int().min(1).max(5).default(3),
+  severity: z.number().int().min(1).max(10).default(5),
   notes: z.string().max(2000).optional().nullable(),
 });
 
@@ -487,7 +487,7 @@ conditionsRouter.patch('/:conditionId/symptoms/:symptomId', requireAuth, async (
   }
   const allowed = z.object({
     resolved_at: z.string().datetime().nullable().optional(),
-    severity: z.number().int().min(1).max(5).optional(),
+    severity: z.number().int().min(1).max(10).optional(),
     notes: z.string().max(2000).nullable().optional(),
   }).safeParse(req.body);
   if (!allowed.success) {
