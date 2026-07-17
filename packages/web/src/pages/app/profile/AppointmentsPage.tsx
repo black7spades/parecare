@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
@@ -80,6 +81,18 @@ export function AppointmentsPage() {
   const { profile, careName, canEdit } = useProfile();
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
+  const [initialProviderId, setInitialProviderId] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // A health alert's "Book appointment" arrives here with ?new=1 and the
+  // GP preselected, so booking is one step, not a hunt through the form.
+  useEffect(() => {
+    if (searchParams.get('new') === '1') {
+      setInitialProviderId(searchParams.get('provider') ?? '');
+      setAdding(true);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
   const [editing, setEditing] = useState<Appointment | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Appointment | null>(null);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
@@ -264,13 +277,16 @@ export function AppointmentsPage() {
         <AppointmentEditor
           profileId={profile.id}
           appointment={editing}
+          initialProviderId={editing ? '' : initialProviderId}
           onClose={() => {
             setAdding(false);
             setEditing(null);
+            setInitialProviderId('');
             setBulkEditQueue([]);
           }}
           onSaved={() => {
             setAdding(false);
+            setInitialProviderId('');
             invalidate();
             if (editing) advanceQueue();
           }}
@@ -327,11 +343,14 @@ interface ProviderFull {
 function AppointmentEditor({
   profileId,
   appointment,
+  initialProviderId = '',
   onClose,
   onSaved,
 }: {
   profileId: string;
   appointment: Appointment | null;
+  /** Preselects a provider on a new appointment, e.g. the GP from a health alert. */
+  initialProviderId?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -339,7 +358,7 @@ function AppointmentEditor({
   const isNew = appointment === null;
   const [title, setTitle] = useState(appointment?.title ?? '');
   const [type, setType] = useState(appointment?.appointment_type ?? 'consultation');
-  const [providerId, setProviderId] = useState(appointment?.provider_id ?? '');
+  const [providerId, setProviderId] = useState(appointment?.provider_id ?? initialProviderId);
   const [providerName, setProviderName] = useState('');
   const [location, setLocation] = useState(appointment?.location ?? '');
   const [startDate, setStartDate] = useState('');

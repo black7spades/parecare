@@ -31,9 +31,14 @@ export function SystemLayout() {
           Reports
         </NavLink>
         {isSuperAdmin ? (
-          <NavLink to="/system/settings" className={tabClass}>
-            Settings
-          </NavLink>
+          <>
+            <NavLink to="/system/database" className={tabClass}>
+              Database
+            </NavLink>
+            <NavLink to="/system/settings" className={tabClass}>
+              Settings
+            </NavLink>
+          </>
         ) : null}
       </nav>
       <Outlet />

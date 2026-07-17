@@ -37,7 +37,7 @@ function fmtDate(v: string | Date | null | undefined, timeZone?: string | null):
   return Number.isNaN(d.getTime()) ? 'unknown time' : formatInZone(d, timeZone);
 }
 
-async function accessibleProfiles(accountId: string): Promise<Array<CareProfile & { relationship: string | null }>> {
+export async function accessibleProfiles(accountId: string): Promise<Array<CareProfile & { relationship: string | null }>> {
   const [owned, shared] = await Promise.all([
     db<CareProfile>('care_profiles').where({ account_id: accountId, archived: false }).orderBy('created_at', 'asc'),
     db<CareProfile>('care_profiles')
@@ -339,7 +339,7 @@ export interface AttentionItem {
 }
 
 /** Item keys an account has acknowledged and set aside. */
-async function getDismissedKeys(accountId: string): Promise<Set<string>> {
+export async function getDismissedKeys(accountId: string): Promise<Set<string>> {
   const rows = await db('attention_dismissals').where({ account_id: accountId }).select('item_key');
   return new Set(rows.map((r) => (r as { item_key: string }).item_key));
 }
