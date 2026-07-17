@@ -846,6 +846,18 @@ function ProfileContact({ profile }: { profile: CareProfile }) {
     rows.push({ label: 'Contact via', value: p.name });
     if (p.phone) rows.push({ label: 'Phone', value: <PhoneLink phone={p.phone} /> });
     if (p.email) rows.push({ label: 'Email', value: <EmailLink email={p.email} /> });
+  } else if (profile.contact_kind === 'profile' && profile.contact_profile) {
+    const c = profile.contact_profile;
+    rows.push({
+      label: 'Primary carer',
+      value: (
+        <Link to={`/app/${c.id}`} className="text-primary hover:underline">
+          {c.preferred_name || c.full_name}
+        </Link>
+      ),
+    });
+    if (c.contact_phone) rows.push({ label: 'Phone', value: <PhoneLink phone={c.contact_phone} /> });
+    if (c.contact_email) rows.push({ label: 'Email', value: <EmailLink email={c.contact_email} /> });
   } else if (profile.contact_kind === 'contact') {
     if (profile.contact_name) rows.push({ label: 'Contact', value: profile.contact_name });
     if (profile.contact_relationship) rows.push({ label: 'Relationship', value: profile.contact_relationship });

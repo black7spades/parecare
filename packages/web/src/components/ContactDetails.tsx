@@ -16,9 +16,10 @@ import { RELATIONSHIPS, type Provider } from '../lib/care';
  */
 
 export interface ContactValue {
-  kind: '' | 'self' | 'user' | 'contact' | 'provider';
+  kind: '' | 'self' | 'user' | 'contact' | 'provider' | 'profile';
   account_id: string;
   provider_id: string;
+  profile_id: string;
   name: string;
   relationship: string;
   phone: string;
@@ -30,6 +31,7 @@ export const emptyContact: ContactValue = {
   kind: '',
   account_id: '',
   provider_id: '',
+  profile_id: '',
   name: '',
   relationship: '',
   phone: '',
@@ -43,12 +45,20 @@ interface ContactableUser {
   email: string;
 }
 
+interface ContactablePerson {
+  id: string;
+  full_name: string;
+  preferred_name: string | null;
+  kind: string;
+}
+
 /** Turn the field set into the care-profile contact columns for the API. */
 export function contactPayload(v: ContactValue): Record<string, string | null> {
   const base = {
     contact_kind: null as string | null,
     contact_account_id: null as string | null,
     contact_provider_id: null as string | null,
+    contact_profile_id: null as string | null,
     contact_name: null as string | null,
     contact_relationship: null as string | null,
     contact_phone: null as string | null,
@@ -69,6 +79,9 @@ export function contactPayload(v: ContactValue): Record<string, string | null> {
   }
   if (v.kind === 'provider') {
     return { ...base, contact_kind: v.provider_id ? 'provider' : null, contact_provider_id: v.provider_id || null };
+  }
+  if (v.kind === 'profile') {
+    return { ...base, contact_kind: v.profile_id ? 'profile' : null, contact_profile_id: v.profile_id || null };
   }
   if (v.kind === 'contact') {
     return {
@@ -103,6 +116,13 @@ export function ContactDetails({
   });
   const users = data?.users ?? [];
 
+  const { data: peopleData } = useQuery({
+    queryKey: ['owner-people'],
+    queryFn: () => api.get<{ profiles: ContactablePerson[] }>('/care-profiles/summary'),
+    enabled: value.kind === 'profile',
+  });
+  const people = (peopleData?.profiles ?? []).filter((p) => p.kind === 'person');
+
   const inputClass =
     'block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
@@ -136,11 +156,29 @@ export function ContactDetails({
         <select id="contact-kind" className={inputClass} value={value.kind} onChange={(e) => set({ kind: e.target.value as ContactValue['kind'] })}>
           <option value="">Choose later</option>
           <option value="self">Themselves</option>
+          <option value="profile">Another person in PareCare</option>
           <option value="user">Someone already using PareCare</option>
           <option value="contact">A new contact</option>
           {providers.length > 0 ? <option value="provider">A provider, such as their care home</option> : null}
         </select>
       </div>
+
+      {value.kind === 'profile' ? (
+        <div>
+          <label htmlFor="contact-profile" className="block text-sm font-medium text-ink mb-1">
+            Person
+          </label>
+          <select id="contact-profile" className={inputClass} value={value.profile_id} onChange={(e) => set({ profile_id: e.target.value })}>
+            <option value="">Choose a person</option>
+            {people.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.preferred_name || p.full_name}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted mt-1">Their own phone and email will be used to reach this person.</p>
+        </div>
+      ) : null}
 
       {value.kind === 'provider' ? (
         <div>

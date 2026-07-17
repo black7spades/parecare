@@ -77,6 +77,7 @@ export function EditProfileModal({
       kind: profile.contact_kind ?? '',
       account_id: profile.contact_account_id ?? '',
       provider_id: profile.contact_provider_id ?? '',
+      profile_id: profile.contact_profile_id ?? '',
       name: profile.contact_name ?? '',
       relationship: profile.contact_relationship ?? '',
       phone: profile.contact_phone ?? '',

@@ -97,6 +97,9 @@ export function Dashboard() {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(new Set());
   const [bulkLinkOpen, setBulkLinkOpen] = useState(false);
+  const [bulkAddressOpen, setBulkAddressOpen] = useState(false);
+  const [bulkOwnerOpen, setBulkOwnerOpen] = useState(false);
+  const [bulkCarerOpen, setBulkCarerOpen] = useState(false);
   const [editQueue, setEditQueue] = useState<ProfileSummary[]>([]);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -124,6 +127,8 @@ export function Dashboard() {
     () => profiles.filter((p) => selectedProfileIds.has(p.id)),
     [profiles, selectedProfileIds]
   );
+  const selectedPetIds = useMemo(() => selectedProfiles.filter((p) => p.kind === 'pet').map((p) => p.id), [selectedProfiles]);
+  const selectedPersonIds = useMemo(() => selectedProfiles.filter((p) => p.kind !== 'pet').map((p) => p.id), [selectedProfiles]);
 
   // Bulk archive and permanent delete each fan out one request per profile
   // so per-profile permission checks still apply; the server silently skips
@@ -293,9 +298,24 @@ export function Dashboard() {
                 Archive
               </Button>
               {canEdit ? (
-                <Button size="sm" variant="secondary" onClick={() => setBulkLinkOpen(true)}>
-                  Link provider
-                </Button>
+                <>
+                  <Button size="sm" variant="secondary" onClick={() => setBulkLinkOpen(true)}>
+                    Link provider
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => setBulkAddressOpen(true)}>
+                    Link address
+                  </Button>
+                  {selectedPersonIds.length > 0 ? (
+                    <Button size="sm" variant="secondary" onClick={() => setBulkCarerOpen(true)}>
+                      Link primary carer
+                    </Button>
+                  ) : null}
+                  {selectedPetIds.length > 0 ? (
+                    <Button size="sm" variant="secondary" onClick={() => setBulkOwnerOpen(true)}>
+                      Link owner
+                    </Button>
+                  ) : null}
+                </>
               ) : null}
               {isAdmin ? (
                 <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)}>
@@ -383,6 +403,39 @@ export function Dashboard() {
             onLinked={() => {
               setBulkLinkOpen(false);
               setSelectedProfileIds(new Set());
+            }}
+          />
+
+          <BulkLinkAddressPicker
+            open={bulkAddressOpen}
+            profileIds={[...selectedProfileIds]}
+            onClose={() => setBulkAddressOpen(false)}
+            onDone={() => {
+              setBulkAddressOpen(false);
+              setSelectedProfileIds(new Set());
+              void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
+            }}
+          />
+
+          <BulkLinkOwnerPicker
+            open={bulkOwnerOpen}
+            petIds={selectedPetIds}
+            onClose={() => setBulkOwnerOpen(false)}
+            onDone={() => {
+              setBulkOwnerOpen(false);
+              setSelectedProfileIds(new Set());
+              void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
+            }}
+          />
+
+          <BulkLinkCarerPicker
+            open={bulkCarerOpen}
+            personIds={selectedPersonIds}
+            onClose={() => setBulkCarerOpen(false)}
+            onDone={() => {
+              setBulkCarerOpen(false);
+              setSelectedProfileIds(new Set());
+              void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
             }}
           />
 
@@ -838,11 +891,10 @@ function ProfileTable({
 }
 
 /**
- * A compact editor for one profile's identity, used by the homeboard's
- * bulk Edit action to step through the selection. Each name part is its
- * own field, per the data conventions; the full record's other pages
- * handle everything else. Fetches the profile so it edits the stored
- * parts rather than re-splitting the composed display name.
+ * A compact editor used by the homeboard's bulk Edit action to step through
+ * the selection. It keeps to the field that makes sense across several
+ * profiles at once, the relationship; names are per-person and are edited on
+ * the profile itself.
  */
 function ProfileQuickEditModal({
   profile,
@@ -862,38 +914,19 @@ function ProfileQuickEditModal({
     queryKey: ['care-profile', profile.id],
     queryFn: () => api.get<{ profile: CareProfileDetail; relationship: string | null }>(`/care-profiles/${profile.id}`),
   });
-  const isPet = profile.kind === 'pet';
-
-  const [fields, setFields] = useState({ title: '', first_name: '', middle_name: '', last_name: '', suffix: '', preferred_name: '', relationship: '' });
+  // Names are per-person and not something anyone sets in bulk, so the quick
+  // edit stays to the fields that make sense across a selection.
+  const [relationship, setRelationship] = useState('');
   const [error, setError] = useState('');
-  const set = (k: keyof typeof fields) => (e: React.ChangeEvent<HTMLInputElement>) => setFields((f) => ({ ...f, [k]: e.target.value }));
 
   useEffect(() => {
     if (!data) return;
-    const p = data.profile;
-    setFields({
-      title: p.title ?? '',
-      first_name: p.first_name ?? '',
-      middle_name: p.middle_name ?? '',
-      last_name: p.last_name ?? '',
-      suffix: p.suffix ?? '',
-      preferred_name: p.preferred_name ?? '',
-      relationship: data.relationship ?? p.owner_relationship ?? '',
-    });
+    setRelationship(data.relationship ?? data.profile.owner_relationship ?? '');
     setError('');
   }, [data]);
 
   const save = useMutation({
-    mutationFn: () =>
-      api.patch(`/care-profiles/${profile.id}`, {
-        title: fields.title.trim() || null,
-        first_name: fields.first_name.trim(),
-        middle_name: fields.middle_name.trim() || null,
-        last_name: fields.last_name.trim() || null,
-        suffix: fields.suffix.trim() || null,
-        preferred_name: fields.preferred_name.trim() || null,
-        owner_relationship: fields.relationship.trim() || null,
-      }),
+    mutationFn: () => api.patch(`/care-profiles/${profile.id}`, { owner_relationship: relationship.trim() || null }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
       void queryClient.invalidateQueries({ queryKey: ['care-profile', profile.id] });
@@ -912,15 +945,13 @@ function ProfileQuickEditModal({
           <p className="text-sm text-muted">Loading…</p>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-3">
-              {!isPet ? <Input label="Title" value={fields.title} onChange={set('title')} placeholder="e.g. Mr, Dr" /> : null}
-              <Input label={isPet ? 'Name' : 'First name'} value={fields.first_name} onChange={set('first_name')} />
-              {!isPet ? <Input label="Middle name" value={fields.middle_name} onChange={set('middle_name')} /> : null}
-              {!isPet ? <Input label="Last name" value={fields.last_name} onChange={set('last_name')} /> : null}
-              {!isPet ? <Input label="Suffix" value={fields.suffix} onChange={set('suffix')} placeholder="e.g. Jr" /> : null}
-            </div>
-            <Input label="Preferred name" value={fields.preferred_name} onChange={set('preferred_name')} hint="What they like to be called." />
-            <Input label="Relationship to you" value={fields.relationship} onChange={set('relationship')} placeholder="e.g. Mother, Resident" />
+            <Input
+              label="Relationship to you"
+              value={relationship}
+              onChange={(e) => setRelationship(e.target.value)}
+              placeholder="e.g. Mother, Resident"
+              hint="To change a name, open the profile and edit it there."
+            />
             {error ? <p className="text-sm text-red-600">{error}</p> : null}
           </>
         )}
@@ -929,7 +960,7 @@ function ProfileQuickEditModal({
           {remaining > 1 ? (
             <Button variant="ghost" onClick={onSkip}>Skip</Button>
           ) : null}
-          <Button loading={save.isPending} disabled={!fields.first_name.trim()} onClick={() => save.mutate()}>
+          <Button loading={save.isPending} onClick={() => save.mutate()}>
             Save
           </Button>
         </div>
@@ -1046,6 +1077,312 @@ function BulkLinkProviderPicker({
           onClick={() => selectedProvider && linkMutation.mutate()}
         >
           Link to {profileIds.length} profile{profileIds.length !== 1 ? 's' : ''}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+interface DirectoryAddress {
+  id: string;
+  label: string | null;
+  formatted: string | null;
+}
+
+/** Link one address in the directory to every selected profile. */
+function BulkLinkAddressPicker({
+  open,
+  profileIds,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  profileIds: string[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['directory-addresses'],
+    queryFn: () => api.get<{ addresses: DirectoryAddress[] }>('/directory/addresses'),
+    enabled: open,
+  });
+  const addresses = data?.addresses ?? [];
+
+  useEffect(() => {
+    if (open) {
+      setSearch('');
+      setSelected(null);
+    }
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return addresses;
+    const q = search.toLowerCase();
+    return addresses.filter((a) => (a.formatted ?? '').toLowerCase().includes(q) || (a.label ?? '').toLowerCase().includes(q));
+  }, [addresses, search]);
+
+  const link = useMutation({
+    mutationFn: () => api.post(`/directory/addresses/${selected}/bulk-link`, { profile_ids: profileIds }),
+    onSuccess: onDone,
+  });
+
+  if (!open) return null;
+
+  return (
+    <Modal open onClose={onClose} title="Link address to selected profiles">
+      <p className="text-sm text-muted mb-3">
+        Choose an address to link to the {profileIds.length} selected profile{profileIds.length !== 1 ? 's' : ''}. It becomes where they live.
+      </p>
+      <input
+        type="text"
+        placeholder="Search addresses…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary mb-3"
+      />
+      {isLoading ? (
+        <p className="text-sm text-muted py-4 text-center">Loading…</p>
+      ) : filtered.length === 0 ? (
+        <p className="text-sm text-muted py-4 text-center">
+          {addresses.length === 0 ? 'No addresses in the directory yet.' : 'No addresses match your search.'}
+        </p>
+      ) : (
+        <div className="max-h-64 overflow-y-auto -mx-1">
+          {filtered.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                selected === a.id ? 'bg-primary-50 dark:bg-primary-900/20 ring-1 ring-primary/30' : 'hover:bg-surface-2'
+              }`}
+              onClick={() => setSelected(a.id)}
+            >
+              <span className="font-medium text-ink">{a.formatted ?? a.label ?? 'Address'}</span>
+              {a.label && a.formatted ? <span className="block text-xs text-muted">{a.label}</span> : null}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex justify-end gap-2 mt-4">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button disabled={!selected} loading={link.isPending} onClick={() => selected && link.mutate()}>
+          Link to {profileIds.length} profile{profileIds.length !== 1 ? 's' : ''}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+interface PersonOption {
+  id: string;
+  full_name: string;
+  preferred_name: string | null;
+  kind: string;
+}
+
+/** Set one person as the owner of every selected pet. */
+function BulkLinkOwnerPicker({
+  open,
+  petIds,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  petIds: string[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [selected, setSelected] = useState('');
+  const { data } = useQuery({
+    queryKey: ['owner-people'],
+    queryFn: () => api.get<{ profiles: PersonOption[] }>('/care-profiles/summary'),
+    enabled: open,
+  });
+  const people = (data?.profiles ?? []).filter((p) => p.kind === 'person');
+
+  useEffect(() => {
+    if (open) setSelected('');
+  }, [open]);
+
+  const save = useMutation({
+    mutationFn: () => Promise.all(petIds.map((id) => api.patch(`/care-profiles/${id}`, { owner_profile_id: selected }))),
+    onSuccess: onDone,
+  });
+
+  if (!open) return null;
+
+  return (
+    <Modal open onClose={onClose} title="Set owner for selected pets">
+      <p className="text-sm text-muted mb-3">
+        Choose the person who owns the {petIds.length} selected pet{petIds.length !== 1 ? 's' : ''}.
+      </p>
+      <select
+        className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        value={selected}
+        onChange={(e) => setSelected(e.target.value)}
+      >
+        <option value="">Choose a person</option>
+        {people.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.preferred_name || p.full_name}
+          </option>
+        ))}
+      </select>
+      {people.length === 0 ? <p className="text-xs text-muted mt-1">Add a person first to set them as the owner.</p> : null}
+      <div className="flex justify-end gap-2 mt-4">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button disabled={!selected} loading={save.isPending} onClick={() => save.mutate()}>
+          Set for {petIds.length} pet{petIds.length !== 1 ? 's' : ''}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+interface ContactableUserOption {
+  id: string;
+  display_name: string;
+  email: string;
+}
+
+/**
+ * Set the primary carer for every selected person. The carer can be the
+ * person themselves, another person in PareCare, a platform user, or a
+ * provider such as a facility or organisation. A provider is linked to each
+ * profile first, so it can stand in as the contact.
+ */
+function BulkLinkCarerPicker({
+  open,
+  personIds,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  personIds: string[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  type CarerKind = 'self' | 'profile' | 'user' | 'provider';
+  const [kind, setKind] = useState<CarerKind>('self');
+  const [targetId, setTargetId] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setKind('self');
+      setTargetId('');
+    }
+  }, [open]);
+
+  const { data: peopleData } = useQuery({
+    queryKey: ['owner-people'],
+    queryFn: () => api.get<{ profiles: PersonOption[] }>('/care-profiles/summary'),
+    enabled: open && kind === 'profile',
+  });
+  const people = (peopleData?.profiles ?? []).filter((p) => p.kind === 'person' && !personIds.includes(p.id));
+
+  const { data: usersData } = useQuery({
+    queryKey: ['contactable-users'],
+    queryFn: () => api.get<{ users: ContactableUserOption[] }>('/care-profiles/contactable-users'),
+    enabled: open && kind === 'user',
+  });
+  const users = usersData?.users ?? [];
+
+  const { data: providersData } = useQuery({
+    queryKey: ['directory-providers'],
+    queryFn: () => api.get<{ providers: DirectoryProvider[] }>('/directory/providers'),
+    enabled: open && kind === 'provider',
+  });
+  const providers = providersData?.providers ?? [];
+
+  const needsTarget = kind !== 'self';
+
+  const save = useMutation({
+    mutationFn: async () => {
+      // A provider must be linked to each profile before it can stand in as
+      // the contact, so link it in one call first.
+      if (kind === 'provider') {
+        await api.post(`/directory/providers/${targetId}/bulk-link`, { profile_ids: personIds });
+      }
+      const body =
+        kind === 'self'
+          ? { contact_kind: 'self' }
+          : kind === 'profile'
+            ? { contact_kind: 'profile', contact_profile_id: targetId }
+            : kind === 'user'
+              ? { contact_kind: 'user', contact_account_id: targetId }
+              : { contact_kind: 'provider', contact_provider_id: targetId };
+      await Promise.all(personIds.map((id) => api.patch(`/care-profiles/${id}`, body)));
+    },
+    onSuccess: onDone,
+  });
+
+  if (!open) return null;
+
+  const inputClass =
+    'block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
+
+  return (
+    <Modal open onClose={onClose} title="Set primary carer for selected people">
+      <p className="text-sm text-muted mb-3">
+        Choose who the care circle should contact about the {personIds.length} selected {personIds.length !== 1 ? 'people' : 'person'}.
+      </p>
+      <div className="space-y-3">
+        <select
+          className={inputClass}
+          value={kind}
+          onChange={(e) => {
+            setKind(e.target.value as CarerKind);
+            setTargetId('');
+          }}
+        >
+          <option value="self">Themselves</option>
+          <option value="profile">Another person in PareCare</option>
+          <option value="user">Someone already using PareCare</option>
+          <option value="provider">A facility or organisation</option>
+        </select>
+
+        {kind === 'profile' ? (
+          <select className={inputClass} value={targetId} onChange={(e) => setTargetId(e.target.value)}>
+            <option value="">Choose a person</option>
+            {people.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.preferred_name || p.full_name}
+              </option>
+            ))}
+          </select>
+        ) : null}
+
+        {kind === 'user' ? (
+          <select className={inputClass} value={targetId} onChange={(e) => setTargetId(e.target.value)}>
+            <option value="">Choose a person</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.display_name} ({u.email})
+              </option>
+            ))}
+          </select>
+        ) : null}
+
+        {kind === 'provider' ? (
+          <select className={inputClass} value={targetId} onChange={(e) => setTargetId(e.target.value)}>
+            <option value="">Choose a facility or organisation</option>
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {p.organisation ? ` · ${p.organisation}` : ''}
+              </option>
+            ))}
+          </select>
+        ) : null}
+      </div>
+
+      <div className="flex justify-end gap-2 mt-4">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button disabled={needsTarget && !targetId} loading={save.isPending} onClick={() => save.mutate()}>
+          Set for {personIds.length} {personIds.length !== 1 ? 'people' : 'person'}
         </Button>
       </div>
     </Modal>

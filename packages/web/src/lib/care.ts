@@ -96,10 +96,14 @@ export interface CareProfile {
   photo_url: string | null;
   photo_color: string | null;
   notes: string | null;
-  /** Who to contact: themselves, a platform user, a new contact, or a provider. */
-  contact_kind?: 'self' | 'user' | 'contact' | 'provider' | null;
+  /** Who to contact: themselves, a platform user, a new contact, a provider, or another person. */
+  contact_kind?: 'self' | 'user' | 'contact' | 'provider' | 'profile' | null;
   contact_account_id?: string | null;
   contact_provider_id?: string | null;
+  /** The primary carer when they are another person in the system. */
+  contact_profile_id?: string | null;
+  /** Resolved carer person, when contact_kind is 'profile'. */
+  contact_profile?: { id: string; full_name: string; preferred_name: string | null; contact_phone: string | null; contact_email: string | null } | null;
   contact_name?: string | null;
   contact_relationship?: string | null;
   contact_phone?: string | null;
