@@ -417,15 +417,54 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
   res.json({ profiles: result });
 });
 
-// Lightweight pinned list for the left nav.
+// Lightweight pinned list for the left nav. Returns the custom order and the
+// last-activity timestamp so the nav can arrange by recent activity, name, or
+// a manually fixed order.
 careProfilesRouter.get('/pinned', requireAuth, async (req, res) => {
   const rows = await db('care_profile_pins')
     .join('care_profiles', 'care_profile_pins.care_profile_id', 'care_profiles.id')
+    .leftJoin(
+      db('audit_log')
+        .select('care_profile_id')
+        .max('created_at as last_activity')
+        .groupBy('care_profile_id')
+        .as('act'),
+      'act.care_profile_id',
+      'care_profiles.id'
+    )
     .where('care_profile_pins.account_id', req.account!.id)
     .andWhere('care_profiles.archived', false)
+    .orderBy('care_profile_pins.sort_order', 'asc')
     .orderBy('care_profile_pins.pinned_at', 'asc')
-    .select('care_profiles.id', 'care_profiles.full_name', 'care_profiles.preferred_name', 'care_profiles.photo_url', 'care_profiles.photo_color');
+    .select(
+      'care_profiles.id',
+      'care_profiles.full_name',
+      'care_profiles.preferred_name',
+      'care_profiles.photo_url',
+      'care_profiles.photo_color',
+      'care_profile_pins.sort_order',
+      'act.last_activity'
+    );
   res.json({ profiles: rows });
+});
+
+// Persist a custom pin order for this carer's left nav. Accepts the full list
+// of pinned care-profile ids in the desired order; each id's sort_order is set
+// to its index so the list renders exactly as arranged.
+careProfilesRouter.put('/pins/order', requireAuth, async (req, res) => {
+  const parsed = z.object({ ids: z.array(z.string().uuid()) }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'A list of care profile ids is required', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  await db.transaction(async (trx) => {
+    for (let i = 0; i < parsed.data.ids.length; i += 1) {
+      await trx('care_profile_pins')
+        .where({ account_id: req.account!.id, care_profile_id: parsed.data.ids[i] })
+        .update({ sort_order: i });
+    }
+  });
+  res.json({ ok: true });
 });
 
 careProfilesRouter.post('/:id/pin', requireAuth, async (req, res) => {
