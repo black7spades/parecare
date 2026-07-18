@@ -16,7 +16,7 @@ import type { Account } from '../types';
 const HORIZON_DAYS = 30;
 const MAX_ITEMS = 50;
 
-export type NotificationKind = 'activity' | 'supply_low' | 'supply_out' | 'dose_overdue';
+export type NotificationKind = 'activity' | 'supply_low' | 'supply_out' | 'dose_overdue' | 'care_plan_ready';
 
 export interface NotificationItem {
   /** Stable identifier, also used to record reads and deliveries. */
@@ -61,6 +61,9 @@ export function prefsOf(account: Pick<Account, 'notification_prefs'>): Required<
 function wanted(kind: NotificationKind, prefs: Required<NotificationPrefs>): boolean {
   if (kind === 'activity') return prefs.activity;
   if (kind === 'dose_overdue') return prefs.dose_overdue;
+  // A plan the account asked for finishing is a direct answer to their own
+  // action, so it is always surfaced regardless of the activity preference.
+  if (kind === 'care_plan_ready') return true;
   return prefs.supply;
 }
 
@@ -106,7 +109,7 @@ export async function gatherNotifications(
   const now = new Date();
   const startOfDay = startOfDayInZone(now, tz);
 
-  const [auditRows, medRows, adminRows, readRows] = await Promise.all([
+  const [auditRows, medRows, adminRows, readRows, planJobRows] = await Promise.all([
     prefs.activity
       ? db('audit_log')
           .leftJoin('accounts', 'audit_log.actor_account_id', 'accounts.id')
@@ -139,6 +142,17 @@ export async function gatherNotifications(
       .select('medication_id')
       .count('id as count'),
     db('notification_reads').where({ account_id: account.id }).select('item_key'),
+    // Care plan generation this account started that has since finished with a
+    // new version. Only the latest run per profile matters, so the newest is
+    // taken below; a run that produced no changes is not "a plan ready".
+    db('care_plan_generation_jobs')
+      .whereIn('care_profile_id', profileIds)
+      .where('account_id', account.id)
+      .where('status', 'succeeded')
+      .whereNotNull('result_version_id')
+      .where('updated_at', '>=', horizon)
+      .orderBy('updated_at', 'desc')
+      .select('id', 'care_profile_id', 'updated_at'),
   ]);
 
   const read = new Set(readRows.map((r) => (r as { item_key: string }).item_key));
@@ -160,6 +174,30 @@ export async function gatherNotifications(
       missed_count: null,
       urgent: false,
       created_at: new Date(row.created_at).toISOString(),
+      read: read.has(key),
+    });
+  }
+
+  // One "care plan ready" per profile: the most recent finished run. The rows
+  // arrive newest-first, so the first seen for a profile is the one to keep.
+  const planSeen = new Set<string>();
+  for (const job of planJobRows) {
+    if (planSeen.has(job.care_profile_id)) continue;
+    planSeen.add(job.care_profile_id);
+    const key = `care_plan_ready:${job.id}`;
+    items.push({
+      key,
+      kind: 'care_plan_ready',
+      profile_id: job.care_profile_id,
+      profile_name: nameById.get(job.care_profile_id) ?? 'Unknown',
+      actor_name: null,
+      action: null,
+      entity_type: 'plan',
+      summary: null,
+      medication_name: null,
+      missed_count: null,
+      urgent: false,
+      created_at: new Date(job.updated_at ?? Date.now()).toISOString(),
       read: read.has(key),
     });
   }
@@ -311,6 +349,9 @@ export function notificationText(item: NotificationItem): string {
   }
   if (item.kind === 'supply_low') {
     return `${item.profile_name}'s prescription for ${item.medication_name} is low.`;
+  }
+  if (item.kind === 'care_plan_ready') {
+    return `${item.profile_name}'s care plan is ready to review.`;
   }
   const who = item.actor_name ?? 'Someone';
   if (item.entity_type === 'messages' && item.action === 'created') {

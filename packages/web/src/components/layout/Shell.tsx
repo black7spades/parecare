@@ -12,6 +12,7 @@ import { Clock } from './Clock';
 import { Avatar } from '../ui/Avatar';
 import { PROFILE_NAV, profileNavItem, type ProfileNavItem } from '../../pages/app/profile/tabs';
 import { api } from '../../api/client';
+import { browserTimeZone } from '../../lib/datetime';
 
 interface PinnedProfile {
   id: string;
@@ -89,11 +90,14 @@ function ProfileNavRow({
   item,
   pinned,
   onTogglePin,
+  showPip,
 }: {
   profileId: string;
   item: ProfileNavItem;
   pinned: boolean;
   onTogglePin: (key: string) => void;
+  /** A small dot signalling something new to see in this section. */
+  showPip?: boolean;
 }) {
   return (
     <div className="group relative">
@@ -102,7 +106,12 @@ function ProfileNavRow({
         end={item.end}
         className={navLinkClass}
       >
-        <span className="truncate pr-5">{item.label}</span>
+        <span className="flex items-center gap-1.5 truncate pr-5">
+          <span className="truncate">{item.label}</span>
+          {showPip ? (
+            <span aria-hidden title="Ready to review" className="h-2 w-2 shrink-0 rounded-full bg-primary" />
+          ) : null}
+        </span>
       </NavLink>
       <button
         type="button"
@@ -172,6 +181,23 @@ function ProfileSidebarNav({ profileId }: { profileId: string }) {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['nav-pins', profileId] }),
   });
 
+  // Share the bell's feed (same query key) to light a pip on a section when
+  // there is something new to see there. Right now that is a freshly generated
+  // care plan waiting on the Care plan page.
+  const tz = browserTimeZone();
+  const { data: notifData } = useQuery({
+    queryKey: ['notifications'],
+    queryFn: () =>
+      api.get<{ items: Array<{ kind: string; profile_id: string; read: boolean }> }>(
+        `/notifications${tz ? `?tz=${encodeURIComponent(tz)}` : ''}`
+      ),
+    refetchInterval: 60_000,
+  });
+  const planReady = (notifData?.items ?? []).some(
+    (i) => i.kind === 'care_plan_ready' && i.profile_id === profileId && !i.read
+  );
+  const pipFor = (key: string): boolean => key === 'plan' && planReady;
+
   const togglePin = (key: string) => {
     const next = pinnedKeys.includes(key) ? pinnedKeys.filter((k) => k !== key) : [...pinnedKeys, key];
     savePins.mutate(next);
@@ -229,7 +255,7 @@ function ProfileSidebarNav({ profileId }: { profileId: string }) {
         <>
           <div className={navHeadingClass}>Pinned</div>
           {pinnedItems.map((item) => (
-            <ProfileNavRow key={`pin-${item.key}`} profileId={profileId} item={item} pinned onTogglePin={togglePin} />
+            <ProfileNavRow key={`pin-${item.key}`} profileId={profileId} item={item} pinned onTogglePin={togglePin} showPip={pipFor(item.key)} />
           ))}
         </>
       ) : null}
@@ -260,6 +286,7 @@ function ProfileSidebarNav({ profileId }: { profileId: string }) {
                       item={item}
                       pinned={false}
                       onTogglePin={togglePin}
+                      showPip={pipFor(item.key)}
                     />
                   ))
               : null}

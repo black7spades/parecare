@@ -14,7 +14,7 @@ import { browserTimeZone } from '../../lib/datetime';
 
 interface NotificationItem {
   key: string;
-  kind: 'activity' | 'supply_low' | 'supply_out' | 'dose_overdue';
+  kind: 'activity' | 'supply_low' | 'supply_out' | 'dose_overdue' | 'care_plan_ready';
   profile_id: string;
   profile_name: string;
   actor_name: string | null;
@@ -62,6 +62,9 @@ function itemText(item: NotificationItem): string {
   }
   if (item.kind === 'supply_low') {
     return `${item.profile_name}'s prescription for ${item.medication_name} is low.`;
+  }
+  if (item.kind === 'care_plan_ready') {
+    return `${item.profile_name}'s care plan is ready to review.`;
   }
   const who = item.actor_name ?? 'Someone';
   if (item.entity_type === 'messages' && item.action === 'created') {
@@ -187,7 +190,7 @@ export function NotificationsBell() {
                       <span aria-hidden className="mt-1.5 h-2 w-2 shrink-0" />
                     )}
                     <span className="min-w-0">
-                      <span className={`block text-sm ${item.kind !== 'activity' ? 'text-red-700 dark:text-red-300' : 'text-ink'}`}>
+                      <span className={`block text-sm ${item.kind === 'supply_low' || item.kind === 'supply_out' || item.kind === 'dose_overdue' ? 'text-red-700 dark:text-red-300' : 'text-ink'}`}>
                         {item.urgent ? (
                           <span className="mr-1.5 align-middle rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">
                             Urgent
