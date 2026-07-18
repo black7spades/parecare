@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
+import { analyseCareLogSentiment } from '../services/careLogSentiment';
 import type { CareLogEntry } from '../types';
 
 export const careLogRouter = Router({ mergeParams: true });
@@ -20,6 +21,9 @@ const entrySchema = z.object({
   title: z.string().max(255).optional().nullable(),
   body: z.string().min(1),
   occurred_at: z.string().datetime().optional(),
+  // A person's own 1-to-6 rating (1 angry to 6 overjoyed). When given it is a
+  // manual reading and the assistant never overwrites it; null clears it.
+  sentiment: z.number().int().min(1).max(6).nullable().optional(),
 });
 
 careLogRouter.get('/', requireAuth, async (req, res) => {
@@ -61,9 +65,22 @@ careLogRouter.post('/', requireAuth, async (req, res) => {
     return;
   }
 
+  const { sentiment, ...fields } = parsed.data;
+  const manualSentiment = typeof sentiment === 'number';
   const [entry] = await db<CareLogEntry>('care_log_entries')
-    .insert({ care_profile_id: req.params['id'], ...parsed.data })
+    .insert({
+      care_profile_id: req.params['id'],
+      ...fields,
+      ...(manualSentiment ? { sentiment, sentiment_source: 'manual' } : {}),
+    })
     .returning('*');
+
+  // With no rating given, read the tone of the note in the background so the
+  // entry saves immediately and never waits on the model. A hand-set rating is
+  // left alone.
+  if (!manualSentiment) {
+    void analyseCareLogSentiment(entry.id, entry.entry_type, entry.title, entry.body);
+  }
 
   res.status(201).json({ entry });
 });
@@ -78,10 +95,16 @@ careLogRouter.post('/bulk-update', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
+  // Sentiment is per-entry and set on its own, not bulk-applied.
+  const { sentiment: _drop, ...patch } = parsed.data.patch;
+  if (Object.keys(patch).length === 0) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
   const updated = await db('care_log_entries')
     .whereIn('id', parsed.data.ids)
     .where({ care_profile_id: req.params['id'] })
-    .update(parsed.data.patch);
+    .update(patch);
   res.json({ updated });
 });
 
@@ -117,15 +140,42 @@ careLogRouter.patch('/:entryId', requireAuth, async (req, res) => {
     return;
   }
 
+  // A rating set here is a person's own; record it as manual so a later
+  // analysis leaves it alone. Setting it to null clears the reading entirely.
+  const { sentiment, ...fields } = parsed.data;
+  const update: Record<string, unknown> = { ...fields };
+  if (sentiment !== undefined) {
+    update['sentiment'] = sentiment;
+    update['sentiment_source'] = sentiment === null ? null : 'manual';
+  }
+
   const [updated] = await db<CareLogEntry>('care_log_entries')
     .where({ id: req.params['entryId'], care_profile_id: req.params['id'] })
-    .update(parsed.data)
+    .update(update)
     .returning('*');
 
   if (!updated) {
     res.status(404).json({ error: 'Entry not found', code: 'NOT_FOUND' });
     return;
   }
+  res.json({ entry: updated });
+});
+
+// Re-read the tone of an entry with the assistant, on demand. This overrides
+// whatever is there, including a hand-set rating, since the person asked for it.
+careLogRouter.post('/:entryId/analyse-sentiment', requireAuth, async (req, res) => {
+  const entry = await db<CareLogEntry>('care_log_entries')
+    .where({ id: req.params['entryId'], care_profile_id: req.params['id'] })
+    .first();
+  if (!entry) {
+    res.status(404).json({ error: 'Entry not found', code: 'NOT_FOUND' });
+    return;
+  }
+  // Clear the source so the analysis is allowed to write, then run it inline so
+  // the caller gets the result back.
+  await db('care_log_entries').where({ id: entry.id }).update({ sentiment_source: null });
+  await analyseCareLogSentiment(entry.id, entry.entry_type, entry.title, entry.body);
+  const updated = await db<CareLogEntry>('care_log_entries').where({ id: entry.id }).first();
   res.json({ entry: updated });
 });
 

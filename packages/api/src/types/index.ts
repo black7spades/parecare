@@ -176,6 +176,8 @@ export interface CareLogEntry {
   entry_type: string;
   title: string | null;
   body: string;
+  sentiment: number | null;
+  sentiment_source: string | null;
   occurred_at: string | Date;
   created_at: string | Date;
 }
