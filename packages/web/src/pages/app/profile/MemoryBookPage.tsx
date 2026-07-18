@@ -10,6 +10,7 @@ import { DataToolbar } from '../../../components/data/DataToolbar';
 import { useAuthStore } from '../../../stores/auth';
 import { useProfile } from './ProfileLayout';
 import { ItemNotesThread } from './JourneysSection';
+import { ToneBlockNotice, extractToneBlock, type ToneBlock } from '../../../components/ToneBlockNotice';
 import type { MemoryEntry } from '../../../lib/care';
 import type { Achievement, CareJourney } from '../../../lib/journeys';
 
@@ -75,6 +76,7 @@ function BookView({
   const [body, setBody] = useState('');
   const [photo, setPhoto] = useState<File | null>(null);
   const [error, setError] = useState('');
+  const [toneBlock, setToneBlock] = useState<ToneBlock | null>(null);
 
   // Write the story: arriving from an achievement prefills the entry.
   useEffect(() => {
@@ -124,11 +126,20 @@ function BookView({
       setBody('');
       setPhoto(null);
       setError('');
+      setToneBlock(null);
       if (fileInput.current) fileInput.current.value = '';
       onStoryDone();
       invalidate();
     },
-    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save memory'),
+    onError: (err) => {
+      const block = extractToneBlock(err);
+      if (block) {
+        setToneBlock(block);
+        setError('');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to save memory');
+      }
+    },
   });
 
   const deleteMutation = useMutation({
@@ -164,11 +175,12 @@ function BookView({
         <Textarea
           label="The memory"
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onChange={(e) => { setBody(e.target.value); if (toneBlock) setToneBlock(null); }}
           rows={4}
           required
           placeholder="Write the story the way you'd tell it…"
         />
+        {toneBlock ? <ToneBlockNotice careName={personName} block={toneBlock} onDismiss={() => setToneBlock(null)} /> : null}
         <div>
           <label htmlFor="memory-photo" className="block text-sm font-medium text-ink mb-1">
             Photo

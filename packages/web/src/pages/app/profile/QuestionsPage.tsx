@@ -8,6 +8,7 @@ import { Modal } from '../../../components/ui/Modal';
 import { useProfile } from './ProfileLayout';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
+import { ToneBlockNotice, extractToneBlock, type ToneBlock } from '../../../components/ToneBlockNotice';
 import type { OpenQuestion, QuestionResponse } from '../../../lib/care';
 
 const STATUS_STYLES: Record<OpenQuestion['status'], string> = {
@@ -38,10 +39,11 @@ const STATUS_FILTER: DataFilter<OpenQuestion> = {
 };
 
 export function QuestionsPage() {
-  const { profile, access, canEdit } = useProfile();
+  const { profile, access, canEdit, careName } = useProfile();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [toneBlock, setToneBlock] = useState<ToneBlock | null>(null);
   const [resolving, setResolving] = useState<OpenQuestion | null>(null);
   const [editing, setEditing] = useState<OpenQuestion | null>(null);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
@@ -68,7 +70,12 @@ export function QuestionsPage() {
     onSuccess: () => {
       setTitle('');
       setBody('');
+      setToneBlock(null);
       invalidate();
+    },
+    onError: (err) => {
+      const block = extractToneBlock(err);
+      if (block) setToneBlock(block);
     },
   });
 
@@ -118,8 +125,9 @@ export function QuestionsPage() {
           <p className="text-sm text-muted -mt-2">
             Open questions the family needs to settle: "Should mum still be driving?", "Who takes February visits?"
           </p>
-          <Input label="Question" value={title} onChange={(e) => setTitle(e.target.value)} required />
-          <Textarea label="Context (optional)" value={body} onChange={(e) => setBody(e.target.value)} rows={2} />
+          <Input label="Question" value={title} onChange={(e) => { setTitle(e.target.value); if (toneBlock) setToneBlock(null); }} required />
+          <Textarea label="Context (optional)" value={body} onChange={(e) => { setBody(e.target.value); if (toneBlock) setToneBlock(null); }} rows={2} />
+          {toneBlock ? <ToneBlockNotice careName={careName} block={toneBlock} onDismiss={() => setToneBlock(null)} /> : null}
           <div className="flex justify-end">
             <Button type="submit" loading={createMutation.isPending} disabled={!title.trim()}>
               Raise question

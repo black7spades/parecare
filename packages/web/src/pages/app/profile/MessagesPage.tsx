@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { api, ApiError } from '../../../api/client';
+import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Textarea } from '../../../components/ui/Input';
+import { ToneBlockNotice, extractToneBlock, type ToneBlock } from '../../../components/ToneBlockNotice';
 import { useAuthStore } from '../../../stores/auth';
 import { useProfile } from './ProfileLayout';
 import type { ChatMessage } from '../../../lib/care';
@@ -15,7 +16,7 @@ export function MessagesPage() {
   const isAdmin = me?.role === 'admin' || me?.role === 'super_admin';
   const [draft, setDraft] = useState('');
   // When the tone guard asks for a revision, its reason and suggested rewrite.
-  const [toneBlock, setToneBlock] = useState<{ reason: string; suggestion: string } | null>(null);
+  const [toneBlock, setToneBlock] = useState<ToneBlock | null>(null);
   const [sendError, setSendError] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -39,11 +40,9 @@ export function MessagesPage() {
       void queryClient.invalidateQueries({ queryKey: ['messages', profile.id] });
     },
     onError: (err) => {
-      if (err instanceof ApiError && err.code === 'TONE_REVISION_NEEDED') {
-        setToneBlock({
-          reason: String(err.data?.['reason'] ?? err.message),
-          suggestion: String(err.data?.['suggestion'] ?? ''),
-        });
+      const block = extractToneBlock(err);
+      if (block) {
+        setToneBlock(block);
         setSendError('');
       } else {
         setSendError(err instanceof Error ? err.message : 'Could not send the message.');
@@ -139,27 +138,13 @@ export function MessagesPage() {
       </div>
 
       {toneBlock ? (
-        <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm dark:border-amber-500/40 dark:bg-amber-900/20">
-          <p className="font-medium text-amber-800 dark:text-amber-200">Let's keep this focused on {careName}'s care</p>
-          <p className="mt-0.5 text-amber-800/90 dark:text-amber-100/90">{toneBlock.reason}</p>
-          {toneBlock.suggestion ? (
-            <div className="mt-2 rounded border border-amber-200 bg-white/70 px-2.5 py-2 text-ink dark:border-amber-500/30 dark:bg-black/20">
-              <p className="text-[11px] uppercase tracking-wide text-muted mb-1">Suggested rewrite</p>
-              <p className="whitespace-pre-wrap">{toneBlock.suggestion}</p>
-            </div>
-          ) : null}
-          <div className="mt-2 flex flex-wrap gap-2">
-            {toneBlock.suggestion ? (
-              <Button
-                size="xs"
-                variant="secondary"
-                onClick={() => { setDraft(toneBlock.suggestion); setToneBlock(null); }}
-              >
-                Use this rewrite
-              </Button>
-            ) : null}
-            <Button size="xs" variant="ghost" onClick={() => setToneBlock(null)}>Edit my message</Button>
-          </div>
+        <div className="mb-3">
+          <ToneBlockNotice
+            careName={careName}
+            block={toneBlock}
+            onUseRewrite={(text) => { setDraft(text); setToneBlock(null); }}
+            onDismiss={() => setToneBlock(null)}
+          />
         </div>
       ) : null}
       {sendError ? <p className="mb-2 text-sm text-red-600">{sendError}</p> : null}
