@@ -8,9 +8,11 @@ import { Modal } from '../../../components/ui/Modal';
 import { CatalogueCombo } from '../../../components/CatalogueCombo';
 import { useProfile } from './ProfileLayout';
 import {
+  ATTRIBUTE_KINDS,
   CONDITION_SEVERITIES,
   DIAGNOSIS_STATUSES,
   NEUROTYPE_LABELS,
+  attributeDomainLabel,
   diagnosisStatusLabel,
   neurotypeLabelText,
   type CareDocument,
@@ -68,10 +70,12 @@ export function NeurotypePage() {
           {neurotypes.map((n) => (
             <NeurotypeCard
               key={n.id}
+              profileId={profile.id}
               condition={n}
               canEdit={canEdit}
               onEdit={() => setEditing(n)}
               onDelete={() => deleteMutation.mutate(n.id)}
+              onChanged={invalidate}
             />
           ))}
         </div>
@@ -94,15 +98,19 @@ export function NeurotypePage() {
 }
 
 function NeurotypeCard({
+  profileId,
   condition,
   canEdit,
   onEdit,
   onDelete,
+  onChanged,
 }: {
+  profileId: string;
   condition: MedicalCondition;
   canEdit: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  onChanged: () => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -152,6 +160,22 @@ function NeurotypeCard({
         ) : null}
       </div>
 
+      <div className="mt-4 border-t border-border pt-4 space-y-5">
+        {ATTRIBUTE_KINDS.map((k) => (
+          <AttributeKindSection
+            key={k.value}
+            profileId={profileId}
+            condition={condition}
+            kind={k.value}
+            heading={k.label}
+            blurb={k.blurb}
+            singular={k.singular}
+            canEdit={canEdit}
+            onChanged={onChanged}
+          />
+        ))}
+      </div>
+
       <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)} title={`Delete ${condition.name}`}>
         <p className="text-sm text-muted mb-4">
           This removes the neurotype record. Any uploaded diagnosis documents remain in Documents.
@@ -161,6 +185,125 @@ function NeurotypeCard({
           <Button variant="danger" onClick={() => { setConfirmDelete(false); onDelete(); }}>Delete</Button>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+/**
+ * One kind of neurotype attribute (traits, needs or supports) for a single
+ * neurotype: the recorded items with a person-specific note each, and a
+ * catalogue-backed box to add more. The library suggests entries for this
+ * neurotype plus cross-cutting ones, and anything typed that is not listed is
+ * added and offered to everyone from then on.
+ */
+function AttributeKindSection({
+  profileId,
+  condition,
+  kind,
+  heading,
+  blurb,
+  singular,
+  canEdit,
+  onChanged,
+}: {
+  profileId: string;
+  condition: MedicalCondition;
+  kind: 'trait' | 'need' | 'support';
+  heading: string;
+  blurb: string;
+  singular: string;
+  canEdit: boolean;
+  onChanged: () => void;
+}) {
+  const items = (condition.attributes ?? []).filter((a) => a.kind === kind);
+  const [noteFor, setNoteFor] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [error, setError] = useState('');
+  const base = `/care-profiles/${profileId}/conditions/${condition.id}/attributes`;
+
+  const add = useMutation({
+    mutationFn: (label: string) => api.post(base, { kind, label }),
+    onSuccess: () => { setError(''); onChanged(); },
+    onError: (err) => setError(err instanceof Error ? err.message : 'Could not add that.'),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.delete(`${base}/${id}`),
+    onSuccess: onChanged,
+  });
+  const saveNote = useMutation({
+    mutationFn: (vars: { id: string; notes: string }) => api.patch(`${base}/${vars.id}`, { notes: vars.notes.trim() || null }),
+    onSuccess: () => { setNoteFor(null); onChanged(); },
+  });
+
+  return (
+    <div>
+      <div className="flex items-baseline gap-2">
+        <h3 className="text-sm font-semibold text-ink">{heading}</h3>
+        <span className="text-xs text-muted">{blurb}</span>
+      </div>
+
+      {items.length === 0 ? (
+        <p className="mt-1 text-sm text-muted">None recorded yet.</p>
+      ) : (
+        <ul className="mt-2 space-y-2">
+          {items.map((a) => (
+            <li key={a.id} className="text-sm">
+              <div className="flex items-start gap-2">
+                <div className="flex-1 min-w-0">
+                  <span className="text-ink">{a.label}</span>
+                  {a.domain ? (
+                    <span className="ml-2 badge bg-surface-2 text-muted text-[10px]">{attributeDomainLabel(a.domain)}</span>
+                  ) : null}
+                  {a.description ? <div className="text-xs text-muted mt-0.5">{a.description}</div> : null}
+                  {a.notes ? <div className="text-xs text-ink/80 mt-0.5">Note: {a.notes}</div> : null}
+                </div>
+                {canEdit ? (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => { setNoteFor(noteFor === a.id ? null : a.id); setNoteDraft(a.notes ?? ''); }}
+                    >
+                      {a.notes ? 'Edit note' : 'Add note'}
+                    </Button>
+                    <Button size="xs" variant="ghost-danger" onClick={() => remove.mutate(a.id)}>Remove</Button>
+                  </div>
+                ) : null}
+              </div>
+              {canEdit && noteFor === a.id ? (
+                <div className="mt-1.5 flex items-start gap-2">
+                  <textarea
+                    className={inputClass}
+                    rows={2}
+                    value={noteDraft}
+                    onChange={(e) => setNoteDraft(e.target.value)}
+                    placeholder="How this shows up for them, or what the support looks like in practice"
+                    aria-label={`Note for ${a.label}`}
+                  />
+                  <div className="flex flex-col gap-1">
+                    <Button size="xs" variant="secondary" loading={saveNote.isPending} onClick={() => saveNote.mutate({ id: a.id, notes: noteDraft })}>Save</Button>
+                    <Button size="xs" variant="ghost" onClick={() => setNoteFor(null)}>Cancel</Button>
+                  </div>
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {canEdit ? (
+        <div className="mt-2">
+          <CatalogueCombo
+            endpoint={`/neurotype-attribute-catalogue?kind=${kind}${condition.neurotype ? `&neurotype=${condition.neurotype}` : ''}`}
+            ariaLabel={`Add a ${singular}`}
+            placeholder={`Add a ${singular}...`}
+            exclude={items.map((a) => a.label)}
+            onPick={(label) => add.mutate(label)}
+            widthClass="w-full sm:w-96"
+          />
+          {error ? <p className="mt-1 text-sm text-red-600">{error}</p> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

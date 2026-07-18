@@ -38,20 +38,36 @@ async function buildContext(cardKey: CardKey, profileId: string, careName: strin
       .orderBy('name', 'asc');
     if (neurotypes.length === 0) return null;
     const ids = neurotypes.map((n) => n.id as string);
-    const [functions, symptoms, docs] = await Promise.all([
+    const [functions, symptoms, docs, attributes] = await Promise.all([
       db('condition_functions').whereIn('condition_id', ids),
       db('condition_symptoms').whereIn('condition_id', ids).whereNull('resolved_at'),
       db('documents').whereIn(
         'id',
         neurotypes.map((n) => n.diagnosis_document_id as string).filter(Boolean)
       ),
+      db('neurotype_attributes as na')
+        .join('neurotype_attribute_catalogue as nac', 'na.catalogue_id', 'nac.id')
+        .whereIn('na.condition_id', ids)
+        .orderBy('na.sort_order', 'asc')
+        .select('na.condition_id', 'na.notes', 'nac.kind', 'nac.label'),
     ]);
+    // The recorded traits, needs and supports are the whole point: they are
+    // what makes the summary specific to this person rather than generic.
+    const attrLine = (conditionId: string, kind: string): string => {
+      const list = attributes
+        .filter((a) => a.condition_id === conditionId && a.kind === kind)
+        .map((a) => `${a.label}${a.notes ? ` (${a.notes})` : ''}`);
+      return list.join('; ');
+    };
     const lines = neurotypes.map((n) => {
       const doc = docs.find((d) => d.id === n.diagnosis_document_id);
       const fns = functions
         .filter((f) => f.condition_id === n.id)
         .map((f) => `${f.domain}: ${f.limitation_level}${f.impact_on_activities ? ` (${f.impact_on_activities})` : ''}`);
       const syms = symptoms.filter((s) => s.condition_id === n.id).map((s) => s.name);
+      const traits = attrLine(n.id as string, 'trait');
+      const needs = attrLine(n.id as string, 'need');
+      const supports = attrLine(n.id as string, 'support');
       return [
         `- ${n.name}`,
         n.neurotype ? `  type: ${n.neurotype}` : null,
@@ -63,11 +79,20 @@ async function buildContext(cardKey: CardKey, profileId: string, careName: strin
         doc ? `  diagnosis document on file: "${doc.label}"` : null,
         fns.length > 0 ? `  affected areas of daily life: ${fns.join('; ')}` : null,
         syms.length > 0 ? `  current symptoms: ${syms.join(', ')}` : null,
+        traits ? `  recorded traits: ${traits}` : null,
+        needs ? `  recorded needs: ${needs}` : null,
+        supports ? `  recorded supports that help: ${supports}` : null,
       ]
         .filter(Boolean)
         .join('\n');
     });
-    return `Neurotypes recorded for ${careName}:\n${lines.join('\n')}`;
+    const anyAttributes = attributes.length > 0;
+    return (
+      `Neurotypes recorded for ${careName}:\n${lines.join('\n')}` +
+      (anyAttributes
+        ? ''
+        : '\n\nNo traits, needs or supports have been recorded for these neurotypes yet.')
+    );
   }
 
   if (cardKey === 'health') {
@@ -155,8 +180,13 @@ async function buildContext(cardKey: CardKey, profileId: string, careName: strin
 
 const CARD_INSTRUCTIONS: Record<CardKey, string> = {
   neurotypes:
-    'Summarise the key findings of the diagnosis and, most importantly, what needs and supports the person has. ' +
-    'Write 2 to 4 sentences.',
+    'Summarise the diagnosis using only the facts given: the neurotype, its diagnosis status, and, if named, who ' +
+    'diagnosed it and when. If a diagnosing provider is named, say that person diagnosed it; never say a diagnosis was ' +
+    '"confirmed by" anyone, and never invent who was involved or add detail that is not in the context. Then, if traits, ' +
+    'needs or supports are recorded, describe what they actually are for this person, drawing only on those recorded ' +
+    'items and any notes on them. If none are recorded, do not describe the neurotype in generic terms and do not guess ' +
+    'what the traits, needs or supports might be: state the diagnosis plainly and invite them to add their own traits, ' +
+    'needs and supports on this page so the summary can reflect them. Write 2 to 4 sentences.',
   health:
     'Summarise the current health picture: what is going on and anything that genuinely needs attention. ' +
     'Write 2 to 3 sentences.',

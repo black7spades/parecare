@@ -72,6 +72,13 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
     expand: (a) => `Record this under substance use: ${a}`,
   },
   {
+    name: 'neurotype',
+    hint: 'a trait, need or support for a neurotype',
+    description: 'Record a neurotype trait, need or support, e.g. /neurotype autism trait: sensory sensitivity to loud noise',
+    expand: (a) =>
+      `Record this against the named neurotype as a trait, need or support (add_neurotype_attribute), choosing the kind from the wording: ${a}`,
+  },
+  {
     name: 'question',
     hint: 'the question for the care circle',
     description: 'Raise a question, e.g. /question should we look at respite care for August?',

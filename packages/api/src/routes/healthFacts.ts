@@ -4,6 +4,12 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { resolveConditionCatalogueId } from './conditionCatalogue';
 import { resolveOptions } from './optionCatalogue';
+import {
+  ATTRIBUTE_DOMAINS,
+  ATTRIBUTE_KINDS,
+  resolveNeurotypeAttributeCatalogueId,
+  type AttributeKind,
+} from './neurotypeAttributeCatalogue';
 
 /**
  * Structured health facts on a care profile: allergies (what they must
@@ -164,6 +170,32 @@ conditionsRouter.get('/', requireAuth, async (req, res) => {
     symptomsByCondition.set(s.condition_id, arr);
   }
 
+  // Neurotype traits, needs and supports, each joined with its library entry
+  // so the label, domain and plain-language description come along.
+  const attributes = ids.length
+    ? await db('neurotype_attributes as na')
+        .join('neurotype_attribute_catalogue as nac', 'na.catalogue_id', 'nac.id')
+        .whereIn('na.condition_id', ids)
+        .orderBy([{ column: 'nac.kind' }, { column: 'na.sort_order' }, { column: 'nac.label' }])
+        .select(
+          'na.id',
+          'na.condition_id',
+          'na.catalogue_id',
+          'na.notes',
+          'na.sort_order',
+          'nac.kind',
+          'nac.label',
+          'nac.domain',
+          'nac.description'
+        )
+    : [];
+  const attributesByCondition = new Map<string, unknown[]>();
+  for (const a of attributes) {
+    const arr = attributesByCondition.get(a.condition_id) ?? [];
+    arr.push(a);
+    attributesByCondition.set(a.condition_id, arr);
+  }
+
   res.json({
     conditions: conditions.map((c) =>
       serializeCondition({
@@ -173,6 +205,7 @@ conditionsRouter.get('/', requireAuth, async (req, res) => {
         codes: codesByCondition.get(c.id) ?? [],
         functions: functionsByCondition.get(c.id) ?? [],
         symptoms: symptomsByCondition.get(c.id) ?? [],
+        attributes: attributesByCondition.get(c.id) ?? [],
       })
     ),
   });
@@ -404,6 +437,127 @@ conditionsRouter.delete('/:conditionId/functions/:functionId', requireAuth, asyn
     return;
   }
   res.json({ message: 'Functional impact removed.' });
+});
+
+// --- Neurotype traits, needs and supports ---------------------------------
+
+const attributeSelect = (conditionId: string) =>
+  db('neurotype_attributes as na')
+    .join('neurotype_attribute_catalogue as nac', 'na.catalogue_id', 'nac.id')
+    .where('na.condition_id', conditionId)
+    .select(
+      'na.id',
+      'na.condition_id',
+      'na.catalogue_id',
+      'na.notes',
+      'na.sort_order',
+      'nac.kind',
+      'nac.label',
+      'nac.domain',
+      'nac.description'
+    );
+
+const attributeSchema = z.object({
+  kind: z.enum(ATTRIBUTE_KINDS),
+  label: z.string().min(1).max(255),
+  domain: z.enum(ATTRIBUTE_DOMAINS).optional().nullable(),
+  description: z.string().max(2000).optional().nullable(),
+  notes: z.string().max(2000).optional().nullable(),
+  sort_order: z.number().int().optional(),
+});
+
+conditionsRouter.post('/:conditionId/attributes', requireAuth, async (req, res) => {
+  const parsed = attributeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const condition = await findProfileCondition(String(req.params['conditionId']), String(req.params['id']));
+  if (!condition) {
+    res.status(404).json({ error: 'Neurotype not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const catalogueId = await resolveNeurotypeAttributeCatalogueId(parsed.data.kind, parsed.data.label, {
+    neurotype: condition.neurotype ?? null,
+    domain: parsed.data.domain ?? null,
+    description: parsed.data.description ?? null,
+    accountId: req.account!.id,
+  });
+  try {
+    await db('neurotype_attributes').insert({
+      condition_id: req.params['conditionId'],
+      catalogue_id: catalogueId,
+      notes: parsed.data.notes ?? null,
+      sort_order: parsed.data.sort_order ?? 0,
+    });
+  } catch (err) {
+    if ((err as { code?: string }).code === '23505') {
+      res.status(409).json({ error: 'That is already recorded for this neurotype', code: 'ALREADY_RECORDED' });
+      return;
+    }
+    throw err;
+  }
+  const [row] = await attributeSelect(String(req.params['conditionId'])).andWhere('na.catalogue_id', catalogueId);
+  res.status(201).json({ attribute: row });
+});
+
+conditionsRouter.patch('/:conditionId/attributes/:attributeId', requireAuth, async (req, res) => {
+  const parsed = attributeSchema.partial().safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const condition = await findProfileCondition(String(req.params['conditionId']), String(req.params['id']));
+  if (!condition) {
+    res.status(404).json({ error: 'Neurotype not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const existing = await db('neurotype_attributes')
+    .where({ id: req.params['attributeId'], condition_id: req.params['conditionId'] })
+    .first();
+  if (!existing) {
+    res.status(404).json({ error: 'Attribute not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const update: Record<string, unknown> = { updated_at: db.fn.now() };
+  if (parsed.data.notes !== undefined) update['notes'] = parsed.data.notes;
+  if (parsed.data.sort_order !== undefined) update['sort_order'] = parsed.data.sort_order;
+  // Renaming (or re-kinding) re-points the record at the library entry.
+  if (parsed.data.label !== undefined && parsed.data.label) {
+    const kind: AttributeKind = parsed.data.kind ?? (existing.kind as AttributeKind);
+    update['catalogue_id'] = await resolveNeurotypeAttributeCatalogueId(kind, parsed.data.label, {
+      neurotype: condition.neurotype ?? null,
+      domain: parsed.data.domain ?? null,
+      description: parsed.data.description ?? null,
+      accountId: req.account!.id,
+    });
+  }
+  try {
+    await db('neurotype_attributes').where({ id: req.params['attributeId'] }).update(update);
+  } catch (err) {
+    if ((err as { code?: string }).code === '23505') {
+      res.status(409).json({ error: 'That is already recorded for this neurotype', code: 'ALREADY_RECORDED' });
+      return;
+    }
+    throw err;
+  }
+  const [row] = await attributeSelect(String(req.params['conditionId'])).andWhere('na.id', req.params['attributeId']);
+  res.json({ attribute: row });
+});
+
+conditionsRouter.delete('/:conditionId/attributes/:attributeId', requireAuth, async (req, res) => {
+  if (!(await findProfileCondition(String(req.params['conditionId']), String(req.params['id'])))) {
+    res.status(404).json({ error: 'Neurotype not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const deleted = await db('neurotype_attributes')
+    .where({ id: req.params['attributeId'], condition_id: req.params['conditionId'] })
+    .delete();
+  if (!deleted) {
+    res.status(404).json({ error: 'Attribute not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ message: 'Removed.' });
 });
 
 // --- Condition symptoms ---------------------------------------------------

@@ -193,6 +193,39 @@ export async function buildProfileContext(
     );
   }
 
+  // What each neurotype actually looks like for this person: the recorded
+  // traits, needs and supports, so the assistant answers from the record
+  // rather than describing the neurotype in generic terms.
+  const neurotypeConds = conditions.filter((c) => c.category === 'neurotype');
+  if (neurotypeConds.length > 0) {
+    const attrs = await db('neurotype_attributes as na')
+      .join('neurotype_attribute_catalogue as nac', 'na.catalogue_id', 'nac.id')
+      .whereIn('na.condition_id', neurotypeConds.map((c) => c.id as string))
+      .orderBy('na.sort_order', 'asc')
+      .select('na.condition_id', 'nac.kind', 'na.notes', 'nac.label');
+    if (attrs.length > 0) {
+      const kindLabel: Record<string, string> = { trait: 'Traits', need: 'Needs', support: 'Supports' };
+      const lines = neurotypeConds
+        .map((c) => {
+          const mine = attrs.filter((a) => a.condition_id === c.id);
+          if (mine.length === 0) return null;
+          const parts = (['trait', 'need', 'support'] as const)
+            .map((k) => {
+              const items = mine
+                .filter((a) => a.kind === k)
+                .map((a) => `${a.label}${a.notes ? ` (${a.notes})` : ''}`);
+              return items.length ? `  ${kindLabel[k]}: ${items.join('; ')}` : null;
+            })
+            .filter(Boolean);
+          return [`- ${c.name}`, ...parts].join('\n');
+        })
+        .filter(Boolean);
+      if (lines.length > 0) {
+        sections.push(`## Neurotype traits, needs and supports\n${lines.join('\n')}`);
+      }
+    }
+  }
+
   if (plan) {
     const contacts = Array.isArray(plan.emergency_contacts) ? plan.emergency_contacts : [];
     sections.push(
