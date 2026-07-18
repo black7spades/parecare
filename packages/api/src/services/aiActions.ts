@@ -696,21 +696,43 @@ interface MedicationEntry {
  * profile's active list, insert the MAR row, draw down the supply and audit.
  * Shared by the singular and batch actions.
  */
+const normDose = (s: unknown): string => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
 async function recordOneMedication(
   entry: MedicationEntry,
   profileId: string,
   account: Account,
-  timeZone: string | null | undefined
+  timeZone: string | null | undefined,
+  // Medication rows already recorded this turn, so several doses of a drug
+  // that exists at more than one strength land on the different strengths
+  // instead of piling onto the first one.
+  usedMedIds?: Set<string>
 ): Promise<string> {
-  const med = await db('medications as m')
+  const matches = await db('medications as m')
     .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
     .where({ 'm.care_profile_id': profileId, 'm.active': true })
     .whereRaw('lower(c.name) = lower(?)', [entry.medication_name.trim()])
     .select('m.*', 'c.name as name', 'c.form as form')
-    .first();
-  if (!med) {
+    .orderBy([{ column: 'm.created_at', order: 'asc' }, { column: 'm.id', order: 'asc' }]);
+  if (matches.length === 0) {
     return `Could not record the dose: no active medication called "${entry.medication_name}" is on the list.`;
   }
+  // The same drug can be listed at two strengths (e.g. Escitalopram 20mg and
+  // 10mg). Prefer a row whose dose matches what was said; otherwise take the
+  // next one not already used this turn, so "record all" hits each strength.
+  let med = matches[0];
+  if (matches.length > 1) {
+    const want = normDose(entry.dose_given);
+    const byDose = want
+      ? matches.filter((m) => {
+          const sig = normDose(m.dose) || normDose(`${m.dose_amount ?? ''}${m.dose_unit ?? ''}`);
+          return sig && (sig === want || sig.includes(want) || want.includes(sig));
+        })
+      : [];
+    const pool = byDose.length > 0 ? byDose : matches;
+    med = pool.find((m) => !usedMedIds?.has(m.id)) ?? pool[0];
+  }
+  usedMedIds?.add(med.id);
   if (!GIVEN.has(entry.status) && !entry.notes?.trim()) {
     return `Could not record the ${entry.status} dose of ${med.name}: a note explaining why is required.`;
   }
@@ -749,7 +771,10 @@ async function executeOne(
   profileId: string,
   account: Account,
   access: CareAccess,
-  timeZone: string | null | undefined
+  timeZone: string | null | undefined,
+  // Shared across a turn so repeated doses of a multi-strength drug spread
+  // across its rows rather than all landing on the first.
+  usedMedIds?: Set<string>
 ): Promise<string | string[]> {
   switch (action.type) {
     case 'log_event': {
@@ -766,14 +791,17 @@ async function executeOne(
       return `Logged a ${action.entry_type.replace(/_/g, ' ')} entry${action.title ? `: ${action.title}` : ''} at ${formatInZone(occurredAt, timeZone)}.`;
     }
     case 'record_medication': {
-      return recordOneMedication(action, profileId, account, timeZone);
+      return recordOneMedication(action, profileId, account, timeZone, usedMedIds ?? new Set());
     }
     case 'record_medications': {
-      // One dose failing to record must not stop the rest of the batch.
+      // One dose failing to record must not stop the rest of the batch. A
+      // shared set spreads repeated doses of a multi-strength drug across its
+      // rows within this batch.
+      const used = usedMedIds ?? new Set<string>();
       const results: string[] = [];
       for (const entry of action.entries) {
         try {
-          results.push(await recordOneMedication(entry, profileId, account, timeZone));
+          results.push(await recordOneMedication(entry, profileId, account, timeZone, used));
         } catch (err) {
           console.warn('Assistant batch medication entry failed:', (err as Error).message);
           results.push(`Could not record ${entry.medication_name}. Please record it directly in the app.`);
@@ -1273,9 +1301,12 @@ export async function executeActions(
     return ['No changes were made: you have view-only access to this care profile.'];
   }
   const results: string[] = [];
+  // One set for the whole turn, so several "Escitalopram" doses across
+  // separate actions still spread across its strengths.
+  const usedMedIds = new Set<string>();
   for (const action of actions) {
     try {
-      const outcome = await executeOne(action, profileId, account, access, timeZone);
+      const outcome = await executeOne(action, profileId, account, access, timeZone, usedMedIds);
       results.push(...(Array.isArray(outcome) ? outcome : [outcome]));
     } catch (err) {
       console.warn('Assistant action failed:', (err as Error).message);
@@ -1407,6 +1438,9 @@ export async function executeCrossProfileActions(
   if (actions.length === 0) return [];
   const results: string[] = [];
   const resolved = new Map<string, ResolvedProfile | null>();
+  // Per-profile record of medication rows used this turn, so repeated doses of
+  // a multi-strength drug spread across its strengths.
+  const usedByProfile = new Map<string, Set<string>>();
 
   for (const action of actions) {
     for (const entry of action.entries) {
@@ -1437,7 +1471,9 @@ export async function executeCrossProfileActions(
         continue;
       }
       try {
-        const outcome = await executeOne(toSingleProfileAction(action, entry), target.profileId, account, target.access, timeZone);
+        let used = usedByProfile.get(target.profileId);
+        if (!used) { used = new Set<string>(); usedByProfile.set(target.profileId, used); }
+        const outcome = await executeOne(toSingleProfileAction(action, entry), target.profileId, account, target.access, timeZone, used);
         for (const line of Array.isArray(outcome) ? outcome : [outcome]) {
           results.push(`${target.name}: ${line}`);
         }
