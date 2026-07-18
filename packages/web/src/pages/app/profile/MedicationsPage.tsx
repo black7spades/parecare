@@ -65,6 +65,9 @@ export function MedicationsPage() {
   const [confirmBulk, setConfirmBulk] = useState(false);
   const [confirmBulkLog, setConfirmBulkLog] = useState(false);
   const [confirmSingleDelete, setConfirmSingleDelete] = useState<MedicationRecord | null>(null);
+  // Recording an ad-hoc dose from the list. This is the entry point for
+  // as-needed medications, which have no scheduled slots to tap in the record.
+  const [recording, setRecording] = useState<MedicationRecord | null>(null);
   // The management list opens expanded so the regimen is visible at a
   // glance; it can be collapsed to focus on the record below.
   const [listOpen, setListOpen] = useState(true);
@@ -148,6 +151,63 @@ export function MedicationsPage() {
     ...(canBulkDelete ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulk(true) }] : []),
   ];
 
+  const colCount = canSelect ? 10 : 9;
+
+  // As-needed medications have no fixed schedule, so they never appear as
+  // due slots in the record. They live in their own group here, each with a
+  // "Record dose" action so a dose taken as needed can be logged on the spot.
+  const scheduledRows = dv.view.filter((m) => !m.as_needed);
+  const asNeededRows = dv.view.filter((m) => m.as_needed);
+
+  const renderRow = (m: MedicationRecord) => {
+    // What's on hand overall: loose units plus unopened packs.
+    const remaining = totalOnHand(m);
+    return (
+      <tr key={m.id} className={`border-b border-border last:border-0 ${m.active ? '' : 'opacity-60'}`}>
+        {canSelect ? (
+          <td className="px-4 py-3">
+            <input type="checkbox" aria-label={`Select ${m.name}`} className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+              checked={dv.selected.has(m.id)} onChange={() => dv.toggle(m.id)} />
+          </td>
+        ) : null}
+        <td className="px-4 py-3">
+          <div data-testid="med-name" className="font-medium text-ink">{m.name}{m.active ? '' : ' (inactive)'}</div>
+          {m.condition_name ? <div className="text-xs text-muted">For {m.condition_name}</div> : null}
+        </td>
+        <td className="px-4 py-3 text-muted">{m.units_per_dose != null ? fmtNum(m.units_per_dose) : '—'}</td>
+        <td className="px-4 py-3 text-muted">{m.dose_amount || '—'}</td>
+        <td className="px-4 py-3 text-muted">{m.dose_unit || '—'}</td>
+        <td className="px-4 py-3 text-muted">{m.route || '—'}</td>
+        <td className="px-4 py-3 text-muted">
+          <div>{regimenLine(m) || '—'}</div>
+          {m.as_needed ? (
+            <div className="text-xs">As needed</div>
+          ) : m.schedule_times?.length ? (
+            <div className="text-xs">{m.schedule_times.join(', ')}</div>
+          ) : null}
+          {m.instructions ? <div className="text-xs">{m.instructions}</div> : null}
+        </td>
+        <td className="px-4 py-3 text-muted">{m.packs_on_hand != null ? fmtNum(m.packs_on_hand) : '—'}</td>
+        <td className="px-4 py-3">
+          {remaining == null ? (
+            <span className="text-muted">—</span>
+          ) : remaining <= 0 ? (
+            <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">Out of stock</span>
+          ) : (
+            <span className={`text-ink ${m.supply != null && remaining <= m.supply * 0.15 ? 'text-amber-700 dark:text-amber-300 font-medium' : ''}`}>
+              {supplyLabel(remaining, m)} left
+            </span>
+          )}
+        </td>
+        <td className="px-4 py-3 text-right whitespace-nowrap space-x-1">
+          {canAdminister ? <Button size="sm" variant="secondary" onClick={() => setRecording(m)}>Record dose</Button> : null}
+          {canManageMeds ? <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>Edit</Button> : null}
+          {canManageMeds ? <Button size="sm" variant="danger" onClick={() => setConfirmSingleDelete(m)}>Delete</Button> : null}
+        </td>
+      </tr>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -230,54 +290,22 @@ export function MedicationsPage() {
               </thead>
               <tbody>
                 {dv.view.length === 0 ? (
-                  <tr><td colSpan={canSelect ? 10 : 9} className="px-4 py-8 text-center text-muted">{meds.length === 0 ? 'No medications recorded yet.' : 'No medications match your search or filters.'}</td></tr>
-                ) : dv.view.map((m) => {
-                  // What's on hand overall: loose units plus unopened packs.
-                  const remaining = totalOnHand(m);
-                  return (
-                  <tr key={m.id} className={`border-b border-border last:border-0 ${m.active ? '' : 'opacity-60'}`}>
-                    {canSelect ? (
-                      <td className="px-4 py-3">
-                        <input type="checkbox" aria-label={`Select ${m.name}`} className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                          checked={dv.selected.has(m.id)} onChange={() => dv.toggle(m.id)} />
-                      </td>
+                  <tr><td colSpan={colCount} className="px-4 py-8 text-center text-muted">{meds.length === 0 ? 'No medications recorded yet.' : 'No medications match your search or filters.'}</td></tr>
+                ) : (
+                  <>
+                    {scheduledRows.map(renderRow)}
+                    {asNeededRows.length > 0 ? (
+                      <>
+                        <tr className="bg-surface border-y border-border">
+                          <td colSpan={colCount} className="px-4 py-2 text-xs font-medium text-muted">
+                            As needed · taken only when required, on no fixed schedule
+                          </td>
+                        </tr>
+                        {asNeededRows.map(renderRow)}
+                      </>
                     ) : null}
-                    <td className="px-4 py-3">
-                      <div data-testid="med-name" className="font-medium text-ink">{m.name}{m.active ? '' : ' (inactive)'}</div>
-                      {m.condition_name ? <div className="text-xs text-muted">For {m.condition_name}</div> : null}
-                    </td>
-                    <td className="px-4 py-3 text-muted">{m.units_per_dose != null ? fmtNum(m.units_per_dose) : '—'}</td>
-                    <td className="px-4 py-3 text-muted">{m.dose_amount || '—'}</td>
-                    <td className="px-4 py-3 text-muted">{m.dose_unit || '—'}</td>
-                    <td className="px-4 py-3 text-muted">{m.route || '—'}</td>
-                    <td className="px-4 py-3 text-muted">
-                      <div>{regimenLine(m) || '—'}</div>
-                      {m.as_needed ? (
-                        <div className="text-xs">As needed</div>
-                      ) : m.schedule_times?.length ? (
-                        <div className="text-xs">{m.schedule_times.join(', ')}</div>
-                      ) : null}
-                      {m.instructions ? <div className="text-xs">{m.instructions}</div> : null}
-                    </td>
-                    <td className="px-4 py-3 text-muted">{m.packs_on_hand != null ? fmtNum(m.packs_on_hand) : '—'}</td>
-                    <td className="px-4 py-3">
-                      {remaining == null ? (
-                        <span className="text-muted">—</span>
-                      ) : remaining <= 0 ? (
-                        <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">Out of stock</span>
-                      ) : (
-                        <span className={`text-ink ${m.supply != null && remaining <= m.supply * 0.15 ? 'text-amber-700 dark:text-amber-300 font-medium' : ''}`}>
-                          {supplyLabel(remaining, m)} left
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap space-x-1">
-                      {canManageMeds ? <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>Edit</Button> : null}
-                      {canManageMeds ? <Button size="sm" variant="danger" onClick={() => setConfirmSingleDelete(m)}>Delete</Button> : null}
-                    </td>
-                  </tr>
-                  );
-                })}
+                  </>
+                )}
               </tbody>
             </table>
           </div>
@@ -291,6 +319,17 @@ export function MedicationsPage() {
           is under Management, where each dose given is logged and reviewed.
         </p>
       </div>
+
+      {recording ? (
+        <AdministerModal
+          profileId={profile.id}
+          med={recording}
+          personName={careName}
+          maxWhen={localNow()}
+          onClose={() => setRecording(null)}
+          onSaved={() => { setRecording(null); invalidate(); }}
+        />
+      ) : null}
 
       {addOpen ? <MedicationForm profileId={profile.id} selfCare={selfCare} onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); invalidate(); }} /> : null}
       {editing ? <MedicationForm profileId={profile.id} med={editing} selfCare={selfCare} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} /> : null}

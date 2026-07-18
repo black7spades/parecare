@@ -151,6 +151,22 @@ export function PlanPage() {
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not update the care plan.'),
   });
 
+  // Opening this page is reviewing the plan, so any "care plan ready" notice
+  // for this person is cleared: its bell entry is marked read and the nav pip
+  // goes out. Keyed by the finished job, done once per job.
+  const markPlanSeen = useMutation({
+    mutationFn: (key: string) => api.post('/notifications/read', { keys: [key] }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+  });
+  const seenJobRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (genJob?.status === 'succeeded' && genJob.version && genJob.id !== seenJobRef.current) {
+      seenJobRef.current = genJob.id;
+      markPlanSeen.mutate(`care_plan_ready:${genJob.id}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genJob?.status, genJob?.id]);
+
   // React only when a run we are watching finishes: refresh the plan on
   // success, surface the reason on failure. A pre-existing completed job on
   // first load is ignored (prev starts null).
