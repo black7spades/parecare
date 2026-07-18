@@ -144,6 +144,14 @@ export function getMarRetentionMonths(): number {
   return numOr('mar.retention_months', 12);
 }
 
+/**
+ * Whether the message tone guard is active. On unless a super admin or admin
+ * has explicitly turned it off, so family messaging is protected by default.
+ */
+export function isMessageToneGuardEnabled(): boolean {
+  return (str('messages.tone_guard') ?? 'on') !== 'off';
+}
+
 export function getOAuthConfig() {
   return {
     googleClientId: str('oauth.google_client_id'),

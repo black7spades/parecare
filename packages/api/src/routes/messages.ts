@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
+import { isMessageToneGuardEnabled } from '../config/settings';
+import { reviewMessageTone } from '../services/messageTone';
 
 export const messagesRouter = Router({ mergeParams: true });
 
@@ -29,6 +31,24 @@ messagesRouter.post('/', requireAuth, async (req, res) => {
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
+  }
+
+  // The tone guard keeps family messaging focused on care. It is compulsory
+  // for everyone while enabled; only an admin or super admin can turn it off,
+  // instance-wide. It never blocks on its own failure (see reviewMessageTone).
+  if (isMessageToneGuardEnabled()) {
+    const profile = await db('care_profiles').where({ id: req.params['id'] }).first();
+    const careName = profile?.preferred_name ?? profile?.first_name ?? profile?.full_name ?? 'this person';
+    const verdict = await reviewMessageTone(parsed.data.body, careName);
+    if (!verdict.ok) {
+      res.status(422).json({
+        error: verdict.reason,
+        code: 'TONE_REVISION_NEEDED',
+        reason: verdict.reason,
+        suggestion: verdict.suggestion,
+      });
+      return;
+    }
   }
 
   const [message] = await db('messages')
