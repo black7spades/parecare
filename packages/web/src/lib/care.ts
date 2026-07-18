@@ -678,6 +678,7 @@ export interface MedicalCondition {
   codes?: ConditionCode[];
   functions?: ConditionFunction[];
   symptoms?: ConditionSymptom[];
+  attributes?: NeurotypeAttribute[];
 }
 
 /** A standard diagnosis code on a condition: the system and the code. */
@@ -695,6 +696,46 @@ export interface ConditionFunction {
   temporal_pattern: string | null;
   impact_on_activities: string | null;
 }
+
+/**
+ * A trait, need or support recorded against a neurotype: what the
+ * neurodivergence actually looks like for this person, chosen from the shared
+ * research-informed library and extendable with their own words.
+ */
+export interface NeurotypeAttribute {
+  id: string;
+  condition_id: string;
+  catalogue_id: string;
+  kind: 'trait' | 'need' | 'support';
+  label: string;
+  domain: string | null;
+  description: string | null;
+  notes: string | null;
+  sort_order: number;
+}
+
+export const ATTRIBUTE_KINDS = [
+  { value: 'trait', label: 'Traits', singular: 'trait', blurb: 'How it shows up for them.' },
+  { value: 'need', label: 'Needs', singular: 'need', blurb: 'What they need to do well.' },
+  { value: 'support', label: 'Supports', singular: 'support', blurb: 'What helps in practice.' },
+] as const;
+
+/** Plain-language names for the area of life an attribute touches. */
+export const ATTRIBUTE_DOMAIN_LABELS: Record<string, string> = {
+  sensory: 'Senses',
+  social_communication: 'Social and communication',
+  executive_function: 'Planning and focus',
+  motor: 'Movement and coordination',
+  cognitive: 'Thinking and learning',
+  emotional: 'Emotions',
+  language: 'Reading and language',
+  self_care: 'Daily living',
+  attention: 'Attention',
+  other: 'Other',
+};
+
+export const attributeDomainLabel = (v: string | null | undefined): string =>
+  v ? ATTRIBUTE_DOMAIN_LABELS[v] ?? v : '';
 
 /** A treatment tied to a condition, as returned inside the condition. */
 export interface ConditionTreatment {

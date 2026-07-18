@@ -34,6 +34,7 @@ import { allergiesRouter, conditionsRouter } from './routes/healthFacts';
 import { conditionCatalogueRouter } from './routes/conditionCatalogue';
 import { symptomCatalogueRouter } from './routes/symptomCatalogue';
 import { substanceCatalogueRouter } from './routes/substanceCatalogue';
+import { neurotypeAttributeCatalogueRouter } from './routes/neurotypeAttributeCatalogue';
 import { substanceUseRouter } from './routes/substanceUse';
 import { optionCatalogueRouter } from './routes/optionCatalogue';
 import { notificationsRouter } from './routes/notifications';
@@ -109,6 +110,8 @@ v1.use('/medication-catalogue', medicationCatalogueRouter);
 v1.use('/condition-catalogue', conditionCatalogueRouter);
 v1.use('/symptom-catalogue', symptomCatalogueRouter);
 v1.use('/substance-catalogue', substanceCatalogueRouter);
+// Shared library of neurotype traits, needs and supports.
+v1.use('/neurotype-attribute-catalogue', neurotypeAttributeCatalogueRouter);
 // Shared option lists (allergens, dietary requirements, mobility aids, …)
 // backing the dropdowns that replaced free-text boxes. Read for everyone
 // signed in; grows implicitly as people save unlisted values.

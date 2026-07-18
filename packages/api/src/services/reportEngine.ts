@@ -228,6 +228,7 @@ export const SYSTEM_PRESETS: Omit<ReportPreset, 'id' | 'created_at' | 'updated_a
         { key: 'demographics', fields: ['full_name', 'preferred_name', 'date_of_birth', 'age', 'pronouns', 'primary_language', 'current_phase'], filters: {} },
         { key: 'allergies', fields: [], filters: {} },
         { key: 'medical_conditions', fields: ['name', 'status', 'notes'], filters: { status: ['active', 'improving', 'managed'] } },
+        { key: 'neurotype_attributes', fields: ['neurotype', 'kind', 'attribute', 'domain', 'notes'], filters: {} },
         { key: 'medications', fields: ['name', 'dose', 'route', 'frequency', 'schedule_times', 'instructions', 'critical', 'as_needed', 'with_food'], filters: { active: true } },
         { key: 'health_statuses', fields: ['name', 'category', 'status', 'onset_date', 'is_contagious', 'isolation_required', 'symptoms'], filters: { status: ['active', 'improving'] } },
         { key: 'care_plan', fields: [], filters: {} },

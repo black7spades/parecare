@@ -216,6 +216,63 @@ registerSection({
 
 registerSection({
   meta: {
+    key: 'neurotype_attributes',
+    label: 'Neurotype traits, needs and supports',
+    description: 'What a person\'s neurodivergence looks like for them: recorded traits, needs and supports',
+    category: 'health',
+    fields: [
+      { key: 'neurotype', label: 'Neurotype', type: 'text' },
+      { key: 'kind', label: 'Kind', type: 'enum', enumValues: ['trait', 'need', 'support'] },
+      { key: 'attribute', label: 'Item', type: 'text' },
+      { key: 'domain', label: 'Area of life', type: 'text' },
+      { key: 'notes', label: 'Notes', type: 'text' },
+    ],
+    filters: [
+      {
+        key: 'kind', label: 'Kind', type: 'multi-select', options: [
+          { value: 'trait', label: 'Traits' },
+          { value: 'need', label: 'Needs' },
+          { value: 'support', label: 'Supports' },
+        ],
+      },
+    ],
+    supportsDateRange: false,
+    crossProfileCapable: true,
+  },
+  async fetch({ profileIds, filters, db }) {
+    let query = db('neurotype_attributes as na')
+      .join('neurotype_attribute_catalogue as nac', 'na.catalogue_id', 'nac.id')
+      .join('medical_conditions as mc', 'mc.id', 'na.condition_id')
+      .join('care_profiles as cp', 'cp.id', 'mc.care_profile_id')
+      .whereIn('mc.care_profile_id', profileIds);
+    if (Array.isArray(filters['kind']) && filters['kind'].length) {
+      query = query.whereIn('nac.kind', filters['kind'] as string[]);
+    }
+    const rows = await query
+      .select(
+        'mc.care_profile_id',
+        'cp.full_name as _profile_name',
+        'mc.name as condition_name',
+        'nac.kind',
+        'nac.label',
+        'nac.domain',
+        'na.notes'
+      )
+      .orderBy([{ column: 'mc.name' }, { column: 'nac.kind' }, { column: 'na.sort_order' }]);
+    return rows.map((r) => ({
+      _profile_id: r.care_profile_id,
+      _profile_name: r._profile_name,
+      neurotype: r.condition_name,
+      kind: r.kind,
+      attribute: r.label,
+      domain: r.domain ? String(r.domain).replace(/_/g, ' ') : null,
+      notes: r.notes,
+    }));
+  },
+});
+
+registerSection({
+  meta: {
     key: 'health_statuses',
     label: 'Health statuses',
     description: 'Current and past health events: illnesses, injuries, recovery periods with symptom tracking',

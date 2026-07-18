@@ -8,6 +8,7 @@ import { resolveConditionCatalogueId } from '../routes/conditionCatalogue';
 import { resolveSubstanceCatalogueId, SUBSTANCE_CLASSES } from '../routes/substanceCatalogue';
 import { SUBSTANCE_STATUSES, SUBSTANCE_ROUTES } from '../routes/substanceUse';
 import { resolveSymptomCatalogueId } from '../routes/symptomCatalogue';
+import { resolveNeurotypeAttributeCatalogueId, ATTRIBUTE_KINDS } from '../routes/neurotypeAttributeCatalogue';
 import { linkAddressToProfile, syncProfileResidence, RESIDENCE_KIND } from './addresses';
 
 /**
@@ -221,6 +222,24 @@ const removeSubstanceSchema = z.object({
   substance: z.string().min(1).max(255),
 });
 
+// Neurotype traits, needs and supports: what a neurodivergence actually looks
+// like for this person. neurotype_name matches a recorded neurotype (e.g.
+// "Autism"); kind is trait, need or support; label is the item itself.
+const addNeurotypeAttributeSchema = z.object({
+  type: z.literal('add_neurotype_attribute'),
+  neurotype_name: z.string().min(1).max(255),
+  kind: z.enum(ATTRIBUTE_KINDS),
+  label: z.string().min(1).max(255),
+  notes: z.string().max(2000).optional().nullable(),
+});
+
+const removeNeurotypeAttributeSchema = z.object({
+  type: z.literal('remove_neurotype_attribute'),
+  neurotype_name: z.string().min(1).max(255),
+  kind: z.enum(ATTRIBUTE_KINDS),
+  label: z.string().min(1).max(255),
+});
+
 // The acute illness tracker: record a symptom on a condition, or move an
 // existing symptom's severity up or down as things progress.
 const addSymptomSchema = z.object({
@@ -342,6 +361,8 @@ export const actionSchema = z.discriminatedUnion('type', [
   addSubstanceSchema,
   updateSubstanceSchema,
   removeSubstanceSchema,
+  addNeurotypeAttributeSchema,
+  removeNeurotypeAttributeSchema,
   resolveConditionSchema,
   addSymptomSchema,
   updateSymptomSchema,
@@ -979,6 +1000,45 @@ async function executeOne(
       await db('substance_use').where({ id: record.id }).del();
       await audit(profileId, account.id, 'substance_use', `removed substance ${record.name}`);
       return `Removed ${record.name} from substance use.`;
+    }
+    case 'add_neurotype_attribute': {
+      const condition = await db('medical_conditions')
+        .where({ care_profile_id: profileId, category: 'neurotype' })
+        .whereRaw('lower(name) = lower(?)', [action.neurotype_name.trim()])
+        .first();
+      if (!condition) return `No neurotype called "${action.neurotype_name}" is on the record, so the ${action.kind} was not added.`;
+      const catalogueId = await resolveNeurotypeAttributeCatalogueId(action.kind, action.label.trim(), {
+        neurotype: condition.neurotype ?? null,
+        accountId: account.id,
+      }).catch(() => null);
+      if (!catalogueId) return `Could not record that ${action.kind}.`;
+      try {
+        await db('neurotype_attributes').insert({
+          condition_id: condition.id,
+          catalogue_id: catalogueId,
+          notes: action.notes ?? null,
+        });
+      } catch (err) {
+        if ((err as { code?: string }).code === '23505') return `"${action.label}" is already recorded as a ${action.kind} for ${condition.name}.`;
+        throw err;
+      }
+      await audit(profileId, account.id, 'conditions', `added ${action.kind} "${action.label}" to ${condition.name}`);
+      return `Recorded "${action.label}" as a ${action.kind} for ${condition.name}.`;
+    }
+    case 'remove_neurotype_attribute': {
+      const record = await db('neurotype_attributes as na')
+        .join('neurotype_attribute_catalogue as nac', 'na.catalogue_id', 'nac.id')
+        .join('medical_conditions as mc', 'mc.id', 'na.condition_id')
+        .where('mc.care_profile_id', profileId)
+        .where('nac.kind', action.kind)
+        .whereRaw('lower(mc.name) = lower(?)', [action.neurotype_name.trim()])
+        .whereRaw('lower(nac.label) = lower(?)', [action.label.trim()])
+        .select('na.id', 'nac.label as label', 'mc.name as condition_name')
+        .first();
+      if (!record) return `No ${action.kind} called "${action.label}" is recorded for ${action.neurotype_name}.`;
+      await db('neurotype_attributes').where({ id: record.id }).del();
+      await audit(profileId, account.id, 'conditions', `removed ${action.kind} "${record.label}" from ${record.condition_name}`);
+      return `Removed "${record.label}" from ${record.condition_name}.`;
     }
     case 'add_symptom': {
       const condition = await db('medical_conditions')
