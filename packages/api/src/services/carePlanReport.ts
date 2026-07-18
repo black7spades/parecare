@@ -71,28 +71,29 @@ const providerTypeText = (t: string | null): string => {
  */
 export function fallbackReport(input: ReportInput): string {
   const s = input.sources;
-  const first = s.name.split(' ').filter((w) => !/^(mr|mrs|ms|miss|dr|mx)\.?$/i.test(w))[0] ?? s.name;
+  // The friendly name the person actually goes by, not their full legal name.
+  const first = s.display_name || (s.name.split(' ').filter((w) => !/^(mr|mrs|ms|miss|dr|mx)\.?$/i.test(w))[0] ?? s.name);
   const lines: string[] = [titleBlock(input), ''];
 
   const live = s.conditions.filter((c) => c.status !== 'resolved' && !c.resolved_on);
   const mentionable = live.filter((c) => !isAcute(c) || acuteWorthMentioning(c));
   const neurotypes = live.filter((c) => c.category === 'neurotype');
 
-  // Goals and preferences
+  // Goals and preferences: a short aim, then the specific goals as a list so
+  // they stay scannable instead of a run-on "manage X, manage Y" sentence.
   lines.push('### Goals and preferences');
-  const goalEntries = input.content.sections['goals'] ?? [];
-  const goalTexts = goalEntries.map((g) => String(g.fields['goal'] ?? '')).filter(Boolean);
-  const goalSentence =
-    goalTexts.length > 0
-      ? `The chief aim for ${s.name} is maintaining functional independence and overall wellbeing. Specific objectives are to ${goalTexts
-          .map((g) => g.replace(/^./, (c) => c.toLowerCase()))
-          .join(', ')}.`
-      : `The chief aim for ${s.name} is maintaining functional independence and overall wellbeing.`;
-  const dietSentence =
-    s.dietary_requirements.length > 0
-      ? ` ${first} keeps to a ${s.dietary_requirements.map((d) => d.toLowerCase()).join(' and ')} diet, and services supporting them must respect that.`
-      : '';
-  lines.push(goalSentence + dietSentence, '');
+  const goalTexts = (input.content.sections['goals'] ?? [])
+    .map((g) => String(g.fields['goal'] ?? '').trim())
+    .filter(Boolean);
+  lines.push(`The chief aim for ${first} is to maintain their independence, wellbeing and quality of life.`);
+  if (goalTexts.length > 0) {
+    lines.push('The specific goals are:');
+    for (const g of goalTexts) lines.push(`* ${g}.`);
+  }
+  if (s.dietary_requirements.length > 0) {
+    lines.push('', `${first} keeps to a ${s.dietary_requirements.map((d) => d.toLowerCase()).join(' and ')} diet, and anyone supporting ${first} must respect that.`);
+  }
+  lines.push('');
 
   // Conditions
   if (mentionable.length > 0) {

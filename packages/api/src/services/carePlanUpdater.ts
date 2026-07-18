@@ -586,8 +586,12 @@ export function fallbackNarrative(src: NarrativeSources): Narrative {
   // of the "manage X" goals and strategies and given its own accommodation.
   const managed = liveConditions.filter((c) => c.category !== 'neurotype');
   const neurotypes = liveConditions.filter((c) => c.category === 'neurotype');
+  // An acute illness or injury is something to get over, not a lifelong goal.
+  const isAcute = (c: NarrativeSources['conditions'][number]) =>
+    c.condition_type === 'acute' || c.category === 'acute_illness' || c.category === 'injury';
+  const aim = (c: NarrativeSources['conditions'][number]) => (isAcute(c) ? `Recover from ${c.name}` : `Manage ${c.name}`);
   for (const c of managed) {
-    goals.push({ goal: `Manage ${c.name}`, basis: `Recorded condition${c.status ? `, currently ${c.status}` : ''}` });
+    goals.push({ goal: aim(c), basis: `Recorded condition${c.status ? `, currently ${c.status}` : ''}` });
   }
   for (const c of neurotypes) {
     goals.push({
@@ -629,7 +633,7 @@ export function fallbackNarrative(src: NarrativeSources): Narrative {
     const supporting = [...c.medications, ...c.treatments];
     return {
       condition: c.name,
-      goal: `Manage ${c.name}`,
+      goal: aim(c),
       strategy: parts.length > 0 ? parts.join('. ') : 'Monitoring. No linked medication or treatment is recorded yet.',
       method: steps.map((s, i) => `${i + 1}. ${s}`).join('\n'),
       supported_by: supporting.length > 0 ? supporting.join(', ') : null,
