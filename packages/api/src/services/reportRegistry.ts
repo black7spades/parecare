@@ -214,6 +214,61 @@ registerSection({
   },
 });
 
+const CARE_LOG_TYPES = [
+  'visit', 'medication', 'medical_appointment', 'phone_call',
+  'decision_made', 'concern_raised', 'observation', 'handover',
+] as const;
+const SENTIMENT_LABELS: Record<number, string> = {
+  1: 'Angry', 2: 'Sad', 3: 'Disappointed', 4: 'Neutral', 5: 'Happy', 6: 'Overjoyed',
+};
+
+registerSection({
+  meta: {
+    key: 'care_log',
+    label: 'Care log',
+    description: 'Logged visits, observations, handovers and concerns, with the emotional tone of each note',
+    category: 'care',
+    fields: [
+      { key: 'occurred_at', label: 'When', type: 'date' },
+      { key: 'entry_type', label: 'Type', type: 'text' },
+      { key: 'title', label: 'Title', type: 'text' },
+      { key: 'body', label: 'Note', type: 'text' },
+      { key: 'mood', label: 'Tone', type: 'text' },
+    ],
+    filters: [
+      {
+        key: 'entry_type', label: 'Type', type: 'multi-select',
+        options: CARE_LOG_TYPES.map((t) => ({ value: t, label: t.replace(/_/g, ' ') })),
+      },
+    ],
+    supportsDateRange: true,
+    crossProfileCapable: true,
+  },
+  async fetch({ profileIds, filters, dateRange, db }) {
+    let query = db('care_log_entries as cl')
+      .join('care_profiles as cp', 'cp.id', 'cl.care_profile_id')
+      .whereIn('cl.care_profile_id', profileIds);
+    if (Array.isArray(filters['entry_type']) && filters['entry_type'].length) {
+      query = query.whereIn('cl.entry_type', filters['entry_type'] as string[]);
+    }
+    if (dateRange) {
+      query = query.where('cl.occurred_at', '>=', dateRange.from).andWhere('cl.occurred_at', '<', `${dateRange.to}T23:59:59.999Z`);
+    }
+    const rows = await query
+      .select('cl.care_profile_id', 'cp.full_name as _profile_name', 'cl.occurred_at', 'cl.entry_type', 'cl.title', 'cl.body', 'cl.sentiment')
+      .orderBy('cl.occurred_at', 'desc');
+    return rows.map((r) => ({
+      _profile_id: r.care_profile_id,
+      _profile_name: r._profile_name,
+      occurred_at: r.occurred_at,
+      entry_type: r.entry_type,
+      title: r.title,
+      body: r.body,
+      mood: r.sentiment != null ? SENTIMENT_LABELS[r.sentiment] ?? '' : '',
+    }));
+  },
+});
+
 registerSection({
   meta: {
     key: 'neurotype_attributes',

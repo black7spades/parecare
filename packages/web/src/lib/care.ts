@@ -214,6 +214,10 @@ export interface CareLogEntry {
   entry_type: LogEntryType;
   title: string | null;
   body: string;
+  /** 1 (angry) to 6 (overjoyed), matching the task outcome scale. */
+  sentiment: number | null;
+  /** Where the rating came from: analysed by the assistant, or set by a person. */
+  sentiment_source: 'ai' | 'manual' | null;
   occurred_at: string;
   created_at: string;
 }

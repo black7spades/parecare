@@ -8,7 +8,9 @@ export class ApiError extends Error {
     public readonly status: number,
     public readonly code: string,
     message: string,
-    public readonly feature?: string
+    public readonly feature?: string,
+    /** The full parsed error body, for endpoints that return extra fields. */
+    public readonly data?: Record<string, unknown>
   ) {
     super(message);
   }
@@ -18,6 +20,7 @@ interface ApiBody {
   error?: string;
   code?: string;
   feature?: string;
+  [key: string]: unknown;
 }
 
 /**
@@ -65,7 +68,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
         .getState()
         .showUpgradePrompt(data.feature, data.error);
     }
-    throw new ApiError(res.status, data.code ?? 'ERROR', data.error ?? 'Request failed', data.feature);
+    throw new ApiError(res.status, data.code ?? 'ERROR', data.error ?? 'Request failed', data.feature, data);
   }
 
   return data as T;

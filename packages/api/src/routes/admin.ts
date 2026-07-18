@@ -5,6 +5,7 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { requireRole, roleAtLeast } from '../middleware/requireRole';
 import { archiveOldAdministrations } from '../services/marArchive';
+import { updateSettings, isMessageToneGuardEnabled } from '../config/settings';
 import { createAccount, composeDisplayName, AccountError } from '../services/accounts';
 import { createInvitation, revokeInvitation, resendInvitation, inviteUrl, effectiveStatus, InviteError } from '../services/invitations';
 import type { Account, AccountRole, Invitation, RightsTemplate } from '../types';
@@ -17,6 +18,22 @@ adminRouter.use(requireAuth, requireRole('admin'));
 adminRouter.post('/mar/archive', requireRole('super_admin'), async (_req, res) => {
   const archived = await archiveOldAdministrations();
   res.json({ archived });
+});
+
+// The message tone guard is compulsory by default; admins and super admins can
+// see its state and turn it off (it is instance-wide).
+adminRouter.get('/message-tone-guard', async (_req, res) => {
+  res.json({ enabled: isMessageToneGuardEnabled() });
+});
+
+adminRouter.patch('/message-tone-guard', async (req, res) => {
+  const enabled = (req.body as { enabled?: unknown } | undefined)?.enabled;
+  if (typeof enabled !== 'boolean') {
+    res.status(400).json({ error: 'enabled must be true or false', code: 'BAD_REQUEST' });
+    return;
+  }
+  await updateSettings({ 'messages.tone_guard': enabled ? 'on' : 'off' }, req.account?.id ?? null);
+  res.json({ enabled: isMessageToneGuardEnabled() });
 });
 
 const ACCOUNT_COLUMNS = [

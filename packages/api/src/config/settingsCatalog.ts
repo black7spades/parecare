@@ -33,6 +33,7 @@ const num = () => z.coerce.number();
 const enom = (values: readonly [string, ...string[]]) => z.enum(values);
 
 const AI_PROVIDERS = ['anthropic', 'openai', 'google', 'ollama', 'lmstudio', 'openai-compatible'] as const;
+const ON_OFF = ['on', 'off'] as const;
 const EMAIL_PROVIDERS = ['smtp', 'sendgrid', 'resend'] as const;
 const STORAGE_PROVIDERS = ['local', 's3'] as const;
 
@@ -47,6 +48,7 @@ export const SETTINGS_CATALOG: readonly SettingEntry[] = [
   { key: 'ai.tokens_free', group: 'ai', label: 'Token limit: Free plan', type: 'number', secret: false, envKey: 'AI_TOKENS_FREE', zod: num() },
   { key: 'ai.tokens_family', group: 'ai', label: 'Token limit: Family plan', type: 'number', secret: false, envKey: 'AI_TOKENS_FAMILY', zod: num() },
   { key: 'ai.tokens_professional', group: 'ai', label: 'Token limit: Professional plan', type: 'number', secret: false, envKey: 'AI_TOKENS_PROFESSIONAL', help: '-1 means unlimited.', zod: num() },
+  { key: 'messages.tone_guard', group: 'ai', label: 'Message tone guard', type: 'enum', enumValues: ON_OFF, secret: false, envKey: 'MESSAGE_TONE_GUARD', help: 'On by default. Checks each family message for a calm, care-focused tone before it posts, and asks the sender to revise anything hostile, off-topic, or dragging in old grievances. Only super admins and admins can turn this off.', zod: enom(ON_OFF) },
 
   // Email / SMTP
   { key: 'email.provider', group: 'email', label: 'Email provider', type: 'enum', enumValues: EMAIL_PROVIDERS, secret: false, envKey: 'EMAIL_PROVIDER', help: 'Only smtp is wired up today.', zod: enom(EMAIL_PROVIDERS) },

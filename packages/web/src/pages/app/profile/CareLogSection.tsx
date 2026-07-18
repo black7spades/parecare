@@ -5,7 +5,7 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
-import { LOG_ENTRY_TYPES, entryTypeLabel, type CareLogEntry } from '../../../lib/care';
+import { LOG_ENTRY_TYPES, SENTIMENTS, entryTypeLabel, sentimentEmoji, sentimentLabel, type CareLogEntry } from '../../../lib/care';
 
 /**
  * The care log: everything that happened, filterable by kind, words and
@@ -105,8 +105,19 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
       setBody('');
       setFormError('');
       invalidate();
+      // The tone is read in the background, so refresh shortly after to pick
+      // up the analysed sentiment once it lands.
+      setTimeout(invalidate, 4000);
     },
     onError: (err) => setFormError(err instanceof Error ? err.message : 'Failed to add entry'),
+  });
+
+  // Set or clear a person's own rating on one entry.
+  const setSentiment = useMutation({
+    mutationFn: (vars: { id: string; sentiment: number | null }) =>
+      api.patch(`/care-profiles/${profileId}/log/${vars.id}`, { sentiment: vars.sentiment }),
+    onSuccess: invalidate,
+    onError: (err) => setActionError(err instanceof Error ? err.message : 'Failed to set the tone'),
   });
 
   const editMutation = useMutation({
@@ -348,6 +359,11 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
                           <div className="flex items-center gap-2 mb-1">
                             <span className="badge bg-primary-50 text-primary text-xs">{entryTypeLabel(entry.entry_type)}</span>
                             <span className="text-xs text-muted">{format(new Date(entry.occurred_at), 'd MMM yyyy, HH:mm')}</span>
+                            <SentimentControl
+                              entry={entry}
+                              canEdit={canEdit}
+                              onSet={(sentiment) => setSentiment.mutate({ id: entry.id, sentiment })}
+                            />
                           </div>
                           {entry.title ? <p className="text-sm font-medium text-ink">{entry.title}</p> : null}
                           <p className="text-sm text-ink whitespace-pre-wrap">{entry.body}</p>
@@ -415,6 +431,52 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
         </div>
       </Modal>
     </div>
+  );
+}
+
+/**
+ * The emotional tone of an entry: an emoji read from the note by the
+ * assistant, or set by a carer. Read-only viewers see the emoji; anyone who
+ * can edit gets a small picker to set or correct it. A carer's choice always
+ * wins over the analysed one.
+ */
+function SentimentControl({
+  entry,
+  canEdit,
+  onSet,
+}: {
+  entry: CareLogEntry;
+  canEdit: boolean;
+  onSet: (sentiment: number | null) => void;
+}) {
+  const has = entry.sentiment != null;
+  const source =
+    entry.sentiment_source === 'manual' ? 'set by a carer' : entry.sentiment_source === 'ai' ? 'read by Pare' : '';
+  const title = has ? `Tone: ${sentimentLabel(entry.sentiment as number)}${source ? ` · ${source}` : ''}` : 'No tone recorded yet';
+
+  if (!canEdit) {
+    return has ? (
+      <span title={title} aria-label={title} className="text-sm leading-none">
+        {sentimentEmoji(entry.sentiment as number)}
+      </span>
+    ) : null;
+  }
+
+  return (
+    <select
+      aria-label="Tone for this entry"
+      title={title}
+      className="rounded border border-border bg-card px-1 py-0.5 text-xs text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+      value={has ? String(entry.sentiment) : ''}
+      onChange={(e) => onSet(e.target.value === '' ? null : Number(e.target.value))}
+    >
+      <option value="">Tone…</option>
+      {SENTIMENTS.map((s) => (
+        <option key={s.value} value={s.value}>
+          {s.emoji} {s.label}
+        </option>
+      ))}
+    </select>
   );
 }
 
