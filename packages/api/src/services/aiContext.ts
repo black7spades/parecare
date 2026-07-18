@@ -51,7 +51,7 @@ export async function buildProfileContext(
   const logSince = new Date(now.getTime() - LOG_DAYS * 24 * 3600 * 1000);
   const soon = new Date(now.getTime() + 30 * 24 * 3600 * 1000);
 
-  const [plan, meds, mar, tasks, circle, providers, questions, log, docs] = await Promise.all([
+  const [plan, meds, mar, latestDoseRows, tasks, circle, providers, questions, log, docs] = await Promise.all([
     db('care_plans').where({ care_profile_id: profileId }).first(),
     db('medications as m')
       .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
@@ -66,6 +66,15 @@ export async function buildProfileContext(
       .select('a.status', 'a.administered_at', 'a.dose_given', 'a.notes', 'a.administered_by_name', 'c.name as med_name')
       .orderBy('a.administered_at', 'desc')
       .limit(60),
+    // The single most recent dose ever recorded, so "the latest dose taken"
+    // is answerable even when it falls outside the recent window above.
+    db('medication_administrations as a')
+      .join('medications as m', 'a.medication_id', 'm.id')
+      .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
+      .where('a.care_profile_id', profileId)
+      .select('a.status', 'a.administered_at', 'a.dose_given', 'a.notes', 'a.administered_by_name', 'c.name as med_name')
+      .orderBy('a.administered_at', 'desc')
+      .limit(1),
     db('reminders')
       .where({ care_profile_id: profileId, completed: false })
       .where('next_due_at', '<=', soon)
@@ -231,16 +240,34 @@ export async function buildProfileContext(
     );
   }
 
-  if (mar.length) {
-    sections.push(
-      `## Medication administration record, last ${MAR_DAYS} days (newest first)\n` +
-        mar
-          .map(
-            (a) =>
-              `- ${fmtDate(a.administered_at, timeZone)}: ${a.med_name}${a.dose_given ? ` ${a.dose_given}` : ''} status ${a.status}${a.administered_by_name ? ` by ${a.administered_by_name}` : ''}${a.notes ? ` (note: ${a.notes})` : ''}`
-          )
-          .join('\n')
-    );
+  {
+    // Always present, so the assistant can tell "no doses recorded" apart from
+    // "I was not given the record". The latest dose ever recorded leads, then
+    // the recent detail; a dose older than the window still answers "the
+    // latest dose taken".
+    const fmtDose = (a: {
+      administered_at: string | Date | null;
+      med_name: string;
+      dose_given: string | null;
+      status: string;
+      administered_by_name: string | null;
+      notes: string | null;
+    }) =>
+      `${fmtDate(a.administered_at, timeZone)}: ${a.med_name}${a.dose_given ? ` ${a.dose_given}` : ''} status ${a.status}${a.administered_by_name ? ` by ${a.administered_by_name}` : ''}${a.notes ? ` (note: ${a.notes})` : ''}`;
+    const latest = latestDoseRows[0];
+    const lines = [`## Medication administration record (doses actually taken)`];
+    if (latest) {
+      lines.push(`Most recent dose taken — ${fmtDose(latest)}`);
+    } else {
+      lines.push('No doses have ever been recorded as taken for this person.');
+    }
+    if (mar.length) {
+      lines.push(`Doses in the last ${MAR_DAYS} days (newest first):`);
+      for (const a of mar) lines.push(`- ${fmtDose(a)}`);
+    } else if (latest) {
+      lines.push(`No doses have been recorded in the last ${MAR_DAYS} days.`);
+    }
+    sections.push(lines.join('\n'));
   }
 
   if (tasks.length) {
