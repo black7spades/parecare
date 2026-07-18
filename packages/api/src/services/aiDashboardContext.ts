@@ -22,6 +22,8 @@ interface ProfileSummaryData {
   staleQuestionCount: number;
   nextEvent: { title: string; next_due_at: Date } | null;
   lastLog: { entry_type: string; title: string | null; body: string; occurred_at: Date } | null;
+  /** The most recent dose recorded as taken, of any medication. */
+  lastDose: { med_name: string; dose_given: string | null; status: string; administered_at: Date; administered_by_name: string | null } | null;
 }
 
 export interface DashboardData {
@@ -97,7 +99,7 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
   const soon = new Date(now.getTime() + 48 * 3600 * 1000);
   const staleBefore = new Date(now.getTime() - STALE_QUESTION_DAYS * 24 * 3600 * 1000);
 
-  const [journeyRows, overdueRows, nextEventRows, lastLogRows, meds, adminRows, questionRows] = await Promise.all([
+  const [journeyRows, overdueRows, nextEventRows, lastLogRows, meds, adminRows, lastDoseRows, questionRows] = await Promise.all([
     db.raw(
       `SELECT j.care_profile_id, j.name, p.name AS phase_name
        FROM care_journeys j
@@ -137,6 +139,18 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
       .groupBy('medication_id')
       .select('medication_id')
       .count('id as count'),
+    // The single most recent dose recorded per person, so the homeboard
+    // assistant can answer "the latest dose taken" without opening a profile.
+    db.raw(
+      `SELECT DISTINCT ON (a.care_profile_id) a.care_profile_id, c.name AS med_name,
+              a.dose_given, a.status, a.administered_at, a.administered_by_name
+       FROM medication_administrations a
+       JOIN medications m ON a.medication_id = m.id
+       JOIN medication_catalogue c ON m.medication_catalogue_id = c.id
+       WHERE a.care_profile_id = ANY(?)
+       ORDER BY a.care_profile_id, a.administered_at DESC`,
+      [ids]
+    ),
     // Open questions where nothing has been said (question or response) for
     // 7 or more days.
     db.raw(
@@ -165,6 +179,17 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
     const arr = overdueMap.get(r.care_profile_id) ?? [];
     arr.push({ title: r.title, next_due_at: r.next_due_at });
     overdueMap.set(r.care_profile_id, arr);
+  }
+
+  const lastDoseMap = new Map<string, ProfileSummaryData['lastDose']>();
+  for (const d of lastDoseRows.rows as Array<{ care_profile_id: string; med_name: string; dose_given: string | null; status: string; administered_at: Date; administered_by_name: string | null }>) {
+    lastDoseMap.set(d.care_profile_id, {
+      med_name: d.med_name,
+      dose_given: d.dose_given,
+      status: d.status,
+      administered_at: d.administered_at,
+      administered_by_name: d.administered_by_name,
+    });
   }
 
   const adminCounts = new Map<string, number>(
@@ -228,6 +253,7 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
       staleQuestionCount,
       nextEvent: ev ? { title: ev.title, next_due_at: ev.next_due_at } : null,
       lastLog: lg ? { entry_type: lg.entry_type, title: lg.title, body: lg.body, occurred_at: lg.occurred_at } : null,
+      lastDose: lastDoseMap.get(p.id) ?? null,
     };
   });
 
@@ -266,6 +292,13 @@ function profileBlock(s: ProfileSummaryData, timeZone?: string | null): string {
             `${m.name}${m.dose ? ` (dose ${m.dose}${m.schedule_times.length ? `, scheduled at ${m.schedule_times.join(', ')}` : ''})` : m.schedule_times.length ? ` (scheduled at ${m.schedule_times.join(', ')})` : ''}`
         )
         .join('; ')}`
+    );
+  }
+  if (s.medications.length > 0) {
+    lines.push(
+      s.lastDose
+        ? `Latest dose taken: ${s.lastDose.med_name}${s.lastDose.dose_given ? ` ${s.lastDose.dose_given}` : ''} (${s.lastDose.status}) at ${fmtDate(s.lastDose.administered_at, timeZone)}${s.lastDose.administered_by_name ? ` by ${s.lastDose.administered_by_name}` : ''}`
+        : 'Latest dose taken: no doses have been recorded yet'
     );
   }
   if (s.overdueMedications.length > 0) {
