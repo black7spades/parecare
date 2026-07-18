@@ -11,6 +11,7 @@ import { useProfile } from './ProfileLayout';
 import { ImportExport } from '../../../components/ImportExport';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
+import { SortableTh } from '../../../components/data/SortableTh';
 import {
   DOSE_MEASURES,
   MED_ROUTES,
@@ -32,18 +33,25 @@ const earliestTime = (m: MedicationRecord): number => {
   return Math.min(...times.map((t) => { const [h, mm] = t.split(':'); return Number(h) * 60 + Number(mm); }));
 };
 const doseValue = (m: MedicationRecord): number => {
-  const n = parseFloat(String(m.dose ?? '').replace(/[^0-9.]/g, ''));
+  const n = parseFloat(String(m.dose_amount ?? m.dose ?? '').replace(/[^0-9.]/g, ''));
   return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
 };
 const byName = (a: MedicationRecord, b: MedicationRecord) => a.name.localeCompare(b.name);
+// Missing numbers sort last (ascending); the data view reverses for descending.
+const numAsc = (n: number | null): number => (n == null ? Number.POSITIVE_INFINITY : n);
 
 const fmtNum = (n: number): string => (Number.isInteger(n) ? String(n) : String(Number(n.toFixed(3))));
 
 const MED_SORTS: DataSort<MedicationRecord>[] = [
   { key: 'default', label: 'Active first, then name', compare: (a, b) => (Number(b.active) - Number(a.active)) || byName(a, b) },
-  { key: 'schedule', label: 'By time of day (through the day)', compare: (a, b) => (earliestTime(a) - earliestTime(b)) || byName(a, b) },
-  { key: 'dose', label: 'By dose (low to high)', compare: (a, b) => (doseValue(a) - doseValue(b)) || byName(a, b) },
-  { key: 'name', label: 'By name (A–Z)', compare: byName },
+  { key: 'name', label: 'Medication', compare: byName },
+  { key: 'units', label: 'Unit', compare: (a, b) => (numAsc(a.units_per_dose) - numAsc(b.units_per_dose)) || byName(a, b) },
+  { key: 'dose', label: 'Dose', compare: (a, b) => (doseValue(a) - doseValue(b)) || byName(a, b) },
+  { key: 'measure', label: 'Measure', compare: (a, b) => (a.dose_unit ?? '').localeCompare(b.dose_unit ?? '') || byName(a, b) },
+  { key: 'route', label: 'Route', compare: (a, b) => (a.route ?? '').localeCompare(b.route ?? '') || byName(a, b) },
+  { key: 'schedule', label: 'Schedule (time of day)', compare: (a, b) => (earliestTime(a) - earliestTime(b)) || byName(a, b) },
+  { key: 'packs', label: 'Packs on hand', compare: (a, b) => (numAsc(a.packs_on_hand) - numAsc(b.packs_on_hand)) || byName(a, b) },
+  { key: 'supply', label: 'Supply left', compare: (a, b) => (numAsc(totalOnHand(a)) - numAsc(totalOnHand(b))) || byName(a, b) },
 ];
 
 const SELECT = 'rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -209,19 +217,20 @@ export function MedicationsPage() {
                         checked={dv.allSelected} onChange={dv.toggleAll} />
                     </th>
                   ) : null}
-                  <th className="px-4 py-3 font-medium">Medication</th>
-                  <th className="px-4 py-3 font-medium">Unit</th>
-                  <th className="px-4 py-3 font-medium">Dose</th>
-                  <th className="px-4 py-3 font-medium">Route</th>
-                  <th className="px-4 py-3 font-medium">Schedule</th>
-                  <th className="px-4 py-3 font-medium">Packs on hand</th>
-                  <th className="px-4 py-3 font-medium">Supply left</th>
+                  <SortableTh label="Medication" sortKey="name" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
+                  <SortableTh label="Unit" sortKey="units" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
+                  <SortableTh label="Dose" sortKey="dose" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
+                  <SortableTh label="Measure" sortKey="measure" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
+                  <SortableTh label="Route" sortKey="route" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
+                  <SortableTh label="Schedule" sortKey="schedule" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
+                  <SortableTh label="Packs on hand" sortKey="packs" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
+                  <SortableTh label="Supply left" sortKey="supply" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
                   <th className="px-4 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {dv.view.length === 0 ? (
-                  <tr><td colSpan={canSelect ? 9 : 8} className="px-4 py-8 text-center text-muted">{meds.length === 0 ? 'No medications recorded yet.' : 'No medications match your search or filters.'}</td></tr>
+                  <tr><td colSpan={canSelect ? 10 : 9} className="px-4 py-8 text-center text-muted">{meds.length === 0 ? 'No medications recorded yet.' : 'No medications match your search or filters.'}</td></tr>
                 ) : dv.view.map((m) => {
                   // What's on hand overall: loose units plus unopened packs.
                   const remaining = totalOnHand(m);
@@ -238,7 +247,8 @@ export function MedicationsPage() {
                       {m.condition_name ? <div className="text-xs text-muted">For {m.condition_name}</div> : null}
                     </td>
                     <td className="px-4 py-3 text-muted">{m.units_per_dose != null ? fmtNum(m.units_per_dose) : '—'}</td>
-                    <td className="px-4 py-3 text-muted">{m.dose || '—'}</td>
+                    <td className="px-4 py-3 text-muted">{m.dose_amount || '—'}</td>
+                    <td className="px-4 py-3 text-muted">{m.dose_unit || '—'}</td>
                     <td className="px-4 py-3 text-muted">{m.route || '—'}</td>
                     <td className="px-4 py-3 text-muted">
                       <div>{regimenLine(m) || '—'}</div>
@@ -546,17 +556,18 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
             {supplyWord}.
           </p>
           <p className="text-sm text-ink leading-8">
-            We have{' '}
+            Unopened, we have{' '}
             <input className={inlineInput} aria-label="Unopened packs on hand" type="number" min="0" step="any" value={packs} onChange={(e) => setPacks(e.target.value)} />{' '}
-            unopened {packs.trim() === '1' ? containerWord : `${containerWord}s`} and{' '}
+            {packs.trim() === '1' ? containerWord : `${containerWord}s`}, plus{' '}
             <input className={inlineInput} aria-label="Amount left in the open pack" type="number" min="0" step="any" value={remaining} onChange={(e) => setRemaining(e.target.value)} />{' '}
-            {supplyWord} in the open {containerWord}.
+            {supplyWord} loose in an open {containerWord} ({`0 if none is open yet`}).
           </p>
           <p className="text-sm text-ink leading-8">
             Repeats due:{' '}
             <input className={`${inlineInput} w-40`} aria-label="Repeats due" type="date" value={repeatsDue} onChange={(e) => setRepeatsDue(e.target.value)} />
           </p>
           <p className="text-xs text-muted mt-1">
+            A {containerWord} stays unopened until a dose is taken from it; then it becomes the open {containerWord} and counts down.{' '}
             {typeMeta?.measured
               ? `Each dose given counts the ${supplyWord} on hand down by the dose volume.`
               : 'Each dose given counts the units on hand down by the number taken each time.'}{' '}

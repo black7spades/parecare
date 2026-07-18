@@ -78,6 +78,12 @@ shipping. Core rules: links navigate, buttons act (all actions use the
 action concept (Hide, Dismiss, Delete, Remove, Unlink each have a fixed
 meaning).
 
+**Every data table has sortable headers by default.** Any table listing
+records uses the shared `SortableTh` + `useDataView` + `DataToolbar` pattern,
+with every column sortable ascending/descending. This is the standing
+default: never ship or leave a data table with fixed, unsortable headers, and
+never wait to be asked for it.
+
 ## UI copy
 
 - **Never use parentheses in headings.** Name a thing one way and spell it

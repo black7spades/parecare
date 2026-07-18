@@ -399,6 +399,7 @@ function InviteModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const [pickedId, setPickedId] = useState('');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState('family');
@@ -410,6 +411,26 @@ function InviteModal({
   const [error, setError] = useState('');
   const [sentUrl, setSentUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // People already on PareCare this carer can invite without typing an email.
+  const { data: invitable } = useQuery({
+    queryKey: ['invitable-users', profileId],
+    queryFn: () => api.get<{ users: { id: string; display_name: string; email: string }[] }>(`/care-profiles/${profileId}/circle/invitable-users`),
+    enabled: open,
+  });
+  const existingUsers = invitable?.users ?? [];
+
+  const pickUser = (id: string) => {
+    setPickedId(id);
+    const u = existingUsers.find((x) => x.id === id);
+    if (u) {
+      setName(u.display_name);
+      setEmail(u.email);
+    } else {
+      setName('');
+      setEmail('');
+    }
+  };
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -423,6 +444,7 @@ function InviteModal({
         poa_type: poaType || null,
       }),
     onSuccess: (res) => {
+      setPickedId('');
       setEmail('');
       setName('');
       setDescription('');
@@ -488,8 +510,29 @@ function InviteModal({
           mutation.mutate();
         }}
       >
-        <Input label="Their name" value={name} onChange={(e) => setName(e.target.value)} required />
-        <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        {existingUsers.length > 0 ? (
+          <div>
+            <label htmlFor="invite-existing" className="block text-sm font-medium text-ink mb-1">
+              Someone already on PareCare
+            </label>
+            <select
+              id="invite-existing"
+              className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              value={pickedId}
+              onChange={(e) => pickUser(e.target.value)}
+            >
+              <option value="">A new person, invited by email</option>
+              {existingUsers.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.display_name} ({u.email})
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-muted">Pick someone already registered, or leave this to invite a new person below.</p>
+          </div>
+        ) : null}
+        <Input label="Their name" value={name} onChange={(e) => setName(e.target.value)} required readOnly={!!pickedId} />
+        <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required readOnly={!!pickedId} />
         <div>
           <label htmlFor="invite-role" className="block text-sm font-medium text-ink mb-1">
             Role
