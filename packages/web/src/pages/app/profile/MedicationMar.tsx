@@ -10,6 +10,7 @@ import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { MED_STATUSES, medStatusDescription, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
+import { coverMedDay } from '../../../lib/marCoverage';
 import { C64_PALETTE, contrastText } from '../../../components/ui/Avatar';
 import { AdministerModal } from './MedicationsPage';
 
@@ -153,9 +154,6 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
     return { expected, given, exceptions, missed: expected > 0 ? Math.max(0, expected - admins.length) : 0 };
   }, [meds, admins, days]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const findAdmin = (medId: string, slotISO: string): ChartAdmin | undefined =>
-    admins.find((a) => a.medication_id === medId && a.scheduled_for && new Date(a.scheduled_for).getTime() === new Date(slotISO).getTime());
-
   const label = period === 'day' ? format(anchor, 'EEEE d MMMM yyyy')
     : period === 'week' ? `${format(from, 'd MMM')} – ${format(to, 'd MMM yyyy')}`
     : format(anchor, 'MMMM yyyy');
@@ -176,9 +174,10 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
   const logAllDue = () => {
     const dayStr = format(anchor, 'yyyy-MM-dd');
     const entries: Entry[] = [];
-    for (const m of meds) for (const t of m.schedule_times ?? []) {
-      const iso = new Date(`${dayStr}T${t}:00`).toISOString();
-      if (new Date(iso) <= now && !findAdmin(m.id, iso)) entries.push({ medication_id: m.id, scheduled_for: iso, administered_at: iso, status: 'given' });
+    for (const m of meds) {
+      for (const sv of coverMedDay(m, dayStr, admins, now).slots) {
+        if (sv.past && !sv.covered) entries.push({ medication_id: m.id, scheduled_for: sv.iso, administered_at: sv.iso, status: 'given' });
+      }
     }
     if (entries.length) recordDose.mutate(entries);
   };
@@ -217,7 +216,7 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
       {meds.length === 0 ? (
         <p className="text-sm text-muted py-6 text-center">No active medications to chart.</p>
       ) : period === 'day' ? (
-        <DayGrid meds={meds} admins={admins} day={anchor} findAdmin={findAdmin} now={now} canAdminister={canAdminister}
+        <DayGrid meds={meds} admins={admins} day={anchor} now={now} canAdminister={canAdminister}
           onQuick={quick} onLogAllDue={logAllDue}
           onLogDetail={(med, slotISO) => {
             const fallback = isSameDay(anchor, now) ? now : new Date(`${format(anchor, 'yyyy-MM-dd')}T12:00:00`);
@@ -247,17 +246,18 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
 // to log it "given" instantly) plus any doses recorded that day as coloured
 // chips, and a "log" button for an ad-hoc or exception dose. Always renders,
 // even for medications with no scheduled times.
-function DayGrid({ meds, admins, day, findAdmin, now, canAdminister, onQuick, onLogAllDue, onLogDetail }: {
+function DayGrid({ meds, admins, day, now, canAdminister, onQuick, onLogAllDue, onLogDetail }: {
   meds: MedicationRecord[]; admins: ChartAdmin[]; day: Date; now: Date; canAdminister: boolean;
-  findAdmin: (medId: string, slotISO: string) => ChartAdmin | undefined;
   onQuick: (medId: string, scheduledFor: string) => void;
   onLogAllDue: () => void;
   onLogDetail: (med: MedicationRecord, slotISO: string | null) => void;
 }) {
   const dayStr = format(day, 'yyyy-MM-dd');
-  const slotISO = (t: string) => new Date(`${dayStr}T${t}:00`).toISOString();
   const chipBase = 'inline-flex items-center gap-1 h-7 rounded px-2 text-xs font-medium';
-  const anyDue = meds.some((m) => (m.schedule_times ?? []).some((t) => new Date(`${dayStr}T${t}:00`) <= now && !findAdmin(m.id, slotISO(t))));
+  const covers = meds.map((m) => ({ m, cover: coverMedDay(m, dayStr, admins, now) }));
+  // Something is due only when a passed slot has no dose covering it, so once
+  // every scheduled dose is given (however it was recorded) the button goes.
+  const anyDue = covers.some(({ cover }) => cover.slots.some((sv) => sv.past && !sv.covered));
 
   return (
     <div className="space-y-2">
@@ -265,35 +265,38 @@ function DayGrid({ meds, admins, day, findAdmin, now, canAdminister, onQuick, on
         <div><Button size="sm" onClick={onLogAllDue}>Log all due doses</Button></div>
       ) : null}
       <div className="card divide-y divide-border p-0">
-        {meds.map((m) => {
-          const scheduled = (m.schedule_times ?? []).map((t) => ({ t, iso: slotISO(t) }));
-          const usedIds = new Set(scheduled.map((s) => findAdmin(m.id, s.iso)?.id).filter(Boolean));
-          const extras = admins.filter((a) => a.medication_id === m.id && !usedIds.has(a.id));
+        {covers.map(({ m, cover }) => {
+          const { slots, extras } = cover;
           return (
             <div key={m.id} className="flex flex-wrap items-center gap-2 px-3 py-2">
               <div className="min-w-[9rem] mr-auto">
                 <div className="font-medium text-ink text-sm">{m.name}</div>
                 <div className="text-xs text-muted">{[m.dose, m.route].filter(Boolean).join(' · ')}</div>
               </div>
-              {scheduled.map(({ t, iso }) => {
-                const a = findAdmin(m.id, iso);
-                const past = new Date(`${dayStr}T${t}:00`) <= now;
-                if (a) return (
-                  <span key={iso} data-testid={`slot-${m.id}-${t}`} title={`${t} — ${statusLabel(a.status)}${a.notes ? ` — ${a.notes}` : ''}`} style={swatch(statusColorFor(a.status))} className={chipBase}>
-                    <span>{t}</span>{a.status === 'given' || a.status === 'self_administered' ? '✓' : statusLabel(a.status).slice(0, 3)}
-                  </span>
-                );
+              {slots.map((sv) => {
+                const a = sv.admin;
+                if (sv.covered && a) {
+                  // If a given dose covered this slot but was taken at another
+                  // time, note the real time so the record stays honest.
+                  const onSlot = a.scheduled_for && new Date(a.scheduled_for).getTime() === new Date(sv.iso).getTime();
+                  const when = onSlot ? '' : ` — given ${format(new Date(a.administered_at), 'HH:mm')}`;
+                  return (
+                    <span key={sv.iso} data-testid={`slot-${m.id}-${sv.t}`} title={`${sv.t} — ${statusLabel(a.status)}${when}${a.notes ? ` — ${a.notes}` : ''}`} style={swatch(statusColorFor(a.status))} className={chipBase}>
+                      <span>{sv.t}</span>{a.status === 'given' || a.status === 'self_administered' ? '✓' : statusLabel(a.status).slice(0, 3)}
+                    </span>
+                  );
+                }
                 // Future doses can't be logged yet; show them as upcoming.
-                if (!canAdminister || !past) return (
-                  <span key={iso} data-testid={`slot-${m.id}-${t}`} title={past ? t : `${t} — upcoming`} className="inline-flex items-center gap-1 h-7 rounded border border-dashed border-border px-2 text-xs text-muted">
-                    <span>{t}</span>{!past ? <span className="text-[10px]">soon</span> : null}
+                if (!canAdminister || !sv.past) return (
+                  <span key={sv.iso} data-testid={`slot-${m.id}-${sv.t}`} title={sv.past ? sv.t : `${sv.t} — upcoming`} className="inline-flex items-center gap-1 h-7 rounded border border-dashed border-border px-2 text-xs text-muted">
+                    <span>{sv.t}</span>{!sv.past ? <span className="text-[10px]">soon</span> : null}
                   </span>
                 );
                 return (
-                  <button key={iso} type="button" data-testid={`slot-${m.id}-${t}`} onClick={() => onQuick(m.id, iso)}
+                  <button key={sv.iso} type="button" data-testid={`slot-${m.id}-${sv.t}`} onClick={() => onQuick(m.id, sv.iso)}
                     style={{ borderColor: C64.lightRed, color: C64.lightRed }}
                     className="inline-flex items-center gap-1 h-7 rounded border border-dashed px-2 text-xs hover:bg-surface-2">
-                    <span>{t}</span>due
+                    <span>{sv.t}</span>due
                   </button>
                 );
               })}
