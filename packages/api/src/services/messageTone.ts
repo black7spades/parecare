@@ -1,4 +1,6 @@
 import { complete, isAiConfigured } from './aiProvider';
+import { db } from '../config/database';
+import { isMessageToneGuardEnabled } from '../config/settings';
 
 /**
  * The message tone guard. Family messaging about someone's care can turn
@@ -22,6 +24,61 @@ export type ToneVerdict =
 
 const TIMEOUT_MS = 12_000;
 
+/**
+ * A deterministic first pass that needs no model. It catches the clear-cut
+ * cases that must never slip through, no matter what the assistant is doing:
+ * strong swearing, slurs, threats, and hostility pointed at people. The AI
+ * layer handles everything subtler; this one is the guarantee.
+ */
+
+// Strong profanity, matched at word boundaries with common endings. Kept to
+// roots that are not substrings of ordinary words (so "class", "assist" and
+// the like are never caught).
+const PROFANITY = [
+  'fuck\\w*', 'motherfuck\\w*', 'shit\\w*', 'bullshit', 'cunt\\w*',
+  'pricks?', 'wankers?', 'bastards?', 'arseholes?', 'assholes?',
+  'dickheads?', 'bitch(?:es)?', 'bollocks', 'twats?', 'piss(?:ed|ing)? off',
+];
+
+// Slurs and clearly dehumanising terms. Always blocked.
+const SLURS = [
+  'retard\\w*', 'faggots?', 'fags?', 'niggers?', 'niggas?', 'spastics?', 'tranny',
+];
+
+// Hostility aimed at people rather than the care matter, and threats. These
+// need no swearing to be a problem.
+const HOSTILITY: RegExp[] = [
+  /\bi\s+(hate|despise|loathe|detest)\s+(you|y'?all|you\s+all|everyone|the\s+lot\s+of\s+you|these\s+people|this\s+family)\b/i,
+  /\bhate\s+you\s+all\b/i,
+  /\bshut\s+(up|the\s+f\w*)\b/i,
+  /\bgo\s+to\s+hell\b/i,
+  /\bkill\s+your\s?self\b/i,
+  /\b(i'?ll|i\s+will|i'?m\s+gonna|going\s+to)\s+(kill|hurt|destroy|end)\s+(you|him|her|them|the\s+lot)\b/i,
+  /\byou(?:'?re|\s+are)?\s+(all\s+)?(pathetic|useless|worthless|disgusting|scum|vermin|a\s+disgrace)\b/i,
+];
+
+const PROFANITY_RE = new RegExp(`\\b(?:${PROFANITY.join('|')})\\b`, 'i');
+const SLUR_RE = new RegExp(`\\b(?:${SLURS.join('|')})\\b`, 'i');
+
+/**
+ * Screen a message without the assistant. Returns a block reason when the
+ * message is clearly unacceptable, or null to let the AI layer decide.
+ */
+export function screenMessageTone(body: string, careName: string): { reason: string } | null {
+  const text = body.toLowerCase();
+  if (SLUR_RE.test(text) || HOSTILITY.some((re) => re.test(body))) {
+    return {
+      reason: `This message is aimed at people rather than ${careName}'s care. Please rewrite it around what needs to happen, without attacking anyone.`,
+    };
+  }
+  if (PROFANITY_RE.test(text)) {
+    return {
+      reason: `Please rewrite this without the strong language, focused on ${careName}'s care.`,
+    };
+  }
+  return null;
+}
+
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
     p,
@@ -43,7 +100,15 @@ function parseJsonObject(text: string): Record<string, unknown> | null {
 
 export async function reviewMessageTone(body: string, careName: string): Promise<ToneVerdict> {
   const text = body.trim();
-  if (!text || !isAiConfigured()) return { ok: true };
+  if (!text) return { ok: true };
+
+  // The deterministic backstop runs first and always, so blatant abuse is
+  // stopped even when the assistant is unconfigured, slow, or uncooperative.
+  const screened = screenMessageTone(text, careName);
+  if (screened) return { ok: false, reason: screened.reason, suggestion: '' };
+
+  // Everything subtler is left to the assistant, which fails open below.
+  if (!isAiConfigured()) return { ok: true };
 
   const system = [
     `You are the tone guard for PareCare, where a family coordinates the care of ${careName}.`,
@@ -76,4 +141,28 @@ export async function reviewMessageTone(body: string, careName: string): Promise
     console.warn('Message tone check skipped:', (err as Error).message);
     return { ok: true };
   }
+}
+
+/**
+ * Guard a piece of member-written text on a profile, honouring the instance
+ * setting. Shared by every communications surface (messages, questions,
+ * memory book) so they all enforce the same tone in the same way. Returns
+ * { ok: true } when the guard is off or the text is fine.
+ */
+export async function guardMessageTone(profileId: string, text: string): Promise<ToneVerdict> {
+  if (!isMessageToneGuardEnabled()) return { ok: true };
+  if (!text || !text.trim()) return { ok: true };
+  const profile = await db('care_profiles').where({ id: profileId }).first();
+  const careName = profile?.preferred_name ?? profile?.first_name ?? profile?.full_name ?? 'this person';
+  return reviewMessageTone(text, careName);
+}
+
+/** The 422 body every surface returns when the guard asks for a revision. */
+export function toneBlockBody(verdict: Extract<ToneVerdict, { ok: false }>) {
+  return {
+    error: verdict.reason,
+    code: 'TONE_REVISION_NEEDED',
+    reason: verdict.reason,
+    suggestion: verdict.suggestion,
+  };
 }

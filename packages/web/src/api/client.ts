@@ -84,7 +84,7 @@ async function uploadRequest<T>(path: string, formData: FormData): Promise<T> {
   const data = await readJson(res, path);
   if (!res.ok) {
     if (res.status === 401) useAuthStore.getState().clearAuth();
-    throw new ApiError(res.status, data.code ?? 'ERROR', data.error ?? 'Upload failed');
+    throw new ApiError(res.status, data.code ?? 'ERROR', data.error ?? 'Upload failed', data.feature, data);
   }
   return data as T;
 }

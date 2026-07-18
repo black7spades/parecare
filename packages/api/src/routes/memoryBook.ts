@@ -6,6 +6,7 @@ import { db } from '../config/database';
 import { getStorageConfig } from '../config/settings';
 import { requireAuth } from '../middleware/auth';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
+import { guardMessageTone, toneBlockBody } from '../services/messageTone';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -110,6 +111,17 @@ memoryBookRouter.post('/', requireAuth, upload.single('photo'), async (req, res)
       res.status(404).json({ error: 'Achievement not found', code: 'NOT_FOUND' });
       return;
     }
+  }
+
+  // The memory book is a shared communications surface, so it is tone-guarded
+  // like messages and questions.
+  const verdict = await guardMessageTone(
+    String(req.params['id']),
+    [parsed.data.title, parsed.data.body].filter(Boolean).join('\n')
+  );
+  if (!verdict.ok) {
+    res.status(422).json(toneBlockBody(verdict));
+    return;
   }
 
   let photo_url: string | null = null;

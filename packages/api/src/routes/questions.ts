@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth';
 import { requireFeature } from '../middleware/subscriptionGate';
 import { requireAccountRight } from '../middleware/accountRights';
 import { mediateQuestion } from '../services/ai';
+import { guardMessageTone, toneBlockBody } from '../services/messageTone';
 import type { CareProfile, OpenQuestion } from '../types';
 
 export const questionsRouter = Router({ mergeParams: true });
@@ -24,6 +25,16 @@ questionsRouter.post('/', requireAuth, async (req, res) => {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+
+  // Questions are a communications surface too, so the same tone guard applies.
+  const verdict = await guardMessageTone(
+    String(req.params['id']),
+    [parsed.data.title, parsed.data.body].filter(Boolean).join('\n')
+  );
+  if (!verdict.ok) {
+    res.status(422).json(toneBlockBody(verdict));
     return;
   }
 
