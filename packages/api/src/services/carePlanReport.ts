@@ -278,6 +278,11 @@ export async function composeReport(input: ReportInput): Promise<string> {
       'assume anything: refer only to what is recorded and advise asking the person about their own ' +
       'preferences for managing it. ' +
       '10) Never invent facts that are not in the data; every statement must trace to a supplied field. ' +
+      '11) ' +
+      (input.sources.self_managed
+        ? `This is ${input.sources.display_name}'s own plan; they manage their own care and read this themselves. Address them directly as "you" throughout ("Take Amlodipine 5mg with breakfast", "Book your physio when the pain flares"). Never write as if a carer is watching over them, and never tell them to report to or seek permission from anyone.`
+        : `${input.sources.display_name} is cared for by others who read this plan; write for those carers, referring to ${input.sources.display_name} by name.`) +
+      ' Keep the tone proportionate to what the record shows: do not imply crisis or constant vigilance for stable or routine matters. ' +
       'Sections to cover when data exists: goals and preferences; conditions; care strategies and ' +
       'interventions; medications; treatments; risks and considerations; review schedule; allergies; ' +
       'day-to-day needs and contacts. Return ONLY the document text.';

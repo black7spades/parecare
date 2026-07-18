@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { uploadFile, deleteFile } from './storage';
 import { composeReport, reportToHtml } from './carePlanReport';
+import { isSelfManaged } from './aiTone';
 
 /**
  * Event-driven incremental care-plan updater.
@@ -340,6 +341,10 @@ function diffOps(current: PlanContent, truth: Record<string, PlanEntry[]>, secti
 
 export interface NarrativeSources {
   name: string;
+  /** Preferred/first name for addressing the person. */
+  display_name: string;
+  /** True when the person runs their own care (address them directly). */
+  self_managed: boolean;
   conditions: Array<{
     name: string;
     status: string | null;
@@ -439,6 +444,12 @@ export async function gatherNarrativeSources(profileId: string): Promise<Narrati
   })();
   return {
     name: profile?.full_name ?? 'this person',
+    display_name: profile?.preferred_name ?? profile?.first_name ?? profile?.full_name ?? 'this person',
+    self_managed: isSelfManaged({
+      kind: profile?.kind ?? 'person',
+      contact_kind: profile?.contact_kind ?? null,
+      owner_relationship: profile?.owner_relationship ?? null,
+    }),
     conditions: conditions.map((c) => ({
       name: c.name,
       status: c.status ?? null,
@@ -568,16 +579,18 @@ function fallbackNarrative(src: NarrativeSources): Narrative {
     const parts: string[] = [];
     if (c.medications.length > 0) parts.push(`Medication: ${c.medications.join(', ')}`);
     if (c.treatments.length > 0) parts.push(`Therapy: ${c.treatments.join(', ')}`);
-    // A plain, ordered method a carer can follow, from the recorded ties.
+    // A plain, ordered method, addressed to whoever carries it out: the
+    // person themselves when they self-manage, otherwise their carers.
+    const self = src.self_managed;
     const steps: string[] = [];
     if (c.medications.length > 0) {
-      steps.push(`Give the medications for ${c.name} at their scheduled times: ${c.medications.join(', ')}`);
-      steps.push('Watch the person take each dose, then record it as given on the Medications record');
+      steps.push(`${self ? 'Take' : `Give ${src.display_name}`} the medications for ${c.name} at their scheduled times: ${c.medications.join(', ')}`);
+      steps.push(self ? 'Record each dose as taken on the Medications record' : `Watch ${src.display_name} take each dose, then record it as given on the Medications record`);
     }
     if (c.treatments.length > 0) {
       steps.push(`Carry out the treatments as recorded: ${c.treatments.join(', ')}`);
     }
-    steps.push(`Note any change in ${c.name} in the care log, and escalate if it worsens`);
+    steps.push(self ? `Note any change in ${c.name} in the care log, and seek help if it worsens` : `Note any change in ${c.name} in the care log, and escalate if it worsens`);
     return {
       condition: c.name,
       goal: `Manage ${c.name}`,
@@ -640,6 +653,12 @@ async function synthesizeNarrative(profileId: string): Promise<Record<NarrativeS
 
   try {
     const { isAiConfigured, complete } = await import('./aiProvider');
+    const { toneGuidance } = await import('./aiTone');
+    const profile = await db('care_profiles')
+      .where({ id: profileId })
+      .select('kind', 'contact_kind', 'owner_relationship', 'preferred_name', 'first_name', 'full_name')
+      .first();
+    const planName = profile?.preferred_name ?? profile?.first_name ?? profile?.full_name ?? src.name;
     if (isAiConfigured()) {
       const system =
         'You are the care plan editor for a care coordination platform. You synthesize the recorded ' +
@@ -669,7 +688,8 @@ async function synthesizeNarrative(profileId: string): Promise<Record<NarrativeS
         '{"goals":[{"goal":"...","basis":"..."}],' +
         '"strategies":[{"condition":"...","goal":"...","strategy":"...","method":"step-by-step how-to","supported_by":"..."}],' +
         '"risks":[{"risk":"...","level":"high|medium|low","source":"...","watch_for":"..."}],' +
-        '"review_triggers":[{"trigger":"...","action":"..."}]}';
+        '"review_triggers":[{"trigger":"...","action":"..."}]}\n' +
+        toneGuidance(profile ?? { kind: 'person', contact_kind: null, owner_relationship: null }, planName);
       const result = await complete(system, [{ role: 'user', content: JSON.stringify(src) }], 4096, 'chat');
       const jsonMatch = result.text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
