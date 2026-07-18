@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { isCurrentHealthCondition } from '../services/healthAlerts';
+import { toneGuidance } from '../services/aiTone';
 
 /**
  * Stored AI summaries for the overview cards of a care profile. A summary
@@ -25,11 +26,6 @@ overviewSummariesRouter.get('/', requireAuth, async (req, res) => {
     .select('card_key', 'content', 'source', 'generated_at', 'updated_at');
   res.json({ summaries });
 });
-
-async function careNameOf(profileId: string): Promise<string> {
-  const profile = await db('care_profiles').where({ id: profileId }).first();
-  return profile?.preferred_name ?? profile?.first_name ?? profile?.full_name ?? 'This person';
-}
 
 /**
  * The facts the model is allowed to summarise, per card. Everything is
@@ -162,11 +158,11 @@ const CARD_INSTRUCTIONS: Record<CardKey, string> = {
     'Summarise the key findings of the diagnosis and, most importantly, what needs and supports the person has. ' +
     'Write 2 to 4 sentences.',
   health:
-    'Summarise the current health picture: what is going on, what carers should watch for, and anything urgent. ' +
+    'Summarise the current health picture: what is going on and anything that genuinely needs attention. ' +
     'Write 2 to 3 sentences.',
   log:
-    'Summarise what has been happening lately based on the care log: patterns, notable events and anything a carer ' +
-    'picking up a shift should know. Write 2 to 4 sentences.',
+    'Summarise what has been happening lately based on the care log: patterns, notable events and anything ' +
+    'worth knowing. Write 2 to 4 sentences.',
 };
 
 async function upsertSummary(
@@ -209,7 +205,8 @@ overviewSummariesRouter.post('/:cardKey/generate', requireAuth, async (req, res)
     return;
   }
   const profileId = String(req.params['id']);
-  const careName = await careNameOf(profileId);
+  const profile = await db('care_profiles').where({ id: profileId }).first();
+  const careName = profile?.preferred_name ?? profile?.first_name ?? profile?.full_name ?? 'This person';
   const context = await buildContext(cardKey, profileId, careName);
   if (!context) {
     res.status(404).json({ error: 'Nothing recorded to summarise yet', code: 'NOT_FOUND' });
@@ -217,9 +214,8 @@ overviewSummariesRouter.post('/:cardKey/generate', requireAuth, async (req, res)
   }
   const systemPrompt =
     'You are Pare, the assistant of a care coordination platform, writing a short summary for a card on a ' +
-    "care profile's overview page. Your readers are family members and carers, not clinicians: plain, warm, " +
-    'factual language, no jargon, no markdown, no headings, no lists. Never invent facts that are not in the ' +
-    `context. ${CARD_INSTRUCTIONS[cardKey]}`;
+    "care profile's overview page. Use plain, warm, factual language, no jargon, no markdown, no headings, no " +
+    `lists. Never invent facts that are not in the context.\n${toneGuidance(profile ?? { kind: 'person', contact_kind: null, owner_relationship: null }, careName)}\n${CARD_INSTRUCTIONS[cardKey]}`;
   try {
     const result = await complete(systemPrompt, [{ role: 'user', content: context }], 1024, 'chat');
     const content = result.text.trim();

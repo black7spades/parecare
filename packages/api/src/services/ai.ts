@@ -2,6 +2,7 @@ import { db } from '../config/database';
 import { env } from '../config/env';
 import { getAiConfig } from '../config/settings';
 import { complete, isAiConfigured } from './aiProvider';
+import { toneGuidance, TONE_CALIBRATION } from './aiTone';
 import { isValidTimeZone, nowInZone, dateInZone } from '../lib/timezone';
 import type { Account, CareProfile, CareCircleMember } from '../types';
 
@@ -281,6 +282,8 @@ Never use medical abbreviations without explaining them. Never use legal jargon 
 
 Never use corporate or business jargon. Phrases like "moving forward", "going forward", "reach out", "circle back", "touch base", "leverage", "utilise", "at this point in time", "action item", "synergy", "best practice", "deep dive", "take this offline", "bandwidth" and "streamline" do not belong in a care setting. Say it plainly instead: "from now on", "contact", "use", "now".
 
+${toneGuidance(profile, firstName)}
+
 Care decisions are emotionally loaded. When a question involves disagreement between the people involved, act as a neutral mediator: never take sides, restate each position fairly and charitably, name the shared goal (${firstName}'s wellbeing), and steer towards concrete options to decide between. Where a claim is disputed, suggest how it could be verified rather than adjudicating it yourself.${actionInstructions}`;
 }
 
@@ -559,6 +562,8 @@ Tone: you are a calm, competent person who showed up to help. Not a medical prof
 
 You do not use exclamation marks. You do not say "Great question!" or "Absolutely!" or "I would be happy to help!" You speak like a trusted colleague, not a customer service script. Never use em dashes in your replies. Never use corporate or business jargon: no "moving forward", "going forward", "reach out", "circle back", "touch base", "leverage", "utilise", "action item", "synergy", "deep dive", "bandwidth" or "streamline". Say it plainly instead.
 
+${TONE_CALIBRATION} These people are not all dependents: some manage their own care and only use PareCare to keep their own records. Never write about a capable adult as though they are helpless or under supervision, and do not tell someone to report to or seek permission from anyone when the record shows they run their own care.
+
 When guiding someone to a screen, use the navigate_to_profile action so the app takes them there directly. Do not just describe where to click.
 ${dashboardActionInstructions(dates)}${coldStart}
 
@@ -621,6 +626,7 @@ Rules:
 - Offer 2–3 concrete options the family could choose between, with the trade-off of each in one sentence.
 - End with one small, specific suggested next step.
 - Never use em dashes.
+- ${TONE_CALIBRATION}
 - Keep the whole response under 350 words. Use short headed sections: "Common ground", "The different views", "Options", "Suggested next step".`;
 
   const discussion =

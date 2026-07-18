@@ -1,6 +1,7 @@
 import { db } from '../config/database';
 import { getSection, getAllSections, type ReportSectionMeta } from './reportRegistry';
 import { complete, isAiConfigured } from './aiProvider';
+import { TONE_CALIBRATION } from './aiTone';
 
 export interface ReportSectionConfig {
   key: string;
@@ -103,6 +104,7 @@ async function generateNarrative(sections: ReportSectionResult[], customPrompt?:
     '- For multi-profile reports, identify cross-cutting patterns (e.g. multiple people with the same illness).',
     '- Structure your response with clear headings.',
     '- Be factual. Do not speculate beyond what the data shows.',
+    `- ${TONE_CALIBRATION}`,
     '- Keep the summary concise but thorough.',
     customPrompt ? `\nAdditional instructions from the report creator: ${customPrompt}` : '',
   ].filter(Boolean).join('\n');
