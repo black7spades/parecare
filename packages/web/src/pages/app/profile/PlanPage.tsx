@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -42,6 +42,14 @@ import {
  * changelog, the version history, sign-off, signatures, reviewer
  * invitations and access control.
  */
+
+interface GenerationJob {
+  id: string;
+  status: 'running' | 'succeeded' | 'failed';
+  error: string | null;
+  result: { status: string | null; applied: number };
+  version: PlanVersionMeta | null;
+}
 
 const SECTION_MANAGE_LINKS: Record<string, { to: string; label: string }> = {
   allergies: { to: '../allergies', label: 'Allergies page' },
@@ -102,6 +110,16 @@ export function PlanPage() {
     queryFn: () => api.get<{ changes: PlanChange[] }>(`/care-profiles/${profile.id}/plan/changelog`),
   });
 
+  // Generation runs in the background; poll its job while one is running, so a
+  // slow model (or a page reload mid-run) never leaves the page hanging.
+  const { data: genStatus } = useQuery({
+    queryKey: ['plan-gen-status', profile.id],
+    queryFn: () => api.get<{ job: GenerationJob | null }>(`/care-profiles/${profile.id}/plan/versions/generate/status`),
+    refetchInterval: (query) => (query.state.data?.job?.status === 'running' ? 2000 : false),
+  });
+  const genJob = genStatus?.job ?? null;
+  const jobRunning = genJob?.status === 'running';
+
   const versions = versionData?.versions ?? [];
   const permissions: PlanPermissions = versionData?.permissions ?? {
     view: true,
@@ -122,14 +140,35 @@ export function PlanPage() {
   };
 
   const generateMutation = useMutation({
-    mutationFn: () => api.post(`/care-profiles/${profile.id}/plan/versions/generate`),
-    onSuccess: () => {
+    mutationFn: () => api.post<{ job: GenerationJob }>(`/care-profiles/${profile.id}/plan/versions/generate`),
+    onSuccess: (res) => {
       setError('');
       setGenerateOpen(false);
-      invalidate();
+      // Seed the poller with the running job so the spinner shows at once.
+      queryClient.setQueryData(['plan-gen-status', profile.id], { job: res.job });
+      void queryClient.invalidateQueries({ queryKey: ['plan-gen-status', profile.id] });
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not update the care plan.'),
   });
+
+  // React only when a run we are watching finishes: refresh the plan on
+  // success, surface the reason on failure. A pre-existing completed job on
+  // first load is ignored (prev starts null).
+  const prevJobStatus = useRef<string | null>(null);
+  useEffect(() => {
+    const status = genJob?.status ?? null;
+    const prev = prevJobStatus.current;
+    prevJobStatus.current = status;
+    if (prev !== 'running') return;
+    if (status === 'succeeded') {
+      setError('');
+      invalidate();
+    } else if (status === 'failed') {
+      setError(genJob?.error || 'Care plan generation did not finish. Please try again.');
+      void queryClient.invalidateQueries({ queryKey: ['plan-pending', profile.id] });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genJob?.status, genJob?.id]);
   const approveMutation = useMutation({
     mutationFn: (versionId: string) =>
       api.post(`/care-profiles/${profile.id}/plan/versions/${versionId}/approve`),
@@ -195,6 +234,12 @@ export function PlanPage() {
           </Button>
         </Link>
       </div>
+      {jobRunning ? (
+        <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary-50 dark:bg-primary-900/20 px-3 py-2 text-sm text-ink">
+          <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden />
+          Generating the care plan. This can take a minute on a self-hosted model; you can leave this page and come back.
+        </div>
+      ) : null}
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
       {!hasVersions ? (
@@ -266,7 +311,7 @@ export function PlanPage() {
                   </p>
                 </div>
                 {permissions.edit && canEdit ? (
-                  <Button size="sm" loading={generateMutation.isPending} onClick={() => generateMutation.mutate()}>
+                  <Button size="sm" loading={generateMutation.isPending || jobRunning} onClick={() => generateMutation.mutate()}>
                     Update care plan
                   </Button>
                 ) : null}
@@ -323,7 +368,7 @@ export function PlanPage() {
           profileId={profile.id}
           careName={careName}
           gaps={pendingData?.baseline_gaps ?? { allergies: false, emergency_contacts: false, gp: false, needs: false }}
-          generating={generateMutation.isPending}
+          generating={generateMutation.isPending || jobRunning}
           onGenerate={() => generateMutation.mutate()}
           onClose={() => setGenerateOpen(false)}
         />
@@ -652,7 +697,7 @@ function ContentSections({ content }: { content: PlanContent }) {
                   {entries.map((e: PlanEntry) => (
                     <tr key={e.key}>
                       {fieldNames.map((f) => (
-                        <td key={f} className="py-1.5 pr-3 text-ink">
+                        <td key={f} className="py-1.5 pr-3 text-ink align-top whitespace-pre-line">
                           {fieldText(e.fields[f])}
                         </td>
                       ))}

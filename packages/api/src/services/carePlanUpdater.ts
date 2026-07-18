@@ -510,6 +510,10 @@ const narrativeSchema = z.object({
         condition: z.string().max(255).optional().nullable(),
         goal: z.string().min(1).max(500),
         strategy: z.string().min(1).max(1000),
+        // The step-by-step method a carer follows to carry the strategy out:
+        // who does what, when, how, with what, and what to check. This is what
+        // makes the plan an instruction manual rather than a summary.
+        method: z.string().max(2000).optional().nullable(),
         supported_by: z.string().max(500).optional().nullable(),
       })
     )
@@ -564,10 +568,21 @@ function fallbackNarrative(src: NarrativeSources): Narrative {
     const parts: string[] = [];
     if (c.medications.length > 0) parts.push(`Medication: ${c.medications.join(', ')}`);
     if (c.treatments.length > 0) parts.push(`Therapy: ${c.treatments.join(', ')}`);
+    // A plain, ordered method a carer can follow, from the recorded ties.
+    const steps: string[] = [];
+    if (c.medications.length > 0) {
+      steps.push(`Give the medications for ${c.name} at their scheduled times: ${c.medications.join(', ')}`);
+      steps.push('Watch the person take each dose, then record it as given on the Medications record');
+    }
+    if (c.treatments.length > 0) {
+      steps.push(`Carry out the treatments as recorded: ${c.treatments.join(', ')}`);
+    }
+    steps.push(`Note any change in ${c.name} in the care log, and escalate if it worsens`);
     return {
       condition: c.name,
       goal: `Manage ${c.name}`,
       strategy: parts.length > 0 ? parts.join('. ') : 'Monitoring. No linked medication or treatment is recorded yet.',
+      method: steps.map((s, i) => `${i + 1}. ${s}`).join('\n'),
       supported_by:
         src.dietary_requirements.length > 0 ? `Dietary compliance: ${src.dietary_requirements.join(', ')}` : null,
     };
@@ -629,14 +644,20 @@ async function synthesizeNarrative(profileId: string): Promise<Record<NarrativeS
       const system =
         'You are the care plan editor for a care coordination platform. You synthesize the recorded ' +
         'facts into the clinical narrative of a care plan meeting frameworks like the Australian ' +
-        "Government's Support at Home program. Requirements: " +
+        "Government's Support at Home program. The plan is an INSTRUCTION MANUAL: it must tell a carer " +
+        'not just what to do, but exactly HOW to do it, so someone who has never met the person could ' +
+        'follow it. Requirements: ' +
         "1) GOALS: state the person's goals, preferences and choices up front, specific to them, " +
         'never generic (e.g. "maintain functional independence with the walking frame", "manage ' +
         'Hypertension", "enjoy a low-salt diet"). ' +
-        '2) STRATEGIES: connect each condition to the services, medications or treatments that address ' +
-        'it and say HOW the goal is pursued (e.g. "To meet the goal of Hypertension management, the ' +
-        'primary strategy is pharmacological intervention (Amlodipine, Perindopril) supported by ' +
-        'dietary compliance (low salt)"). ' +
+        '2) STRATEGIES: for each condition or goal, name the strategy (the services, medications or ' +
+        'treatments that address it), and give a "method": the step-by-step way a carer carries it out. ' +
+        'The method must be concrete and practical, ordered steps where it helps, naming who does what, ' +
+        'when, how, with what, and what to check or watch for afterwards (e.g. method for a morning ' +
+        'medication round: "1. Wash hands. 2. Check the blister pack for the 08:00 dose. 3. Give ' +
+        'Amlodipine 5mg and Perindopril 4mg with a full glass of water while seated. 4. Watch them ' +
+        'swallow. 5. Record the dose as given. 6. Check both ankles for swelling and note anything ' +
+        'unusual"). Use only the medications, doses, routes and schedules actually in the record. ' +
         '3) RISKS: proactively infer risks from the allergies, conditions, medications and recent care ' +
         'log entries, each with a level (high/medium/low), its source, and what carers should watch ' +
         'for (e.g. oedema associated with Amlodipine intake requires vigilance during morning routines). ' +
@@ -644,9 +665,9 @@ async function synthesizeNarrative(profileId: string): Promise<Record<NarrativeS
         'standard 12-month review (hospital admission, fall, new diagnosis, a condition status change, ' +
         'a breach of a dietary requirement, a significant care log incident). ' +
         'Write in plain language a family carer can follow; refer to the person by name; never invent ' +
-        'facts that are not in the data. Return ONLY strict JSON, no prose, matching: ' +
+        'facts, medications or doses that are not in the data. Return ONLY strict JSON, no prose, matching: ' +
         '{"goals":[{"goal":"...","basis":"..."}],' +
-        '"strategies":[{"condition":"...","goal":"...","strategy":"...","supported_by":"..."}],' +
+        '"strategies":[{"condition":"...","goal":"...","strategy":"...","method":"step-by-step how-to","supported_by":"..."}],' +
         '"risks":[{"risk":"...","level":"high|medium|low","source":"...","watch_for":"..."}],' +
         '"review_triggers":[{"trigger":"...","action":"..."}]}';
       const result = await complete(system, [{ role: 'user', content: JSON.stringify(src) }], 4096, 'chat');
@@ -684,6 +705,7 @@ async function synthesizeNarrative(profileId: string): Promise<Record<NarrativeS
           condition: s.condition ?? null,
           goal: s.goal,
           strategy: s.strategy,
+          method: s.method ?? null,
           supported_by: s.supported_by ?? null,
         },
       }))

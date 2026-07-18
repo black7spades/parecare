@@ -251,10 +251,93 @@ carePlanRouter.get('/versions/pending', requireAuth, async (req, res) => {
   });
 });
 
+// A generation job left running longer than this is treated as failed: the
+// process almost certainly restarted mid-run, so it will never finish.
+const GENERATION_STALE_MS = 10 * 60 * 1000;
+
+/** The most recent generation job for a profile, with staleness applied. */
+async function latestJob(profileId: string): Promise<Record<string, unknown> | null> {
+  const job = await db('care_plan_generation_jobs')
+    .where({ care_profile_id: profileId })
+    .orderBy('created_at', 'desc')
+    .first();
+  if (!job) return null;
+  if (job.status === 'running' && Date.now() - new Date(job.updated_at).getTime() > GENERATION_STALE_MS) {
+    await db('care_plan_generation_jobs')
+      .where({ id: job.id })
+      .update({ status: 'failed', error: 'Generation timed out.', updated_at: db.fn.now() });
+    return { ...job, status: 'failed', error: 'Generation timed out.' };
+  }
+  return job;
+}
+
+/** Serialise a job for the client, resolving its result version if any. */
+async function jobPayload(job: Record<string, unknown>): Promise<Record<string, unknown>> {
+  let version = null;
+  if (job['result_version_id']) {
+    const v = await db('care_plan_versions').where({ id: job['result_version_id'] }).first();
+    if (v) version = versionMeta(v);
+  }
+  return {
+    id: job['id'],
+    status: job['status'],
+    error: job['error'] ?? null,
+    result: { status: job['result_status'] ?? null, applied: job['applied_count'] ?? 0 },
+    version,
+  };
+}
+
 /**
- * Generate the plan. First run assembles version 1 as the baseline;
- * afterwards it applies only the pending events as a minimal delta —
- * the full document is never regenerated.
+ * Run one generation to completion in the background, recording the outcome on
+ * its job row. Never rejects: any failure is captured so the poller sees it.
+ */
+async function runGeneration(jobId: string, profileId: string, actorId: string | null): Promise<void> {
+  try {
+    const existing = await db('care_plan_versions').where({ care_profile_id: profileId }).first();
+    if (!existing) {
+      const version = await generateBaseline(profileId, actorId);
+      logPlanAudit(profileId, actorId, 'created', `Care plan version ${version.version} generated`);
+      await db('care_plan_generation_jobs').where({ id: jobId }).update({
+        status: 'succeeded',
+        result_version_id: version.id,
+        result_status: version.status,
+        applied_count: version.applied_event_ids.length,
+        updated_at: db.fn.now(),
+      });
+      return;
+    }
+    const result = await applyPending(profileId, actorId);
+    if (result.version) {
+      logPlanAudit(
+        profileId,
+        actorId,
+        'created',
+        `Care plan version ${result.version.version} ${result.status === 'awaiting_signoff' ? 'awaiting sign-off' : 'published'}`
+      );
+    }
+    await db('care_plan_generation_jobs').where({ id: jobId }).update({
+      status: 'succeeded',
+      result_version_id: result.version?.id ?? null,
+      result_status: result.status,
+      applied_count: result.applied,
+      updated_at: db.fn.now(),
+    });
+  } catch (err) {
+    console.error('Care plan generation failed:', err);
+    await db('care_plan_generation_jobs')
+      .where({ id: jobId })
+      .update({ status: 'failed', error: (err as Error).message?.slice(0, 500) ?? 'Generation failed.', updated_at: db.fn.now() })
+      .catch(() => {});
+  }
+}
+
+/**
+ * Start generating the plan and return immediately. The work runs in the
+ * background so the request never sits open long enough for a proxy to kill
+ * it; the client polls the status endpoint below. First run assembles version
+ * 1 as the baseline; afterwards it applies only the pending events as a
+ * minimal delta. If a run is already in flight, that one is returned rather
+ * than starting a second.
  */
 carePlanRouter.post('/versions/generate', requireAuth, async (req, res) => {
   const perms = await planPermissions(req);
@@ -264,26 +347,30 @@ carePlanRouter.post('/versions/generate', requireAuth, async (req, res) => {
   }
   const profileId = String(req.params['id']);
   const actorId = req.account!.id;
-  const existing = await db('care_plan_versions').where({ care_profile_id: profileId }).first();
-  if (!existing) {
-    const version = await generateBaseline(profileId, actorId);
-    logPlanAudit(profileId, actorId, 'created', `Care plan version ${version.version} generated`);
-    res.status(201).json({ result: { status: version.status, applied: version.applied_event_ids.length }, version: versionMeta(version) });
+
+  const current = await latestJob(profileId);
+  if (current && current['status'] === 'running') {
+    res.status(202).json({ job: await jobPayload(current) });
     return;
   }
-  const result = await applyPending(profileId, actorId);
-  if (result.version) {
-    logPlanAudit(
-      profileId,
-      actorId,
-      'created',
-      `Care plan version ${result.version.version} ${result.status === 'awaiting_signoff' ? 'awaiting sign-off' : 'published'}`
-    );
+
+  const [job] = await db('care_plan_generation_jobs')
+    .insert({ care_profile_id: profileId, account_id: actorId, status: 'running' })
+    .returning('*');
+  // Fire and forget: the job row carries the outcome.
+  void runGeneration(job.id, profileId, actorId);
+  res.status(202).json({ job: await jobPayload(job) });
+});
+
+/** Poll the state of the latest generation run. */
+carePlanRouter.get('/versions/generate/status', requireAuth, async (req, res) => {
+  const perms = await planPermissions(req);
+  if (!perms.view) {
+    forbidden(res, 'view');
+    return;
   }
-  res.status(result.version ? 201 : 200).json({
-    result: { status: result.status, applied: result.applied },
-    version: result.version ? versionMeta(result.version) : null,
-  });
+  const job = await latestJob(String(req.params['id']));
+  res.json({ job: job ? await jobPayload(job) : null });
 });
 
 /**
