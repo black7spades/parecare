@@ -11,6 +11,7 @@ import { gatherHealthAlerts } from '../services/healthAlerts';
 import { buildProfileContext } from '../services/aiContext';
 import { extractDashboardActions, splitDashboardActions, executeDashboardActions } from '../services/aiDashboardActions';
 import { executeCrossProfileActions } from '../services/aiActions';
+import { replyIntendsToAct, repairActionText, dashboardActionReference } from '../services/actionRepair';
 import { getCareAccess } from '../middleware/subscriptionGate';
 import type { AiConversation, CareProfile } from '../types';
 
@@ -160,12 +161,14 @@ aiDashboardRouter.post(
     // note it is open, so Pare can answer in detail and act on them directly
     // while still seeing everyone else.
     let context = dashboardContext;
+    let openProfileName: string | null = null;
     if (parsed.data.current_profile_id) {
       const access = await getCareAccess(req.account!, parsed.data.current_profile_id);
       const profile = access
         ? await db<CareProfile>('care_profiles').where({ id: parsed.data.current_profile_id }).first()
         : null;
       if (access && profile) {
+        openProfileName = profile.full_name;
         const full = await buildProfileContext(profile, access, timeZone);
         context = `${dashboardContext}\n\n## Currently open profile\nThe user is viewing ${profile.full_name}'s profile right now. When they say "log this", "record that" or otherwise do not name anyone, they mean ${profile.full_name}. Here is ${profile.full_name}'s full record:\n\n${full}`;
       }
@@ -194,7 +197,20 @@ aiDashboardRouter.post(
     // Carry out any actions the assistant proposed. Navigation is passed
     // through for the web app to perform; profile creation happens here;
     // cross-profile logging resolves each named profile and writes to it.
-    const { cleanedReply, actions, parseErrors } = extractDashboardActions(result.reply);
+    const extracted = extractDashboardActions(result.reply);
+    const { cleanedReply } = extracted;
+    let { actions, parseErrors } = extracted;
+    // If the reply meant to record something but emitted no block, ask once
+    // more for just the JSON (weak models often describe the action instead of
+    // emitting it). The open profile's name lets it resolve "log this".
+    if (actions.length === 0 && parseErrors.length === 0 && replyIntendsToAct(result.reply)) {
+      const repaired = await repairActionText(parsed.data.content, dashboardActionReference(openProfileName));
+      if (repaired && repaired.trim().toUpperCase() !== 'NONE') {
+        const re = extractDashboardActions(repaired);
+        actions = re.actions;
+        parseErrors = re.parseErrors;
+      }
+    }
     const { single, cross } = splitDashboardActions(actions);
     const { outcomes, clientActions, confirmations } = await executeDashboardActions(single, req.account!);
     const crossOutcomes = await executeCrossProfileActions(cross, req.account!, timeZone);

@@ -650,6 +650,10 @@ export function extractActionBlocks<T>(reply: string, schema: z.ZodType<T, z.Zod
     cleanedReply = cleanedReply.slice(0, dangling);
     parseErrors.push('The reply was cut off before this could be recorded, so nothing was saved. Please ask again.');
   }
+  // A model sometimes fakes the app's own confirmation lines ("✔ Logged ...")
+  // in its prose. Those are never the model's to write, and the real ones are
+  // appended by the route after execution, so drop any the model invented.
+  cleanedReply = cleanedReply.replace(/^[ \t]*[✔✓☑].*(?:\n|$)/gm, '');
   cleanedReply = cleanedReply.replace(/\n{3,}/g, '\n\n').trim();
   return { cleanedReply, actions, parseErrors };
 }

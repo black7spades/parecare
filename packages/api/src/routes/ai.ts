@@ -8,6 +8,7 @@ import { sendMessage } from '../services/ai';
 import type { ChatMessage } from '../services/ai';
 import { buildProfileContext } from '../services/aiContext';
 import { extractActions, executeActions } from '../services/aiActions';
+import { replyIntendsToAct, repairActionText, PROFILE_ACTION_REFERENCE } from '../services/actionRepair';
 import type { AiConversation, CareProfile } from '../types';
 
 export const aiRouter = Router({ mergeParams: true });
@@ -161,7 +162,20 @@ aiRouter.post(
 
     // Carry out any actions the assistant proposed, then show what happened
     // instead of the raw action blocks.
-    const { cleanedReply, actions, parseErrors } = extractActions(result.reply);
+    const extracted = extractActions(result.reply);
+    const { cleanedReply } = extracted;
+    let { actions, parseErrors } = extracted;
+    // Weak models sometimes describe an action (or fake a confirmation) without
+    // emitting the block. When the reply clearly meant to record something but
+    // produced nothing, ask once more for just the JSON and run that.
+    if (canWrite && actions.length === 0 && parseErrors.length === 0 && replyIntendsToAct(result.reply)) {
+      const repaired = await repairActionText(parsed.data.content, PROFILE_ACTION_REFERENCE);
+      if (repaired && repaired.trim().toUpperCase() !== 'NONE') {
+        const re = extractActions(repaired);
+        actions = re.actions;
+        parseErrors = re.parseErrors;
+      }
+    }
     const outcomes = [...(await executeActions(actions, req.params['id']!, req.account!, access, timeZone)), ...parseErrors];
     const finalReply = [cleanedReply, ...outcomes.map((o) => `✔ ${o}`)].filter(Boolean).join('\n\n');
 
