@@ -125,17 +125,26 @@ export function fallbackReport(input: ReportInput): string {
     lines.push('');
   }
 
-  // Care strategies
+  // Care strategies, each written as an instruction: the aim, then the
+  // step-by-step method a carer follows to carry it out.
   const strategyEntries = input.content.sections['strategies'] ?? [];
   if (strategyEntries.length > 0) {
-    lines.push('### Care strategies and interventions');
-    const sentences = strategyEntries.map((e) => {
+    lines.push('### Care strategies and how to carry them out');
+    for (const e of strategyEntries) {
       const condition = e.fields['condition'] ? sentenceCase(String(e.fields['condition'])) : null;
       const strategy = String(e.fields['strategy'] ?? '').replace(/\.+$/, '');
       const supported = e.fields['supported_by'] ? ` This is supported by ${String(e.fields['supported_by']).toLowerCase()}.` : '';
-      return condition ? `To manage ${condition}: ${strategy.toLowerCase()}.${supported}` : `${strategy}.${supported}`;
-    });
-    lines.push(sentences.join(' '), '');
+      lines.push(condition ? `**${condition}:** ${strategy}.${supported}` : `${strategy}.${supported}`);
+      const method = String(e.fields['method'] ?? '').trim();
+      if (method) {
+        lines.push('How to carry it out:');
+        for (const step of method.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
+          // Keep any existing "1." numbering; otherwise bullet it.
+          lines.push(/^\d+[.)]/.test(step) ? step : `- ${step}`);
+        }
+      }
+      lines.push('');
+    }
   }
 
   // Medications, each in the context of what it is for

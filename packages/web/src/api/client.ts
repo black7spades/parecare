@@ -14,6 +14,34 @@ export class ApiError extends Error {
   }
 }
 
+interface ApiBody {
+  error?: string;
+  code?: string;
+  feature?: string;
+}
+
+/**
+ * Read a response as JSON without ever throwing a raw "Unexpected token '<'"
+ * when the body is not JSON. A non-JSON body means the request did not reach
+ * the API and was answered by something else (a reverse proxy's error page,
+ * a gateway timeout, or the single-page-app fallback serving index.html). We
+ * surface that as a clear, actionable ApiError instead of a parse crash.
+ */
+async function readJson(res: Response, path: string): Promise<ApiBody> {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text) as ApiBody;
+  } catch {
+    console.error(`Non-JSON response from ${path} (HTTP ${res.status}):`, text.slice(0, 300));
+    throw new ApiError(
+      res.status || 502,
+      'BAD_GATEWAY',
+      'The server could not be reached just now, or returned an unexpected response. Please try again in a moment.'
+    );
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = useAuthStore.getState().token;
 
@@ -26,7 +54,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     },
   });
 
-  const data = (await res.json()) as { error?: string; code?: string; feature?: string };
+  const data = await readJson(res, path);
 
   if (!res.ok) {
     if (res.status === 401) {
@@ -50,7 +78,7 @@ async function uploadRequest<T>(path: string, formData: FormData): Promise<T> {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: formData,
   });
-  const data = (await res.json()) as { error?: string; code?: string };
+  const data = await readJson(res, path);
   if (!res.ok) {
     if (res.status === 401) useAuthStore.getState().clearAuth();
     throw new ApiError(res.status, data.code ?? 'ERROR', data.error ?? 'Upload failed');
