@@ -371,8 +371,15 @@ medicationsRouter.post('/', requireAuth, requireProfileOwner, async (req, res) =
       medication_catalogue_id: catalogueId,
       ...fields,
       supply: parsed.data.supply ?? null,
-      // Start with what's on hand if given, otherwise a full pack.
-      supply_remaining: parsed.data.supply_remaining ?? parsed.data.supply ?? null,
+      // A pack only becomes "open" once a dose is taken from it, so unopened
+      // packs must not silently start a pack open as well (that double-counted
+      // the supply). Use the open-pack amount if given; otherwise start with
+      // no open pack when unopened packs are on hand, or a single loose pack
+      // when only a pack size was entered.
+      supply_remaining:
+        parsed.data.supply_remaining ??
+        (parsed.data.packs_on_hand != null ? 0 : parsed.data.supply) ??
+        null,
       packs_on_hand: parsed.data.packs_on_hand ?? null,
       schedule_times: parsed.data.schedule_times ? db.raw('?::jsonb', [JSON.stringify(parsed.data.schedule_times)]) : null,
     })

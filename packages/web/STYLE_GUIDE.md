@@ -91,6 +91,25 @@ Labels are verbs that say what will happen. "Dismiss", "Edit",
   (`bg-red-50 text-red-700 dark:bg-red-900/10 dark:text-red-300`) with a
   left border accent, plus a small uppercase badge if a label is needed.
 
+## Data tables
+
+Any table that lists records (people, pets, providers, addresses,
+medications, substances, doses, and so on) is a data table and follows one
+pattern, by default and without being asked:
+
+- **Every column header is sortable**, ascending then descending on repeat
+  clicks, using the shared `SortableTh` wired to a `useDataView` instance.
+  There is no such thing as a data table with some sortable columns and some
+  fixed ones; every visible column gets a comparator. This is the default for
+  every new table and every table you touch, not an enhancement to request.
+- Search, filters, pagination and any bulk actions use the shared
+  `DataToolbar` and `useDataView`, so behaviour is identical everywhere.
+- One column per data point (see the copy rules); each column sorts and
+  filters independently.
+
+If you add or edit a table and it is not sortable this way, the change is not
+finished.
+
 ## Copy rules
 
 These repeat the non-negotiables from CLAUDE.md:
@@ -115,3 +134,6 @@ Before shipping any UI change, confirm:
    ones have a confirmation step.
 7. Copy rules pass: no parentheses in headings, no unexplained jargon,
    no em dashes, no combined data points.
+8. Every data table has sortable headers (ascending/descending) on all
+   columns via `SortableTh` and `useDataView`. No table ships with fixed,
+   unsortable headers.

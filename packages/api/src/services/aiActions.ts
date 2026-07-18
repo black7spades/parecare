@@ -459,6 +459,74 @@ const ACTION_INFO_RE = /parecare[\s_-]*action/i;
 // actions when their JSON validates: an unlabelled block or a json block.
 const GENERIC_INFO_RE = /^(json|json5|jsonc)?$/i;
 
+/**
+ * The index just past a balanced JSON value that starts at `start` (on a `{`
+ * or `[`), respecting strings and escapes, or -1 if it never closes. Used to
+ * lift a bare JSON action out of prose when a model forgets the code fence.
+ */
+function jsonSpanEnd(text: string, start: number): number {
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < text.length; i += 1) {
+    const c = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{' || c === '[') depth += 1;
+    else if (c === '}' || c === ']') {
+      depth -= 1;
+      if (depth === 0) return i + 1;
+      if (depth < 0) return -1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Lift bare, unfenced JSON actions out of a reply. Some models narrate the
+ * confirmation and drop the code fence entirely; without this, the action
+ * would silently not happen. Only spans that parse and fully validate as
+ * actions are consumed, so ordinary prose and non-action JSON are untouched.
+ */
+function scanBareActions<T>(
+  text: string,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+  actions: T[],
+): string {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    // A JSON action always begins with an object or array whose first key is
+    // a quote; anything else is prose and is copied through untouched.
+    if ((c === '{' || c === '[') && /["[{]/.test(text.slice(i + 1).trimStart()[0] ?? '')) {
+      const end = jsonSpanEnd(text, i);
+      if (end > i) {
+        const candidate = text.slice(i, end);
+        try {
+          const parsed = JSON.parse(candidate);
+          const items = Array.isArray(parsed) ? parsed : [parsed];
+          if (items.length > 0 && items.every((it) => schema.safeParse(it).success)) {
+            for (const it of items) actions.push(schema.parse(it));
+            i = end;
+            continue;
+          }
+        } catch {
+          // Not valid JSON: fall through and treat as ordinary text.
+        }
+      }
+    }
+    out += c;
+    i += 1;
+  }
+  return out;
+}
+
 /** Validate one candidate against the schema, collecting the action or an error. */
 function takeCandidate<T>(
   raw: unknown,
@@ -547,7 +615,11 @@ export function extractActionBlocks<T>(reply: string, schema: z.ZodType<T, z.Zod
     }
   }
   out += reply.slice(cursor);
-  let cleanedReply = out;
+
+  // Some models drop the code fence and leave the action JSON bare in prose.
+  // Lift out any that fully validate, so a change of model cannot silently
+  // stop actions from being carried out.
+  let cleanedReply = scanBareActions(out, schema, actions);
 
   // A reply cut off mid-action (provider token limit) leaves an opening fence
   // with no closing one, so the loop above never matched it. Never show the

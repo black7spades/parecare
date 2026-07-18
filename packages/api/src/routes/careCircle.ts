@@ -6,6 +6,7 @@ import { requireAccountRight } from '../middleware/accountRights';
 import { requireCountBelow } from '../middleware/subscriptionGate';
 import { requireProfileOwner } from '../middleware/permissions';
 import { createInvitation, resendInvitation, revokeInvitation, inviteUrl, effectiveStatus, InviteError } from '../services/invitations';
+import { env } from '../config/env';
 import type { CareCircleMember, Invitation } from '../types';
 
 export const careCircleRouter = Router({ mergeParams: true });
@@ -57,6 +58,53 @@ careCircleRouter.get('/', requireAuth, async (req, res) => {
       };
     }),
   });
+});
+
+/**
+ * People already registered on PareCare that this carer can invite straight
+ * into the circle, rather than typing an email for someone new. Excludes the
+ * carer themselves and anyone already in this profile's circle. A self-hosted
+ * instance and platform admins can pick any account; everyone else is limited
+ * to people they already share care with, so the list is never a directory of
+ * strangers.
+ */
+careCircleRouter.get('/invitable-users', requireAuth, async (req, res) => {
+  const account = req.account!;
+  const profileId = req.params['id'];
+
+  const existing = await db('care_circle_members')
+    .where({ care_profile_id: profileId })
+    .whereNotNull('account_id')
+    .select('account_id');
+  const exclude = new Set<string>(existing.map((r) => r.account_id as string));
+  exclude.add(account.id);
+
+  const privileged = env.SELF_HOSTED || account.role === 'super_admin' || account.role === 'admin';
+  let query = db('accounts').whereNotIn('id', [...exclude]);
+  if (!privileged) {
+    query = query.where((qb) => {
+      qb.whereIn(
+        'accounts.id',
+        db('care_circle_members')
+          .join('care_profiles', 'care_profiles.id', 'care_circle_members.care_profile_id')
+          .where('care_profiles.account_id', account.id)
+          .whereNotNull('care_circle_members.account_id')
+          .select('care_circle_members.account_id'),
+      ).orWhereIn(
+        'accounts.id',
+        db('care_profiles')
+          .join('care_circle_members', 'care_profiles.id', 'care_circle_members.care_profile_id')
+          .where('care_circle_members.account_id', account.id)
+          .where('care_circle_members.invite_accepted', true)
+          .select('care_profiles.account_id'),
+      );
+    });
+  }
+  const users = await query
+    .select('accounts.id', 'accounts.display_name', 'accounts.email')
+    .orderBy('accounts.display_name', 'asc')
+    .limit(500);
+  res.json({ users });
 });
 
 careCircleRouter.post(
