@@ -364,6 +364,12 @@ export interface NarrativeSources {
   dietary_requirements: string[];
   mobility_aids: string[];
   communication_needs: string[];
+  /**
+   * Neurodivergence is intrinsic, not a condition to manage. These are the
+   * recorded traits (how it shows up), needs and supports (what helps), keyed
+   * by the neurotype they belong to, so the plan can describe accommodations.
+   */
+  neurotype_attributes: Array<{ neurotype: string; kind: 'trait' | 'need' | 'support'; label: string; notes: string | null }>;
   medications: Array<{
     name: string;
     dose_amount: string | null;
@@ -416,6 +422,16 @@ export async function gatherNarrativeSources(profileId: string): Promise<Narrati
       .limit(20),
   ]);
   const conditionNameById = new Map<string, string>(conditions.map((c) => [c.id as string, c.name as string]));
+  // Neurotype traits, needs and supports, so the plan describes accommodations
+  // rather than treating neurodivergence as something to manage.
+  const neurotypeIds = conditions.filter((c) => c.category === 'neurotype').map((c) => c.id as string);
+  const attrRows = neurotypeIds.length
+    ? await db('neurotype_attributes as na')
+        .join('neurotype_attribute_catalogue as nac', 'na.catalogue_id', 'nac.id')
+        .whereIn('na.condition_id', neurotypeIds)
+        .orderBy('na.sort_order', 'asc')
+        .select('na.condition_id', 'na.notes', 'nac.kind', 'nac.label')
+    : [];
   const medsByCondition = new Map<string, string[]>();
   for (const m of meds) {
     if (!m.medical_condition_id) continue;
@@ -468,6 +484,12 @@ export async function gatherNarrativeSources(profileId: string): Promise<Narrati
     dietary_requirements: asStringArray(plan?.dietary_requirements),
     mobility_aids: asStringArray(plan?.mobility_aids),
     communication_needs: asStringArray(plan?.communication_needs),
+    neurotype_attributes: attrRows.map((a) => ({
+      neurotype: conditionNameById.get(a.condition_id as string) ?? 'neurotype',
+      kind: a.kind as 'trait' | 'need' | 'support',
+      label: a.label as string,
+      notes: (a.notes as string | null) ?? null,
+    })),
     medications: meds.map((m) => ({
       name: m.name,
       dose_amount: m.dose_amount ?? null,
@@ -556,11 +578,22 @@ type Narrative = z.infer<typeof narrativeSchema>;
  * condition-to-treatment ties, risks from allergies and condition flags,
  * and the standard Support at Home review triggers.
  */
-function fallbackNarrative(src: NarrativeSources): Narrative {
+export function fallbackNarrative(src: NarrativeSources): Narrative {
+  const first = src.display_name;
   const goals: Narrative['goals'] = [];
   const liveConditions = src.conditions.filter((c) => c.status !== 'resolved');
-  for (const c of liveConditions) {
+  // Neurodivergence is intrinsic, not a condition to manage, so it is kept out
+  // of the "manage X" goals and strategies and given its own accommodation.
+  const managed = liveConditions.filter((c) => c.category !== 'neurotype');
+  const neurotypes = liveConditions.filter((c) => c.category === 'neurotype');
+  for (const c of managed) {
     goals.push({ goal: `Manage ${c.name}`, basis: `Recorded condition${c.status ? `, currently ${c.status}` : ''}` });
+  }
+  for (const c of neurotypes) {
+    goals.push({
+      goal: `Support and accommodate ${first}'s sensory, cognitive and social needs`,
+      basis: `${c.name}${c.diagnosis_status === 'formal' ? ', formally diagnosed' : ''}: intrinsic to who ${first} is, supported rather than treated`,
+    });
   }
   for (const d of src.dietary_requirements) {
     goals.push({ goal: `Keep to a ${d.toLowerCase()} diet`, basis: 'Recorded dietary requirement' });
@@ -575,31 +608,58 @@ function fallbackNarrative(src: NarrativeSources): Narrative {
     });
   }
 
-  const strategies: Narrative['strategies'] = liveConditions.map((c) => {
+  const self = src.self_managed;
+  const managedStrategies: Narrative['strategies'] = managed.map((c) => {
     const parts: string[] = [];
     if (c.medications.length > 0) parts.push(`Medication: ${c.medications.join(', ')}`);
     if (c.treatments.length > 0) parts.push(`Therapy: ${c.treatments.join(', ')}`);
     // A plain, ordered method, addressed to whoever carries it out: the
     // person themselves when they self-manage, otherwise their carers.
-    const self = src.self_managed;
     const steps: string[] = [];
     if (c.medications.length > 0) {
-      steps.push(`${self ? 'Take' : `Give ${src.display_name}`} the medications for ${c.name} at their scheduled times: ${c.medications.join(', ')}`);
-      steps.push(self ? 'Record each dose as taken on the Medications record' : `Watch ${src.display_name} take each dose, then record it as given on the Medications record`);
+      steps.push(`${self ? 'Take' : `Give ${first}`} the medications for ${c.name} at their scheduled times: ${c.medications.join(', ')}`);
+      steps.push(self ? 'Record each dose as taken on the Medications record' : `Watch ${first} take each dose, then record it as given on the Medications record`);
     }
     if (c.treatments.length > 0) {
       steps.push(`Carry out the treatments as recorded: ${c.treatments.join(', ')}`);
     }
     steps.push(self ? `Note any change in ${c.name} in the care log, and seek help if it worsens` : `Note any change in ${c.name} in the care log, and escalate if it worsens`);
+    // What supports this condition is its own medications and treatments, not
+    // an unrelated dietary requirement.
+    const supporting = [...c.medications, ...c.treatments];
     return {
       condition: c.name,
       goal: `Manage ${c.name}`,
       strategy: parts.length > 0 ? parts.join('. ') : 'Monitoring. No linked medication or treatment is recorded yet.',
       method: steps.map((s, i) => `${i + 1}. ${s}`).join('\n'),
-      supported_by:
-        src.dietary_requirements.length > 0 ? `Dietary compliance: ${src.dietary_requirements.join(', ')}` : null,
+      supported_by: supporting.length > 0 ? supporting.join(', ') : null,
     };
   });
+
+  const neurotypeStrategies: Narrative['strategies'] = neurotypes.map((c) => {
+    const attrs = src.neurotype_attributes.filter((a) => a.neurotype === c.name);
+    const fmt = (a: { label: string; notes: string | null }) => (a.notes ? `${a.label} (${a.notes})` : a.label);
+    const traits = attrs.filter((a) => a.kind === 'trait');
+    const needs = attrs.filter((a) => a.kind === 'need');
+    const supports = attrs.filter((a) => a.kind === 'support');
+    const steps: string[] = [];
+    if (traits.length > 0) steps.push(`Understand how ${c.name.toLowerCase()} shows up for ${first}: ${traits.map(fmt).join('; ')}`);
+    if (needs.length > 0) steps.push(`Make sure these needs are met: ${needs.map(fmt).join('; ')}`);
+    if (supports.length > 0) steps.push(`Put in place what helps ${first}: ${supports.map(fmt).join('; ')}`);
+    if (steps.length === 0) {
+      steps.push(`Ask ${first} what helps day to day, and record their traits, needs and supports on the Neurotypes page so this plan can be specific to them`);
+    }
+    steps.push(`Accommodate ${first}, do not try to change them: the aim is to support how they experience the world, never to treat or fix it`);
+    return {
+      condition: c.name,
+      goal: `Support and accommodate ${first}'s ${c.name.toLowerCase()} needs`,
+      strategy: `${c.name} is intrinsic to who ${first} is. The approach is accommodation of ${first}'s sensory, cognitive and social needs, not treatment or monitoring.`,
+      method: steps.map((s, i) => `${i + 1}. ${s}`).join('\n'),
+      supported_by: supports.length > 0 ? supports.map((s) => s.label).join(', ') : null,
+    };
+  });
+
+  const strategies: Narrative['strategies'] = [...managedStrategies, ...neurotypeStrategies];
 
   const risks: Narrative['risks'] = [];
   for (const a of src.allergies) {
@@ -610,7 +670,7 @@ function fallbackNarrative(src: NarrativeSources): Narrative {
       watch_for: a.reaction ? `Must not be given ${a.substance}. Reaction: ${a.reaction}` : `Must not be given ${a.substance}`,
     });
   }
-  for (const c of liveConditions) {
+  for (const c of managed) {
     if (c.contagious) {
       risks.push({
         risk: `${c.name} is contagious`,
@@ -683,6 +743,17 @@ async function synthesizeNarrative(profileId: string): Promise<Record<NarrativeS
         '4) REVIEW TRIGGERS: list the concrete events that must trigger a plan review before the ' +
         'standard 12-month review (hospital admission, fall, new diagnosis, a condition status change, ' +
         'a breach of a dietary requirement, a significant care log incident). ' +
+        'NEURODIVERGENCE: a neurotype (autism, ADHD, dyslexia and so on) is intrinsic to who the person ' +
+        'is, like eye colour, and is NOT a condition to manage, monitor, treat or cure. Never write ' +
+        '"manage <neurotype>", never say a neurotype is "currently active", and never list it among ' +
+        'conditions or risks. For each neurotype, write the goal and strategy about accommodating the ' +
+        "person's sensory, cognitive and social needs, drawing ONLY on their recorded traits, needs and " +
+        'supports (the neurotype_attributes in the data); if none are recorded, say to ask the person and ' +
+        'record their traits, needs and supports. The aim is accommodation, never changing the person. ' +
+        'DIET: a dietary requirement (e.g. low salt) is its own goal, not a universal support. Do NOT put ' +
+        'a diet in the "supported_by" of conditions it is not clinically relevant to; "supported_by" is ' +
+        "the medications, treatments or services for THAT condition. Low salt supports blood pressure, not " +
+        'depression, dry eyes, a cold or a neurotype. ' +
         'Write in plain language a family carer can follow; refer to the person by name; never invent ' +
         'facts, medications or doses that are not in the data. Return ONLY strict JSON, no prose, matching: ' +
         '{"goals":[{"goal":"...","basis":"..."}],' +

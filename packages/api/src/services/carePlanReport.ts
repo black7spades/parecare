@@ -111,16 +111,31 @@ export function fallbackReport(input: ReportInput): string {
         `${s.name} is currently managing ${parts.join('; ')}. Each is addressed in the strategies below.`
       );
     }
+    lines.push('');
+  }
+
+  // Neurodivergence is intrinsic, not a condition. It gets its own section,
+  // described as accommodations and drawn only from the recorded traits, needs
+  // and supports, and is never framed as something to manage or monitor.
+  if (neurotypes.length > 0) {
+    lines.push('### Neurodivergence and how to support it');
     for (const n of neurotypes) {
-      if (n.diagnosis_status === 'formal') {
-        lines.push(
-          `${first} has a formal diagnosis of ${sentenceCase(n.name)}. Care should give attentive consideration to the social, sensory and cognitive needs associated with this diagnosis, to help maintain an even mood and support recovery from burnout or meltdown events. Ask ${first} directly what helps and record their preferences.`
-        );
+      const attrs = s.neurotype_attributes.filter((a) => a.neurotype === n.name);
+      const needs = attrs.filter((a) => a.kind === 'need').map((a) => a.label.toLowerCase());
+      const supports = attrs.filter((a) => a.kind === 'support').map((a) => a.label.toLowerCase());
+      const diag = n.diagnosis_status === 'formal'
+        ? `${first} has a formal diagnosis of ${sentenceCase(n.name)}.`
+        : `${first} identifies with ${sentenceCase(n.name)}${n.diagnosis_status ? ` (${n.diagnosis_status.replace(/_/g, ' ')})` : ''}.`;
+      let detail: string;
+      if (needs.length > 0 || supports.length > 0) {
+        const bits: string[] = [];
+        if (needs.length > 0) bits.push(`meeting their needs (${needs.join('; ')})`);
+        if (supports.length > 0) bits.push(`putting in place what helps (${supports.join('; ')})`);
+        detail = ` Support ${first}'s sensory, cognitive and social needs by ${bits.join(', and ')}.`;
       } else {
-        lines.push(
-          `${first} identifies with ${sentenceCase(n.name)}${n.diagnosis_status ? ` (${n.diagnosis_status.replace(/_/g, ' ')})` : ''}. No formal diagnosis is on record, so no assumptions should be made about associated needs; ask ${first} about their preferences for managing it and record what they say.`
-        );
+        detail = ` No traits, needs or supports are recorded yet; ask ${first} what helps day to day and record it on the Neurotypes page so this plan can be specific to them.`;
       }
+      lines.push(`${diag} This is an intrinsic part of who ${first} is, to be accommodated rather than treated or monitored.${detail}`);
     }
     lines.push('');
   }
@@ -272,12 +287,19 @@ export async function composeReport(input: ReportInput): Promise<string> {
       'stated in the data is left out of the prose. ' +
       '7) Mention each medication with its dose and time in the context of what it manages. ' +
       '8) Providers must include their contact information, not just names. ' +
-      '9) If the person is neurodivergent with a FORMAL diagnosis on record, use that diagnosis to ' +
-      'assess what social, sensory and cognitive needs may help maintain an even mood and foster ' +
-      'recovery from burnout or meltdown events. If there is no formal diagnosis, do NOT invent or ' +
-      'assume anything: refer only to what is recorded and advise asking the person about their own ' +
-      'preferences for managing it. ' +
-      '10) Never invent facts that are not in the data; every statement must trace to a supplied field. ' +
+      '9) NEURODIVERGENCE (autism, ADHD, dyslexia and so on) is intrinsic to who the person is, like eye ' +
+      'colour, and is never a condition to manage, monitor, treat or cure. Never write "manage <neurotype>", ' +
+      'never say a neurotype is "currently active", and never list a neurotype among conditions or risks. ' +
+      'Give it its own short paragraph about accommodating the sensory, cognitive and social needs, drawing ' +
+      'ONLY on the recorded traits, needs and supports (neurotype_attributes); if none are recorded, say to ' +
+      'ask the person and record them. State a formal diagnosis plainly if there is one; assume nothing when ' +
+      'there is not. The aim is accommodation, never changing the person. ' +
+      '10) Never invent facts that are not in the data; every statement must trace to a supplied field. A ' +
+      'dietary requirement (e.g. low salt) is its own day-to-day need, not a universal support: never say a ' +
+      'condition is "supported by" a diet unless the diet is clinically relevant to that condition (low salt ' +
+      'supports blood pressure, not depression, dry eyes, a cold or a neurotype). Under care strategies, ' +
+      "include each strategy's step-by-step method from the data so the plan reads as an instruction manual, " +
+      'not a one-line summary, and do not repeat an identical sentence shape for every condition. ' +
       '11) ' +
       (input.sources.self_managed
         ? `This is ${input.sources.display_name}'s own plan; they manage their own care and read this themselves. Address them directly as "you" throughout ("Take Amlodipine 5mg with breakfast", "Book your physio when the pain flares"). Never write as if a carer is watching over them, and never tell them to report to or seek permission from anyone.`
