@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -7,6 +7,7 @@ import { PagePurpose } from '../../../components/PagePurpose';
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
+import { CartIcon, PencilIcon, PillIcon, TrashIcon } from '../../../components/ui/icons';
 import { useProfile } from './ProfileLayout';
 import { ImportExport } from '../../../components/ImportExport';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
@@ -22,10 +23,12 @@ import {
   isLowSupply,
   medStatusDescription,
   regimenLine,
+  supplierLabel,
   supplyLabel,
   totalOnHand,
   type MedicalCondition,
   type MedicationRecord,
+  type Supplier,
 } from '../../../lib/care';
 
 // Domain sort/filter helpers for the reusable data view.
@@ -207,17 +210,31 @@ export function MedicationsPage() {
           )}
         </td>
         <td className="px-4 py-3 text-muted">
-          {m.supplier ? <span>{m.supplier}</span> : <span className="text-muted">—</span>}
+          {m.supplier ? (
+            <div>
+              <span className="text-ink">{m.supplier}</span>
+              {m.supplier_suburb ? <div className="text-xs">{m.supplier_suburb}</div> : null}
+            </div>
+          ) : <span className="text-muted">—</span>}
         </td>
-        <td className="px-4 py-3 text-right whitespace-nowrap space-x-1">
-          {low && m.supplier_order_url ? (
-            <a href={m.supplier_order_url} target="_blank" rel="noopener noreferrer">
-              <Button size="sm" variant="primary">Order</Button>
-            </a>
-          ) : null}
-          {canAdminister ? <Button size="sm" variant="secondary" onClick={() => setRecording(m)}>Record dose</Button> : null}
-          {canManageMeds ? <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>Edit</Button> : null}
-          {canManageMeds ? <Button size="sm" variant="danger" onClick={() => setConfirmSingleDelete(m)}>Delete</Button> : null}
+        <td className="px-4 py-3 text-right whitespace-nowrap">
+          <div className="inline-flex items-center justify-end gap-1">
+            {m.supplier_order_url ? (
+              <a
+                href={m.supplier_order_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={low ? 'Order more, supply is low' : 'Order more'}
+                title={low ? 'Order more, supply is low' : 'Order more'}
+                className={`inline-flex items-center justify-center rounded-sm px-2 py-1 transition-colors ${low ? 'text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300' : 'text-muted hover:text-ink hover:bg-surface-2'}`}
+              >
+                <CartIcon />
+              </a>
+            ) : null}
+            {canAdminister ? <Button size="xs" variant="ghost" aria-label={`Record dose of ${m.name}`} title="Record dose" onClick={() => setRecording(m)}><PillIcon /></Button> : null}
+            {canManageMeds ? <Button size="xs" variant="ghost" aria-label={`Edit ${m.name}`} title="Edit" onClick={() => setEditing(m)}><PencilIcon /></Button> : null}
+            {canManageMeds ? <Button size="xs" variant="ghost-danger" aria-label={`Delete ${m.name}`} title="Delete" onClick={() => setConfirmSingleDelete(m)}><TrashIcon /></Button> : null}
+          </div>
         </td>
       </tr>
     );
@@ -445,9 +462,15 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
   const [remaining, setRemaining] = useState(med?.supply_remaining != null ? String(med.supply_remaining) : '');
   const [packs, setPacks] = useState(med?.packs_on_hand != null ? String(med.packs_on_hand) : '');
   const [repeatsDue, setRepeatsDue] = useState(med?.repeats_due ?? '');
-  const [supplier, setSupplier] = useState(med?.supplier ?? '');
-  const [supplierOrderUrl, setSupplierOrderUrl] = useState(med?.supplier_order_url ?? '');
+  // The supplier is chosen from the account's shared suppliers; picking one
+  // autofills the reorder link, which is saved on the supplier itself.
+  const [supplierId, setSupplierId] = useState(med?.supplier_id ?? '');
+  const [supplierModalOpen, setSupplierModalOpen] = useState(false);
+  // Suppliers created from within this form, merged into the list so the new
+  // one is immediately selectable before the list refetches.
+  const [newSuppliers, setNewSuppliers] = useState<Supplier[]>([]);
   const [error, setError] = useState('');
+  const formQueryClient = useQueryClient();
 
   const typeMeta = MED_TYPES.find((t) => t.value.toLowerCase() === type.toLowerCase());
 
@@ -463,6 +486,20 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
     queryFn: () => api.get<{ conditions: MedicalCondition[] }>(`/care-profiles/${profileId}/conditions`),
   });
   const conditions = conditionData?.conditions ?? [];
+
+  // The account's shared suppliers drive the "reordered from" picker.
+  const { data: suppliersData } = useQuery({
+    queryKey: ['suppliers'],
+    queryFn: () => api.get<{ suppliers: Supplier[] }>('/suppliers'),
+  });
+  const suppliers = useMemo(() => {
+    const base = suppliersData?.suppliers ?? [];
+    const seen = new Set(base.map((s) => s.id));
+    return [...base, ...newSuppliers.filter((s) => !seen.has(s.id))].sort((a, b) =>
+      a.name.localeCompare(b.name) || (a.suburb ?? '').localeCompare(b.suburb ?? '')
+    );
+  }, [suppliersData, newSuppliers]);
+  const selectedSupplier = suppliers.find((s) => s.id === supplierId) ?? null;
 
   // The type suggests the route; the route stays editable.
   const pickType = (value: string) => {
@@ -505,13 +542,11 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
         supply_remaining: remaining.trim() === '' ? null : Number(remaining),
         packs_on_hand: packs.trim() === '' ? null : Number(packs),
         repeats_due: repeatsDue || null,
-        supplier: supplier.trim() || null,
-        // Accept a bare domain by defaulting to https, so a pasted link works.
-        supplier_order_url: (() => {
-          const u = supplierOrderUrl.trim();
-          if (!u) return null;
-          return /^https?:\/\//i.test(u) ? u : `https://${u}`;
-        })(),
+        // The chosen supplier is authoritative: the server derives the name
+        // and reorder link from it. No supplier clears all three.
+        ...(supplierId
+          ? { supplier_id: supplierId }
+          : { supplier_id: null, supplier: null, supplier_order_url: null }),
       };
       return med ? api.patch(`/care-profiles/${profileId}/medications/${med.id}`, body) : api.post(`/care-profiles/${profileId}/medications`, body);
     },
@@ -632,12 +667,35 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
           </p>
           <p className="text-sm text-ink leading-8">
             Reordered from{' '}
-            <input className={`${inlineInput} w-56`} aria-label="Supplier" placeholder="e.g. City Pharmacy" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
-            {' '}with a reorder link{' '}
-            <input className={`${inlineInput} w-72`} aria-label="Order link" type="url" inputMode="url" placeholder="https://…" value={supplierOrderUrl} onChange={(e) => setSupplierOrderUrl(e.target.value)} />.
+            <select
+              className={inlineSelect}
+              aria-label="Supplier"
+              value={supplierId}
+              onChange={(e) => {
+                if (e.target.value === '__new__') { setSupplierModalOpen(true); return; }
+                setSupplierId(e.target.value);
+              }}
+            >
+              <option value="">no supplier yet</option>
+              {suppliers.map((s) => <option key={s.id} value={s.id}>{supplierLabel(s, suppliers)}</option>)}
+              <option value="__new__">＋ Add a new supplier…</option>
+            </select>.
           </p>
+          {selectedSupplier ? (
+            <p className="text-xs text-muted mt-1">
+              {[
+                selectedSupplier.suburb ? `Branch: ${selectedSupplier.suburb}` : null,
+                selectedSupplier.phone,
+                selectedSupplier.order_url ? 'Reorder link saved on this supplier.' : 'No reorder link saved on this supplier yet.',
+              ].filter(Boolean).join(' · ')}
+            </p>
+          ) : (
+            <p className="text-xs text-muted mt-1">
+              Pick the pharmacy or shop this is reordered from, or add a new one. The reorder link is saved on the supplier.
+            </p>
+          )}
           <p className="text-xs text-muted mt-1">
-            When supply drops to a week or less, this medication is highlighted in the list and an Order button links straight to the reorder link.
+            When supply drops to a week or less, this medication is highlighted in the list and an Order button links straight to the supplier's reorder link.
           </p>
           <p className="text-xs text-muted mt-1">
             A {containerWord} stays unopened until a dose is taken from it; then it becomes the open {containerWord} and counts down.{' '}
@@ -652,6 +710,59 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>Save</Button>
+        </div>
+      </form>
+
+      {supplierModalOpen ? (
+        <SupplierModal
+          onClose={() => setSupplierModalOpen(false)}
+          onCreated={(s) => {
+            setNewSuppliers((prev) => [...prev, s]);
+            setSupplierId(s.id);
+            setSupplierModalOpen(false);
+            void formQueryClient.invalidateQueries({ queryKey: ['suppliers'] });
+          }}
+        />
+      ) : null}
+    </Modal>
+  );
+}
+
+/**
+ * Create a supplier from within the medication editor. Vendor name and suburb
+ * are separate fields; the suburb tells apart two branches of one vendor. The
+ * reorder link and phone live on the supplier, reused by every medication that
+ * names it.
+ */
+function SupplierModal({ onClose, onCreated }: { onClose: () => void; onCreated: (s: Supplier) => void }) {
+  const [name, setName] = useState('');
+  const [suburb, setSuburb] = useState('');
+  const [phone, setPhone] = useState('');
+  const [orderUrl, setOrderUrl] = useState('');
+  const [error, setError] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => api.post<{ supplier: Supplier }>('/suppliers', {
+      name: name.trim(),
+      suburb: suburb.trim() || null,
+      phone: phone.trim() || null,
+      order_url: orderUrl.trim() || null,
+    }),
+    onSuccess: (res) => onCreated(res.supplier),
+    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Add a supplier">
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (name.trim()) mutation.mutate(); }}>
+        <Input label="Vendor name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Chemist Warehouse" />
+        <Input label="Suburb" value={suburb} onChange={(e) => setSuburb(e.target.value)} placeholder="e.g. Morayfield" hint="Tells apart two branches of the same vendor." />
+        <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. 07 5555 5555" />
+        <Input label="Reorder link" type="url" inputMode="url" value={orderUrl} onChange={(e) => setOrderUrl(e.target.value)} placeholder="https://…" hint="Where the Order button goes to restock." />
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>Add supplier</Button>
         </div>
       </form>
     </Modal>

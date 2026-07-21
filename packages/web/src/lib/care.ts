@@ -903,13 +903,41 @@ export interface MedicationRecord {
   packs_on_hand: number | null;
   /** When a repeat prescription is next due. */
   repeats_due: string | null;
+  /** The account's shared supplier this medication is reordered from. */
+  supplier_id?: string | null;
   /** The pharmacy or shop this medication is reordered from. */
   supplier: string | null;
+  /** The supplier's branch suburb, telling apart two of the same vendor. */
+  supplier_suburb?: string | null;
   /** A direct link to reorder it from that supplier. */
   supplier_order_url: string | null;
   /** Dangerous to miss: overdue and out-of-stock alerts are urgent. */
   critical: boolean;
   active: boolean;
+}
+
+/** A pharmacy or shop a medication is reordered from, shared per account. */
+export interface Supplier {
+  id: string;
+  account_id: string;
+  /** The vendor name, e.g. "Chemist Warehouse". */
+  name: string;
+  /** The branch suburb, telling apart two branches of one vendor. */
+  suburb: string | null;
+  phone: string | null;
+  /** A direct link to reorder from this supplier. */
+  order_url: string | null;
+}
+
+/**
+ * Label a supplier for the picker. When two suppliers share a vendor name,
+ * the branch suburb disambiguates them as "Vendor (Suburb)"; a lone vendor
+ * shows its name alone. Names is the full list, so duplicates can be found.
+ */
+export function supplierLabel(supplier: Supplier, all: Supplier[]): string {
+  const sameName = all.filter((s) => s.name.trim().toLowerCase() === supplier.name.trim().toLowerCase());
+  if (sameName.length > 1 && supplier.suburb?.trim()) return `${supplier.name} (${supplier.suburb.trim()})`;
+  return supplier.name;
 }
 
 /** Every way a medication can enter the body, in plain language. */
