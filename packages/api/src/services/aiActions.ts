@@ -108,6 +108,8 @@ const addMedicationSchema = z.object({
   units_per_dose: z.number().nonnegative().optional().nullable(),
   supply: z.number().nonnegative().optional().nullable(),
   packs_on_hand: z.number().nonnegative().optional().nullable(),
+  supplier: z.string().max(255).optional().nullable(),
+  supplier_order_url: z.string().url().max(2000).optional().nullable(),
   with_food: z.boolean().optional(),
   as_needed: z.boolean().optional(),
   critical: z.boolean().optional(),
@@ -125,6 +127,8 @@ const updateMedicationSchema = z.object({
   supply: z.number().nonnegative().optional().nullable(),
   supply_remaining: z.number().nonnegative().optional().nullable(),
   packs_on_hand: z.number().nonnegative().optional().nullable(),
+  supplier: z.string().max(255).optional().nullable(),
+  supplier_order_url: z.string().url().max(2000).optional().nullable(),
   with_food: z.boolean().optional(),
   as_needed: z.boolean().optional(),
   critical: z.boolean().optional(),
@@ -844,6 +848,8 @@ async function executeOne(
         supply: action.supply ?? null,
         supply_remaining: action.supply ?? null,
         packs_on_hand: action.packs_on_hand ?? null,
+        supplier: action.supplier ?? null,
+        supplier_order_url: action.supplier_order_url ?? null,
         with_food: action.with_food ?? false,
         as_needed: action.as_needed ?? false,
         critical: action.critical ?? false,
@@ -874,6 +880,8 @@ async function executeOne(
       }
       if (action.supply_remaining !== undefined) patch['supply_remaining'] = action.supply_remaining;
       if (action.packs_on_hand !== undefined) patch['packs_on_hand'] = action.packs_on_hand;
+      if (action.supplier !== undefined) patch['supplier'] = action.supplier;
+      if (action.supplier_order_url !== undefined) patch['supplier_order_url'] = action.supplier_order_url;
       if (action.with_food !== undefined) patch['with_food'] = action.with_food;
       if (action.as_needed !== undefined) patch['as_needed'] = action.as_needed;
       if (action.critical !== undefined) patch['critical'] = action.critical;

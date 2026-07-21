@@ -18,6 +18,8 @@ import {
   MED_STATUSES,
   MED_TYPES,
   SELF_RELATIONSHIP,
+  daysOfSupply,
+  isLowSupply,
   medStatusDescription,
   regimenLine,
   supplyLabel,
@@ -51,7 +53,8 @@ const MED_SORTS: DataSort<MedicationRecord>[] = [
   { key: 'route', label: 'Route', compare: (a, b) => (a.route ?? '').localeCompare(b.route ?? '') || byName(a, b) },
   { key: 'schedule', label: 'Schedule (time of day)', compare: (a, b) => (earliestTime(a) - earliestTime(b)) || byName(a, b) },
   { key: 'packs', label: 'Packs on hand', compare: (a, b) => (numAsc(a.packs_on_hand) - numAsc(b.packs_on_hand)) || byName(a, b) },
-  { key: 'supply', label: 'Supply left', compare: (a, b) => (numAsc(totalOnHand(a)) - numAsc(totalOnHand(b))) || byName(a, b) },
+  { key: 'supply', label: 'Supply left', compare: (a, b) => (numAsc(daysOfSupply(a) ?? totalOnHand(a)) - numAsc(daysOfSupply(b) ?? totalOnHand(b))) || byName(a, b) },
+  { key: 'supplier', label: 'Supplier', compare: (a, b) => (a.supplier ?? '').localeCompare(b.supplier ?? '') || byName(a, b) },
 ];
 
 const SELECT = 'rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -109,7 +112,7 @@ export function MedicationsPage() {
   const dv = useDataView<MedicationRecord>({
     rows: meds,
     getId: (m) => m.id,
-    searchText: (m) => [m.name, m.dose, m.route, m.frequency].filter(Boolean).join(' '),
+    searchText: (m) => [m.name, m.dose, m.route, m.frequency, m.supplier].filter(Boolean).join(' '),
     sorts: MED_SORTS,
     filters: [statusFilter, routeFilter],
   });
@@ -151,7 +154,7 @@ export function MedicationsPage() {
     ...(canBulkDelete ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulk(true) }] : []),
   ];
 
-  const colCount = canSelect ? 10 : 9;
+  const colCount = canSelect ? 11 : 10;
 
   // As-needed medications have no fixed schedule, so they never appear as
   // due slots in the record. They live in their own group here, each with a
@@ -162,8 +165,11 @@ export function MedicationsPage() {
   const renderRow = (m: MedicationRecord) => {
     // What's on hand overall: loose units plus unopened packs.
     const remaining = totalOnHand(m);
+    const days = daysOfSupply(m);
+    // A week or less of supply left (and still some in stock): worth reordering.
+    const low = m.active && remaining != null && remaining > 0 && isLowSupply(m);
     return (
-      <tr key={m.id} className={`border-b border-border last:border-0 ${m.active ? '' : 'opacity-60'}`}>
+      <tr key={m.id} className={`border-b border-border last:border-0 ${m.active ? '' : 'opacity-60'} ${low ? 'bg-amber-50 dark:bg-amber-900/10' : ''}`}>
         {canSelect ? (
           <td className="px-4 py-3">
             <input type="checkbox" aria-label={`Select ${m.name}`} className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
@@ -194,12 +200,21 @@ export function MedicationsPage() {
           ) : remaining <= 0 ? (
             <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">Out of stock</span>
           ) : (
-            <span className={`text-ink ${m.supply != null && remaining <= m.supply * 0.15 ? 'text-amber-700 dark:text-amber-300 font-medium' : ''}`}>
+            <span className={`text-ink ${low ? 'text-amber-700 dark:text-amber-300 font-medium' : ''}`}>
               {supplyLabel(remaining, m)} left
+              {days != null ? <span className="block text-xs font-normal text-muted">{`about ${Math.floor(days)} day${Math.floor(days) === 1 ? '' : 's'}`}</span> : null}
             </span>
           )}
         </td>
+        <td className="px-4 py-3 text-muted">
+          {m.supplier ? <span>{m.supplier}</span> : <span className="text-muted">—</span>}
+        </td>
         <td className="px-4 py-3 text-right whitespace-nowrap space-x-1">
+          {low && m.supplier_order_url ? (
+            <a href={m.supplier_order_url} target="_blank" rel="noopener noreferrer">
+              <Button size="sm" variant="primary">Order</Button>
+            </a>
+          ) : null}
           {canAdminister ? <Button size="sm" variant="secondary" onClick={() => setRecording(m)}>Record dose</Button> : null}
           {canManageMeds ? <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>Edit</Button> : null}
           {canManageMeds ? <Button size="sm" variant="danger" onClick={() => setConfirmSingleDelete(m)}>Delete</Button> : null}
@@ -236,8 +251,8 @@ export function MedicationsPage() {
               resource="medications"
               canImport={canManageMeds}
               onImported={invalidate}
-              templateHeaders={['Name', 'Units per dose', 'Dose', 'Type', 'Route', 'With food', 'As needed', 'Times', 'Instructions', 'Supply in units', 'Packs on hand', 'Active']}
-              templateSample={['Metformin', '1', '500 mg', 'Tablet', 'By mouth', 'true', 'false', '08:00; 20:00', 'Take with a full glass of water', '60', '2', 'true']}
+              templateHeaders={['Name', 'Units per dose', 'Dose', 'Type', 'Route', 'With food', 'As needed', 'Times', 'Instructions', 'Supply in units', 'Packs on hand', 'Supplier', 'Order link', 'Active']}
+              templateSample={['Metformin', '1', '500 mg', 'Tablet', 'By mouth', 'true', 'false', '08:00; 20:00', 'Take with a full glass of water', '60', '2', 'City Pharmacy', 'https://citypharmacy.example/reorder', 'true']}
             />
             {canManageMeds ? <Button onClick={() => setAddOpen(true)}>Add medication</Button> : null}
           </div>
@@ -285,6 +300,7 @@ export function MedicationsPage() {
                   <SortableTh label="Schedule" sortKey="schedule" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
                   <SortableTh label="Packs on hand" sortKey="packs" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
                   <SortableTh label="Supply left" sortKey="supply" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
+                  <SortableTh label="Supplier" sortKey="supplier" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
                   <th className="px-4 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
@@ -429,6 +445,8 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
   const [remaining, setRemaining] = useState(med?.supply_remaining != null ? String(med.supply_remaining) : '');
   const [packs, setPacks] = useState(med?.packs_on_hand != null ? String(med.packs_on_hand) : '');
   const [repeatsDue, setRepeatsDue] = useState(med?.repeats_due ?? '');
+  const [supplier, setSupplier] = useState(med?.supplier ?? '');
+  const [supplierOrderUrl, setSupplierOrderUrl] = useState(med?.supplier_order_url ?? '');
   const [error, setError] = useState('');
 
   const typeMeta = MED_TYPES.find((t) => t.value.toLowerCase() === type.toLowerCase());
@@ -487,6 +505,13 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
         supply_remaining: remaining.trim() === '' ? null : Number(remaining),
         packs_on_hand: packs.trim() === '' ? null : Number(packs),
         repeats_due: repeatsDue || null,
+        supplier: supplier.trim() || null,
+        // Accept a bare domain by defaulting to https, so a pasted link works.
+        supplier_order_url: (() => {
+          const u = supplierOrderUrl.trim();
+          if (!u) return null;
+          return /^https?:\/\//i.test(u) ? u : `https://${u}`;
+        })(),
       };
       return med ? api.patch(`/care-profiles/${profileId}/medications/${med.id}`, body) : api.post(`/care-profiles/${profileId}/medications`, body);
     },
@@ -604,6 +629,15 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
           <p className="text-sm text-ink leading-8">
             Repeats due:{' '}
             <input className={`${inlineInput} w-40`} aria-label="Repeats due" type="date" value={repeatsDue} onChange={(e) => setRepeatsDue(e.target.value)} />
+          </p>
+          <p className="text-sm text-ink leading-8">
+            Reordered from{' '}
+            <input className={`${inlineInput} w-56`} aria-label="Supplier" placeholder="e.g. City Pharmacy" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
+            {' '}with a reorder link{' '}
+            <input className={`${inlineInput} w-72`} aria-label="Order link" type="url" inputMode="url" placeholder="https://…" value={supplierOrderUrl} onChange={(e) => setSupplierOrderUrl(e.target.value)} />.
+          </p>
+          <p className="text-xs text-muted mt-1">
+            When supply drops to a week or less, this medication is highlighted in the list and an Order button links straight to the reorder link.
           </p>
           <p className="text-xs text-muted mt-1">
             A {containerWord} stays unopened until a dose is taken from it; then it becomes the open {containerWord} and counts down.{' '}
