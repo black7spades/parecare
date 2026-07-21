@@ -8,6 +8,7 @@ import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { CartIcon, PencilIcon, PillIcon, TrashIcon } from '../../../components/ui/icons';
+import { AddressFields, addressPayload, emptyAddress, type AddressValue } from '../../../components/AddressFields';
 import { useProfile } from './ProfileLayout';
 import { ImportExport } from '../../../components/ImportExport';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
@@ -496,7 +497,7 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
     const base = suppliersData?.suppliers ?? [];
     const seen = new Set(base.map((s) => s.id));
     return [...base, ...newSuppliers.filter((s) => !seen.has(s.id))].sort((a, b) =>
-      a.name.localeCompare(b.name) || (a.suburb ?? '').localeCompare(b.suburb ?? '')
+      a.name.localeCompare(b.name) || (a.address_suburb ?? '').localeCompare(b.address_suburb ?? '')
     );
   }, [suppliersData, newSuppliers]);
   const selectedSupplier = suppliers.find((s) => s.id === supplierId) ?? null;
@@ -684,7 +685,7 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
           {selectedSupplier ? (
             <p className="text-xs text-muted mt-1">
               {[
-                selectedSupplier.suburb ? `Branch: ${selectedSupplier.suburb}` : null,
+                selectedSupplier.address_suburb ? `Branch: ${selectedSupplier.address_suburb}` : null,
                 selectedSupplier.phone,
                 selectedSupplier.order_url ? 'Reorder link saved on this supplier.' : 'No reorder link saved on this supplier yet.',
               ].filter(Boolean).join(' · ')}
@@ -729,23 +730,26 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
 }
 
 /**
- * Create a supplier from within the medication editor. Vendor name and suburb
- * are separate fields; the suburb tells apart two branches of one vendor. The
- * reorder link and phone live on the supplier, reused by every medication that
+ * Create a supplier from within the medication editor, with the same fields
+ * and the same type-ahead address finder as the supplier directory. The
+ * address suburb tells apart two branches of one vendor; the reorder link,
+ * phone and address live on the supplier, reused by every medication that
  * names it.
  */
 function SupplierModal({ onClose, onCreated }: { onClose: () => void; onCreated: (s: Supplier) => void }) {
   const [name, setName] = useState('');
-  const [suburb, setSuburb] = useState('');
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [address, setAddress] = useState<AddressValue>(emptyAddress);
   const [orderUrl, setOrderUrl] = useState('');
   const [error, setError] = useState('');
 
   const mutation = useMutation({
     mutationFn: () => api.post<{ supplier: Supplier }>('/suppliers', {
       name: name.trim(),
-      suburb: suburb.trim() || null,
       phone: phone.trim() || null,
+      email: email.trim() || null,
+      ...addressPayload(address),
       order_url: orderUrl.trim() || null,
     }),
     onSuccess: (res) => onCreated(res.supplier),
@@ -753,11 +757,14 @@ function SupplierModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   });
 
   return (
-    <Modal open onClose={onClose} title="Add a supplier">
+    <Modal open onClose={onClose} title="Add a supplier" wide>
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (name.trim()) mutation.mutate(); }}>
         <Input label="Vendor name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Chemist Warehouse" />
-        <Input label="Suburb" value={suburb} onChange={(e) => setSuburb(e.target.value)} placeholder="e.g. Morayfield" hint="Tells apart two branches of the same vendor." />
-        <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. 07 5555 5555" />
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. 07 5555 5555" />
+          <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </div>
+        <AddressFields value={address} onChange={setAddress} />
         <Input label="Reorder link" type="url" inputMode="url" value={orderUrl} onChange={(e) => setOrderUrl(e.target.value)} placeholder="https://…" hint="Where the Order button goes to restock." />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">

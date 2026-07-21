@@ -2,6 +2,17 @@
 
 Guidance for Claude Code sessions in this repository.
 
+## Working with this user
+
+- **"The same as X" means identical, not similar.** When asked to build
+  something "the same as" an existing feature, mirror it field-for-field and
+  wire in every shared piece it uses (e.g. the address finder, link-to-profiles
+  flow, bulk actions). Do not ship a partial version and call it done.
+- **The user is impressed when you don't make more work for him.** Finish the
+  whole job the first time; anticipate the shared plumbing a feature needs
+  rather than leaving gaps to be reported back. If a request is genuinely
+  ambiguous, ask before building, not after.
+
 ## Project overview
 
 PareCare is a care coordination platform for anyone in your care: your own

@@ -916,15 +916,25 @@ export interface MedicationRecord {
   active: boolean;
 }
 
-/** A pharmacy or shop a medication is reordered from, shared per account. */
+/** A pharmacy or shop a medication is reordered from, shared per account.
+ * Mirrors a provider field for field, with a reorder link in place of the
+ * booking and directions links. */
 export interface Supplier {
   id: string;
   account_id: string;
   /** The vendor name, e.g. "Chemist Warehouse". */
   name: string;
-  /** The branch suburb, telling apart two branches of one vendor. */
-  suburb: string | null;
   phone: string | null;
+  email: string | null;
+  /** Composed one-line display, kept in step with the segmented parts. */
+  address: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  /** The branch suburb, telling apart two branches of one vendor. */
+  address_suburb: string | null;
+  address_state: string | null;
+  address_postcode: string | null;
+  address_country: string | null;
   /** A direct link to reorder from this supplier. */
   order_url: string | null;
 }
@@ -932,11 +942,11 @@ export interface Supplier {
 /**
  * Label a supplier for the picker. When two suppliers share a vendor name,
  * the branch suburb disambiguates them as "Vendor (Suburb)"; a lone vendor
- * shows its name alone. Names is the full list, so duplicates can be found.
+ * shows its name alone. `all` is the full list, so duplicates can be found.
  */
 export function supplierLabel(supplier: Supplier, all: Supplier[]): string {
   const sameName = all.filter((s) => s.name.trim().toLowerCase() === supplier.name.trim().toLowerCase());
-  if (sameName.length > 1 && supplier.suburb?.trim()) return `${supplier.name} (${supplier.suburb.trim()})`;
+  if (sameName.length > 1 && supplier.address_suburb?.trim()) return `${supplier.name} (${supplier.address_suburb.trim()})`;
   return supplier.name;
 }
 

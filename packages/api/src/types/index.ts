@@ -271,11 +271,26 @@ export interface Supplier {
   account_id: string;
   /** The vendor name, e.g. "Chemist Warehouse". */
   name: string;
-  /** The branch suburb, telling apart two branches of one vendor. */
-  suburb: string | null;
   phone: string | null;
+  email: string | null;
+  /** Composed one-line display, kept in step with the segmented parts. */
+  address: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  /** The branch suburb, telling apart two branches of one vendor. */
+  address_suburb: string | null;
+  address_state: string | null;
+  address_postcode: string | null;
+  address_country: string | null;
   /** A direct link to reorder from this supplier. */
   order_url: string | null;
+  created_at: string | Date;
+}
+
+export interface CareProfileSupplier {
+  id: string;
+  care_profile_id: string;
+  supplier_id: string;
   created_at: string | Date;
 }
 

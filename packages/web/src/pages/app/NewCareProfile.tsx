@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { Input, Textarea } from '../../components/ui/Input';
@@ -17,7 +17,13 @@ export function NewCareProfile() {
   const account = useAuthStore((s) => s.account);
   const mayCreate =
     account?.can_create_care_profiles !== false || account?.role === 'admin' || account?.role === 'super_admin';
-  const [kind, setKind] = useState<ProfileKind | null>(null);
+  // Adding straight from the People or Pets directory pre-picks the kind via
+  // ?kind=, skipping the person-or-pet chooser.
+  const [searchParams] = useSearchParams();
+  const initialKind = searchParams.get('kind');
+  const [kind, setKind] = useState<ProfileKind | null>(
+    initialKind === 'person' || initialKind === 'pet' ? initialKind : null
+  );
 
   if (!mayCreate) {
     return (
