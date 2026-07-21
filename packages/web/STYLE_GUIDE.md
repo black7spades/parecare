@@ -23,11 +23,12 @@ wins; fix the old pattern rather than copying it.
   reorder arrows in an editable list, sort indicators in table column
   headers, card collapse chevrons, pin toggles, navigation collapse
   controls (group chevrons, expand all and collapse all, and the
-  sidebar show and hide toggle), and the per-row action set in a dense
-  data table (Record dose, Order, Edit, Delete and the like), always
-  with both an `aria-label` and a matching `title` tooltip so the icon's
-  meaning is never in doubt. Muted colour at rest; destructive ones turn
-  red on hover.
+  sidebar show and hide toggle), the arrange/sort control and its
+  lock-in-place tick in a nav group heading, and the per-row action set
+  in a dense data table (Record dose, Order, Edit, Delete and the like),
+  always with both an `aria-label` and a matching `title` tooltip so the
+  icon's meaning is never in doubt. Muted colour at rest; destructive
+  ones turn red on hover.
 - Segmented view switches, such as a cards and table toggle, are a
   distinct control: a pill group where the active option has
   `bg-card text-ink font-medium shadow-sm` and inactive options are
