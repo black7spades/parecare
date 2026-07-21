@@ -5,6 +5,7 @@ import { DataToolbar } from '../../components/data/DataToolbar';
 import { SortableTh } from '../../components/data/SortableTh';
 import { useDataView, type DataSort, type DataFilter } from '../../components/data/useDataView';
 import { Avatar } from '../../components/ui/Avatar';
+import { Button } from '../../components/ui/Button';
 import { ageFrom, phaseLabel, CARE_PHASES, type ProfileKind } from '../../lib/care';
 import { format } from 'date-fns';
 
@@ -86,6 +87,7 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
     queryFn: () => api.get<{ profiles: DirectoryProfile[]; can_edit: boolean }>(endpoint),
   });
   const profiles = data?.profiles ?? [];
+  const canEdit = data?.can_edit ?? false;
 
   const dv = useDataView<DirectoryProfile>({
     rows: profiles,
@@ -121,6 +123,11 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
               : 'All pets across your care profiles.'}
           </p>
         </div>
+        {canEdit ? (
+          <Link to={`/app/profiles/new?kind=${kind}`}>
+            <Button>{isPeople ? 'Add person' : 'Add pet'}</Button>
+          </Link>
+        ) : null}
       </div>
 
       {profiles.length > 0 ? (

@@ -360,13 +360,15 @@ directoryRouter.post('/providers/:id/bulk-unlink', requireAuth, async (req, res)
 
 // ---------------------------------------------------------------------------
 // Supplier directory: the account's pharmacies and shops, reused across every
-// medication. Suppliers link to profiles indirectly, through the medications
-// that name them, so "used by" is derived from those medications.
+// medication and mirroring providers field for field — the same segmented
+// address, the same link-to-profiles join, the same edit, delete and bulk
+// tools. The medication count each supplier serves is shown alongside.
 
 const supplierSchema = z.object({
   name: z.string().min(1).max(255),
-  suburb: z.string().max(120).optional().nullable(),
   phone: z.string().max(50).optional().nullable(),
+  email: z.string().email().optional().nullable().or(z.literal('')),
+  ...providerAddressFields,
   order_url: z.string().url().max(2000).optional().nullable().or(z.literal('')),
 });
 
@@ -381,11 +383,11 @@ const normaliseSupplierUrl = (v: string | null | undefined): string | null => {
 };
 
 /**
- * List suppliers for the directory, with the profiles each is used by (via
- * their medications) and how many medications reference it.
+ * List suppliers for the directory, with the profiles each is linked to (the
+ * same join providers use) and how many medications reference it.
  *   super_admin  => every supplier
  *   admin        => their account's suppliers
- *   user/viewer  => suppliers used by profiles they can access (read-only)
+ *   user/viewer  => suppliers linked to profiles they can access (read-only)
  */
 directoryRouter.get('/suppliers', requireAuth, async (req, res) => {
   const account = req.account!;
@@ -397,16 +399,16 @@ directoryRouter.get('/suppliers', requireAuth, async (req, res) => {
         SELECT count(*) FROM medications m WHERE m.supplier_id = s.id
       )::int AS medication_count`),
       db.raw(`(
-        SELECT json_agg(x) FROM (
-          SELECT DISTINCT cp.id AS profile_id, cp.full_name AS profile_name
-          FROM medications m
-          JOIN care_profiles cp ON cp.id = m.care_profile_id
-          WHERE m.supplier_id = s.id
-          ORDER BY cp.full_name
-        ) x
+        SELECT json_agg(json_build_object(
+          'profile_id', cps.care_profile_id,
+          'profile_name', cp.full_name
+        ) ORDER BY cp.full_name)
+        FROM care_profile_suppliers cps
+        JOIN care_profiles cp ON cp.id = cps.care_profile_id
+        WHERE cps.supplier_id = s.id
       ) AS linked_profiles`),
     )
-    .orderBy([{ column: 's.name', order: 'asc' }, { column: 's.suburb', order: 'asc' }]);
+    .orderBy([{ column: 's.name', order: 'asc' }, { column: 's.address_suburb', order: 'asc' }]);
 
   if (roleAtLeast(account.role, 'super_admin')) {
     // See everything
@@ -414,8 +416,8 @@ directoryRouter.get('/suppliers', requireAuth, async (req, res) => {
     query = query.where('s.account_id', account.id);
   } else {
     query = query
-      .join('medications as m2', 'm2.supplier_id', 's.id')
-      .join('care_circle_members as ccm', 'ccm.care_profile_id', 'm2.care_profile_id')
+      .join('care_profile_suppliers as cps', 'cps.supplier_id', 's.id')
+      .join('care_circle_members as ccm', 'ccm.care_profile_id', 'cps.care_profile_id')
       .where('ccm.account_id', account.id)
       .where('ccm.invite_accepted', true)
       .groupBy('s.id');
@@ -441,9 +443,10 @@ directoryRouter.post('/suppliers', requireAuth, async (req, res) => {
   const [supplier] = await db('suppliers')
     .insert({
       account_id: account.id,
+      ...withComposedAddress(parsed.data),
       name: parsed.data.name.trim(),
-      suburb: cleanField(parsed.data.suburb),
       phone: cleanField(parsed.data.phone),
+      email: cleanField(parsed.data.email),
       order_url: normaliseSupplierUrl(parsed.data.order_url),
     })
     .returning('*');
@@ -462,10 +465,10 @@ directoryRouter.patch('/suppliers/:id', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
-  const update: Record<string, unknown> = {};
+  const update: Record<string, unknown> = withComposedAddress(parsed.data);
   if ('name' in parsed.data) update['name'] = (parsed.data.name ?? '').trim();
-  if ('suburb' in parsed.data) update['suburb'] = cleanField(parsed.data.suburb);
   if ('phone' in parsed.data) update['phone'] = cleanField(parsed.data.phone);
+  if ('email' in parsed.data) update['email'] = cleanField(parsed.data.email);
   if ('order_url' in parsed.data) update['order_url'] = normaliseSupplierUrl(parsed.data.order_url);
 
   let query = db('suppliers').where({ id: req.params['id'] });
@@ -486,7 +489,7 @@ directoryRouter.patch('/suppliers/:id', requireAuth, async (req, res) => {
 /**
  * Delete a supplier (admin+ for their account, super_admin for any). Any
  * medication that named it keeps its typed-in name but loses the link, as the
- * supplier_id is set null by the foreign key.
+ * supplier_id is set null by the foreign key; profile links cascade away.
  */
 directoryRouter.delete('/suppliers/:id', requireAuth, async (req, res) => {
   const account = req.account!;
@@ -502,6 +505,67 @@ directoryRouter.delete('/suppliers/:id', requireAuth, async (req, res) => {
     return;
   }
   res.json({ message: 'Supplier deleted.' });
+});
+
+/** Bulk link a supplier to multiple care profiles at once (admin+). */
+directoryRouter.post('/suppliers/:id/bulk-link', requireAuth, async (req, res) => {
+  const account = req.account!;
+  if (!roleAtLeast(account.role, 'admin')) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+  const parsed = z.object({ profile_ids: z.array(z.string().uuid()).min(1).max(100) }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
+    return;
+  }
+  const supplier = await db('suppliers').where({ id: req.params['id'] }).first();
+  if (!supplier) {
+    res.status(404).json({ error: 'Supplier not found', code: 'NOT_FOUND' });
+    return;
+  }
+  if (!roleAtLeast(account.role, 'super_admin') && supplier.account_id !== account.id) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+
+  const { profile_ids } = parsed.data;
+  const accessRows = roleAtLeast(account.role, 'super_admin')
+    ? await db('care_profiles').whereIn('id', profile_ids).select('id')
+    : await db('care_profiles').whereIn('id', profile_ids).where({ account_id: account.id }).select('id');
+  const accessibleIds = accessRows.map((r) => r.id);
+
+  const existing = await db('care_profile_suppliers')
+    .where({ supplier_id: supplier.id })
+    .whereIn('care_profile_id', accessibleIds)
+    .select('care_profile_id');
+  const existingSet = new Set(existing.map((r) => r.care_profile_id));
+  const toInsert = accessibleIds.filter((id) => !existingSet.has(id));
+  if (toInsert.length > 0) {
+    await db('care_profile_suppliers').insert(
+      toInsert.map((pid) => ({ care_profile_id: pid, supplier_id: supplier.id }))
+    );
+  }
+  res.json({ linked: toInsert.length, already_linked: existingSet.size, skipped: profile_ids.length - accessibleIds.length });
+});
+
+/** Bulk unlink a supplier from multiple care profiles (admin+). */
+directoryRouter.post('/suppliers/:id/bulk-unlink', requireAuth, async (req, res) => {
+  const account = req.account!;
+  if (!roleAtLeast(account.role, 'admin')) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+  const parsed = z.object({ profile_ids: z.array(z.string().uuid()).min(1).max(100) }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
+    return;
+  }
+  const removed = await db('care_profile_suppliers')
+    .where({ supplier_id: req.params['id'] })
+    .whereIn('care_profile_id', parsed.data.profile_ids)
+    .delete();
+  res.json({ unlinked: removed });
 });
 
 // ---------------------------------------------------------------------------

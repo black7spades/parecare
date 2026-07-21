@@ -10,14 +10,19 @@ source. Versions follow [semantic versioning](https://semver.org).
 ### Added
 
 - **Suppliers**, a shared account-level directory of the pharmacies and shops
-  medications are reordered from, kept separate from care providers. Vendor
-  name and branch suburb are distinct fields, so two branches of one vendor are
-  told apart as "Vendor (Suburb)".
+  medications are reordered from, kept separate from care providers but
+  mirroring them field for field: name, phone, email, the same segmented
+  address filled by the type-ahead address finder, and a reorder link. Two
+  branches of one vendor are told apart by suburb as "Vendor (Suburb)".
 - Suppliers surfaced in the **Directory** alongside People, Pets, Providers and
-  Addresses, with the same search, sort, edit and delete tools, showing how
-  many medications use each supplier and which people they are for.
-- The **Add/Edit medication** editor now picks its supplier from the shared
-  list, autofilling the reorder link, and can create a new supplier inline.
+  Addresses, with the identical tools: search, sort, edit, delete, bulk edit
+  and delete, and the same Link-to-profiles flow (a supplier can be linked to
+  any person or pet). The list also shows how many medications use each one.
+- The **Add/Edit medication** editor picks its supplier from the shared list,
+  autofilling the reorder link, and can create a new supplier inline, with the
+  same address finder.
+- **Add person / Add pet** buttons on the People and Pets directory pages,
+  pre-selecting the kind on the new-profile form.
 - A **sort dropdown on every top-level nav group** (Directory, Tools, Pinned):
   default, A to Z, Z to A, or a custom manual order. The dropdown is theme
   aware, following light, dark or device mode. Custom order shows move controls

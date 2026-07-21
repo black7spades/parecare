@@ -18,7 +18,7 @@ const medSelect = () =>
     .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
     .leftJoin('medical_conditions as mc', 'm.medical_condition_id', 'mc.id')
     .leftJoin('suppliers as sup', 'm.supplier_id', 'sup.id')
-    .select('m.*', 'c.name as name', 'c.form as form', 'mc.name as condition_name', 'sup.suburb as supplier_suburb');
+    .select('m.*', 'c.name as name', 'c.form as form', 'mc.name as condition_name', 'sup.address_suburb as supplier_suburb');
 
 const medWithName = (id: string) => medSelect().where('m.id', id).first();
 

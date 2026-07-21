@@ -2,15 +2,18 @@ import type { Knex } from 'knex';
 
 /**
  * Suppliers are the pharmacies and shops a medication is reordered from,
- * shared across every care profile in an account (like providers, but a
- * separate concern: a supplier fulfils orders, a provider delivers care).
+ * shared across every care profile in an account. They mirror providers
+ * field-for-field: a name, phone and email, the same segmented address filled
+ * by the shared address finder, and a reorder link (in place of a provider's
+ * booking and directions links). Like providers they can be linked directly to
+ * care profiles through a join table, and like providers a supplier fulfils
+ * orders rather than delivering care.
  *
- * Vendor name and suburb are two distinct data points, so they are two
- * columns. Two suppliers can share a vendor name (a chain with several
- * branches); the suburb tells them apart, e.g. "Chemist Warehouse" in two
- * suburbs. Each medication links to one supplier via `supplier_id`; the
- * denormalised `supplier` name and `supplier_order_url` stay on the
- * medication for display, export and the low-supply Order button.
+ * Each medication also links to one supplier via `supplier_id`; the
+ * denormalised `supplier` name and `supplier_order_url` stay on the medication
+ * for display, export and the low-supply Order button. Two suppliers can share
+ * a vendor name (a chain with several branches); the address suburb tells them
+ * apart, e.g. "Chemist Warehouse" in two suburbs.
  */
 export async function up(knex: Knex): Promise<void> {
   await knex.schema.createTable('suppliers', (t) => {
@@ -18,15 +21,30 @@ export async function up(knex: Knex): Promise<void> {
     t.uuid('account_id').notNullable().references('id').inTable('accounts').onDelete('CASCADE');
     // The vendor name, e.g. "Chemist Warehouse".
     t.string('name', 255).notNullable();
-    // The branch suburb, telling apart two branches of the same vendor.
-    t.string('suburb', 120).nullable();
     // How to reach them to place or chase an order.
     t.string('phone', 50).nullable();
+    t.string('email', 255).nullable();
+    // The same segmented address as people, pets and providers. `address` is a
+    // composed one-line display, kept in step with the parts on write.
+    t.text('address').nullable();
+    t.string('address_line1', 255).nullable();
+    t.string('address_line2', 255).nullable();
+    t.string('address_suburb', 120).nullable();
+    t.string('address_state', 120).nullable();
+    t.string('address_postcode', 20).nullable();
+    t.string('address_country', 120).nullable();
     // A direct link to reorder from this supplier (their order page).
     t.text('order_url').nullable();
     t.timestamp('created_at').notNullable().defaultTo(knex.fn.now());
-    // The same vendor+suburb is one supplier per account.
-    t.unique(['account_id', 'name', 'suburb']);
+  });
+
+  // Link suppliers to care profiles, the same join providers use.
+  await knex.schema.createTable('care_profile_suppliers', (t) => {
+    t.uuid('id').primary().defaultTo(knex.raw('gen_random_uuid()'));
+    t.uuid('care_profile_id').notNullable().references('id').inTable('care_profiles').onDelete('CASCADE');
+    t.uuid('supplier_id').notNullable().references('id').inTable('suppliers').onDelete('CASCADE');
+    t.timestamp('created_at').notNullable().defaultTo(knex.fn.now());
+    t.unique(['care_profile_id', 'supplier_id']);
   });
 
   // Link each medication to a supplier. Nullable: a medication need not name
@@ -63,5 +81,6 @@ export async function down(knex: Knex): Promise<void> {
   await knex.schema.alterTable('medications', (t) => {
     t.dropColumn('supplier_id');
   });
+  await knex.schema.dropTable('care_profile_suppliers');
   await knex.schema.dropTable('suppliers');
 }

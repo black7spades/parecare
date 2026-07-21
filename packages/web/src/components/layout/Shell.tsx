@@ -43,6 +43,11 @@ const TOOLS_NAV: NavItemDef[] = [
   { key: 'reports', label: 'Reports', to: '/app/reports', icon: <ChartIcon size={16} /> },
 ];
 
+// First-segment names under /app that are top-level sections, not a care
+// profile id. On these the sidebar keeps the main nav instead of switching to
+// a profile's sub-nav.
+const RESERVED_APP_SECTIONS = new Set(['profiles', 'directory', 'reports']);
+
 type PinArrangement = 'recent' | 'az' | 'za' | 'custom';
 
 const PIN_ARRANGE_KEY = 'parecare-pin-arrangement';
@@ -505,12 +510,12 @@ export function Shell() {
   const homeDest = role === 'admin' || role === 'super_admin' ? '/system' : '/app';
 
   // Detect whether a care profile is open, so the left nav can switch to that
-  // profile's sections. Exclude the "profiles/new" route.
+  // profile's sections. The first segment after /app is a profile id only when
+  // it is not one of the reserved top-level sections (Directory, Tools/Reports,
+  // and the profiles/new route); otherwise the main nav stays put.
   const profileMatch = useMatch('/app/:profileId/*');
-  const profileId =
-    profileMatch?.params.profileId && profileMatch.params.profileId !== 'profiles' && profileMatch.params.profileId !== 'directory'
-      ? profileMatch.params.profileId
-      : null;
+  const matchedFirst = profileMatch?.params.profileId;
+  const profileId = matchedFirst && !RESERVED_APP_SECTIONS.has(matchedFirst) ? matchedFirst : null;
 
   // Refresh account info so role/tier/avatar changes apply without re-login
   useEffect(() => {
