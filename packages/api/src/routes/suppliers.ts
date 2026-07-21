@@ -20,7 +20,9 @@ const supplierSchema = z.object({
   phone: z.string().max(50).optional().nullable(),
   email: z.string().email().optional().nullable().or(z.literal('')),
   ...providerAddressFields,
-  order_url: z.string().url().max(2000).optional().nullable().or(z.literal('')),
+  // A bare domain is accepted and defaulted to https on write, so a pasted
+  // link works; hence a plain string rather than a strict url() here.
+  order_url: z.string().max(2000).optional().nullable(),
 });
 
 const clean = (v: string | null | undefined): string | null => {

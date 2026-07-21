@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { AddressFields, addressFrom, addressPayload, emptyAddress, type AddressValue } from '../../components/AddressFields';
+import { ImportExport } from '../../components/ImportExport';
 import { DataToolbar } from '../../components/data/DataToolbar';
 import { SortableTh } from '../../components/data/SortableTh';
 import { useDataView, type DataSort, type DataFilter } from '../../components/data/useDataView';
@@ -94,11 +95,21 @@ export function DirectoryProvidersPage() {
           <h2 className="text-base font-semibold text-ink">Provider directory</h2>
           <p className="text-sm text-muted">All providers across your care profiles. Edit details here and they update everywhere.</p>
         </div>
-        {canEdit ? (
-          <Button onClick={() => { setEditing(null); setEditorOpen(true); }}>
-            Add provider
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <ImportExport
+            basePath="/directory/providers"
+            resource="providers"
+            canImport={canEdit}
+            onImported={invalidate}
+            templateHeaders={['Name', 'Type', 'Organisation', 'Phone', 'Email', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country', 'Booking link', 'Directions']}
+            templateSample={['Dr Jane Smith', 'gp', 'City Medical', '07 5555 5555', 'jane@example.com', '1 Main St', '', 'Morayfield', 'QLD', '4506', 'Australia', '', '']}
+          />
+          {canEdit ? (
+            <Button onClick={() => { setEditing(null); setEditorOpen(true); }}>
+              Add provider
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {providers.length > 0 ? (

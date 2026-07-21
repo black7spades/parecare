@@ -5,7 +5,8 @@ import { requireAuth } from '../middleware/auth';
 import { roleAtLeast } from '../middleware/requireRole';
 import { providerAddressFields, withComposedAddress } from './providers';
 import { addressColumns, ADDRESS_PART_KEYS, RESIDENCE_KIND, syncProfileResidence, syncResidenceForAddress } from '../services/addresses';
-import type { CareProfile, Provider, ProfileKind } from '../types';
+import { exportRecords, importRecords, type PortDescriptor, type PortFormat } from '../services/dataPort';
+import type { AccountRole, CareProfile, Provider, ProfileKind } from '../types';
 
 export const directoryRouter = Router();
 
@@ -369,7 +370,9 @@ const supplierSchema = z.object({
   phone: z.string().max(50).optional().nullable(),
   email: z.string().email().optional().nullable().or(z.literal('')),
   ...providerAddressFields,
-  order_url: z.string().url().max(2000).optional().nullable().or(z.literal('')),
+  // A bare domain is accepted and defaulted to https on write, so a pasted
+  // link works; hence a plain string rather than a strict url() here.
+  order_url: z.string().max(2000).optional().nullable(),
 });
 
 const cleanField = (v: string | null | undefined): string | null => {
@@ -446,17 +449,15 @@ directoryRouter.get('/suppliers', requireAuth, async (req, res) => {
   }
 
   const suppliers = await query;
-  const canEdit = roleAtLeast(account.role, 'admin');
-  res.json({ suppliers, can_edit: canEdit });
+  // Suppliers are account-scoped and already creatable by any signed-in carer
+  // from the medication editor, so the directory lets them be managed here too
+  // rather than gating it behind a platform admin like providers.
+  res.json({ suppliers, can_edit: true });
 });
 
-/** Create a supplier at the account level (admin+). */
+/** Create a supplier at the account level. */
 directoryRouter.post('/suppliers', requireAuth, async (req, res) => {
   const account = req.account!;
-  if (!roleAtLeast(account.role, 'admin')) {
-    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
-    return;
-  }
   const parsed = supplierSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
@@ -475,13 +476,9 @@ directoryRouter.post('/suppliers', requireAuth, async (req, res) => {
   res.status(201).json({ supplier });
 });
 
-/** Update a supplier (admin+ for their account, super_admin for any). */
+/** Update a supplier (its own account; super_admin for any). */
 directoryRouter.patch('/suppliers/:id', requireAuth, async (req, res) => {
   const account = req.account!;
-  if (!roleAtLeast(account.role, 'admin')) {
-    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
-    return;
-  }
   const parsed = supplierSchema.partial().safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
@@ -515,10 +512,6 @@ directoryRouter.patch('/suppliers/:id', requireAuth, async (req, res) => {
  */
 directoryRouter.delete('/suppliers/:id', requireAuth, async (req, res) => {
   const account = req.account!;
-  if (!roleAtLeast(account.role, 'admin')) {
-    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
-    return;
-  }
   let query = db('suppliers').where({ id: req.params['id'] });
   if (!roleAtLeast(account.role, 'super_admin')) query = query.where({ account_id: account.id });
   const affected = await query.delete();
@@ -529,13 +522,9 @@ directoryRouter.delete('/suppliers/:id', requireAuth, async (req, res) => {
   res.json({ message: 'Supplier deleted.' });
 });
 
-/** Bulk link a supplier to multiple care profiles at once (admin+). */
+/** Bulk link a supplier to multiple care profiles at once. */
 directoryRouter.post('/suppliers/:id/bulk-link', requireAuth, async (req, res) => {
   const account = req.account!;
-  if (!roleAtLeast(account.role, 'admin')) {
-    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
-    return;
-  }
   const parsed = z.object({ profile_ids: z.array(z.string().uuid()).min(1).max(100) }).safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
@@ -571,13 +560,9 @@ directoryRouter.post('/suppliers/:id/bulk-link', requireAuth, async (req, res) =
   res.json({ linked: toInsert.length, already_linked: existingSet.size, skipped: profile_ids.length - accessibleIds.length });
 });
 
-/** Bulk unlink a supplier from multiple care profiles (admin+). */
+/** Bulk unlink a supplier from multiple care profiles. */
 directoryRouter.post('/suppliers/:id/bulk-unlink', requireAuth, async (req, res) => {
   const account = req.account!;
-  if (!roleAtLeast(account.role, 'admin')) {
-    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
-    return;
-  }
   const parsed = z.object({ profile_ids: z.array(z.string().uuid()).min(1).max(100) }).safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
@@ -771,3 +756,310 @@ directoryRouter.post('/addresses/:id/bulk-unlink', requireAuth, async (req, res)
     .delete();
   res.json({ unlinked: removed });
 });
+
+// ---------------------------------------------------------------------------
+// Bulk import and export for every directory resource. Each resource plugs a
+// small descriptor into the shared dataPort toolkit (CSV and JSON, flexible
+// header matching, a blank template), the same way medications do, so every
+// directory sub-item can be exported and re-imported. Writes follow each
+// resource's normal permission: suppliers by any signed-in carer for their
+// account, the rest by an admin.
+
+const portBlank = (v: string | null | undefined): string | null => {
+  const t = (v ?? '').trim();
+  return t === '' ? null : t;
+};
+const portUrl = (v: string | null | undefined): string | null => {
+  const u = (v ?? '').trim();
+  if (!u) return null;
+  return /^https?:\/\//i.test(u) ? u : `https://${u}`;
+};
+const portEmail = (v: string | null | undefined): string | null => {
+  const e = (v ?? '').trim();
+  return e && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e) ? e : null;
+};
+const portDate = (v: string | null | undefined): string | null => {
+  const d = (v ?? '').trim();
+  return /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : null;
+};
+const portBool = (v: string | null | undefined): boolean =>
+  ['true', 'yes', '1', 'y'].includes((v ?? '').trim().toLowerCase());
+const portFullName = (full: string): { first_name: string | null; middle_name: string | null; last_name: string | null } => {
+  const w = full.trim().split(/\s+/).filter(Boolean);
+  return {
+    first_name: w[0] ?? null,
+    middle_name: w.length > 2 ? w.slice(1, -1).join(' ') : null,
+    last_name: w.length > 1 ? w[w.length - 1] : null,
+  };
+};
+const portReadFormat = (v: unknown): PortFormat => (String(v).toLowerCase() === 'json' ? 'json' : 'csv');
+
+const PORT_PHASES = new Set([
+  'early_concern', 'home_with_support', 'increased_dependency',
+  'transition_to_residential', 'residential_ongoing', 'end_of_life',
+]);
+
+// Any directory record carries the columns its list query selects.
+type AnyRow = Record<string, unknown>;
+const cell = (v: unknown): string => (v == null ? '' : String(v));
+
+// A parsed import record is the set of columns to insert (minus account_id).
+type PortRecord = Record<string, unknown>;
+
+const providerPort: PortDescriptor<AnyRow, PortRecord> = {
+  resource: 'providers',
+  columns: [
+    { key: 'name', header: 'Name', aliases: ['provider', 'full name'], toCell: (r) => cell(r['name']) },
+    { key: 'provider_type', header: 'Type', aliases: ['provider type', 'role'], toCell: (r) => cell(r['provider_type']) },
+    { key: 'organisation', header: 'Organisation', aliases: ['org', 'clinic', 'practice'], toCell: (r) => cell(r['organisation']) },
+    { key: 'phone', header: 'Phone', toCell: (r) => cell(r['phone']) },
+    { key: 'email', header: 'Email', toCell: (r) => cell(r['email']) },
+    { key: 'address_line1', header: 'Address line 1', aliases: ['address', 'street'], toCell: (r) => cell(r['address_line1']) },
+    { key: 'address_line2', header: 'Address line 2', toCell: (r) => cell(r['address_line2']) },
+    { key: 'address_suburb', header: 'Suburb', aliases: ['city', 'town'], toCell: (r) => cell(r['address_suburb']) },
+    { key: 'address_state', header: 'State', toCell: (r) => cell(r['address_state']) },
+    { key: 'address_postcode', header: 'Postcode', aliases: ['zip', 'postal code'], toCell: (r) => cell(r['address_postcode']) },
+    { key: 'address_country', header: 'Country', toCell: (r) => cell(r['address_country']) },
+    { key: 'booking_link', header: 'Booking link', aliases: ['booking'], toCell: (r) => cell(r['booking_link']) },
+    { key: 'directions_link', header: 'Directions', aliases: ['directions link', 'map'], toCell: (r) => cell(r['directions_link']) },
+  ],
+  coerce: (raw, n) => {
+    const name = (raw['name'] ?? '').trim();
+    if (!name) return { ok: false as const, error: `Row ${n}: a provider name is required.` };
+    return {
+      ok: true as const,
+      value: withComposedAddress({
+        provider_type: portBlank(raw['provider_type']) ?? 'other',
+        name,
+        organisation: portBlank(raw['organisation']),
+        phone: portBlank(raw['phone']),
+        email: portEmail(raw['email']),
+        address_line1: portBlank(raw['address_line1']),
+        address_line2: portBlank(raw['address_line2']),
+        address_suburb: portBlank(raw['address_suburb']),
+        address_state: portBlank(raw['address_state']),
+        address_postcode: portBlank(raw['address_postcode']),
+        address_country: portBlank(raw['address_country']),
+        booking_link: portUrl(raw['booking_link']),
+        directions_link: portUrl(raw['directions_link']),
+      }),
+    };
+  },
+};
+
+const supplierPort: PortDescriptor<AnyRow, PortRecord> = {
+  resource: 'suppliers',
+  columns: [
+    { key: 'name', header: 'Vendor', aliases: ['name', 'supplier', 'pharmacy'], toCell: (r) => cell(r['name']) },
+    { key: 'phone', header: 'Phone', toCell: (r) => cell(r['phone']) },
+    { key: 'email', header: 'Email', toCell: (r) => cell(r['email']) },
+    { key: 'address_line1', header: 'Address line 1', aliases: ['address', 'street'], toCell: (r) => cell(r['address_line1']) },
+    { key: 'address_line2', header: 'Address line 2', toCell: (r) => cell(r['address_line2']) },
+    { key: 'address_suburb', header: 'Suburb', aliases: ['city', 'town'], toCell: (r) => cell(r['address_suburb']) },
+    { key: 'address_state', header: 'State', toCell: (r) => cell(r['address_state']) },
+    { key: 'address_postcode', header: 'Postcode', aliases: ['zip', 'postal code'], toCell: (r) => cell(r['address_postcode']) },
+    { key: 'address_country', header: 'Country', toCell: (r) => cell(r['address_country']) },
+    { key: 'order_url', header: 'Reorder link', aliases: ['order url', 'order link', 'reorder'], toCell: (r) => cell(r['order_url']) },
+  ],
+  coerce: (raw, n) => {
+    const name = (raw['name'] ?? '').trim();
+    if (!name) return { ok: false as const, error: `Row ${n}: a vendor name is required.` };
+    return {
+      ok: true as const,
+      value: withComposedAddress({
+        name,
+        phone: portBlank(raw['phone']),
+        email: portEmail(raw['email']),
+        address_line1: portBlank(raw['address_line1']),
+        address_line2: portBlank(raw['address_line2']),
+        address_suburb: portBlank(raw['address_suburb']),
+        address_state: portBlank(raw['address_state']),
+        address_postcode: portBlank(raw['address_postcode']),
+        address_country: portBlank(raw['address_country']),
+        order_url: portUrl(raw['order_url']),
+      }),
+    };
+  },
+};
+
+const addressPort: PortDescriptor<AnyRow, PortRecord> = {
+  resource: 'addresses',
+  columns: [
+    { key: 'label', header: 'Label', aliases: ['name'], toCell: (r) => cell(r['label']) },
+    { key: 'address_line1', header: 'Address line 1', aliases: ['address', 'street'], toCell: (r) => cell(r['address_line1']) },
+    { key: 'address_line2', header: 'Address line 2', toCell: (r) => cell(r['address_line2']) },
+    { key: 'address_suburb', header: 'Suburb', aliases: ['city', 'town'], toCell: (r) => cell(r['address_suburb']) },
+    { key: 'address_state', header: 'State', toCell: (r) => cell(r['address_state']) },
+    { key: 'address_postcode', header: 'Postcode', aliases: ['zip', 'postal code'], toCell: (r) => cell(r['address_postcode']) },
+    { key: 'address_country', header: 'Country', toCell: (r) => cell(r['address_country']) },
+  ],
+  coerce: (raw, n) => {
+    const parts = {
+      address_line1: portBlank(raw['address_line1']),
+      address_line2: portBlank(raw['address_line2']),
+      address_suburb: portBlank(raw['address_suburb']),
+      address_state: portBlank(raw['address_state']),
+      address_postcode: portBlank(raw['address_postcode']),
+      address_country: portBlank(raw['address_country']),
+    };
+    if (!ADDRESS_PART_KEYS.some((k) => (parts as Record<string, unknown>)[k])) {
+      return { ok: false as const, error: `Row ${n}: an address is required.` };
+    }
+    return { ok: true as const, value: { ...addressColumns(parts, portBlank(raw['label'])) } };
+  },
+};
+
+const personPort: PortDescriptor<AnyRow, PortRecord> = {
+  resource: 'people',
+  columns: [
+    { key: 'full_name', header: 'Name', aliases: ['full name', 'person'], toCell: (r) => cell(r['full_name']) },
+    { key: 'preferred_name', header: 'Preferred name', aliases: ['known as'], toCell: (r) => cell(r['preferred_name']) },
+    { key: 'date_of_birth', header: 'Date of birth', aliases: ['dob', 'birthdate'], toCell: (r) => cell(r['date_of_birth']).slice(0, 10) },
+    { key: 'pronouns', header: 'Pronouns', toCell: (r) => cell(r['pronouns']) },
+    { key: 'primary_language', header: 'Language', aliases: ['primary language'], toCell: (r) => cell(r['primary_language']) },
+    { key: 'current_phase', header: 'Phase', toCell: (r) => cell(r['current_phase']) },
+    { key: 'owner_relationship', header: 'Relationship', aliases: ['relationship'], toCell: (r) => cell(r['owner_relationship']) },
+    { key: 'contact_name', header: 'Contact name', toCell: (r) => cell(r['contact_name']) },
+    { key: 'contact_phone', header: 'Contact phone', toCell: (r) => cell(r['contact_phone']) },
+    { key: 'contact_email', header: 'Contact email', toCell: (r) => cell(r['contact_email']) },
+  ],
+  coerce: (raw, n) => {
+    const full = (raw['full_name'] ?? '').trim();
+    if (!full) return { ok: false as const, error: `Row ${n}: a name is required.` };
+    const contactName = portBlank(raw['contact_name']);
+    const phase = (raw['current_phase'] ?? '').trim();
+    return {
+      ok: true as const,
+      value: {
+        kind: 'person',
+        full_name: full,
+        ...portFullName(full),
+        preferred_name: portBlank(raw['preferred_name']),
+        date_of_birth: portDate(raw['date_of_birth']),
+        pronouns: portBlank(raw['pronouns']),
+        primary_language: portBlank(raw['primary_language']),
+        current_phase: PORT_PHASES.has(phase) ? phase : 'early_concern',
+        owner_relationship: portBlank(raw['owner_relationship']),
+        contact_kind: contactName ? 'contact' : null,
+        contact_name: contactName,
+        contact_phone: portBlank(raw['contact_phone']),
+        contact_email: portEmail(raw['contact_email']),
+      },
+    };
+  },
+};
+
+const petPort: PortDescriptor<AnyRow, PortRecord> = {
+  resource: 'pets',
+  columns: [
+    { key: 'full_name', header: 'Name', aliases: ['pet', 'full name'], toCell: (r) => cell(r['full_name']) },
+    { key: 'species', header: 'Species', toCell: (r) => cell(r['species']) },
+    { key: 'breed', header: 'Breed', toCell: (r) => cell(r['breed']) },
+    { key: 'desexed', header: 'Desexed', aliases: ['neutered', 'spayed'], toCell: (r) => (r['desexed'] ? 'true' : 'false') },
+    { key: 'microchip_number', header: 'Microchip', aliases: ['microchip number', 'chip'], toCell: (r) => cell(r['microchip_number']) },
+    { key: 'date_of_birth', header: 'Date of birth', aliases: ['dob'], toCell: (r) => cell(r['date_of_birth']).slice(0, 10) },
+    { key: 'owner_relationship', header: 'Relationship', aliases: ['relationship'], toCell: (r) => cell(r['owner_relationship']) },
+    { key: 'contact_name', header: 'Contact name', toCell: (r) => cell(r['contact_name']) },
+    { key: 'contact_phone', header: 'Contact phone', toCell: (r) => cell(r['contact_phone']) },
+    { key: 'contact_email', header: 'Contact email', toCell: (r) => cell(r['contact_email']) },
+  ],
+  coerce: (raw, n) => {
+    const full = (raw['full_name'] ?? '').trim();
+    if (!full) return { ok: false as const, error: `Row ${n}: a name is required.` };
+    const contactName = portBlank(raw['contact_name']);
+    return {
+      ok: true as const,
+      value: {
+        kind: 'pet',
+        full_name: full,
+        ...portFullName(full),
+        species: portBlank(raw['species']),
+        breed: portBlank(raw['breed']),
+        desexed: portBool(raw['desexed']),
+        microchip_number: portBlank(raw['microchip_number']),
+        date_of_birth: portDate(raw['date_of_birth']),
+        current_phase: 'early_concern',
+        owner_relationship: portBlank(raw['owner_relationship']),
+        contact_kind: contactName ? 'contact' : null,
+        contact_name: contactName,
+        contact_phone: portBlank(raw['contact_phone']),
+        contact_email: portEmail(raw['contact_email']),
+      },
+    };
+  },
+};
+
+// Fetch the rows to export for a table, scoped to what the caller may see:
+// super_admin sees all, everyone else their own account's records.
+async function exportRows(table: string, account: { id: string; role: AccountRole }, extra?: (q: import('knex').Knex.QueryBuilder) => void) {
+  let q = db(table).select('*');
+  if (!roleAtLeast(account.role, 'super_admin')) q = q.where({ account_id: account.id });
+  if (extra) extra(q);
+  return q;
+}
+
+const importBody = z.object({ format: z.enum(['csv', 'json']).optional(), data: z.string().min(1) });
+
+// Wire an export and an import route for one directory resource.
+function mountPort(
+  path: string,
+  descriptor: PortDescriptor<AnyRow, PortRecord>,
+  opts: {
+    table: string;
+    kind?: ProfileKind;
+    canWrite: (role: AccountRole) => boolean;
+    afterImport?: (ids: string[]) => Promise<void>;
+  }
+) {
+  directoryRouter.get(`/${path}/export`, requireAuth, async (req, res) => {
+    const account = req.account!;
+    const format = portReadFormat(req.query['format']);
+    const rows = await exportRows(opts.table, account, (q) => {
+      if (opts.kind) q.where({ kind: opts.kind, archived: false });
+      q.orderBy(opts.kind ? 'full_name' : (descriptor.columns[0]!.key), 'asc');
+    });
+    const { body, contentType, filename } = exportRecords(descriptor, rows as AnyRow[], format);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(body);
+  });
+
+  directoryRouter.post(`/${path}/import`, requireAuth, async (req, res) => {
+    const account = req.account!;
+    if (!opts.canWrite(account.role)) {
+      res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+      return;
+    }
+    const parsed = importBody.safeParse(req.body);
+    let text: string;
+    let format: PortFormat;
+    if (typeof req.body === 'string') {
+      text = req.body;
+      format = portReadFormat(req.query['format'] ?? (req.is('application/json') ? 'json' : 'csv'));
+    } else if (parsed.success) {
+      text = parsed.data.data;
+      format = parsed.data.format ?? portReadFormat(req.query['format']);
+    } else {
+      res.status(400).json({ error: 'Provide the file contents in a "data" field.', code: 'VALIDATION_ERROR' });
+      return;
+    }
+    const { records, errors, total } = importRecords(descriptor, text, format);
+    if (records.length === 0) {
+      res.status(400).json({ error: 'No valid rows found to import.', code: 'IMPORT_EMPTY', imported: 0, skipped: total, errors });
+      return;
+    }
+    const rows = records.map((r) => ({ ...r, account_id: account.id }));
+    const inserted = await db(opts.table).insert(rows).returning('id');
+    if (opts.afterImport) await opts.afterImport(inserted.map((r) => (r as { id: string }).id));
+    res.status(201).json({ imported: inserted.length, skipped: errors.length, errors });
+  });
+}
+
+const adminWrite = (role: AccountRole) => roleAtLeast(role, 'admin');
+const anyWrite = () => true;
+
+mountPort('providers', providerPort, { table: 'providers', canWrite: adminWrite });
+mountPort('suppliers', supplierPort, { table: 'suppliers', canWrite: anyWrite });
+mountPort('addresses', addressPort, { table: 'addresses', canWrite: adminWrite });
+mountPort('people', personPort, { table: 'care_profiles', kind: 'person', canWrite: adminWrite });
+mountPort('pets', petPort, { table: 'care_profiles', kind: 'pet', canWrite: adminWrite });
