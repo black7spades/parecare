@@ -23,6 +23,7 @@ const supplierSchema = z.object({
   // A bare domain is accepted and defaulted to https on write, so a pasted
   // link works; hence a plain string rather than a strict url() here.
   order_url: z.string().max(2000).optional().nullable(),
+  directions_link: z.string().max(2000).optional().nullable(),
 });
 
 const clean = (v: string | null | undefined): string | null => {
@@ -88,6 +89,7 @@ suppliersRouter.post('/', requireAuth, async (req, res) => {
       phone: clean(parsed.data.phone),
       email: clean(parsed.data.email),
       order_url: normaliseUrl(parsed.data.order_url),
+      directions_link: normaliseUrl(parsed.data.directions_link),
     })
     .returning('*');
   res.status(201).json({ supplier });

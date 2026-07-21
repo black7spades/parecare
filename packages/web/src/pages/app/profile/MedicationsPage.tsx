@@ -170,7 +170,7 @@ export function MedicationsPage() {
     // What's on hand overall: loose units plus unopened packs.
     const remaining = totalOnHand(m);
     const days = daysOfSupply(m);
-    // A week or less of supply left (and still some in stock): worth reordering.
+    // Under five days of supply left (and still some in stock): worth reordering.
     const low = m.active && remaining != null && remaining > 0 && isLowSupply(m);
     return (
       <tr key={m.id} className={`border-b border-border last:border-0 ${m.active ? '' : 'opacity-60'} ${low ? 'bg-amber-50 dark:bg-amber-900/10' : ''}`}>
@@ -220,14 +220,17 @@ export function MedicationsPage() {
         </td>
         <td className="px-4 py-3 text-right whitespace-nowrap">
           <div className="inline-flex items-center justify-end gap-1">
-            {m.supplier_order_url ? (
+            {/* The reorder icon appears only when this medication is running low
+                (under five days of supply) and it has a supplier link to order
+                from, so it means "reorder now", not a permanent fixture. */}
+            {low && m.supplier_order_url ? (
               <a
                 href={m.supplier_order_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-label={low ? 'Order more, supply is low' : 'Order more'}
-                title={low ? 'Order more, supply is low' : 'Order more'}
-                className={`inline-flex items-center justify-center rounded-sm px-2 py-1 transition-colors ${low ? 'text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300' : 'text-muted hover:text-ink hover:bg-surface-2'}`}
+                aria-label={`Reorder ${m.name}, supply is low`}
+                title="Reorder now, supply is low"
+                className="inline-flex items-center justify-center rounded-sm px-2 py-1 transition-colors text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
               >
                 <CartIcon />
               </a>
@@ -742,6 +745,7 @@ function SupplierModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState<AddressValue>(emptyAddress);
   const [orderUrl, setOrderUrl] = useState('');
+  const [directionsLink, setDirectionsLink] = useState('');
   const [error, setError] = useState('');
 
   const mutation = useMutation({
@@ -751,6 +755,7 @@ function SupplierModal({ onClose, onCreated }: { onClose: () => void; onCreated:
       email: email.trim() || null,
       ...addressPayload(address),
       order_url: orderUrl.trim() || null,
+      directions_link: directionsLink.trim() || null,
     }),
     onSuccess: (res) => onCreated(res.supplier),
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
@@ -765,7 +770,10 @@ function SupplierModal({ onClose, onCreated }: { onClose: () => void; onCreated:
           <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
         <AddressFields value={address} onChange={setAddress} />
-        <Input label="Reorder link" type="url" inputMode="url" value={orderUrl} onChange={(e) => setOrderUrl(e.target.value)} placeholder="https://…" hint="Where the Order button goes to restock." />
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Reorder link" type="url" inputMode="url" value={orderUrl} onChange={(e) => setOrderUrl(e.target.value)} placeholder="https://…" hint="Where the Order button goes to restock." />
+          <Input label="Directions" type="url" inputMode="url" value={directionsLink} onChange={(e) => setDirectionsLink(e.target.value)} placeholder="https://…" hint="A map link to the shop." />
+        </div>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>

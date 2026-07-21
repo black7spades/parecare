@@ -36,7 +36,13 @@ source. Versions follow [semantic versioning](https://semver.org).
 ### Changed
 
 - Medication row actions (Record dose, Order, Edit, Delete) are now compact
-  icons with tooltips. The Order action appears whenever a reorder link exists.
+  icons with tooltips. The reorder (cart) icon appears on a medication only
+  when its supply drops under five days and it has a supplier reorder link, so
+  it means "reorder now" rather than being a permanent fixture. The low-supply
+  threshold is now under five days (was a week).
+- Suppliers gain a directions link (a map link to the shop) alongside the
+  reorder link, matching a provider's directions link, in both the directory
+  editor and the inline add-supplier form, and in import/export.
 - **Sign out** moved from the top-right account menu to the sidebar footer,
   beside the theme picker.
 

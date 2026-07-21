@@ -373,6 +373,7 @@ const supplierSchema = z.object({
   // A bare domain is accepted and defaulted to https on write, so a pasted
   // link works; hence a plain string rather than a strict url() here.
   order_url: z.string().max(2000).optional().nullable(),
+  directions_link: z.string().max(2000).optional().nullable(),
 });
 
 const cleanField = (v: string | null | undefined): string | null => {
@@ -471,6 +472,7 @@ directoryRouter.post('/suppliers', requireAuth, async (req, res) => {
       phone: cleanField(parsed.data.phone),
       email: cleanField(parsed.data.email),
       order_url: normaliseSupplierUrl(parsed.data.order_url),
+      directions_link: normaliseSupplierUrl(parsed.data.directions_link),
     })
     .returning('*');
   res.status(201).json({ supplier });
@@ -489,6 +491,7 @@ directoryRouter.patch('/suppliers/:id', requireAuth, async (req, res) => {
   if ('phone' in parsed.data) update['phone'] = cleanField(parsed.data.phone);
   if ('email' in parsed.data) update['email'] = cleanField(parsed.data.email);
   if ('order_url' in parsed.data) update['order_url'] = normaliseSupplierUrl(parsed.data.order_url);
+  if ('directions_link' in parsed.data) update['directions_link'] = normaliseSupplierUrl(parsed.data.directions_link);
 
   let query = db('suppliers').where({ id: req.params['id'] });
   if (!roleAtLeast(account.role, 'super_admin')) query = query.where({ account_id: account.id });
@@ -860,6 +863,7 @@ const supplierPort: PortDescriptor<AnyRow, PortRecord> = {
     { key: 'address_postcode', header: 'Postcode', aliases: ['zip', 'postal code'], toCell: (r) => cell(r['address_postcode']) },
     { key: 'address_country', header: 'Country', toCell: (r) => cell(r['address_country']) },
     { key: 'order_url', header: 'Reorder link', aliases: ['order url', 'order link', 'reorder'], toCell: (r) => cell(r['order_url']) },
+    { key: 'directions_link', header: 'Directions', aliases: ['directions link', 'map'], toCell: (r) => cell(r['directions_link']) },
   ],
   coerce: (raw, n) => {
     const name = (raw['name'] ?? '').trim();
@@ -877,6 +881,7 @@ const supplierPort: PortDescriptor<AnyRow, PortRecord> = {
         address_postcode: portBlank(raw['address_postcode']),
         address_country: portBlank(raw['address_country']),
         order_url: portUrl(raw['order_url']),
+        directions_link: portUrl(raw['directions_link']),
       }),
     };
   },

@@ -937,6 +937,8 @@ export interface Supplier {
   address_country: string | null;
   /** A direct link to reorder from this supplier. */
   order_url: string | null;
+  /** A map link to the supplier, the same as a provider's directions link. */
+  directions_link: string | null;
 }
 
 /**
@@ -1040,13 +1042,14 @@ export function daysOfSupply(m: Pick<MedicationRecord, 'as_needed' | 'units_per_
 }
 
 /**
- * Whether a medication has dropped to a week or less of supply, the point at
- * which it is worth reordering. Scheduled medications use the days-of-supply
+ * Whether a medication has dropped to under five days of supply, the point at
+ * which it is worth reordering. Scheduled medications (tablets or liquids, as
+ * days-of-supply is worked out from the dose either way) use the days-of-supply
  * figure; as-needed or unscheduled ones fall back to a low fraction of a pack.
  */
 export function isLowSupply(m: Pick<MedicationRecord, 'as_needed' | 'units_per_dose' | 'schedule_times' | 'supply' | 'supply_remaining' | 'packs_on_hand'>): boolean {
   const days = daysOfSupply(m);
-  if (days != null) return days < 7;
+  if (days != null) return days < 5;
   const onHand = totalOnHand(m);
   return onHand != null && onHand > 0 && m.supply != null && onHand <= m.supply * 0.15;
 }
