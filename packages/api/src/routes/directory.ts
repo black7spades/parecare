@@ -359,6 +359,152 @@ directoryRouter.post('/providers/:id/bulk-unlink', requireAuth, async (req, res)
 });
 
 // ---------------------------------------------------------------------------
+// Supplier directory: the account's pharmacies and shops, reused across every
+// medication. Suppliers link to profiles indirectly, through the medications
+// that name them, so "used by" is derived from those medications.
+
+const supplierSchema = z.object({
+  name: z.string().min(1).max(255),
+  suburb: z.string().max(120).optional().nullable(),
+  phone: z.string().max(50).optional().nullable(),
+  order_url: z.string().url().max(2000).optional().nullable().or(z.literal('')),
+});
+
+const cleanField = (v: string | null | undefined): string | null => {
+  const t = (v ?? '').trim();
+  return t === '' ? null : t;
+};
+const normaliseSupplierUrl = (v: string | null | undefined): string | null => {
+  const u = (v ?? '').trim();
+  if (!u) return null;
+  return /^https?:\/\//i.test(u) ? u : `https://${u}`;
+};
+
+/**
+ * List suppliers for the directory, with the profiles each is used by (via
+ * their medications) and how many medications reference it.
+ *   super_admin  => every supplier
+ *   admin        => their account's suppliers
+ *   user/viewer  => suppliers used by profiles they can access (read-only)
+ */
+directoryRouter.get('/suppliers', requireAuth, async (req, res) => {
+  const account = req.account!;
+
+  let query = db('suppliers as s')
+    .select(
+      's.*',
+      db.raw(`(
+        SELECT count(*) FROM medications m WHERE m.supplier_id = s.id
+      )::int AS medication_count`),
+      db.raw(`(
+        SELECT json_agg(x) FROM (
+          SELECT DISTINCT cp.id AS profile_id, cp.full_name AS profile_name
+          FROM medications m
+          JOIN care_profiles cp ON cp.id = m.care_profile_id
+          WHERE m.supplier_id = s.id
+          ORDER BY cp.full_name
+        ) x
+      ) AS linked_profiles`),
+    )
+    .orderBy([{ column: 's.name', order: 'asc' }, { column: 's.suburb', order: 'asc' }]);
+
+  if (roleAtLeast(account.role, 'super_admin')) {
+    // See everything
+  } else if (roleAtLeast(account.role, 'admin')) {
+    query = query.where('s.account_id', account.id);
+  } else {
+    query = query
+      .join('medications as m2', 'm2.supplier_id', 's.id')
+      .join('care_circle_members as ccm', 'ccm.care_profile_id', 'm2.care_profile_id')
+      .where('ccm.account_id', account.id)
+      .where('ccm.invite_accepted', true)
+      .groupBy('s.id');
+  }
+
+  const suppliers = await query;
+  const canEdit = roleAtLeast(account.role, 'admin');
+  res.json({ suppliers, can_edit: canEdit });
+});
+
+/** Create a supplier at the account level (admin+). */
+directoryRouter.post('/suppliers', requireAuth, async (req, res) => {
+  const account = req.account!;
+  if (!roleAtLeast(account.role, 'admin')) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+  const parsed = supplierSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
+    return;
+  }
+  const [supplier] = await db('suppliers')
+    .insert({
+      account_id: account.id,
+      name: parsed.data.name.trim(),
+      suburb: cleanField(parsed.data.suburb),
+      phone: cleanField(parsed.data.phone),
+      order_url: normaliseSupplierUrl(parsed.data.order_url),
+    })
+    .returning('*');
+  res.status(201).json({ supplier });
+});
+
+/** Update a supplier (admin+ for their account, super_admin for any). */
+directoryRouter.patch('/suppliers/:id', requireAuth, async (req, res) => {
+  const account = req.account!;
+  if (!roleAtLeast(account.role, 'admin')) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+  const parsed = supplierSchema.partial().safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const update: Record<string, unknown> = {};
+  if ('name' in parsed.data) update['name'] = (parsed.data.name ?? '').trim();
+  if ('suburb' in parsed.data) update['suburb'] = cleanField(parsed.data.suburb);
+  if ('phone' in parsed.data) update['phone'] = cleanField(parsed.data.phone);
+  if ('order_url' in parsed.data) update['order_url'] = normaliseSupplierUrl(parsed.data.order_url);
+
+  let query = db('suppliers').where({ id: req.params['id'] });
+  if (!roleAtLeast(account.role, 'super_admin')) query = query.where({ account_id: account.id });
+  const [supplier] = await query.update(update).returning('*');
+  if (!supplier) {
+    res.status(404).json({ error: 'Supplier not found', code: 'NOT_FOUND' });
+    return;
+  }
+  // The medication's denormalised supplier name and reorder link mirror the
+  // supplier, so keep every medication that names it in step.
+  await db('medications')
+    .where({ supplier_id: supplier.id })
+    .update({ supplier: supplier.name, supplier_order_url: supplier.order_url ?? null });
+  res.json({ supplier });
+});
+
+/**
+ * Delete a supplier (admin+ for their account, super_admin for any). Any
+ * medication that named it keeps its typed-in name but loses the link, as the
+ * supplier_id is set null by the foreign key.
+ */
+directoryRouter.delete('/suppliers/:id', requireAuth, async (req, res) => {
+  const account = req.account!;
+  if (!roleAtLeast(account.role, 'admin')) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+  let query = db('suppliers').where({ id: req.params['id'] });
+  if (!roleAtLeast(account.role, 'super_admin')) query = query.where({ account_id: account.id });
+  const affected = await query.delete();
+  if (!affected) {
+    res.status(404).json({ error: 'Supplier not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ message: 'Supplier deleted.' });
+});
+
+// ---------------------------------------------------------------------------
 // Address directory: the reusable address book, the same shape as providers.
 
 const addressSchema = z.object({

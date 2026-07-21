@@ -3,9 +3,10 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth';
 import { Avatar } from '../ui/Avatar';
 
-/** Top-right account menu: profile, settings, billing, system tools, sign out. */
+/** Top-right account menu: profile, settings, billing, system tools. Sign out
+ * lives in the sidebar footer, beside the theme picker. */
 export function AvatarMenu() {
-  const { account, clearAuth } = useAuthStore();
+  const { account } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(false);
@@ -71,18 +72,6 @@ export function AvatarMenu() {
               System
             </button>
           ) : null}
-          <div className="my-1 border-t border-border" />
-          <button
-            type="button"
-            role="menuitem"
-            className={item}
-            onClick={() => {
-              clearAuth();
-              navigate('/login');
-            }}
-          >
-            Sign out
-          </button>
         </div>
       ) : null}
     </div>

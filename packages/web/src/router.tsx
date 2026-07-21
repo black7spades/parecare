@@ -32,6 +32,7 @@ import { SubstanceUsePage } from './pages/app/profile/SubstanceUsePage';
 import { ActivityPage } from './pages/app/profile/ActivityPage';
 import { AiPage } from './pages/app/profile/AiPage';
 import { DirectoryProvidersPage } from './pages/app/DirectoryProvidersPage';
+import { DirectorySuppliersPage } from './pages/app/DirectorySuppliersPage';
 import { DirectoryAddressesPage } from './pages/app/DirectoryAddressesPage';
 import { DirectoryPeoplePage, DirectoryPetsPage } from './pages/app/DirectoryProfilesPage';
 import { InvitePage } from './pages/InvitePage';
@@ -99,6 +100,7 @@ export const router = createBrowserRouter([
       { path: 'app/directory/people', element: <DirectoryPeoplePage /> },
       { path: 'app/directory/pets', element: <DirectoryPetsPage /> },
       { path: 'app/directory/providers', element: <DirectoryProvidersPage /> },
+      { path: 'app/directory/suppliers', element: <DirectorySuppliersPage /> },
       { path: 'app/directory/addresses', element: <DirectoryAddressesPage /> },
       { path: 'app/reports', element: <ReportGeneratorPage /> },
       {

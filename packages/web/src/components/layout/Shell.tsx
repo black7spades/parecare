@@ -13,6 +13,11 @@ import { Avatar } from '../ui/Avatar';
 import { PROFILE_NAV, profileNavItem, type ProfileNavItem } from '../../pages/app/profile/tabs';
 import { api } from '../../api/client';
 import { browserTimeZone } from '../../lib/datetime';
+import { NavSortControl, type SortOption } from './NavSortControl';
+import { SortableNavGroup, type NavItemDef } from './SortableNavGroup';
+import { navHeadingClass, navLinkClass } from './navStyles';
+import { VersionBadge } from './VersionBadge';
+import { CheckIcon, ChartIcon, MapPinIcon, PawIcon, SignOutIcon, StethoscopeIcon, StoreIcon, UsersIcon } from '../ui/icons';
 
 interface PinnedProfile {
   id: string;
@@ -24,10 +29,25 @@ interface PinnedProfile {
   last_activity: string | null;
 }
 
+// The Directory and Tools nav groups, each item with a small icon. Arranged
+// from a per-group sort dropdown (default, A-Z, Z-A, or a locked custom order).
+const DIRECTORY_NAV: NavItemDef[] = [
+  { key: 'people', label: 'People', to: '/app/directory/people', icon: <UsersIcon size={16} /> },
+  { key: 'pets', label: 'Pets', to: '/app/directory/pets', icon: <PawIcon size={16} /> },
+  { key: 'providers', label: 'Providers', to: '/app/directory/providers', icon: <StethoscopeIcon size={16} /> },
+  { key: 'suppliers', label: 'Suppliers', to: '/app/directory/suppliers', icon: <StoreIcon size={16} /> },
+  { key: 'addresses', label: 'Addresses', to: '/app/directory/addresses', icon: <MapPinIcon size={16} /> },
+];
+
+const TOOLS_NAV: NavItemDef[] = [
+  { key: 'reports', label: 'Reports', to: '/app/reports', icon: <ChartIcon size={16} /> },
+];
+
 type PinArrangement = 'recent' | 'az' | 'za' | 'custom';
 
 const PIN_ARRANGE_KEY = 'parecare-pin-arrangement';
-const PIN_ARRANGE_OPTIONS: Array<{ value: PinArrangement; label: string }> = [
+const PIN_EDITING_KEY = 'parecare-pin-editing';
+const PIN_ARRANGE_OPTIONS: SortOption<PinArrangement>[] = [
   { value: 'recent', label: 'Recent activity' },
   { value: 'az', label: 'A to Z' },
   { value: 'za', label: 'Z to A' },
@@ -37,6 +57,9 @@ const PIN_ARRANGE_OPTIONS: Array<{ value: PinArrangement; label: string }> = [
 function readPinArrangement(): PinArrangement {
   const v = localStorage.getItem(PIN_ARRANGE_KEY);
   return v === 'az' || v === 'za' || v === 'custom' || v === 'recent' ? v : 'recent';
+}
+function readPinEditing(): boolean {
+  return localStorage.getItem(PIN_EDITING_KEY) === '1';
 }
 
 const pinName = (p: PinnedProfile) => p.preferred_name || p.full_name;
@@ -71,13 +94,6 @@ function TierBadge() {
     </button>
   );
 }
-
-const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
-    isActive ? 'bg-primary-50 text-primary font-medium' : 'text-muted hover:text-ink hover:bg-surface-2'
-  }`;
-
-const navHeadingClass = 'pt-4 pb-1 px-3 text-[11px] font-medium uppercase tracking-wide text-muted';
 
 /**
  * One row of the profile nav: the section link plus a pin toggle that keeps
@@ -306,10 +322,18 @@ function ProfileSidebarNav({ profileId }: { profileId: string }) {
 function PinnedProfilesNav({ pinned }: { pinned: PinnedProfile[] }) {
   const queryClient = useQueryClient();
   const [arrangement, setArrangement] = useState<PinArrangement>(readPinArrangement);
+  const [editing, setEditing] = useState<boolean>(readPinEditing);
 
+  const setPinEditing = (v: boolean) => {
+    setEditing(v);
+    localStorage.setItem(PIN_EDITING_KEY, v ? '1' : '0');
+  };
   const setArrange = (next: PinArrangement) => {
     setArrangement(next);
     localStorage.setItem(PIN_ARRANGE_KEY, next);
+    // Entering custom order opens the reorder controls; any other order hides
+    // them. The tick locks the custom order back in place.
+    setPinEditing(next === 'custom');
   };
 
   const saveOrder = useMutation({
@@ -346,7 +370,7 @@ function PinnedProfilesNav({ pinned }: { pinned: PinnedProfile[] }) {
   if (pinned.length === 0) return null;
 
   const ordered = arrangePins(pinned, arrangement);
-  const isCustom = arrangement === 'custom';
+  const isEditing = arrangement === 'custom' && editing;
 
   const move = (index: number, delta: number) => {
     const target = index + delta;
@@ -361,18 +385,25 @@ function PinnedProfilesNav({ pinned }: { pinned: PinnedProfile[] }) {
     <>
       <div className={`${navHeadingClass} flex items-center justify-between gap-1`}>
         <span>Pinned</span>
-        <select
-          aria-label="Arrange pinned people"
-          value={arrangement}
-          onChange={(e) => setArrange(e.target.value as PinArrangement)}
-          className="text-[11px] font-medium bg-transparent text-muted hover:text-ink focus:text-ink border-0 rounded px-1 py-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary normal-case tracking-normal"
-        >
-          {PIN_ARRANGE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-0.5">
+          {isEditing ? (
+            <button
+              type="button"
+              aria-label="Lock pinned order"
+              title="Lock the order"
+              onClick={() => setPinEditing(false)}
+              className="p-1 rounded text-primary hover:bg-surface-2 transition-colors"
+            >
+              <CheckIcon />
+            </button>
+          ) : null}
+          <NavSortControl
+            value={arrangement}
+            options={PIN_ARRANGE_OPTIONS}
+            onChange={setArrange}
+            ariaLabel="Arrange pinned people"
+          />
+        </div>
       </div>
       {ordered.map((p, i) => (
         <div key={p.id} className="flex items-center gap-1">
@@ -383,7 +414,7 @@ function PinnedProfilesNav({ pinned }: { pinned: PinnedProfile[] }) {
             <Avatar accountId={p.id} name={p.full_name} avatarUrl={p.photo_url} color={p.photo_color} fetchPath={`/care-profiles/${p.id}/photo`} size={22} />
             <span className="truncate">{pinName(p)}</span>
           </NavLink>
-          {isCustom ? (
+          {isEditing ? (
             <div className="flex items-center shrink-0">
               <button
                 type="button"
@@ -426,6 +457,33 @@ function PinnedProfilesNav({ pinned }: { pinned: PinnedProfile[] }) {
         </div>
       ))}
     </>
+  );
+}
+
+/**
+ * The bottom of the sidebar: the theme picker and Sign out side by side, with
+ * the version badge beneath. Sign out lives here (not the top-right avatar
+ * menu) so the two account-wide controls sit together.
+ */
+function SidebarFooter() {
+  const clearAuth = useAuthStore((s) => s.clearAuth);
+  const navigate = useNavigate();
+  return (
+    <div className="pt-4 mt-4 border-t border-border px-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <ThemeToggle />
+        <button
+          type="button"
+          onClick={() => { clearAuth(); navigate('/login'); }}
+          className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-ink transition-colors"
+          title="Sign out of PareCare"
+        >
+          <SignOutIcon size={13} />
+          Sign out
+        </button>
+      </div>
+      <VersionBadge />
+    </div>
   );
 }
 
@@ -497,23 +555,8 @@ export function Shell() {
       <NavLink to="/app" end className={navLinkClass}>
         Homeboard
       </NavLink>
-      <div className={navHeadingClass}>Directory</div>
-      <NavLink to="/app/directory/people" className={navLinkClass}>
-        People
-      </NavLink>
-      <NavLink to="/app/directory/pets" className={navLinkClass}>
-        Pets
-      </NavLink>
-      <NavLink to="/app/directory/providers" className={navLinkClass}>
-        Providers
-      </NavLink>
-      <NavLink to="/app/directory/addresses" className={navLinkClass}>
-        Addresses
-      </NavLink>
-      <div className={navHeadingClass}>Tools</div>
-      <NavLink to="/app/reports" className={navLinkClass}>
-        Reports
-      </NavLink>
+      <SortableNavGroup groupKey="directory" heading="Directory" items={DIRECTORY_NAV} />
+      <SortableNavGroup groupKey="tools" heading="Tools" items={TOOLS_NAV} />
       <PinnedProfilesNav pinned={pinned} />
     </>
   );
@@ -567,9 +610,7 @@ export function Shell() {
         {!sidebarHidden ? (
           <nav className="hidden lg:flex w-56 shrink-0 bg-card border-r border-border flex-col py-5 px-4 overflow-y-auto">
             <div className="flex-1 space-y-1">{sidebarNav}</div>
-            <div className="pt-4 mt-4 border-t border-border px-3">
-              <ThemeToggle />
-            </div>
+            <SidebarFooter />
           </nav>
         ) : null}
 
@@ -595,9 +636,7 @@ export function Shell() {
                 </button>
               </div>
               <div className="flex-1 space-y-1">{sidebarNav}</div>
-              <div className="pt-4 mt-4 border-t border-border px-3">
-                <ThemeToggle />
-              </div>
+              <SidebarFooter />
             </nav>
           </div>
         ) : null}
