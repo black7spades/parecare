@@ -117,8 +117,8 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <div>
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="min-w-0">
           <h2 className="text-base font-semibold text-ink">{label} directory</h2>
           <p className="text-sm text-muted">
             {isPeople
@@ -126,7 +126,7 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
               : 'All pets across your care profiles.'}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex gap-2 shrink-0">
           <ImportExport
             basePath={isPeople ? '/directory/people' : '/directory/pets'}
             resource={isPeople ? 'people' : 'pets'}

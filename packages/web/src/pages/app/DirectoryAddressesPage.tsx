@@ -72,12 +72,12 @@ export function DirectoryAddressesPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <div>
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="min-w-0">
           <h2 className="text-base font-semibold text-ink">Address directory</h2>
           <p className="text-sm text-muted">Every address in the system. Edit one here and it updates for everyone it is linked to.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex gap-2 shrink-0">
           <ImportExport
             basePath="/directory/addresses"
             resource="addresses"
