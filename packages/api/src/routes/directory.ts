@@ -392,6 +392,10 @@ const normaliseSupplierUrl = (v: string | null | undefined): string | null => {
 directoryRouter.get('/suppliers', requireAuth, async (req, res) => {
   const account = req.account!;
 
+  // "Used by" is every person or pet connected to the supplier: those whose
+  // medication names it (implicit, no manual step) unioned with any linked by
+  // hand (the proactive "this is their pharmacy" case). One coherent answer,
+  // deduplicated, rather than two rival notions of a link.
   let query = db('suppliers as s')
     .select(
       's.*',
@@ -400,12 +404,15 @@ directoryRouter.get('/suppliers', requireAuth, async (req, res) => {
       )::int AS medication_count`),
       db.raw(`(
         SELECT json_agg(json_build_object(
-          'profile_id', cps.care_profile_id,
-          'profile_name', cp.full_name
-        ) ORDER BY cp.full_name)
-        FROM care_profile_suppliers cps
-        JOIN care_profiles cp ON cp.id = cps.care_profile_id
-        WHERE cps.supplier_id = s.id
+          'profile_id', p.id,
+          'profile_name', p.full_name
+        ) ORDER BY p.full_name)
+        FROM (
+          SELECT cp.id, cp.full_name
+          FROM care_profiles cp
+          WHERE cp.id IN (SELECT care_profile_id FROM care_profile_suppliers WHERE supplier_id = s.id)
+             OR cp.id IN (SELECT care_profile_id FROM medications WHERE supplier_id = s.id)
+        ) p
       ) AS linked_profiles`),
     )
     .orderBy([{ column: 's.name', order: 'asc' }, { column: 's.address_suburb', order: 'asc' }]);
@@ -415,12 +422,27 @@ directoryRouter.get('/suppliers', requireAuth, async (req, res) => {
   } else if (roleAtLeast(account.role, 'admin')) {
     query = query.where('s.account_id', account.id);
   } else {
-    query = query
-      .join('care_profile_suppliers as cps', 'cps.supplier_id', 's.id')
-      .join('care_circle_members as ccm', 'ccm.care_profile_id', 'cps.care_profile_id')
-      .where('ccm.account_id', account.id)
-      .where('ccm.invite_accepted', true)
-      .groupBy('s.id');
+    // A non-admin sees a supplier connected to any profile they can access,
+    // whether by a manual link or by a medication that names it.
+    query = query.whereExists(function () {
+      this.select(db.raw('1'))
+        .from('care_circle_members as ccm')
+        .where('ccm.account_id', account.id)
+        .where('ccm.invite_accepted', true)
+        .where(function () {
+          this.whereExists(function () {
+            this.select(db.raw('1'))
+              .from('care_profile_suppliers as cps')
+              .whereRaw('cps.supplier_id = s.id')
+              .whereRaw('cps.care_profile_id = ccm.care_profile_id');
+          }).orWhereExists(function () {
+            this.select(db.raw('1'))
+              .from('medications as m2')
+              .whereRaw('m2.supplier_id = s.id')
+              .whereRaw('m2.care_profile_id = ccm.care_profile_id');
+          });
+        });
+    });
   }
 
   const suppliers = await query;

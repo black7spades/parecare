@@ -26,7 +26,7 @@ const SORTS: DataSort<DirectorySupplier>[] = [
   { key: 'phone', label: 'Phone', compare: (a, b) => (a.phone ?? '').localeCompare(b.phone ?? '') },
   { key: 'address', label: 'Address', compare: (a, b) => (a.address ?? '').localeCompare(b.address ?? '') },
   { key: 'medications', label: 'Medications', compare: (a, b) => b.medication_count - a.medication_count },
-  { key: 'profiles', label: 'Linked profiles', compare: (a, b) => (b.linked_profiles?.length ?? 0) - (a.linked_profiles?.length ?? 0) },
+  { key: 'profiles', label: 'Used by', compare: (a, b) => (b.linked_profiles?.length ?? 0) - (a.linked_profiles?.length ?? 0) },
 ];
 
 export function DirectorySuppliersPage() {
@@ -142,7 +142,7 @@ export function DirectorySuppliersPage() {
                 <SortableTh label="Address" sortKey="address" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <th className="px-3 py-2">Reorder link</th>
                 <SortableTh label="Medications" sortKey="medications" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
-                <SortableTh label="Linked to" sortKey="profiles" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Used by" sortKey="profiles" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 {canEdit ? <th className="px-3 py-2 w-36" /> : null}
               </tr>
             </thead>
@@ -182,7 +182,7 @@ export function DirectorySuppliersPage() {
                         ))}
                       </div>
                     ) : (
-                      <span className="text-xs text-muted">Not linked</span>
+                      <span className="text-xs text-muted">Not used yet</span>
                     )}
                   </td>
                   {canEdit ? (
