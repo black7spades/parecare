@@ -37,6 +37,17 @@ interface CalendarEvent {
   medication_id?: string;
   appointment_id?: string;
   location?: string | null;
+  // A map or directions URL for the event's location, when one is known.
+  directions_link?: string | null;
+  // Whole-day events (birthdays, illness milestones) carry no meaningful
+  // clock time, so the UI shows the date alone.
+  all_day?: boolean;
+}
+
+/** Whether a string is an http(s) URL we can safely turn into a link. */
+function isUrl(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return /^https?:\/\//i.test(value.trim());
 }
 
 // Appointments are their own table; the calendar shows each one at its
@@ -47,16 +58,35 @@ async function expandAppointmentEvents(profileId: string, from: Date, to: Date):
     .where('a.care_profile_id', profileId)
     .whereBetween('a.starts_at', [from, to])
     .whereNot('a.status', 'cancelled')
-    .select('a.id', 'a.title', 'a.starts_at', 'a.status', 'a.location', 'p.name as provider_name');
-  return appointments.map((a) => ({
-    id: `appt-${a.id}`,
-    title: `🩺 ${a.title}${a.provider_name ? ` with ${a.provider_name}` : ''}`,
-    next_due_at: new Date(a.starts_at).toISOString(),
-    completed: a.status === 'completed',
-    kind: 'appointment',
-    appointment_id: a.id,
-    location: a.location ?? null,
-  }));
+    .select(
+      'a.id',
+      'a.title',
+      'a.starts_at',
+      'a.status',
+      'a.location',
+      'p.name as provider_name',
+      'p.directions_link as provider_directions_link'
+    );
+  return appointments.map((a) => {
+    // A directions link comes from the provider's saved map link, or from the
+    // appointment's own location when that was entered as a URL.
+    const directions = isUrl(a.provider_directions_link)
+      ? a.provider_directions_link
+      : isUrl(a.location)
+        ? a.location
+        : null;
+    return {
+      id: `appt-${a.id}`,
+      title: `🩺 ${a.title}${a.provider_name ? ` with ${a.provider_name}` : ''}`,
+      next_due_at: new Date(a.starts_at).toISOString(),
+      completed: a.status === 'completed',
+      kind: 'appointment',
+      appointment_id: a.id,
+      // Show a URL location only as a button, never as raw text.
+      location: isUrl(a.location) ? null : (a.location ?? null),
+      directions_link: directions,
+    };
+  });
 }
 
 // Expand each active medication's scheduled times across the date range into
@@ -121,6 +151,7 @@ async function expandBirthdayEvents(profileId: string, from: Date, to: Date): Pr
         next_due_at: bday.toISOString(),
         completed: false,
         kind: 'birthday',
+        all_day: true,
       });
     }
   }
@@ -150,6 +181,7 @@ async function expandHealthStatusEvents(profileId: string, from: Date, to: Date)
           next_due_at: new Date(onset + 'T00:00:00Z').toISOString(),
           completed: false,
           kind: 'health_status',
+          all_day: true,
         });
       }
     }
@@ -162,6 +194,7 @@ async function expandHealthStatusEvents(profileId: string, from: Date, to: Date)
           next_due_at: new Date(resolved + 'T00:00:00Z').toISOString(),
           completed: true,
           kind: 'health_status',
+          all_day: true,
         });
       }
     }
