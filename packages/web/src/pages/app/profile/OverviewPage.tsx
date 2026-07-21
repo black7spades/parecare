@@ -755,9 +755,18 @@ function UpcomingEvents({ profileId }: { profileId: string }) {
   const { data } = useQuery({
     queryKey: ['calendar-upcoming', profileId],
     queryFn: () =>
-      api.get<{ events: Array<{ id: string; title: string; next_due_at: string; completed: boolean; kind?: string; location?: string | null }> }>(
-        `/care-profiles/${profileId}/calendar?from=${from.toISOString()}&to=${to.toISOString()}`
-      ),
+      api.get<{
+        events: Array<{
+          id: string;
+          title: string;
+          next_due_at: string;
+          completed: boolean;
+          kind?: string;
+          location?: string | null;
+          directions_link?: string | null;
+          all_day?: boolean;
+        }>;
+      }>(`/care-profiles/${profileId}/calendar?from=${from.toISOString()}&to=${to.toISOString()}`),
   });
   const events = (data?.events ?? []).filter((e) => e.kind !== 'medication' && !e.completed).slice(0, 6);
   if (events.length === 0) {
@@ -772,15 +781,33 @@ function UpcomingEvents({ profileId }: { profileId: string }) {
         </Link>
       </div>
       <ul className="divide-y divide-border">
-        {events.map((e) => (
-          <li key={e.id} className="py-1.5 flex items-baseline gap-3 text-sm">
-            <span className="text-muted whitespace-nowrap tabular-nums">
-              {new Date(e.next_due_at).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
-            </span>
-            <span className="text-ink min-w-0 truncate">{e.title}</span>
-            {e.location ? <span className="text-xs text-muted truncate">{e.location}</span> : null}
-          </li>
-        ))}
+        {events.map((e) => {
+          const when = new Date(e.next_due_at);
+          return (
+            <li key={e.id} className="py-1.5 flex items-baseline gap-3 text-sm">
+              <span className="text-muted whitespace-nowrap tabular-nums">
+                {when.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
+                {e.all_day ? null : (
+                  <span className="ml-1 text-ink">
+                    {when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                )}
+              </span>
+              <span className="text-ink min-w-0 truncate">{e.title}</span>
+              {e.location ? <span className="text-xs text-muted truncate">{e.location}</span> : null}
+              {e.directions_link ? (
+                <a
+                  href={e.directions_link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-auto shrink-0 inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs text-primary hover:bg-primary/5"
+                >
+                  📍 Directions
+                </a>
+              ) : null}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

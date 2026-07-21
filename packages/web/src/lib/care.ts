@@ -903,6 +903,10 @@ export interface MedicationRecord {
   packs_on_hand: number | null;
   /** When a repeat prescription is next due. */
   repeats_due: string | null;
+  /** The pharmacy or shop this medication is reordered from. */
+  supplier: string | null;
+  /** A direct link to reorder it from that supplier. */
+  supplier_order_url: string | null;
   /** Dangerous to miss: overdue and out-of-stock alerts are urgent. */
   critical: boolean;
   active: boolean;
@@ -977,6 +981,36 @@ export function totalOnHand(m: {
   if (m.supply_remaining == null) return null;
   const packUnits = m.packs_on_hand != null && m.supply != null ? m.packs_on_hand * m.supply : 0;
   return m.supply_remaining + packUnits;
+}
+
+/**
+ * How many days of a medication remain at its current use. Units used per day
+ * is units-per-dose times the number of scheduled times a day, so this only
+ * applies to scheduled medications with a tracked supply. Returns null when
+ * that cannot be worked out (as-needed, no schedule, or no supply on hand).
+ */
+export function daysOfSupply(m: Pick<MedicationRecord, 'as_needed' | 'units_per_dose' | 'schedule_times' | 'supply' | 'supply_remaining' | 'packs_on_hand'>): number | null {
+  if (m.as_needed) return null;
+  const onHand = totalOnHand(m);
+  if (onHand == null) return null;
+  const dosesPerDay = (m.schedule_times ?? []).length;
+  if (dosesPerDay <= 0) return null;
+  const unitsPerDose = m.units_per_dose && m.units_per_dose > 0 ? m.units_per_dose : 1;
+  const perDay = dosesPerDay * unitsPerDose;
+  if (perDay <= 0) return null;
+  return onHand / perDay;
+}
+
+/**
+ * Whether a medication has dropped to a week or less of supply, the point at
+ * which it is worth reordering. Scheduled medications use the days-of-supply
+ * figure; as-needed or unscheduled ones fall back to a low fraction of a pack.
+ */
+export function isLowSupply(m: Pick<MedicationRecord, 'as_needed' | 'units_per_dose' | 'schedule_times' | 'supply' | 'supply_remaining' | 'packs_on_hand'>): boolean {
+  const days = daysOfSupply(m);
+  if (days != null) return days < 7;
+  const onHand = totalOnHand(m);
+  return onHand != null && onHand > 0 && m.supply != null && onHand <= m.supply * 0.15;
 }
 
 export function supplyLabel(count: number, m: { form: string | null; dose_unit: string | null }): string {

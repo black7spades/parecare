@@ -48,6 +48,10 @@ const medSchema = z.object({
   // Unopened full packs on hand, on top of the loose units above.
   packs_on_hand: z.coerce.number().min(0).max(1e6).optional().nullable(),
   repeats_due: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  // Where this medication is reordered from, and a link to reorder it.
+  // Name and link are separate data points, kept in separate columns.
+  supplier: z.string().max(255).optional().nullable(),
+  supplier_order_url: z.string().url().max(2000).optional().nullable().or(z.literal('')),
   // Dangerous to miss (stopping suddenly is harmful): overdue and
   // out-of-stock alerts for this medication are urgent.
   critical: z.boolean().optional(),
@@ -99,6 +103,8 @@ interface MedRow {
   supply_remaining: number | null;
   packs_on_hand: number | null;
   repeats_due: string | null;
+  supplier: string | null;
+  supplier_order_url: string | null;
   active: boolean;
 }
 
@@ -116,6 +122,8 @@ interface MedInsert {
   supply: number | null;
   packs_on_hand: number | null;
   repeats_due: string | null;
+  supplier: string | null;
+  supplier_order_url: string | null;
   active: boolean;
 }
 
@@ -188,6 +196,8 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
     { key: 'supply_remaining', header: 'Units left', aliases: ['remaining', 'supply remaining'], toCell: (r) => (r.supply_remaining ?? '').toString() },
     { key: 'packs_on_hand', header: 'Packs on hand', aliases: ['packs', 'packs left', 'unopened packs'], toCell: (r) => (r.packs_on_hand ?? '').toString() },
     { key: 'repeats_due', header: 'Repeats due', aliases: ['repeat', 'repeat due'], toCell: (r) => r.repeats_due ?? '' },
+    { key: 'supplier', header: 'Supplier', aliases: ['pharmacy', 'supplied by'], toCell: (r) => r.supplier ?? '' },
+    { key: 'supplier_order_url', header: 'Order link', aliases: ['order url', 'reorder link', 'order'], toCell: (r) => r.supplier_order_url ?? '' },
     { key: 'active', header: 'Active', aliases: ['status'], toCell: (r) => (r.active ? 'true' : 'false') },
   ],
   coerce: (raw, rowNumber) => {
@@ -227,6 +237,11 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
           return Number.isFinite(packsNum) ? packsNum : null;
         })(),
         repeats_due: repeats && /^\d{4}-\d{2}-\d{2}$/.test(repeats) ? repeats : null,
+        supplier: blank(raw['supplier']),
+        supplier_order_url: (() => {
+          const u = blank(raw['supplier_order_url']);
+          return u && /^https?:\/\//i.test(u) ? u : null;
+        })(),
         active: parseActive(raw['active']),
       },
     };
@@ -301,6 +316,8 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner, async (req, 
       supply_remaining: r.supply,
       packs_on_hand: r.packs_on_hand,
       repeats_due: r.repeats_due,
+      supplier: r.supplier,
+      supplier_order_url: r.supplier_order_url,
       active: r.active,
       schedule_times: r.schedule_times.length
         ? db.raw('?::jsonb', [JSON.stringify(r.schedule_times)])
@@ -329,6 +346,8 @@ async function medFieldsFrom(data: z.infer<typeof medSchema> | Partial<z.infer<t
   if ('as_needed' in data) fields['as_needed'] = data.as_needed ?? false;
   if ('frequency' in data) fields['frequency'] = data.frequency ?? null;
   if ('repeats_due' in data) fields['repeats_due'] = data.repeats_due ?? null;
+  if ('supplier' in data) fields['supplier'] = (data.supplier ?? '').trim() || null;
+  if ('supplier_order_url' in data) fields['supplier_order_url'] = (data.supplier_order_url ?? '').trim() || null;
   if ('critical' in data) fields['critical'] = data.critical ?? false;
   if ('active' in data) fields['active'] = data.active ?? true;
 

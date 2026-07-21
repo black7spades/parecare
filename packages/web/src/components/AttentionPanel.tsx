@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { format, startOfDay, endOfDay } from 'date-fns';
 import { api } from '../api/client';
 import { useAssistantStore } from '../stores/assistant';
 import { Button } from './ui/Button';
@@ -8,6 +9,8 @@ import { Modal } from './ui/Modal';
 import { GpModal } from './QuickAddModals';
 import { browserTimeZone } from '../lib/datetime';
 import { severityLabel } from '../pages/app/profile/ConditionSymptoms';
+import { coverMedDay, type ChartAdmin } from '../lib/marCoverage';
+import type { MedicationRecord } from '../lib/care';
 
 export interface AttentionItem {
   profile_id: string;
@@ -139,6 +142,39 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
     },
   });
 
+  // Log every dose due today for a profile straight from the panel, using the
+  // same slot-coverage logic as the medication record's "Log all due doses"
+  // button: fetch today's chart, record each passed scheduled slot that has no
+  // dose against it, then refresh so the alert clears.
+  const logAllDoses = useMutation({
+    mutationFn: async (profileId: string) => {
+      const from = startOfDay(new Date());
+      const to = endOfDay(new Date());
+      const chart = await api.get<{ medications: MedicationRecord[]; administrations: ChartAdmin[] }>(
+        `/care-profiles/${profileId}/medications/chart?from=${from.toISOString()}&to=${to.toISOString()}`
+      );
+      const now = new Date();
+      const dayStr = format(now, 'yyyy-MM-dd');
+      const entries: Array<{ medication_id: string; scheduled_for: string; administered_at: string; status: string }> = [];
+      for (const m of chart.medications) {
+        for (const sv of coverMedDay(m, dayStr, chart.administrations, now).slots) {
+          if (sv.past && !sv.covered) {
+            entries.push({ medication_id: m.id, scheduled_for: sv.iso, administered_at: sv.iso, status: 'given' });
+          }
+        }
+      }
+      if (entries.length) {
+        await api.post(`/care-profiles/${profileId}/medications/administrations/batch`, { entries });
+      }
+      return entries.length;
+    },
+    onSuccess: (_n, profileId) => {
+      void queryClient.invalidateQueries({ queryKey: ['pare-attention'] });
+      void queryClient.invalidateQueries({ queryKey: ['med-chart', profileId] });
+      void queryClient.invalidateQueries({ queryKey: ['calendar-upcoming', profileId] });
+    },
+  });
+
   if (count === 0) return null;
 
   return (
@@ -176,7 +212,7 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                     </span>
                   </span>
                 </Link>
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center justify-end gap-1 shrink-0 ml-auto">
                   <Button
                     size="xs"
                     variant="ghost"
@@ -203,7 +239,7 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                   </Button>
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-7 text-sm">
+              <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1.5 pl-7 text-sm">
                 {a.gp ? (
                   <>
                     <span className="text-ink">
@@ -253,7 +289,23 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                   ) : null}
                 </span>
               </Link>
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="flex flex-wrap items-center justify-end gap-1 shrink-0 ml-auto">
+                {it.kind === 'unrecorded_dose' ? (
+                  <>
+                    <Link to={`/app/${it.profile_id}/mar`}>
+                      <Button size="xs" variant="ghost" className="whitespace-nowrap">Check records</Button>
+                    </Link>
+                    <Button
+                      size="xs"
+                      variant="secondary"
+                      className="whitespace-nowrap"
+                      loading={logAllDoses.isPending && logAllDoses.variables === it.profile_id}
+                      onClick={() => logAllDoses.mutate(it.profile_id)}
+                    >
+                      Log all doses
+                    </Button>
+                  </>
+                ) : null}
                 {it.dismissible ? (
                   <Button
                     size="xs"
