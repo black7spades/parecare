@@ -23,6 +23,8 @@ source. Versions follow [semantic versioning](https://semver.org).
   same address finder.
 - **Add person / Add pet** buttons on the People and Pets directory pages,
   pre-selecting the kind on the new-profile form.
+- **Bulk import and export** (CSV and JSON, with a blank template) on every
+  Directory sub-item: People, Pets, Providers, Suppliers and Addresses.
 - A **sort dropdown on every top-level nav group** (Directory, Tools, Pinned):
   default, A to Z, Z to A, or a custom manual order. The dropdown is theme
   aware, following light, dark or device mode. Custom order shows move controls

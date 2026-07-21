@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { AddressFields, addressFrom, addressPayload, emptyAddress, type AddressValue } from '../../components/AddressFields';
+import { ImportExport } from '../../components/ImportExport';
 import { DataToolbar } from '../../components/data/DataToolbar';
 import { SortableTh } from '../../components/data/SortableTh';
 import { useDataView, type DataSort } from '../../components/data/useDataView';
@@ -75,11 +76,21 @@ export function DirectorySuppliersPage() {
           <h2 className="text-base font-semibold text-ink">Supplier directory</h2>
           <p className="text-sm text-muted">The pharmacies and shops your medications are reordered from. Edit details here and they update on every medication that names them.</p>
         </div>
-        {canEdit ? (
-          <Button onClick={() => { setEditing(null); setEditorOpen(true); }}>
-            Add supplier
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <ImportExport
+            basePath="/directory/suppliers"
+            resource="suppliers"
+            canImport={canEdit}
+            onImported={invalidate}
+            templateHeaders={['Vendor', 'Phone', 'Email', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country', 'Reorder link']}
+            templateSample={['Chemist Warehouse', '07 5555 5555', '', '2 Shop St', '', 'Morayfield', 'QLD', '4506', 'Australia', 'https://chemistwarehouse.example/reorder']}
+          />
+          {canEdit ? (
+            <Button onClick={() => { setEditing(null); setEditorOpen(true); }}>
+              Add supplier
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {suppliers.length > 0 ? (

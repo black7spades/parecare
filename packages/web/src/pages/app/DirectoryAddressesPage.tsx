@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { AddressFields, addressFrom, addressPayload, emptyAddress, type AddressValue } from '../../components/AddressFields';
+import { ImportExport } from '../../components/ImportExport';
 import { DataToolbar } from '../../components/data/DataToolbar';
 import { SortableTh } from '../../components/data/SortableTh';
 import { useDataView, type DataSort } from '../../components/data/useDataView';
@@ -76,7 +77,17 @@ export function DirectoryAddressesPage() {
           <h2 className="text-base font-semibold text-ink">Address directory</h2>
           <p className="text-sm text-muted">Every address in the system. Edit one here and it updates for everyone it is linked to.</p>
         </div>
-        {canEdit ? <Button onClick={() => { setEditing(null); setEditorOpen(true); }}>Add address</Button> : null}
+        <div className="flex flex-wrap gap-2">
+          <ImportExport
+            basePath="/directory/addresses"
+            resource="addresses"
+            canImport={canEdit}
+            onImported={invalidate}
+            templateHeaders={['Label', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country']}
+            templateSample={['Home', '1 Main St', '', 'Morayfield', 'QLD', '4506', 'Australia']}
+          />
+          {canEdit ? <Button onClick={() => { setEditing(null); setEditorOpen(true); }}>Add address</Button> : null}
+        </div>
       </div>
 
       {addresses.length > 0 ? (

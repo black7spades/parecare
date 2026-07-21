@@ -1,11 +1,12 @@
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { DataToolbar } from '../../components/data/DataToolbar';
 import { SortableTh } from '../../components/data/SortableTh';
 import { useDataView, type DataSort, type DataFilter } from '../../components/data/useDataView';
 import { Avatar } from '../../components/ui/Avatar';
 import { Button } from '../../components/ui/Button';
+import { ImportExport } from '../../components/ImportExport';
 import { ageFrom, phaseLabel, CARE_PHASES, type ProfileKind } from '../../lib/care';
 import { format } from 'date-fns';
 
@@ -82,12 +83,14 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
   const sorts = isPeople ? PEOPLE_SORTS : PETS_SORTS;
   const filters = isPeople ? PEOPLE_FILTERS : PETS_FILTERS;
 
+  const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ['directory-profiles', kind],
     queryFn: () => api.get<{ profiles: DirectoryProfile[]; can_edit: boolean }>(endpoint),
   });
   const profiles = data?.profiles ?? [];
   const canEdit = data?.can_edit ?? false;
+  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['directory-profiles', kind] });
 
   const dv = useDataView<DirectoryProfile>({
     rows: profiles,
@@ -123,11 +126,25 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
               : 'All pets across your care profiles.'}
           </p>
         </div>
-        {canEdit ? (
-          <Link to={`/app/profiles/new?kind=${kind}`}>
-            <Button>{isPeople ? 'Add person' : 'Add pet'}</Button>
-          </Link>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <ImportExport
+            basePath={isPeople ? '/directory/people' : '/directory/pets'}
+            resource={isPeople ? 'people' : 'pets'}
+            canImport={canEdit}
+            onImported={invalidate}
+            templateHeaders={isPeople
+              ? ['Name', 'Preferred name', 'Date of birth', 'Pronouns', 'Language', 'Phase', 'Relationship', 'Contact name', 'Contact phone', 'Contact email']
+              : ['Name', 'Species', 'Breed', 'Desexed', 'Microchip', 'Date of birth', 'Relationship', 'Contact name', 'Contact phone', 'Contact email']}
+            templateSample={isPeople
+              ? ['Marie Rose', 'Marie', '1948-03-14', 'she/her', 'English', 'home_with_support', 'Mother', 'Chris Rattray', '07 5555 5555', 'chris@example.com']
+              : ['Bread Loaf', 'Cat', 'Domestic Shorthair', 'true', '', '2019-06-01', 'Cat', 'Chris Rattray', '07 5555 5555', '']}
+          />
+          {canEdit ? (
+            <Link to={`/app/profiles/new?kind=${kind}`}>
+              <Button>{isPeople ? 'Add person' : 'Add pet'}</Button>
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       {profiles.length > 0 ? (
