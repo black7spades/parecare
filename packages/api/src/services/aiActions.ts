@@ -4,6 +4,7 @@ import type { Account, CareAccess, CareCircleMember, CareProfile } from '../type
 import { parseZonedTime, formatInZone } from '../lib/timezone';
 import { matchProfileNames, type NameCandidate } from '../lib/nameMatch';
 import { drawDownOnHand, perDoseDrawdown } from './medicationSupply';
+import { resolveSupplierId } from '../routes/medications';
 import { resolveConditionCatalogueId } from '../routes/conditionCatalogue';
 import { resolveSubstanceCatalogueId, SUBSTANCE_CLASSES } from '../routes/substanceCatalogue';
 import { SUBSTANCE_STATUSES, SUBSTANCE_ROUTES } from '../routes/substanceUse';
@@ -836,6 +837,9 @@ async function executeOne(
           .insert({ name, form: action.form ?? null, created_by_account_id: account.id })
           .returning('*');
       }
+      // Link a named supplier to the account's shared supplier list, creating
+      // one where the name is new, so the assistant tracks the same model.
+      const supplierId = await resolveSupplierId(action.supplier, action.supplier_order_url, account.id);
       await db('medications').insert({
         care_profile_id: profileId,
         medication_catalogue_id: cat.id,
@@ -848,6 +852,7 @@ async function executeOne(
         supply: action.supply ?? null,
         supply_remaining: action.supply ?? null,
         packs_on_hand: action.packs_on_hand ?? null,
+        supplier_id: supplierId,
         supplier: action.supplier ?? null,
         supplier_order_url: action.supplier_order_url ?? null,
         with_food: action.with_food ?? false,
@@ -880,7 +885,11 @@ async function executeOne(
       }
       if (action.supply_remaining !== undefined) patch['supply_remaining'] = action.supply_remaining;
       if (action.packs_on_hand !== undefined) patch['packs_on_hand'] = action.packs_on_hand;
-      if (action.supplier !== undefined) patch['supplier'] = action.supplier;
+      if (action.supplier !== undefined) {
+        patch['supplier'] = action.supplier;
+        // Re-point the medication at the account's shared supplier list.
+        patch['supplier_id'] = await resolveSupplierId(action.supplier, action.supplier_order_url, account.id);
+      }
       if (action.supplier_order_url !== undefined) patch['supplier_order_url'] = action.supplier_order_url;
       if (action.with_food !== undefined) patch['with_food'] = action.with_food;
       if (action.as_needed !== undefined) patch['as_needed'] = action.as_needed;

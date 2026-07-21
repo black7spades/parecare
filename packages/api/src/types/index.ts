@@ -266,6 +266,19 @@ export interface Provider {
   created_at: string | Date;
 }
 
+export interface Supplier {
+  id: string;
+  account_id: string;
+  /** The vendor name, e.g. "Chemist Warehouse". */
+  name: string;
+  /** The branch suburb, telling apart two branches of one vendor. */
+  suburb: string | null;
+  phone: string | null;
+  /** A direct link to reorder from this supplier. */
+  order_url: string | null;
+  created_at: string | Date;
+}
+
 export interface CareProfileProvider {
   id: string;
   care_profile_id: string;

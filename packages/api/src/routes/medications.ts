@@ -17,7 +17,8 @@ const medSelect = () =>
   db('medications as m')
     .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
     .leftJoin('medical_conditions as mc', 'm.medical_condition_id', 'mc.id')
-    .select('m.*', 'c.name as name', 'c.form as form', 'mc.name as condition_name');
+    .leftJoin('suppliers as sup', 'm.supplier_id', 'sup.id')
+    .select('m.*', 'c.name as name', 'c.form as form', 'mc.name as condition_name', 'sup.suburb as supplier_suburb');
 
 const medWithName = (id: string) => medSelect().where('m.id', id).first();
 
@@ -50,6 +51,9 @@ const medSchema = z.object({
   repeats_due: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   // Where this medication is reordered from, and a link to reorder it.
   // Name and link are separate data points, kept in separate columns.
+  // supplier_id links to the account's shared supplier; the name and link
+  // are then derived from it. A bare name still works and resolves to one.
+  supplier_id: z.string().uuid().optional().nullable(),
   supplier: z.string().max(255).optional().nullable(),
   supplier_order_url: z.string().url().max(2000).optional().nullable().or(z.literal('')),
   // Dangerous to miss (stopping suddenly is harmful): overdue and
@@ -85,6 +89,36 @@ export async function resolveConditionId(name: string | null | undefined, profil
     .first();
   if (existing) return existing.id;
   const [created] = await db('medical_conditions').insert({ care_profile_id: profileId, name: trimmed }).returning('id');
+  return (created as { id: string }).id;
+}
+
+// Default a bare domain to https so a pasted reorder link works.
+function normaliseOrderUrl(url: string | null | undefined): string | null {
+  const u = (url ?? '').trim();
+  if (!u) return null;
+  return /^https?:\/\//i.test(u) ? u : `https://${u}`;
+}
+
+// Resolve a free-typed supplier name to one of the account's shared suppliers,
+// creating one if it is new. Used by import and the AI actions, where only a
+// name (not a chosen supplier id) is available. The editor sends a supplier_id
+// instead, which is authoritative. Empty clears the tie.
+export async function resolveSupplierId(
+  name: string | null | undefined,
+  orderUrl: string | null | undefined,
+  accountId: string
+): Promise<string | null> {
+  const trimmed = (name ?? '').trim();
+  if (!trimmed) return null;
+  const existing = await db('suppliers')
+    .where({ account_id: accountId })
+    .whereRaw('lower(name) = lower(?)', [trimmed])
+    .orderBy('created_at', 'asc')
+    .first();
+  if (existing) return existing.id;
+  const [created] = await db('suppliers')
+    .insert({ account_id: accountId, name: trimmed, order_url: normaliseOrderUrl(orderUrl) })
+    .returning('id');
   return (created as { id: string }).id;
 }
 
@@ -301,6 +335,9 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner, async (req, 
   const toInsert: Record<string, unknown>[] = [];
   for (const r of records) {
     const catalogueId = await resolveCatalogueId(r.name, r.form, req.account!.id);
+    // Link each imported supplier name to the account's shared supplier list,
+    // creating one where the name is new, so imports track the same model.
+    const supplierId = await resolveSupplierId(r.supplier, r.supplier_order_url, req.account!.id);
     toInsert.push({
       care_profile_id: req.params['id'],
       medication_catalogue_id: catalogueId,
@@ -316,6 +353,7 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner, async (req, 
       supply_remaining: r.supply,
       packs_on_hand: r.packs_on_hand,
       repeats_due: r.repeats_due,
+      supplier_id: supplierId,
       supplier: r.supplier,
       supplier_order_url: r.supplier_order_url,
       active: r.active,
@@ -338,7 +376,7 @@ async function conditionBelongsToProfile(conditionId: string | null | undefined,
 
 // Resolve the condition tie from either an id or a free-typed name, and
 // compose the dose columns, shared by create and edit.
-async function medFieldsFrom(data: z.infer<typeof medSchema> | Partial<z.infer<typeof medSchema>>, profileId: string) {
+async function medFieldsFrom(data: z.infer<typeof medSchema> | Partial<z.infer<typeof medSchema>>, profileId: string, accountId: string) {
   const fields: Record<string, unknown> = {};
   if ('units_per_dose' in data) fields['units_per_dose'] = data.units_per_dose ?? null;
   if ('route' in data) fields['route'] = data.route ?? null;
@@ -346,8 +384,32 @@ async function medFieldsFrom(data: z.infer<typeof medSchema> | Partial<z.infer<t
   if ('as_needed' in data) fields['as_needed'] = data.as_needed ?? false;
   if ('frequency' in data) fields['frequency'] = data.frequency ?? null;
   if ('repeats_due' in data) fields['repeats_due'] = data.repeats_due ?? null;
-  if ('supplier' in data) fields['supplier'] = (data.supplier ?? '').trim() || null;
-  if ('supplier_order_url' in data) fields['supplier_order_url'] = (data.supplier_order_url ?? '').trim() || null;
+  // Supplier: an explicit link from the editor is authoritative and its name
+  // and order link are derived from the supplier record; a bare name (import,
+  // assistant) resolves to a shared supplier, created if new; clearing removes
+  // the tie but keeps any free-typed name and link the caller sent.
+  if ('supplier_id' in data && data.supplier_id) {
+    const sup = await db('suppliers').where({ id: data.supplier_id, account_id: accountId }).first();
+    if (sup) {
+      fields['supplier_id'] = sup.id;
+      fields['supplier'] = sup.name;
+      fields['supplier_order_url'] = sup.order_url ?? null;
+    } else {
+      fields['supplier_id'] = null;
+    }
+  } else if ('supplier' in data && (data.supplier ?? '').trim()) {
+    const name = (data.supplier ?? '').trim();
+    fields['supplier_id'] = await resolveSupplierId(name, data.supplier_order_url, accountId);
+    fields['supplier'] = name;
+    if ('supplier_order_url' in data) fields['supplier_order_url'] = normaliseOrderUrl(data.supplier_order_url);
+  } else if ('supplier_id' in data || 'supplier' in data) {
+    // Supplier explicitly cleared.
+    fields['supplier_id'] = null;
+    if ('supplier' in data) fields['supplier'] = null;
+    if ('supplier_order_url' in data) fields['supplier_order_url'] = normaliseOrderUrl(data.supplier_order_url);
+  } else if ('supplier_order_url' in data) {
+    fields['supplier_order_url'] = normaliseOrderUrl(data.supplier_order_url);
+  }
   if ('critical' in data) fields['critical'] = data.critical ?? false;
   if ('active' in data) fields['active'] = data.active ?? true;
 
@@ -383,7 +445,7 @@ medicationsRouter.post('/', requireAuth, requireProfileOwner, async (req, res) =
     return;
   }
   const catalogueId = await resolveCatalogueId(parsed.data.name, parsed.data.form ?? null, req.account!.id);
-  const fields = await medFieldsFrom(parsed.data, req.params['id']!);
+  const fields = await medFieldsFrom(parsed.data, req.params['id']!, req.account!.id);
   const [med] = await db('medications')
     .insert({
       care_profile_id: req.params['id'],
@@ -416,7 +478,7 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner, async (req,
     res.status(400).json({ error: 'Condition not found', code: 'VALIDATION_ERROR' });
     return;
   }
-  const update: Record<string, unknown> = { ...(await medFieldsFrom(parsed.data, req.params['id']!)), updated_at: db.fn.now() };
+  const update: Record<string, unknown> = { ...(await medFieldsFrom(parsed.data, req.params['id']!, req.account!.id)), updated_at: db.fn.now() };
   if (parsed.data.schedule_times !== undefined) {
     update['schedule_times'] = parsed.data.schedule_times ? db.raw('?::jsonb', [JSON.stringify(parsed.data.schedule_times)]) : null;
   }
