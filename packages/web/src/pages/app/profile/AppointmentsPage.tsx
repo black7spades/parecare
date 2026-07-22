@@ -345,10 +345,12 @@ interface ProviderFull {
   email: string | null;
 }
 
-function AppointmentEditor({
+export function AppointmentEditor({
   profileId,
   appointment,
   initialProviderId = '',
+  initialTitle = '',
+  initialType = 'consultation',
   onClose,
   onSaved,
 }: {
@@ -356,13 +358,17 @@ function AppointmentEditor({
   appointment: Appointment | null;
   /** Preselects a provider on a new appointment, e.g. the GP from a health alert. */
   initialProviderId?: string;
+  /** Prefills the title on a new appointment, e.g. a surgery from a condition. */
+  initialTitle?: string;
+  /** Preselects the kind on a new appointment, e.g. procedure for a surgery. */
+  initialType?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const queryClient = useQueryClient();
   const isNew = appointment === null;
-  const [title, setTitle] = useState(appointment?.title ?? '');
-  const [type, setType] = useState(appointment?.appointment_type ?? 'consultation');
+  const [title, setTitle] = useState(appointment?.title ?? initialTitle);
+  const [type, setType] = useState(appointment?.appointment_type ?? initialType);
   const [providerId, setProviderId] = useState(appointment?.provider_id ?? initialProviderId);
   const [providerName, setProviderName] = useState('');
   const [location, setLocation] = useState(appointment?.location ?? '');

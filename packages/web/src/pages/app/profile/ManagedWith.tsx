@@ -4,6 +4,7 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { useHealthConfig } from '../../../lib/appConfig';
 import { DirectoryAssetEditor, type DirectoryAsset } from '../DirectoryAssetsPage';
+import { AppointmentEditor } from './AppointmentsPage';
 import { fuzzyRank, similarity } from '../../../lib/fuzzy';
 import {
   DOSE_MEASURES,
@@ -98,6 +99,8 @@ export async function persistManagedRows(
 ): Promise<void> {
   for (const r of rows) {
     if (!rowIsFilled(r)) continue;
+    // A surgery is booked as an appointment from its row, not saved here.
+    if (r.kind === 'surgery') continue;
     if (r.kind === 'medication') {
       const asNeeded = r.perDay < 1;
       await api.post(`/care-profiles/${profileId}/medications`, {
@@ -327,6 +330,7 @@ export function ManagedWithSection({
             key={row.key}
             row={row}
             index={i}
+            profileId={profileId}
             careName={careName}
             allergies={allergies}
             onChange={(patch) => setRow(row.key, patch)}
@@ -350,6 +354,7 @@ export function ManagedWithSection({
 function ManagedRowCard({
   row,
   index,
+  profileId,
   careName,
   allergies,
   onChange,
@@ -357,6 +362,7 @@ function ManagedRowCard({
 }: {
   row: ManagedRow;
   index: number;
+  profileId: string;
   careName: string;
   allergies: Allergy[];
   onChange: (patch: Partial<ManagedRow>) => void;
@@ -387,9 +393,61 @@ function ManagedRowCard({
         <MedicationRowFields row={row} careName={careName} allergies={allergies} onChange={onChange} />
       ) : isDeviceKind(row.kind) ? (
         <DeviceRowFields row={row} onChange={onChange} />
+      ) : row.kind === 'surgery' ? (
+        <SurgeryRowFields row={row} profileId={profileId} onChange={onChange} onRemove={onRemove} />
       ) : (
         <TreatmentRowFields row={row} onChange={onChange} />
       )}
+    </div>
+  );
+}
+
+/**
+ * A surgery is booked as an appointment, not filed as a loose treatment. The
+ * row names the procedure and opens the appointment editor to book it properly,
+ * prefilled as a procedure with the name carried across.
+ */
+function SurgeryRowFields({ row, profileId, onChange, onRemove }: { row: ManagedRow; profileId: string; onChange: (patch: Partial<ManagedRow>) => void; onRemove: () => void }) {
+  const [booking, setBooking] = useState(false);
+  const [booked, setBooked] = useState(false);
+  const queryClient = useQueryClient();
+  return (
+    <div className="space-y-2">
+      <label className="block">
+        <span className="block text-xs text-muted mb-1">Procedure</span>
+        <input
+          className={`${smallInput} w-full`}
+          placeholder="e.g. Hip replacement"
+          value={row.name}
+          onChange={(e) => onChange({ name: e.target.value })}
+        />
+      </label>
+      {booked ? (
+        <p className="text-xs text-green-700 dark:text-green-300">Booked as an appointment. Manage it on the Appointments page.</p>
+      ) : (
+        <div className="flex items-center gap-2">
+          <Button size="xs" variant="secondary" type="button" disabled={!row.name.trim()} onClick={() => setBooking(true)}>
+            Book appointment
+          </Button>
+          <span className="text-xs text-muted">A surgery is booked as an appointment, not saved with the condition.</span>
+        </div>
+      )}
+      {booking ? (
+        <AppointmentEditor
+          profileId={profileId}
+          appointment={null}
+          initialTitle={row.name.trim()}
+          initialType="procedure"
+          onClose={() => setBooking(false)}
+          onSaved={() => {
+            setBooking(false);
+            setBooked(true);
+            void queryClient.invalidateQueries({ queryKey: ['appointments', profileId] });
+            void queryClient.invalidateQueries({ queryKey: ['calendar-events', profileId] });
+            onRemove();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

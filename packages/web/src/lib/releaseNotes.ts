@@ -36,6 +36,7 @@ export const RELEASES: Release[] = [
         heading: 'Conditions and equipment',
         items: [
           'A device that manages a condition is now filed as a real asset: pick one from your register (its details autofill) or add a new one with the same editor, and it is linked to the condition it treats.',
+          'A surgery under a condition opens the make-appointment editor to book it properly, prefilled as a procedure.',
         ],
       },
     ],
