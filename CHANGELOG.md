@@ -43,6 +43,9 @@ source. Versions follow [semantic versioning](https://semver.org).
 - Suppliers gain a directions link (a map link to the shop) alongside the
   reorder link, matching a provider's directions link, in both the directory
   editor and the inline add-supplier form, and in import/export.
+- **Bulk edit selected medications**: an "Edit selected" action applies one
+  change (supplier, route, taken with food, dangerous to miss, active status)
+  to every selected medication at once.
 - **Sign out** moved from the top-right account menu to the sidebar footer,
   beside the theme picker.
 

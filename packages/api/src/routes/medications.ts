@@ -514,8 +514,13 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner, async (req,
 // viewers can sort/filter but never bulk-delete. Scoped to this profile, so
 // an admin only ever deletes medications for a person in their care.
 const bulkSchema = z.object({
-  action: z.enum(['delete', 'activate', 'deactivate']),
+  action: z.enum(['delete', 'activate', 'deactivate', 'update']),
   ids: z.array(z.string().uuid()).min(1).max(500),
+  // For 'update': the fields to apply to every selected medication. Only the
+  // keys present are changed (e.g. supplier, route, with food, dangerous to
+  // miss, active). Per-medication facts like name, schedule and supply counts
+  // are not bulk-editable, as they differ from one medication to the next.
+  fields: medSchema.partial().optional(),
 });
 
 medicationsRouter.post('/bulk', requireAuth, requireProfileOwner, async (req, res) => {
@@ -528,6 +533,18 @@ medicationsRouter.post('/bulk', requireAuth, requireProfileOwner, async (req, re
   if (parsed.data.action === 'delete') {
     const deleted = await scope.del();
     res.json({ deleted });
+    return;
+  }
+  if (parsed.data.action === 'update') {
+    // Resolve the same way a single edit does (supplier link, composed dose,
+    // condition tie), but only for the fields supplied; then apply to all.
+    const fields = await medFieldsFrom(parsed.data.fields ?? {}, req.params['id']!, req.account!.id);
+    if (Object.keys(fields).length === 0) {
+      res.status(400).json({ error: 'Choose at least one field to change.', code: 'VALIDATION_ERROR' });
+      return;
+    }
+    const updated = await scope.update({ ...fields, updated_at: db.fn.now() });
+    res.json({ updated });
     return;
   }
   const updated = await scope.update({ active: parsed.data.action === 'activate', updated_at: db.fn.now() });
