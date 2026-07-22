@@ -1,4 +1,5 @@
 import { Knex } from 'knex';
+import { summarizeSpend, toNum, type SpendCategory } from './healthSpend';
 
 export interface ReportField {
   key: string;
@@ -632,6 +633,115 @@ registerSection({
       status: r.status,
       notes: r.notes,
       readings: (valsByObs.get(r.id) ?? []).join('; '),
+    }));
+  },
+});
+
+registerSection({
+  meta: {
+    key: 'health_spend',
+    label: 'Health spend',
+    description: 'Actual spend on each person over the chosen date range, split into medications, appointments and other, for the high-level view across everyone in your care',
+    category: 'medications',
+    fields: [
+      { key: 'medication_spend', label: 'Medications', type: 'number' },
+      { key: 'appointment_spend', label: 'Appointments', type: 'number' },
+      { key: 'other_spend', label: 'Other', type: 'number' },
+      { key: 'total_spend', label: 'Total spent', type: 'number' },
+      { key: 'pending_spend', label: 'Estimated, not yet confirmed', type: 'number' },
+    ],
+    filters: [],
+    supportsDateRange: true,
+    crossProfileCapable: true,
+  },
+  async fetch({ profileIds, dateRange, db }) {
+    // One row per person: confirmed spend over the range, by category and
+    // combined, plus the estimated amount still awaiting confirmation. Each
+    // figure is its own column so the report can sort and total independently.
+    const range = { from: dateRange?.from ?? null, to: dateRange?.to ?? null };
+    const profiles = await db('care_profiles').whereIn('id', profileIds).select('id', 'full_name');
+    const nameById = new Map(profiles.map((p) => [p.id, p.full_name]));
+    const rows: Record<string, unknown>[] = [];
+    for (const profileId of profileIds) {
+      const s = await summarizeSpend(profileId, range, db);
+      rows.push({
+        _profile_id: profileId,
+        _profile_name: nameById.get(profileId) ?? '',
+        medication_spend: s.by_category.medication,
+        appointment_spend: s.by_category.appointment,
+        other_spend: s.by_category.other,
+        total_spend: s.total,
+        pending_spend: s.pending_total,
+      });
+    }
+    return rows;
+  },
+});
+
+registerSection({
+  meta: {
+    key: 'health_spend_detail',
+    label: 'Health spend, itemised',
+    description: 'Every recorded cost over the chosen date range: what it was for, the amount, and whether it is confirmed or still an estimate',
+    category: 'medications',
+    fields: [
+      { key: 'spent_on', label: 'Date', type: 'date' },
+      { key: 'category', label: 'Category', type: 'enum', enumValues: ['medication', 'appointment', 'other'] },
+      { key: 'item_name', label: 'What it was for', type: 'text' },
+      { key: 'amount', label: 'Amount', type: 'number' },
+      { key: 'status', label: 'Status', type: 'enum', enumValues: ['confirmed', 'estimated'] },
+      { key: 'description', label: 'Note', type: 'text' },
+    ],
+    filters: [
+      {
+        key: 'category', label: 'Category', type: 'multi-select', options: [
+          { value: 'medication', label: 'Medications' },
+          { value: 'appointment', label: 'Appointments' },
+          { value: 'other', label: 'Other' },
+        ],
+      },
+      {
+        key: 'status', label: 'Status', type: 'multi-select', options: [
+          { value: 'confirmed', label: 'Confirmed' },
+          { value: 'estimated', label: 'Estimated' },
+        ],
+      },
+    ],
+    supportsDateRange: true,
+    crossProfileCapable: true,
+  },
+  async fetch({ profileIds, filters, dateRange, db }) {
+    let query = db('health_spend_entries as e')
+      .join('care_profiles as cp', 'cp.id', 'e.care_profile_id')
+      .leftJoin('appointments as ap', 'ap.id', 'e.appointment_id')
+      .leftJoin('medications as m', 'm.id', 'e.medication_id')
+      .leftJoin('medication_catalogue as mc', 'mc.id', 'm.medication_catalogue_id')
+      .whereIn('e.care_profile_id', profileIds);
+    if (Array.isArray(filters['category']) && filters['category'].length) {
+      query = query.whereIn('e.category', filters['category'] as string[]);
+    }
+    if (Array.isArray(filters['status']) && filters['status'].length) {
+      query = query.whereIn('e.status', filters['status'] as string[]);
+    }
+    if (dateRange) {
+      query = query.where('e.spent_on', '>=', dateRange.from).where('e.spent_on', '<=', dateRange.to);
+    }
+    const rows = await query
+      .select(
+        'e.care_profile_id', 'e.spent_on', 'e.category', 'e.status', 'e.amount', 'e.description',
+        'cp.full_name as _profile_name',
+        db.raw('coalesce(mc.name, ap.title, e.description) as item_name')
+      )
+      .orderBy('e.spent_on', 'desc');
+    return rows.map((r) => ({
+      _profile_id: r.care_profile_id,
+      _profile_name: r._profile_name,
+      spent_on: r.spent_on,
+      category: r.category as SpendCategory,
+      item_name: r.item_name,
+      amount: toNum(r.amount),
+      status: r.status,
+      description: r.description,
     }));
   },
 });

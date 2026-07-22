@@ -576,6 +576,9 @@ const reorderSchema = z.object({
   action: z.enum(['ordered', 'replenished']),
   packs_on_hand: z.coerce.number().min(0).max(1e6).optional(),
   supply_remaining: z.coerce.number().min(0).max(1e9).optional(),
+  // What the repeat cost. Recorded as a dated health-spend entry when the
+  // packs arrive, since that is the moment the money is spent.
+  amount_paid: z.coerce.number().min(0).max(1e9).optional().nullable(),
 });
 
 medicationsRouter.post('/:medId/reorder', requireAuth, requireProfileOwner, async (req, res) => {
@@ -605,6 +608,18 @@ medicationsRouter.post('/:medId/reorder', requireAuth, requireProfileOwner, asyn
   // it runs out again later.
   if (parsed.data.action === 'replenished') {
     await db('attention_dismissals').where({ item_key: `out_of_stock:${req.params['medId']}` }).delete();
+    // Log what the repeat cost, dated to today, as a confirmed spend entry.
+    if (parsed.data.amount_paid != null && parsed.data.amount_paid > 0) {
+      await db('health_spend_entries').insert({
+        care_profile_id: req.params['id'],
+        amount: parsed.data.amount_paid,
+        spent_on: new Date().toISOString().slice(0, 10),
+        category: 'medication',
+        status: 'confirmed',
+        medication_id: req.params['medId'],
+        created_by_account_id: req.account!.id,
+      });
+    }
   }
   res.json({ medication: serializeMed(await medWithName((med as { id: string }).id)) });
 });

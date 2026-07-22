@@ -378,10 +378,10 @@ export async function countAttentionItems(accountId: string): Promise<number> {
 export interface AttentionItem {
   profile_id: string;
   profile_name: string;
-  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'reorder_overdue' | 'unresolved_outcome';
+  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'reorder_overdue' | 'unresolved_outcome' | 'appointment_cost';
   label: string;
   detail: string | null;
-  section: 'tasks' | 'medications' | 'mar' | 'questions';
+  section: 'tasks' | 'medications' | 'mar' | 'questions' | 'appointments';
   /** A stable identifier for this item, for React keys and for dismissal. */
   key: string;
   /** Pressing enough to lead the list and stand out. */
@@ -403,22 +403,38 @@ export async function getDismissedKeys(accountId: string): Promise<Set<string>> 
  * account has dismissed is left out.
  */
 export async function gatherAttentionItems(accountId: string, timeZone?: string | null): Promise<AttentionItem[]> {
-  const [data, dismissed, poorOutcomes] = await Promise.all([
+  const profileIds = (await accessibleProfiles(accountId)).map((p) => p.id);
+  const [data, dismissed, poorOutcomes, apptCosts] = await Promise.all([
     gatherDashboardData(accountId, timeZone),
     getDismissedKeys(accountId),
     db('reminders')
-      .whereIn('care_profile_id', (await accessibleProfiles(accountId)).map((p) => p.id))
+      .whereIn('care_profile_id', profileIds)
       .where('completed', true)
       .whereNotNull('sentiment')
       .where('sentiment', '<=', 3)
       .where('completed_at', '>=', db.raw("now() - interval '7 days'"))
       .select('care_profile_id', 'id', 'title', 'sentiment'),
+    // Appointments that have happened and were booked with an estimate but not
+    // yet confirmed to a real amount: prompt to log what they actually cost.
+    db('appointments as a')
+      .join('health_spend_entries as e', 'e.appointment_id', 'a.id')
+      .whereIn('a.care_profile_id', profileIds)
+      .where('e.status', 'estimated')
+      .where('a.starts_at', '<', db.fn.now())
+      .whereIn('a.status', ['scheduled', 'completed'])
+      .select('a.care_profile_id', 'a.id', 'a.title', 'a.starts_at'),
   ]);
   const poorByProfile = new Map<string, Array<{ id: string; title: string; sentiment: number }>>();
   for (const r of poorOutcomes) {
     const arr = poorByProfile.get(r.care_profile_id) ?? [];
     arr.push({ id: r.id, title: r.title, sentiment: r.sentiment });
     poorByProfile.set(r.care_profile_id, arr);
+  }
+  const apptCostByProfile = new Map<string, Array<{ id: string; title: string; starts_at: Date }>>();
+  for (const r of apptCosts as Array<{ care_profile_id: string; id: string; title: string; starts_at: Date }>) {
+    const arr = apptCostByProfile.get(r.care_profile_id) ?? [];
+    arr.push({ id: r.id, title: r.title, starts_at: r.starts_at });
+    apptCostByProfile.set(r.care_profile_id, arr);
   }
   const items: AttentionItem[] = [];
   for (const s of data.profiles) {
@@ -495,6 +511,20 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
         key: `stale_question:${s.profile.id}`,
         urgent: false,
         dismissible: false,
+      });
+    }
+    const apptCostsForProfile = apptCostByProfile.get(s.profile.id) ?? [];
+    for (const a of apptCostsForProfile) {
+      items.push({
+        profile_id: s.profile.id,
+        profile_name: name,
+        kind: 'appointment_cost',
+        label: 'Confirm what an appointment cost',
+        detail: `${a.title} on ${fmtDate(a.starts_at, timeZone)} was booked with an estimate; log what it actually cost`,
+        section: 'appointments',
+        key: `appointment_cost:${a.id}`,
+        urgent: false,
+        dismissible: true,
       });
     }
     const poor = poorByProfile.get(s.profile.id) ?? [];

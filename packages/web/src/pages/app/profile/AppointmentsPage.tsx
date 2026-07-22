@@ -9,6 +9,7 @@ import { Modal } from '../../../components/ui/Modal';
 import { useDataView, type DataFilter, type DataSort } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
 import { useProfile } from './ProfileLayout';
+import { useHealthConfig } from '../../../lib/appConfig';
 
 const inputClass =
   'w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -27,6 +28,10 @@ export interface Appointment {
   ends_at: string | null;
   status: string;
   notes: string | null;
+  /** The estimate given at booking, if any (kept out of spend totals). */
+  cost_estimate: number | null;
+  /** The confirmed actual cost, if logged (counts as spend). */
+  cost_actual: number | null;
 }
 
 const APPOINTMENT_TYPES = [
@@ -366,8 +371,11 @@ function AppointmentEditor({
   const [endTime, setEndTime] = useState('');
   const [status, setStatus] = useState(appointment?.status ?? 'scheduled');
   const [notes, setNotes] = useState(appointment?.notes ?? '');
+  const [costEstimate, setCostEstimate] = useState(appointment?.cost_estimate != null ? String(appointment.cost_estimate) : '');
+  const [costActual, setCostActual] = useState(appointment?.cost_actual != null ? String(appointment.cost_actual) : '');
   const [error, setError] = useState('');
   const [showSaveProvider, setShowSaveProvider] = useState(false);
+  const health = useHealthConfig();
 
   useEffect(() => {
     if (appointment) {
@@ -387,6 +395,8 @@ function AppointmentEditor({
       }
       setStatus(appointment.status);
       setNotes(appointment.notes ?? '');
+      setCostEstimate(appointment.cost_estimate != null ? String(appointment.cost_estimate) : '');
+      setCostActual(appointment.cost_actual != null ? String(appointment.cost_actual) : '');
     }
   }, [appointment]);
 
@@ -450,6 +460,8 @@ function AppointmentEditor({
         ends_at: endsAt,
         status,
         notes: notes.trim() || null,
+        cost_estimate: costEstimate.trim() === '' ? null : Number(costEstimate),
+        cost_actual: costActual.trim() === '' ? null : Number(costActual),
       };
       return isNew
         ? api.post(`/care-profiles/${profileId}/appointments`, body)
@@ -548,6 +560,26 @@ function AppointmentEditor({
           </label>
         </div>
         <Textarea label="Notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Input
+            label={`Estimated cost (${health.currency_symbol})`}
+            type="number"
+            min="0"
+            step="any"
+            value={costEstimate}
+            onChange={(e) => setCostEstimate(e.target.value)}
+            hint="What you expect it to cost. Kept as an estimate until confirmed."
+          />
+          <Input
+            label={`Actual cost (${health.currency_symbol})`}
+            type="number"
+            min="0"
+            step="any"
+            value={costActual}
+            onChange={(e) => setCostActual(e.target.value)}
+            hint="What it actually cost. Counts as health spend once entered."
+          />
+        </div>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>

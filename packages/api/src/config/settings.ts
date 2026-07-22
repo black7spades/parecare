@@ -152,6 +152,14 @@ export function isMessageToneGuardEnabled(): boolean {
   return (str('messages.tone_guard') ?? 'on') !== 'off';
 }
 
+/**
+ * The single currency every cost and health-spend total is shown in, across
+ * the whole account. Defaults to AUD until a super admin changes it.
+ */
+export function getHealthCurrency(): string {
+  return str('health.currency') ?? 'AUD';
+}
+
 export function getOAuthConfig() {
   return {
     googleClientId: str('oauth.google_client_id'),

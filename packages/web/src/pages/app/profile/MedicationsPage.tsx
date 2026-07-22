@@ -10,6 +10,7 @@ import { Modal } from '../../../components/ui/Modal';
 import { CartIcon, CheckIcon, PackageIcon, PencilIcon, PillIcon, TrashIcon } from '../../../components/ui/icons';
 import { AddressFields, addressPayload, emptyAddress, type AddressValue } from '../../../components/AddressFields';
 import { useProfile } from './ProfileLayout';
+import { useHealthConfig } from '../../../lib/appConfig';
 import { ImportExport } from '../../../components/ImportExport';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
@@ -795,12 +796,14 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
  * fields prefill to a sensible restock (one more full pack) and can be edited.
  */
 function ReplenishModal({ profileId, med, onClose, onSaved }: { profileId: string; med: MedicationRecord; onClose: () => void; onSaved: () => void }) {
+  const health = useHealthConfig();
   const [packs, setPacks] = useState(String((med.packs_on_hand ?? 0) + 1));
   const [remaining, setRemaining] = useState(
     med.supply_remaining != null && med.supply_remaining > 0
       ? String(med.supply_remaining)
       : med.supply != null ? String(med.supply) : ''
   );
+  const [amountPaid, setAmountPaid] = useState('');
   const [error, setError] = useState('');
 
   const mutation = useMutation({
@@ -808,6 +811,7 @@ function ReplenishModal({ profileId, med, onClose, onSaved }: { profileId: strin
       action: 'replenished',
       packs_on_hand: packs.trim() === '' ? undefined : Number(packs),
       supply_remaining: remaining.trim() === '' ? undefined : Number(remaining),
+      amount_paid: amountPaid.trim() === '' ? null : Number(amountPaid),
     }),
     onSuccess: onSaved,
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not record the delivery.'),
@@ -827,6 +831,11 @@ function ReplenishModal({ profileId, med, onClose, onSaved }: { profileId: strin
           pack{packs.trim() === '1' ? '' : 's'}, plus{' '}
           <input className={inlineInput} aria-label="Units in the open pack" type="number" min="0" step="any" value={remaining} onChange={(e) => setRemaining(e.target.value)} />{' '}
           loose in the open one.
+        </p>
+        <p className="text-sm text-ink leading-8">
+          This repeat cost {health.currency_symbol}
+          <input className={inlineInput} aria-label="Amount paid for this repeat" type="number" min="0" step="any" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} />{' '}
+          <span className="text-muted text-xs">(logged as health spend, dated today; leave blank to skip)</span>
         </p>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">

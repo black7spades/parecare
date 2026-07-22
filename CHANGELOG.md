@@ -5,6 +5,31 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.4.0] - 2026-07-22
+
+### Added
+
+- **Health spend tracking**, built as a ledger of real costs rather than a
+  projection. Every amount is a dated entry, so spend over any period is just
+  the entries in that window.
+- A medication's cost is recorded **when a repeat is replenished**: the "repeat
+  arrived" step now takes what it cost, logged and dated to the day it arrived.
+- An appointment or therapy takes an **estimated cost when it is booked** and a
+  confirmed **actual cost afterwards**. Until it is confirmed, the estimate is
+  kept apart and does not count towards spend, and the Homeboard's
+  needs-attention list prompts you to log what a past appointment actually
+  cost.
+- A one-off cost (a mobility aid, a dental bill) can be **added by hand**.
+- A **Health spend** card on each person's overview, for the account owner and
+  admins only, with a Last 12 months / This year / All time switch, the total
+  and its split into medications, appointments and other, and every dated
+  entry.
+- Two **date-range reports**: Health spend (per person, by category) and Health
+  spend, itemised (every entry), so costs roll up across everyone in your care
+  over whatever range you choose.
+- A **currency** setting in System settings, under a new Health spend group,
+  used across the whole account.
+
 ## [0.3.0] - 2026-07-22
 
 ### Added
