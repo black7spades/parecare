@@ -8,49 +8,81 @@ import zlib from 'zlib';
 export function extractText(buffer: Buffer, mimetype: string, filename: string): string {
   const name = (filename || '').toLowerCase();
   if (mimetype.startsWith('text/') || name.endsWith('.txt') || name.endsWith('.csv') || mimetype === 'application/json') {
-    return buffer.toString('utf-8');
+    return cleanup(buffer.toString('utf-8'));
   }
   if (mimetype === 'application/pdf' || name.endsWith('.pdf')) {
     return extractPdfText(buffer);
   }
-  // Last resort: strip to printable characters, so a DOCX or odd type still
-  // yields something the model can read.
-  const ascii = buffer.toString('latin1').replace(/[^\x20-\x7E\n]+/g, ' ');
-  return ascii.length > 40 ? ascii : '';
+  return '';
+}
+
+/** Drop control and non-printable bytes and collapse whitespace. */
+function cleanup(s: string): string {
+  return s.replace(/[^\x09\x0A\x0D\x20-\x7E]/g, ' ').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim();
+}
+
+/** A PDF string token is real text if most of its characters are printable. */
+function looksLikeText(s: string): boolean {
+  if (s.length < 2) return false;
+  const printable = (s.match(/[\x20-\x7E]/g) || []).length;
+  return printable / s.length > 0.7;
+}
+
+// Decode a PDF literal string: octal escapes (\ddd) and the named escapes.
+function decodePdfLiteral(body: string): string {
+  return body.replace(/\\([nrtbf()\\]|[0-7]{1,3})/g, (_m, e: string) => {
+    switch (e) {
+      case 'n': return '\n';
+      case 'r': return '';
+      case 't': return ' ';
+      case 'b': return '';
+      case 'f': return '';
+      case '(': return '(';
+      case ')': return ')';
+      case '\\': return '\\';
+      default: return String.fromCharCode(parseInt(e, 8) & 0xff);
+    }
+  });
 }
 
 /**
- * A dependency-free PDF text scan: inflate each content stream and pull the
- * strings out of the text-showing operators. Good enough for a text invoice or
- * letter; a scanned page yields nothing (there is no text to find).
+ * A dependency-free PDF text scan. Only content streams (those inflating to
+ * something with text operators) are read, and only tokens that look like real
+ * text are kept, so image, font and other binary streams do not leak in. Good
+ * enough for a text invoice or letter; a scanned page yields nothing.
  */
 function extractPdfText(buffer: Buffer): string {
   const out: string[] = [];
   const data = buffer;
   let i = 0;
   const needle = Buffer.from('stream');
+  const endNeedle = Buffer.from('endstream');
   while (i < data.length) {
     const s = data.indexOf(needle, i);
     if (s === -1) break;
     let start = s + needle.length;
     if (data[start] === 0x0d) start++;
     if (data[start] === 0x0a) start++;
-    const e = data.indexOf(Buffer.from('endstream'), start);
+    const e = data.indexOf(endNeedle, start);
     if (e === -1) break;
+    i = e + endNeedle.length;
     const chunk = data.subarray(start, e);
-    let text: Buffer;
+    // Only inflated streams are used; a raw (non-flate) stream is almost always
+    // binary (an image or font), so it is skipped rather than read as garbage.
+    let text: string;
     try {
-      text = zlib.inflateSync(chunk);
+      text = zlib.inflateSync(chunk).toString('latin1');
     } catch {
-      text = chunk;
+      continue;
     }
-    for (const m of text.toString('latin1').matchAll(/\((?:[^()\\]|\\.)*\)/g)) {
-      const raw = m[0].slice(1, -1).replace(/\\([()\\])/g, '$1');
-      if (raw.trim()) out.push(raw);
+    // Not a content stream (no text-showing operators): skip it.
+    if (!/\b(BT|Tj|TJ)\b|\)\s*Tj|\]\s*TJ/.test(text)) continue;
+    for (const m of text.matchAll(/\(((?:[^()\\]|\\.)*)\)/g)) {
+      const token = decodePdfLiteral(m[1] ?? '');
+      if (looksLikeText(token)) out.push(token);
     }
-    i = e + 9;
   }
-  return out.join(' ').replace(/\s+/g, ' ').trim();
+  return cleanup(out.join(' '));
 }
 
 /**
@@ -63,15 +95,27 @@ function extractPdfText(buffer: Buffer): string {
 export function buildIngestPrompt(profileName: string, today: string): string {
   return `You are filing an uploaded document into ${profileName}'s care record. Today is ${today}.
 
-Read the document text below and do two things:
-1. In one or two short sentences, say what the document is (an invoice, a care plan, a referral letter, a business card, a receipt, and so on) and what you filed.
-2. Append one \`\`\`parecare-action\`\`\` fenced JSON block per record you can extract, using the action vocabulary you have been given. File everything against this profile.
+Do two things:
+1. In one or two short sentences, say what the document is (an invoice, a care plan, a referral letter, a business card, a prescription) and what you are filing from it. Do NOT quote or repeat the document text back.
+2. For each record you can extract, append a fenced code block in exactly this form, opening fence on its own line, one JSON object, closing fence:
 
-Guidance on what goes where:
-- A tax invoice or receipt for a piece of equipment (a CPAP machine, a hoist, a wheelchair, a bed) is an asset: emit add_asset with the unit name, make/model, serial number, price actually paid, purchase date, supplier (who sold it), warranty expiry (compute it if the document gives a warranty length from the purchase date), and put the included accessories in notes. A GST-free medical device still has a price.
-- A business card or a letterhead for a clinician or clinic is a provider: emit add_provider.
+\`\`\`parecare-action
+{"type": "add_asset", "name": "ResMed AirSense 11 CPAP machine", "make_model": "ResMed AirSense 11 Auto", "serial_number": "22232961781", "price": 2080, "purchase_date": "2024-03-15", "supplier": "Sleep Healthcare Australia", "warranty_expiry": "2029-03-15", "notes": "Includes AirFit P10 mask, ClimateLine tube, humidifier."}
+\`\`\`
+
+CRITICAL: the key is "type" (never "action"), the JSON must be valid, one object per block, and the block must be fenced exactly as \`\`\`parecare-action ... \`\`\`. Emit one block per record.
+
+The action types you can use here and their fields:
+- {"type": "add_asset", "name" (required), "category"?, "make_model"?, "serial_number"?, "price"? (number), "purchase_date"? ("YYYY-MM-DD"), "supplier"? (who sold it), "warranty_expiry"? ("YYYY-MM-DD"), "condition"?, "location"?, "useful_life_years"? (number), "notes"?}
+- {"type": "add_provider", "provider_type": one of gp | specialist | pharmacy | care_facility | allied_health | legal | financial | social_worker | other, "name" (required), "organisation"?, "phone"?, "email"?}
+- {"type": "add_medication", "medication_name" (required), "dose"?, "route"?, "frequency"?, "instructions"?}
+- {"type": "add_task", "title" (required), "body"?, "due_at" (ISO time), "repeat": once | daily | weekly | monthly}
+- {"type": "log_event", "entry_type": visit | medical_appointment | observation | handover, "title"?, "body"?, "occurred_at"? (ISO time)}
+
+What goes where:
+- A tax invoice or receipt for a piece of equipment (a CPAP machine, a hoist, a wheelchair, a bed, a monitor) is an asset: add_asset with the unit name, make/model, serial number, the price actually paid, purchase date, the seller as "supplier", and the warranty expiry (compute it from the purchase date if the document gives a warranty length). Put accessories in notes. A GST-free medical device still has a price. The seller of equipment goes in the asset's "supplier" field, NOT as a provider; only use add_provider for a clinician or a clinic, not a retailer.
 - A prescription or medication list is one add_medication per drug.
-- Only extract facts that are actually in the document. Do not invent serial numbers, prices or dates. Use "YYYY-MM-DD" for dates. If you truly cannot extract anything fileable, say so and emit no blocks.
+- Only extract facts that are actually in the document. Never invent serial numbers, prices or dates. Use "YYYY-MM-DD" for dates. If you cannot extract anything fileable, say so and emit no blocks.
 
 The document text is in the next message.`;
 }

@@ -8,7 +8,51 @@ import { uploadFile } from '../services/storage';
 import { complete, isAiConfigured } from '../services/aiProvider';
 import { dateInZone } from '../lib/timezone';
 import { extractText, buildIngestPrompt } from '../services/documentIngest';
-import { extractActions, executeActions, actionSchema, type AssistantAction } from '../services/aiActions';
+import { executeActions, actionSchema, type AssistantAction } from '../services/aiActions';
+
+/**
+ * Pull proposed actions out of the assistant's reply, tolerantly. Models vary:
+ * they may key the object on "action" instead of "type", fence the block
+ * loosely, or wrap the JSON in prose. Every candidate JSON object is normalised
+ * and validated against the real action schema, so only well-formed, known
+ * actions survive; anything else is ignored rather than filed.
+ */
+function parseProposedActions(reply: string): AssistantAction[] {
+  const found: AssistantAction[] = [];
+  const seen = new Set<string>();
+  // Prefer fenced parecare-action blocks; fall back to any fenced/bare object.
+  const candidates: string[] = [];
+  for (const m of reply.matchAll(/```(?:parecare-action|json)?\s*([\s\S]*?)```/g)) {
+    if (m[1]) candidates.push(m[1].trim());
+  }
+  // Also any bare {...} object that mentions type/action, for models that skip fences.
+  for (const m of reply.matchAll(/\{[^{}]*"(?:type|action)"[^{}]*\}/g)) {
+    candidates.push(m[0]);
+  }
+  for (const raw of candidates) {
+    // A block may hold several objects; split on the boundary between them.
+    const objects = raw.match(/\{[\s\S]*?\}(?=\s*,?\s*(?:\{|$))/g) ?? [raw];
+    for (const objText of objects) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(objText.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']'));
+      } catch {
+        continue;
+      }
+      if (!parsed || typeof parsed !== 'object') continue;
+      const obj = parsed as Record<string, unknown>;
+      if (obj['type'] === undefined && typeof obj['action'] === 'string') obj['type'] = obj['action'];
+      delete obj['action'];
+      const result = actionSchema.safeParse(obj);
+      if (!result.success) continue;
+      const key = JSON.stringify(result.data);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      found.push(result.data);
+    }
+  }
+  return found;
+}
 
 /**
  * Upload anything (a care plan, an invoice, a business card) and let the
@@ -70,14 +114,15 @@ documentIngestRouter.post('/', requireAuth, upload.single('file'), async (req, r
   const today = dateInZone(new Date(), (req.headers['x-time-zone'] as string) || null);
   const system = buildIngestPrompt(personName, today);
   const result = await complete(system, [{ role: 'user', content: text.slice(0, 12000) }], 1500, 'chat');
-  const { actions, parseErrors } = extractActions(result.text);
+  const actions = parseProposedActions(result.text);
+  // The summary is the model's prose with any fenced blocks removed.
+  const summary = result.text.replace(/```[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim();
 
   res.json({
     document_id: (doc as { id: string }).id,
     text_found: true,
-    summary: result.text.replace(/```parecare-action[\s\S]*?```/g, '').trim(),
+    summary: summary || 'Read the document.',
     actions,
-    parse_errors: parseErrors,
   });
 });
 
