@@ -284,6 +284,8 @@ export interface Supplier {
   address_country: string | null;
   /** A direct link to reorder from this supplier. */
   order_url: string | null;
+  /** A map link to the supplier, the same as a provider's directions link. */
+  directions_link: string | null;
   created_at: string | Date;
 }
 

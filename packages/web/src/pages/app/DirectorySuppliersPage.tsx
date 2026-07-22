@@ -82,8 +82,8 @@ export function DirectorySuppliersPage() {
             resource="suppliers"
             canImport={canEdit}
             onImported={invalidate}
-            templateHeaders={['Vendor', 'Phone', 'Email', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country', 'Reorder link']}
-            templateSample={['Chemist Warehouse', '07 5555 5555', '', '2 Shop St', '', 'Morayfield', 'QLD', '4506', 'Australia', 'https://chemistwarehouse.example/reorder']}
+            templateHeaders={['Vendor', 'Phone', 'Email', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country', 'Reorder link', 'Directions']}
+            templateSample={['Chemist Warehouse', '07 5555 5555', '', '2 Shop St', '', 'Morayfield', 'QLD', '4506', 'Australia', 'https://chemistwarehouse.example/reorder', 'https://maps.example/chemist']}
           />
           {canEdit ? (
             <Button onClick={() => { setEditing(null); setEditorOpen(true); }}>
@@ -151,7 +151,6 @@ export function DirectorySuppliersPage() {
                 <SortableTh label="Suburb" sortKey="suburb" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Phone" sortKey="phone" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Address" sortKey="address" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
-                <th className="px-3 py-2">Reorder link</th>
                 <SortableTh label="Medications" sortKey="medications" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Used by" sortKey="profiles" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 {canEdit ? <th className="px-3 py-2 w-36" /> : null}
@@ -179,11 +178,6 @@ export function DirectorySuppliersPage() {
                     ) : <span className="text-muted">-</span>}
                   </td>
                   <td className="px-3 py-2 text-muted max-w-48 truncate">{s.address || '-'}</td>
-                  <td className="px-3 py-2">
-                    {s.order_url ? (
-                      <a href={s.order_url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Reorder</a>
-                    ) : <span className="text-muted">-</span>}
-                  </td>
                   <td className="px-3 py-2 text-muted">{s.medication_count}</td>
                   <td className="px-3 py-2">
                     {s.linked_profiles && s.linked_profiles.length > 0 ? (
@@ -370,6 +364,7 @@ function DirectorySupplierEditor({
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState<AddressValue>(emptyAddress);
   const [orderUrl, setOrderUrl] = useState('');
+  const [directionsLink, setDirectionsLink] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -378,6 +373,7 @@ function DirectorySupplierEditor({
     setEmail(supplier?.email ?? '');
     setAddress(supplier ? addressFrom(supplier) : emptyAddress);
     setOrderUrl(supplier?.order_url ?? '');
+    setDirectionsLink(supplier?.directions_link ?? '');
     setError('');
   }, [supplier, open]);
 
@@ -389,6 +385,7 @@ function DirectorySupplierEditor({
         email: email.trim() || null,
         ...addressPayload(address),
         order_url: orderUrl.trim() || null,
+        directions_link: directionsLink.trim() || null,
       };
       return supplier
         ? api.patch(`/directory/suppliers/${supplier.id}`, body)
@@ -411,7 +408,10 @@ function DirectorySupplierEditor({
           <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
         <AddressFields value={address} onChange={setAddress} />
-        <Input label="Reorder link" type="url" placeholder="https://…" value={orderUrl} onChange={(e) => setOrderUrl(e.target.value)} hint="Where the Order button goes to restock." />
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Reorder link" type="url" placeholder="https://…" value={orderUrl} onChange={(e) => setOrderUrl(e.target.value)} hint="Where the Order button goes to restock." />
+          <Input label="Directions" type="url" placeholder="https://…" value={directionsLink} onChange={(e) => setDirectionsLink(e.target.value)} hint="A map link to the shop." />
+        </div>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
