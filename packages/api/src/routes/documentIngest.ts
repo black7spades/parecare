@@ -112,7 +112,14 @@ documentIngestRouter.post('/', requireAuth, upload.single('file'), async (req, r
   }
 
   const today = dateInZone(new Date(), (req.headers['x-time-zone'] as string) || null);
-  const system = buildIngestPrompt(personName, today);
+  // Addresses already on file in this account, so the assistant can tell the
+  // person's own address (the "invoice to") from a vendor's and not file it.
+  const account = await db('care_profiles').where({ id: profileId }).select('account_id').first();
+  const knownRows = account
+    ? await db('addresses').where({ account_id: (account as { account_id: string }).account_id }).select('formatted').limit(30)
+    : [];
+  const knownAddresses = knownRows.map((r) => (r as { formatted: string | null }).formatted).filter((v): v is string => !!v);
+  const system = buildIngestPrompt(personName, today, knownAddresses);
   const result = await complete(system, [{ role: 'user', content: text.slice(0, 12000) }], 1500, 'chat');
   const actions = parseProposedActions(result.text);
   // The summary is the model's prose with any fenced blocks removed.

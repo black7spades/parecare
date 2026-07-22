@@ -92,8 +92,11 @@ function extractPdfText(buffer: Buffer): string {
  * vocabulary (add_asset, add_provider, add_medication, and so on). Everything
  * is filed against the current profile.
  */
-export function buildIngestPrompt(profileName: string, today: string): string {
-  return `You are filing an uploaded document into ${profileName}'s care record. Today is ${today}.
+export function buildIngestPrompt(profileName: string, today: string, knownAddresses: string[] = []): string {
+  const addressGuard = knownAddresses.length
+    ? `\n\nAddresses already on file in this account (they belong to the family, NOT to vendors):\n${knownAddresses.map((a) => `- ${a}`).join('\n')}\nIf an address on the document matches one of these, it is the person's own address (the "invoice to" / "bill to" / "ship to"), so do NOT create a provider or supplier from it. Only a business's own address (usually the letterhead or the top of the page, next to its name, phone and ABN) identifies a vendor.`
+    : '';
+  return `You are filing an uploaded document into ${profileName}'s care record. Today is ${today}.${addressGuard}
 
 Do two things:
 1. In one or two short sentences, say what the document is (an invoice, a care plan, a referral letter, a business card, a prescription) and what you are filing from it. Do NOT quote or repeat the document text back.
@@ -114,6 +117,7 @@ The action types you can use here and their fields:
 
 What goes where:
 - A tax invoice or receipt for a piece of equipment (a CPAP machine, a hoist, a wheelchair, a bed, a monitor) is an asset: add_asset with the unit name, make/model, serial number, the price actually paid, purchase date, the seller as "supplier", and the warranty expiry (compute it from the purchase date if the document gives a warranty length). Put accessories in notes. A GST-free medical device still has a price. The seller of equipment goes in the asset's "supplier" field, NOT as a provider; only use add_provider for a clinician or a clinic, not a retailer.
+- The seller is the business named on the letterhead (with its own phone and ABN); the "invoice to" / "bill to" party is the customer, usually ${profileName}, and that address is the person's own, not a vendor's. A provider's or supplier's name is the business name (e.g. "Sleep Healthcare Australia"), never an address.
 - A prescription or medication list is one add_medication per drug.
 - Only extract facts that are actually in the document. Never invent serial numbers, prices or dates. Use "YYYY-MM-DD" for dates. If you cannot extract anything fileable, say so and emit no blocks.
 
