@@ -303,6 +303,22 @@ const addProviderSchema = z.object({
   directions_link: z.string().url().optional().nullable(),
 });
 
+const addAssetSchema = z.object({
+  type: z.literal('add_asset'),
+  name: z.string().min(1).max(255),
+  category: z.string().max(100).optional().nullable(),
+  serial_number: z.string().max(120).optional().nullable(),
+  make_model: z.string().max(255).optional().nullable(),
+  price: z.number().nonnegative().optional().nullable(),
+  purchase_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  supplier: z.string().max(255).optional().nullable(),
+  warranty_expiry: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  condition: z.string().max(30).optional().nullable(),
+  location: z.string().max(255).optional().nullable(),
+  notes: z.string().max(5000).optional().nullable(),
+  useful_life_years: z.number().int().nonnegative().optional().nullable(),
+});
+
 const updateProviderSchema = z.object({
   type: z.literal('update_provider'),
   name: z.string().min(1).max(255),
@@ -375,6 +391,7 @@ export const actionSchema = z.discriminatedUnion('type', [
   raiseQuestionSchema,
   setCarePhaseSchema,
   addProviderSchema,
+  addAssetSchema,
   updateProviderSchema,
   linkProviderSchema,
   linkAddressSchema,
@@ -1200,6 +1217,28 @@ async function executeOne(
       });
       await audit(profileId, account.id, 'providers', `added provider ${action.name}`);
       return `Added ${action.name} to the providers list.`;
+    }
+    case 'add_asset': {
+      const [asset] = await db('assets')
+        .insert({
+          account_id: account.id,
+          name: action.name.trim(),
+          category: action.category ?? null,
+          serial_number: action.serial_number ?? null,
+          make_model: action.make_model ?? null,
+          price: action.price ?? null,
+          purchase_date: action.purchase_date ?? null,
+          supplier: action.supplier ?? null,
+          warranty_expiry: action.warranty_expiry ?? null,
+          condition: action.condition ?? null,
+          location: action.location ?? null,
+          notes: action.notes ?? null,
+          useful_life_years: action.useful_life_years ?? null,
+        })
+        .returning('id');
+      await db('care_profile_assets').insert({ care_profile_id: profileId, asset_id: asset.id });
+      await audit(profileId, account.id, 'assets', `added asset ${action.name}`);
+      return `Added ${action.name} to the assets and linked it to this profile.`;
     }
     case 'update_provider': {
       const provider = await db('care_profile_providers as cpp')
