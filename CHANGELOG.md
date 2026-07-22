@@ -5,6 +5,19 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.7.0] - 2026-07-22
+
+### Added
+
+- **Upload and file with Pare**: upload any document, invoice, care plan or
+  business card and the assistant reads it, says what it is, and proposes what
+  to file into the person's record. Nothing is written until you confirm. A tax
+  invoice for a CPAP machine, for example, becomes an asset with its make and
+  model, serial number, price, purchase date, supplier and warranty, linked to
+  the person. The source file is kept in the document repository.
+- The assistant can now **file equipment into the asset register** (a new
+  add_asset action) and link it to a profile, on its own or from an upload.
+
 ## [0.6.0] - 2026-07-22
 
 ### Added

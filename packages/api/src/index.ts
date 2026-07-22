@@ -16,6 +16,7 @@ import { carePlanRouter, planReviewsRouter } from './routes/carePlan';
 import { checklistsRouter } from './routes/checklists';
 import { questionsRouter } from './routes/questions';
 import { documentsRouter } from './routes/documents';
+import { documentIngestRouter } from './routes/documentIngest';
 import { providersRouter, providerSearchRouter } from './routes/providers';
 import { suppliersRouter } from './routes/suppliers';
 import { addressesRouter } from './routes/addresses';
@@ -153,6 +154,7 @@ v1.use('/care-profiles/:id/allergies', ...profileAccess, capturePlanEvents('alle
 v1.use('/care-profiles/:id/conditions', ...profileAccess, capturePlanEvents('conditions'), conditionsRouter);
 v1.use('/care-profiles/:id/questions', ...profileAccess, questionsRouter);
 v1.use('/care-profiles/:id/documents', ...profileAccess, documentsRouter);
+v1.use('/care-profiles/:id/ingest', ...profileAccess, documentIngestRouter);
 v1.use('/care-profiles/:id/providers', ...profileAccess, capturePlanEvents('providers'), providersRouter);
 v1.use('/care-profiles/:id/addresses', ...profileAccess, addressesRouter);
 v1.use('/providers/search', providerSearchRouter);

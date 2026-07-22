@@ -8,6 +8,7 @@ import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
+import { IngestModal } from '../../../components/IngestModal';
 import { CIRCLE_ROLES, circleRoleLabel, DOCUMENT_CATEGORIES, documentCategoryLabel, type CareDocument, type CircleMember } from '../../../lib/care';
 import { PagePurpose } from '../../../components/PagePurpose';
 import { useProfile } from './ProfileLayout';
@@ -56,6 +57,7 @@ export function DocumentsPage() {
   const [viewing, setViewing] = useState<CareDocument | null>(null);
   const [confirmBulk, setConfirmBulk] = useState(false);
   const [bulkEditQueue, setBulkEditQueue] = useState<CareDocument[]>([]);
+  const [ingesting, setIngesting] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['documents', profile.id],
@@ -159,6 +161,9 @@ export function DocumentsPage() {
         <div className="flex items-center gap-2 mb-4">
           <h2 className="text-base font-semibold text-ink">Document repository</h2>
           <PagePurpose kind="entry" />
+          {canEdit ? (
+            <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setIngesting(true)}>Upload and file with Pare</Button>
+          ) : null}
         </div>
 
         <DataToolbar
@@ -426,6 +431,7 @@ export function DocumentsPage() {
           }}
         />
       ) : null}
+      {ingesting ? <IngestModal profileId={profile.id} onClose={() => setIngesting(false)} /> : null}
     </div>
   );
 }

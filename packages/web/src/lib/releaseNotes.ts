@@ -20,6 +20,20 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.7.0',
+    date: '2026-07-22',
+    summary: 'Upload anything and let Pare file it into the right place in the record.',
+    groups: [
+      {
+        heading: 'Upload and file with Pare',
+        items: [
+          'Upload a document, an invoice, a care plan or a business card, and Pare reads it, says what it is, and proposes what to file into the person\u2019s record. Nothing is saved until you confirm.',
+          'A tax invoice for a piece of equipment, like a CPAP machine, becomes an asset with its make and model, serial number, price, purchase date, supplier and warranty, linked to the person. The source file is kept in the document repository.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.6.0',
     date: '2026-07-22',
     summary: 'Health spend an accountant can reconcile: tax, claims, reimbursements, receipts, a financial-year view and an export.',
