@@ -7,7 +7,7 @@ import { PagePurpose } from '../../../components/PagePurpose';
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
-import { CartIcon, PencilIcon, PillIcon, TrashIcon } from '../../../components/ui/icons';
+import { CartIcon, CheckIcon, PackageIcon, PencilIcon, PillIcon, TrashIcon } from '../../../components/ui/icons';
 import { AddressFields, addressPayload, emptyAddress, type AddressValue } from '../../../components/AddressFields';
 import { useProfile } from './ProfileLayout';
 import { ImportExport } from '../../../components/ImportExport';
@@ -76,6 +76,8 @@ export function MedicationsPage() {
   // Recording an ad-hoc dose from the list. This is the entry point for
   // as-needed medications, which have no scheduled slots to tap in the record.
   const [recording, setRecording] = useState<MedicationRecord | null>(null);
+  // Recording that an ordered repeat has arrived, topping up the supply.
+  const [replenishing, setReplenishing] = useState<MedicationRecord | null>(null);
   // The management list opens expanded so the regimen is visible at a
   // glance; it can be collapsed to focus on the record below.
   const [listOpen, setListOpen] = useState(true);
@@ -143,6 +145,12 @@ export function MedicationsPage() {
     onSuccess: () => { setConfirmSingleDelete(null); invalidate(); },
   });
 
+  // Mark a low medication as ordered: the reorder workflow's middle state.
+  const markOrdered = useMutation({
+    mutationFn: (id: string) => api.post(`/care-profiles/${profile.id}/medications/${id}/reorder`, { action: 'ordered' }),
+    onSuccess: () => invalidate(),
+  });
+
   const bulkSetActive = useMutation({
     mutationFn: (action: 'activate' | 'deactivate') => api.post(`/care-profiles/${profile.id}/medications/bulk`, {
       action, ids: dv.selectedRows.map((m) => m.id),
@@ -174,6 +182,12 @@ export function MedicationsPage() {
     const days = daysOfSupply(m);
     // Under five days of supply left (and still some in stock): worth reordering.
     const low = m.active && remaining != null && remaining > 0 && isLowSupply(m);
+    // Reorder workflow: depleted (low/out and not ordered), ordered (awaiting),
+    // or replenished (ordered cleared). Out of stock counts as depleted too.
+    const depleted = m.active && remaining != null && (remaining <= 0 || low);
+    const ordered = !!m.reorder_ordered_at;
+    const orderedDays = ordered ? Math.floor((Date.now() - new Date(m.reorder_ordered_at!).getTime()) / 86400000) : 0;
+    const orderedOverdue = ordered && orderedDays >= 5;
     return (
       <tr key={m.id} className={`border-b border-border last:border-0 ${m.active ? '' : 'opacity-60'} ${low ? 'bg-amber-50 dark:bg-amber-900/10' : ''}`}>
         {canSelect ? (
@@ -211,6 +225,11 @@ export function MedicationsPage() {
               {days != null ? <span className="block text-xs font-normal text-muted">{`about ${Math.floor(days)} day${Math.floor(days) === 1 ? '' : 's'}`}</span> : null}
             </span>
           )}
+          {ordered ? (
+            <span className={`mt-1 block text-xs font-medium ${orderedOverdue ? 'text-red-600 dark:text-red-400' : 'text-amber-700 dark:text-amber-300'}`}>
+              On order{orderedDays >= 1 ? ` ${orderedDays} day${orderedDays === 1 ? '' : 's'}` : ''}{orderedOverdue ? ' · not arrived, chase up' : ''}
+            </span>
+          ) : null}
         </td>
         <td className="px-4 py-3 text-muted">
           {m.supplier ? (
@@ -222,10 +241,10 @@ export function MedicationsPage() {
         </td>
         <td className="px-4 py-3 text-right whitespace-nowrap">
           <div className="inline-flex items-center justify-end gap-1">
-            {/* The reorder icon appears only when this medication is running low
-                (under five days of supply) and it has a supplier link to order
-                from, so it means "reorder now", not a permanent fixture. */}
-            {low && m.supplier_order_url ? (
+            {/* Reorder workflow: order link and "mark ordered" while depleted
+                and not yet ordered; "mark replenished" once on order. The cart
+                links out to the supplier to place the order. */}
+            {depleted && !ordered && m.supplier_order_url ? (
               <a
                 href={m.supplier_order_url}
                 target="_blank"
@@ -236,6 +255,12 @@ export function MedicationsPage() {
               >
                 <CartIcon />
               </a>
+            ) : null}
+            {canManageMeds && depleted && !ordered ? (
+              <Button size="xs" variant="ghost" aria-label={`Mark ${m.name} as ordered`} title="Mark as ordered" loading={markOrdered.isPending && markOrdered.variables === m.id} onClick={() => markOrdered.mutate(m.id)}><PackageIcon /></Button>
+            ) : null}
+            {canManageMeds && ordered ? (
+              <Button size="xs" variant="ghost" aria-label={`Mark ${m.name} as replenished`} title="Mark as replenished (arrived)" onClick={() => setReplenishing(m)}><CheckIcon /></Button>
             ) : null}
             {canAdminister ? <Button size="xs" variant="ghost" aria-label={`Record dose of ${m.name}`} title="Record dose" onClick={() => setRecording(m)}><PillIcon /></Button> : null}
             {canManageMeds ? <Button size="xs" variant="ghost" aria-label={`Edit ${m.name}`} title="Edit" onClick={() => setEditing(m)}><PencilIcon /></Button> : null}
@@ -367,6 +392,15 @@ export function MedicationsPage() {
           maxWhen={localNow()}
           onClose={() => setRecording(null)}
           onSaved={() => { setRecording(null); invalidate(); }}
+        />
+      ) : null}
+
+      {replenishing ? (
+        <ReplenishModal
+          profileId={profile.id}
+          med={replenishing}
+          onClose={() => setReplenishing(null)}
+          onSaved={() => { setReplenishing(null); invalidate(); }}
         />
       ) : null}
 
@@ -751,6 +785,55 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
           }}
         />
       ) : null}
+    </Modal>
+  );
+}
+
+/**
+ * Record that an ordered repeat has arrived: the replenished step of the
+ * reorder workflow. It tops up the supply and clears the "on order" mark. The
+ * fields prefill to a sensible restock (one more full pack) and can be edited.
+ */
+function ReplenishModal({ profileId, med, onClose, onSaved }: { profileId: string; med: MedicationRecord; onClose: () => void; onSaved: () => void }) {
+  const [packs, setPacks] = useState(String((med.packs_on_hand ?? 0) + 1));
+  const [remaining, setRemaining] = useState(
+    med.supply_remaining != null && med.supply_remaining > 0
+      ? String(med.supply_remaining)
+      : med.supply != null ? String(med.supply) : ''
+  );
+  const [error, setError] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => api.post(`/care-profiles/${profileId}/medications/${med.id}/reorder`, {
+      action: 'replenished',
+      packs_on_hand: packs.trim() === '' ? undefined : Number(packs),
+      supply_remaining: remaining.trim() === '' ? undefined : Number(remaining),
+    }),
+    onSuccess: onSaved,
+    onError: (err) => setError(err instanceof Error ? err.message : 'Could not record the delivery.'),
+  });
+
+  const inlineInput = 'inline-block w-24 rounded-md border border-border bg-card px-2 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
+
+  return (
+    <Modal open onClose={onClose} title={`Repeat arrived: ${med.name}`}>
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); mutation.mutate(); }}>
+        <p className="text-sm text-muted">
+          Record what arrived. This tops up the supply and clears the on-order mark, so the reorder alert stops.
+        </p>
+        <p className="text-sm text-ink leading-8">
+          Unopened, we now have{' '}
+          <input className={inlineInput} aria-label="Packs on hand" type="number" min="0" step="any" value={packs} onChange={(e) => setPacks(e.target.value)} />{' '}
+          pack{packs.trim() === '1' ? '' : 's'}, plus{' '}
+          <input className={inlineInput} aria-label="Units in the open pack" type="number" min="0" step="any" value={remaining} onChange={(e) => setRemaining(e.target.value)} />{' '}
+          loose in the open one.
+        </p>
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={mutation.isPending}>Mark replenished</Button>
+        </div>
+      </form>
     </Modal>
   );
 }

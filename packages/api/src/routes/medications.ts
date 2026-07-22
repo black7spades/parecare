@@ -486,6 +486,14 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner, async (req,
   if (parsed.data.supply !== undefined) update['supply'] = parsed.data.supply;
   if (parsed.data.supply_remaining !== undefined) update['supply_remaining'] = parsed.data.supply_remaining;
   if (parsed.data.packs_on_hand !== undefined) update['packs_on_hand'] = parsed.data.packs_on_hand;
+  // Topping up stock by hand completes the reorder workflow: an outstanding
+  // order has arrived, so clear the "ordered" mark.
+  if (
+    (parsed.data.supply_remaining != null && parsed.data.supply_remaining > 0) ||
+    (parsed.data.packs_on_hand != null && parsed.data.packs_on_hand > 0)
+  ) {
+    update['reorder_ordered_at'] = null;
+  }
   // Changing the drug identity re-points the medication at a catalogue entry.
   if (parsed.data.name !== undefined) {
     update['medication_catalogue_id'] = await resolveCatalogueId(parsed.data.name, parsed.data.form ?? null, req.account!.id);
@@ -558,6 +566,47 @@ medicationsRouter.delete('/:medId', requireAuth, requireProfileOwner, async (req
     return;
   }
   res.json({ message: 'Medication removed.' });
+});
+
+// The reorder workflow for a medication running low: mark it ordered when a
+// repeat is requested, and replenished when it arrives. Replenishing clears
+// the order and optionally records the new stock, so the person's supply and
+// the "not replenished" alert stay honest.
+const reorderSchema = z.object({
+  action: z.enum(['ordered', 'replenished']),
+  packs_on_hand: z.coerce.number().min(0).max(1e6).optional(),
+  supply_remaining: z.coerce.number().min(0).max(1e9).optional(),
+});
+
+medicationsRouter.post('/:medId/reorder', requireAuth, requireProfileOwner, async (req, res) => {
+  const parsed = reorderSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const update: Record<string, unknown> = { updated_at: db.fn.now() };
+  if (parsed.data.action === 'ordered') {
+    update['reorder_ordered_at'] = db.fn.now();
+  } else {
+    // Replenished: the order has arrived. Clear it and record what came in.
+    update['reorder_ordered_at'] = null;
+    if (parsed.data.packs_on_hand !== undefined) update['packs_on_hand'] = parsed.data.packs_on_hand;
+    if (parsed.data.supply_remaining !== undefined) update['supply_remaining'] = parsed.data.supply_remaining;
+  }
+  const [med] = await db('medications')
+    .where({ id: req.params['medId'], care_profile_id: req.params['id'] })
+    .update(update)
+    .returning('id');
+  if (!med) {
+    res.status(404).json({ error: 'Medication not found', code: 'NOT_FOUND' });
+    return;
+  }
+  // A restock clears any out-of-stock acknowledgement, so the alert recurs if
+  // it runs out again later.
+  if (parsed.data.action === 'replenished') {
+    await db('attention_dismissals').where({ item_key: `out_of_stock:${req.params['medId']}` }).delete();
+  }
+  res.json({ medication: serializeMed(await medWithName((med as { id: string }).id)) });
 });
 
 // Chart view: the active regimen plus every administration touching the

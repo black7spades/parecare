@@ -914,6 +914,9 @@ export interface MedicationRecord {
   supplier_suburb?: string | null;
   /** A direct link to reorder it from that supplier. */
   supplier_order_url: string | null;
+  /** When a repeat was ordered, for the reorder workflow. Null when not on
+   * order (either well stocked, or depleted and not yet ordered). */
+  reorder_ordered_at: string | null;
   /** Dangerous to miss: overdue and out-of-stock alerts are urgent. */
   critical: boolean;
   active: boolean;

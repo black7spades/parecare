@@ -12,6 +12,11 @@ source. Versions follow [semantic versioning](https://semver.org).
 - An **as needed** checkbox on the add and edit medication form, for a
   medication with no set schedule (a painkiller, or diazepam taken when
   required). It sits in the as needed group and a dose is logged when taken.
+- A tracked **reorder workflow** for a medication running low: depleted, then
+  ordered, then replenished. Mark a low medication ordered when a repeat is
+  requested, and replenished when it arrives (which tops the supply back up).
+  A repeat ordered but **not replenished after five days** is raised as an
+  urgent item on the Homeboard's needs-attention list.
 - A **normal level** (baseline severity) on a condition, on the 1 to 10 symptom
   scale. Everyone is different: if someone's chronic condition sits at a 6 or 7
   every day, that is their normal.

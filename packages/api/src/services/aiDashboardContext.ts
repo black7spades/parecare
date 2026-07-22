@@ -19,6 +19,8 @@ interface ProfileSummaryData {
   overdueMedications: string[];
   /** Active medications whose remaining supply has reached zero. */
   outOfStockMedications: Array<{ id: string; name: string }>;
+  /** Medications ordered but not replenished after the reorder-stale window. */
+  reorderOverdueMedications: Array<{ id: string; name: string; days: number }>;
   staleQuestionCount: number;
   nextEvent: { title: string; next_due_at: Date } | null;
   lastLog: { entry_type: string; title: string | null; body: string; occurred_at: Date } | null;
@@ -32,6 +34,9 @@ export interface DashboardData {
 }
 
 const STALE_QUESTION_DAYS = 7;
+const DAY_MS = 24 * 3600 * 1000;
+/** A repeat ordered but not replenished after this many days is chased up. */
+const REORDER_STALE_DAYS = 5;
 
 function fmtDate(v: string | Date | null | undefined, timeZone?: string | null): string {
   if (!v) return 'unknown time';
@@ -131,7 +136,7 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
       .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
       .whereIn('m.care_profile_id', ids)
       .where('m.active', true)
-      .select('m.care_profile_id', 'm.id', 'c.name as name', 'm.dose', 'm.schedule_times', 'm.supply', 'm.supply_remaining', 'm.packs_on_hand')
+      .select('m.care_profile_id', 'm.id', 'c.name as name', 'm.dose', 'm.schedule_times', 'm.supply', 'm.supply_remaining', 'm.packs_on_hand', 'm.reorder_ordered_at')
       .orderBy('c.name', 'asc'),
     db('medication_administrations')
       .whereIn('care_profile_id', ids)
@@ -203,7 +208,9 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
 
   const medsMap = new Map<string, Array<{ name: string; dose: string | null; schedule_times: string[] }>>();
   const outOfStockMap = new Map<string, Array<{ id: string; name: string }>>();
-  for (const m of meds as Array<{ care_profile_id: string; id: string; name: string; dose: string | null; schedule_times: unknown; supply: string | number | null; supply_remaining: string | number | null; packs_on_hand: string | number | null }>) {
+  const reorderOverdueMap = new Map<string, Array<{ id: string; name: string; days: number }>>();
+  const nowMs = now.getTime();
+  for (const m of meds as Array<{ care_profile_id: string; id: string; name: string; dose: string | null; schedule_times: unknown; supply: string | number | null; supply_remaining: string | number | null; packs_on_hand: string | number | null; reorder_ordered_at: Date | string | null }>) {
     const arr = medsMap.get(m.care_profile_id) ?? [];
     arr.push({
       name: m.name,
@@ -219,6 +226,16 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
       const out = outOfStockMap.get(m.care_profile_id) ?? [];
       out.push({ id: m.id, name: m.name });
       outOfStockMap.set(m.care_profile_id, out);
+    }
+    // Ordered but still not replenished after the stale window: the order
+    // stands (reorder_ordered_at is still set), so chase it up.
+    if (m.reorder_ordered_at) {
+      const days = Math.floor((nowMs - new Date(m.reorder_ordered_at).getTime()) / DAY_MS);
+      if (days >= REORDER_STALE_DAYS) {
+        const arr2 = reorderOverdueMap.get(m.care_profile_id) ?? [];
+        arr2.push({ id: m.id, name: m.name, days });
+        reorderOverdueMap.set(m.care_profile_id, arr2);
+      }
     }
   }
 
@@ -239,8 +256,9 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
     const overdueReminders = overdueMap.get(p.id) ?? [];
     const overdueMedications = overdueMedMap.get(p.id) ?? [];
     const outOfStockMedications = outOfStockMap.get(p.id) ?? [];
+    const reorderOverdueMedications = reorderOverdueMap.get(p.id) ?? [];
     const staleQuestionCount = staleMap.get(p.id) ?? 0;
-    attentionCount += overdueReminders.length + overdueMedications.length + outOfStockMedications.length + staleQuestionCount;
+    attentionCount += overdueReminders.length + overdueMedications.length + outOfStockMedications.length + reorderOverdueMedications.length + staleQuestionCount;
     const ev = eventMap.get(p.id);
     const lg = logMap.get(p.id);
     return {
@@ -250,6 +268,7 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
       medications: medsMap.get(p.id) ?? [],
       overdueMedications,
       outOfStockMedications,
+      reorderOverdueMedications,
       staleQuestionCount,
       nextEvent: ev ? { title: ev.title, next_due_at: ev.next_due_at } : null,
       lastLog: lg ? { entry_type: lg.entry_type, title: lg.title, body: lg.body, occurred_at: lg.occurred_at } : null,
@@ -359,7 +378,7 @@ export async function countAttentionItems(accountId: string): Promise<number> {
 export interface AttentionItem {
   profile_id: string;
   profile_name: string;
-  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'unresolved_outcome';
+  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'reorder_overdue' | 'unresolved_outcome';
   label: string;
   detail: string | null;
   section: 'tasks' | 'medications' | 'mar' | 'questions';
@@ -416,6 +435,21 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
         detail: m.name,
         section: 'medications',
         key: `out_of_stock:${m.id}`,
+        urgent: true,
+        dismissible: true,
+      });
+    }
+    // A repeat ordered but still not replenished after the stale window: the
+    // order may have been missed or delayed, so chase it up.
+    for (const m of s.reorderOverdueMedications) {
+      items.push({
+        profile_id: s.profile.id,
+        profile_name: name,
+        kind: 'reorder_overdue',
+        label: 'Reorder not arrived',
+        detail: `${m.name} — ordered ${m.days} ${m.days === 1 ? 'day' : 'days'} ago, not yet replenished`,
+        section: 'medications',
+        key: `reorder_overdue:${m.id}`,
         urgent: true,
         dismissible: true,
       });

@@ -15,7 +15,7 @@ import type { MedicationRecord } from '../lib/care';
 export interface AttentionItem {
   profile_id: string;
   profile_name: string;
-  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'unresolved_outcome';
+  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'reorder_overdue' | 'unresolved_outcome';
   label: string;
   detail: string | null;
   section: string;
@@ -45,6 +45,7 @@ const ATTENTION_ICON: Record<AttentionItem['kind'], string> = {
   unrecorded_dose: '💊',
   stale_question: '❓',
   out_of_stock: '📦',
+  reorder_overdue: '🚚',
   unresolved_outcome: '⚠️',
 };
 
@@ -67,6 +68,10 @@ function itemBrief(it: AttentionItem): string {
       return `${who} has run out of ${it.detail ?? 'a medication'}. ${useRecord}`
         + `Write the actual repeat request here now (a clear subject and body) addressed to their pharmacy or prescriber from the record. `
         + `Only ask me for a detail if it is genuinely missing. Do not change anything yourself; once it is arranged, ask me whether to update the supply.`;
+    case 'reorder_overdue':
+      return `A repeat for ${who} was ordered but has not arrived: ${it.detail ?? 'a medication'}. ${useRecord}`
+        + `Write a short chase-up message here now addressed to their pharmacy or prescriber from the record, asking where the order is. `
+        + `Only ask me for a detail if it is genuinely missing. Do not change anything yourself; once it arrives, mark it replenished on the medication.`;
     case 'unrecorded_dose':
       return `Record all the doses due for ${who} now${it.detail ? `: ${it.detail}` : ''}. `
         + `Log every one of them in a single action at their scheduled times, using the exact medication names from the record. `
@@ -326,7 +331,9 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                         warning:
                           it.kind === 'out_of_stock'
                             ? 'This is an urgent item. It will stop showing here until the medication is restocked, so only dismiss it if you have the repeat in hand.'
-                            : 'It will stop showing here.',
+                            : it.kind === 'reorder_overdue'
+                              ? 'It will stop showing here until this medication is marked replenished, so only dismiss it if the order is genuinely in hand.'
+                              : 'It will stop showing here.',
                       })
                     }
                   >
