@@ -16,7 +16,7 @@ interface LinkedProfile {
   profile_name: string;
 }
 
-interface DirectoryAsset extends Asset {
+export interface DirectoryAsset extends Asset {
   linked_profiles: LinkedProfile[] | null;
 }
 
@@ -353,7 +353,7 @@ function BulkLinkDialog({
   );
 }
 
-function DirectoryAssetEditor({
+export function DirectoryAssetEditor({
   open,
   asset,
   currencySymbol,
@@ -364,7 +364,7 @@ function DirectoryAssetEditor({
   asset: DirectoryAsset | null;
   currencySymbol: string;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (saved?: DirectoryAsset) => void;
 }) {
   const [name, setName] = useState('');
   const [category, setCategory] = useState('');
@@ -413,10 +413,10 @@ function DirectoryAssetEditor({
         notes: notes.trim() || null,
       };
       return asset
-        ? api.patch(`/directory/assets/${asset.id}`, body)
-        : api.post('/directory/assets', body);
+        ? api.patch<{ asset: DirectoryAsset }>(`/directory/assets/${asset.id}`, body)
+        : api.post<{ asset: DirectoryAsset }>('/directory/assets', body);
     },
-    onSuccess: onSaved,
+    onSuccess: (res) => onSaved(res.asset),
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save asset'),
   });
 

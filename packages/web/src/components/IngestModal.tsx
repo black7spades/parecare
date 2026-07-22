@@ -13,33 +13,51 @@ interface IngestResult {
   parse_errors?: string[];
 }
 
-/** A short, readable line describing what an action will do, for the review. */
-function describe(a: ProposedAction): string {
-  const s = (k: string) => (a[k] == null || a[k] === '' ? '' : String(a[k]));
-  const bits = (arr: [string, string][]) => arr.filter(([, v]) => v).map(([label, v]) => `${label} ${v}`).join(', ');
-  switch (a.type) {
-    case 'add_asset':
-      return `Add asset: ${s('name')}` + (bits([['·', s('make_model')], ['serial', s('serial_number')], ['paid', s('price')], ['bought', s('purchase_date')], ['from', s('supplier')], ['warranty to', s('warranty_expiry')]]) ? ` (${bits([['', s('make_model')], ['serial', s('serial_number')], ['paid', s('price')], ['bought', s('purchase_date')], ['from', s('supplier')], ['warranty to', s('warranty_expiry')]])})` : '');
-    case 'add_provider':
-      return `Add provider: ${s('name')}${s('organisation') ? ` (${s('organisation')})` : ''}`;
-    case 'add_medication':
-      return `Add medication: ${s('medication_name')}${s('dose') ? ` ${s('dose')}` : ''}`;
-    case 'add_treatment':
-      return `Add treatment: ${s('name')}`;
-    default:
-      return `${a.type.replace(/_/g, ' ')}: ${s('name') || s('title') || s('medication_name') || ''}`;
-  }
-}
-
 /**
  * Upload any document and let Pare read it, say what it is, and propose what to
  * file against this profile. Nothing is written until the proposals are
  * confirmed. Owner and admin, via the profile's edit right.
  */
+const ACTION_TITLE: Record<string, string> = {
+  add_asset: 'Asset', add_provider: 'Provider', add_medication: 'Medication', add_treatment: 'Treatment', add_task: 'Task', log_event: 'Note',
+};
+const humanize = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/, (c) => c.toUpperCase());
+const inputClass = 'w-full rounded-md border border-border bg-card px-2 py-1 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
+
+/** The scalar fields of a proposed action, editable before filing. */
+function ActionCard({ action, onChange, onRemove }: { action: ProposedAction; onChange: (a: ProposedAction) => void; onRemove: () => void }) {
+  const keys = Object.keys(action).filter((k) => k !== 'type' && (action[k] == null || ['string', 'number'].includes(typeof action[k])));
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted">{ACTION_TITLE[action.type] ?? action.type.replace(/_/g, ' ')}</span>
+        <button type="button" className="text-xs text-muted hover:text-red-600" onClick={onRemove}>Remove</button>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-2">
+        {keys.map((k) => (
+          <label key={k} className="block">
+            <span className="block text-xs text-muted mb-0.5">{humanize(k)}</span>
+            <input
+              className={inputClass}
+              value={action[k] == null ? '' : String(action[k])}
+              onChange={(e) => {
+                const v = e.target.value;
+                const next = typeof action[k] === 'number' ? (v.trim() === '' ? null : Number(v)) : (v === '' ? null : v);
+                onChange({ ...action, [k]: next });
+              }}
+            />
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function IngestModal({ profileId, onClose }: { profileId: string; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<IngestResult | null>(null);
+  const [actions, setActions] = useState<ProposedAction[]>([]);
   const [outcomes, setOutcomes] = useState<string[] | null>(null);
   const [error, setError] = useState('');
 
@@ -49,15 +67,14 @@ export function IngestModal({ profileId, onClose }: { profileId: string; onClose
       form.append('file', file!);
       return api.upload<IngestResult>(`/care-profiles/${profileId}/ingest`, form);
     },
-    onSuccess: (r) => { setResult(r); setError(''); },
+    onSuccess: (r) => { setResult(r); setActions(r.actions ?? []); setError(''); },
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not read the file.'),
   });
 
   const applyMutation = useMutation({
-    mutationFn: () => api.post<{ outcomes: string[] }>(`/care-profiles/${profileId}/ingest/apply`, { actions: result!.actions }),
+    mutationFn: () => api.post<{ outcomes: string[] }>(`/care-profiles/${profileId}/ingest/apply`, { actions }),
     onSuccess: (r) => {
       setOutcomes(r.outcomes);
-      // The filed records could touch several lists; refresh broadly.
       for (const key of ['directory-assets', 'providers', 'medications', 'documents', 'health-spend']) {
         void queryClient.invalidateQueries({ queryKey: [key] });
       }
@@ -72,7 +89,7 @@ export function IngestModal({ profileId, onClose }: { profileId: string; onClose
           <>
             <p className="text-sm text-muted">
               Upload a document, an invoice, a care plan or a business card. Pare reads it and proposes what to file into this
-              person's record. Nothing is saved until you confirm.
+              person's record. You can edit every detail before anything is saved.
             </p>
             <input
               type="file"
@@ -98,20 +115,27 @@ export function IngestModal({ profileId, onClose }: { profileId: string; onClose
         ) : (
           <>
             <p className="text-sm text-ink">{result.summary}</p>
-            {result.actions.length > 0 ? (
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Pare will file</p>
-                <ul className="space-y-1 text-sm text-ink">
-                  {result.actions.map((a, i) => <li key={i}>· {describe(a)}</li>)}
-                </ul>
-              </div>
+            {actions.length > 0 ? (
+              <>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted">Pare will file (check and edit before saving)</p>
+                <div className="space-y-3 max-h-[26rem] overflow-y-auto">
+                  {actions.map((a, i) => (
+                    <ActionCard
+                      key={i}
+                      action={a}
+                      onChange={(next) => setActions((prev) => prev.map((x, j) => (j === i ? next : x)))}
+                      onRemove={() => setActions((prev) => prev.filter((_, j) => j !== i))}
+                    />
+                  ))}
+                </div>
+              </>
             ) : (
               <p className="text-sm text-muted">Nothing could be filed automatically. The file has been saved to documents.</p>
             )}
             {error ? <p className="text-sm text-red-600">{error}</p> : null}
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={onClose}>Close</Button>
-              {result.actions.length > 0 ? (
+              {actions.length > 0 ? (
                 <Button loading={applyMutation.isPending} onClick={() => applyMutation.mutate()}>File these</Button>
               ) : null}
             </div>
