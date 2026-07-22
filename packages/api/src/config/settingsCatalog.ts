@@ -9,7 +9,7 @@ import { z } from 'zod';
  * Adding or removing a movable setting is a change here, not a data migration.
  */
 
-export type SettingGroup = 'ai' | 'email' | 'oauth' | 'storage' | 'stripe' | 'scheduler';
+export type SettingGroup = 'ai' | 'email' | 'oauth' | 'storage' | 'stripe' | 'scheduler' | 'health';
 export type SettingType = 'string' | 'number' | 'enum';
 
 export interface SettingEntry {
@@ -36,6 +36,8 @@ const AI_PROVIDERS = ['anthropic', 'openai', 'google', 'ollama', 'lmstudio', 'op
 const ON_OFF = ['on', 'off'] as const;
 const EMAIL_PROVIDERS = ['smtp', 'sendgrid', 'resend'] as const;
 const STORAGE_PROVIDERS = ['local', 's3'] as const;
+// One currency for the whole account; every price is shown with its symbol.
+const CURRENCIES = ['AUD', 'USD', 'GBP', 'EUR', 'NZD', 'CAD'] as const;
 
 export const SETTINGS_CATALOG: readonly SettingEntry[] = [
   // AI assistant
@@ -57,6 +59,10 @@ export const SETTINGS_CATALOG: readonly SettingEntry[] = [
   { key: 'email.smtp_user', group: 'email', label: 'SMTP username', type: 'string', secret: false, envKey: 'SMTP_USER', zod: str() },
   { key: 'email.smtp_pass', group: 'email', label: 'SMTP password', type: 'string', secret: true, envKey: 'SMTP_PASS', zod: str() },
   { key: 'email.from', group: 'email', label: 'From address', type: 'string', secret: false, envKey: 'EMAIL_FROM', zod: z.string().email() },
+
+  // Health spend
+  { key: 'health.currency', group: 'health', label: 'Currency', type: 'enum', enumValues: CURRENCIES, secret: false, envKey: 'HEALTH_CURRENCY', help: 'The single currency every price and health-spend total is shown in, across the whole account.', zod: enom(CURRENCIES) },
+  { key: 'health.price_required', group: 'health', label: 'Require a price on medications and treatments', type: 'enum', enumValues: ON_OFF, secret: false, envKey: 'HEALTH_PRICE_REQUIRED', help: 'Off by default, so pricing stays optional. Turn on to make a price mandatory when adding or editing a medication (per pack) or a treatment (per session), so the yearly health spend is always complete.', zod: enom(ON_OFF) },
 
   // Scheduler
   { key: 'scheduler.reminder_interval_ms', group: 'scheduler', label: 'Reminder check interval (ms)', type: 'number', secret: false, envKey: 'REMINDER_CHECK_INTERVAL_MS', help: '0 or less disables the reminder scheduler.', zod: num() },
@@ -86,4 +92,4 @@ export const SETTINGS_CATALOG: readonly SettingEntry[] = [
 
 export const SETTINGS_BY_KEY = new Map(SETTINGS_CATALOG.map((e) => [e.key, e]));
 
-export const SETTING_GROUPS: readonly SettingGroup[] = ['ai', 'email', 'scheduler', 'oauth', 'storage', 'stripe'];
+export const SETTING_GROUPS: readonly SettingGroup[] = ['ai', 'health', 'email', 'scheduler', 'oauth', 'storage', 'stripe'];

@@ -20,6 +20,29 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.4.0',
+    date: '2026-07-22',
+    summary: 'Track the yearly spend on health, from a price on each medication and treatment.',
+    groups: [
+      {
+        heading: 'Health spend',
+        items: [
+          'Medications now take a price per pack, and treatments a price per session, so the yearly spend on someone’s health can be tracked.',
+          'The yearly cost is worked out for you: a medication’s from its price, pack size and schedule (how many packs a year it gets through), and a treatment’s from its price per session and how many sessions a year. An as needed medication with no set schedule is left out, since there is no predictable yearly count.',
+          'A Health spend card on each person’s overview, for the account owner and admins only, showing the medication total, treatment total, combined total, and each priced item’s own yearly cost.',
+        ],
+      },
+      {
+        heading: 'Reports and settings',
+        items: [
+          'A Health spend report and yearly-cost columns on the medications report, so spend rolls up across everyone in your care in the high-level reports.',
+          'A new Health spend group in System settings sets one currency for the whole account and can require a price on every medication and treatment.',
+          'The medications list gains a price per pack column, and price is included in medication import and export.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.3.0',
     date: '2026-07-22',
     summary: 'As needed medications, and health alerts that know each person’s normal.',

@@ -1,4 +1,5 @@
 import { Knex } from 'knex';
+import { annualMedicationCost, profileHealthSpend } from './healthSpend';
 
 export interface ReportField {
   key: string;
@@ -443,6 +444,8 @@ registerSection({
       { key: 'instructions', label: 'Instructions', type: 'text' },
       { key: 'supply_remaining', label: 'Supply remaining', type: 'number' },
       { key: 'packs_on_hand', label: 'Packs on hand', type: 'number' },
+      { key: 'price', label: 'Price per pack', type: 'number' },
+      { key: 'annual_cost', label: 'Yearly cost', type: 'number' },
       { key: 'critical', label: 'Critical', type: 'boolean' },
       { key: 'as_needed', label: 'As needed', type: 'boolean' },
       { key: 'with_food', label: 'With food', type: 'boolean' },
@@ -484,6 +487,8 @@ registerSection({
       instructions: r.instructions,
       supply_remaining: r.supply_remaining,
       packs_on_hand: r.packs_on_hand,
+      price: r.price == null ? null : Number(r.price),
+      annual_cost: annualMedicationCost(r),
       critical: r.critical,
       as_needed: r.as_needed,
       with_food: r.with_food,
@@ -633,6 +638,44 @@ registerSection({
       notes: r.notes,
       readings: (valsByObs.get(r.id) ?? []).join('; '),
     }));
+  },
+});
+
+registerSection({
+  meta: {
+    key: 'health_spend',
+    label: 'Health spend',
+    description: 'Yearly spend on each person, split into medications and treatments, for the high-level view across everyone in your care',
+    category: 'medications',
+    fields: [
+      { key: 'medication_annual_cost', label: 'Medications yearly cost', type: 'number' },
+      { key: 'treatment_annual_cost', label: 'Treatments yearly cost', type: 'number' },
+      { key: 'annual_total', label: 'Total yearly cost', type: 'number' },
+    ],
+    filters: [],
+    supportsDateRange: false,
+    crossProfileCapable: true,
+  },
+  async fetch({ profileIds, db }) {
+    // One row per person: their yearly medication spend, treatment spend, and
+    // the combined total. Each figure stays its own column so the high-level
+    // report can sort and total them independently.
+    const profiles = await db('care_profiles')
+      .whereIn('id', profileIds)
+      .select('id', 'full_name');
+    const nameById = new Map(profiles.map((p) => [p.id, p.full_name]));
+    const rows: Record<string, unknown>[] = [];
+    for (const profileId of profileIds) {
+      const spend = await profileHealthSpend(profileId, db);
+      rows.push({
+        _profile_id: profileId,
+        _profile_name: nameById.get(profileId) ?? '',
+        medication_annual_cost: spend.medication_annual_total,
+        treatment_annual_cost: spend.treatment_annual_total,
+        annual_total: spend.annual_total,
+      });
+    }
+    return rows;
   },
 });
 

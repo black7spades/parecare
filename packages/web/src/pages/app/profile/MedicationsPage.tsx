@@ -10,6 +10,7 @@ import { Modal } from '../../../components/ui/Modal';
 import { CartIcon, CheckIcon, PackageIcon, PencilIcon, PillIcon, TrashIcon } from '../../../components/ui/icons';
 import { AddressFields, addressPayload, emptyAddress, type AddressValue } from '../../../components/AddressFields';
 import { useProfile } from './ProfileLayout';
+import { useHealthConfig } from '../../../lib/appConfig';
 import { ImportExport } from '../../../components/ImportExport';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
@@ -58,6 +59,7 @@ const MED_SORTS: DataSort<MedicationRecord>[] = [
   { key: 'schedule', label: 'Schedule (time of day)', compare: (a, b) => (earliestTime(a) - earliestTime(b)) || byName(a, b) },
   { key: 'packs', label: 'Packs on hand', compare: (a, b) => (numAsc(a.packs_on_hand) - numAsc(b.packs_on_hand)) || byName(a, b) },
   { key: 'supply', label: 'Supply left', compare: (a, b) => (numAsc(daysOfSupply(a) ?? totalOnHand(a)) - numAsc(daysOfSupply(b) ?? totalOnHand(b))) || byName(a, b) },
+  { key: 'price', label: 'Price per pack', compare: (a, b) => (numAsc(a.price) - numAsc(b.price)) || byName(a, b) },
   { key: 'supplier', label: 'Supplier', compare: (a, b) => (a.supplier ?? '').localeCompare(b.supplier ?? '') || byName(a, b) },
 ];
 
@@ -65,6 +67,7 @@ const SELECT = 'rounded-md border border-border bg-card px-3 py-2 text-sm focus:
 
 export function MedicationsPage() {
   const { profile, access, canEdit, careName, relationship } = useProfile();
+  const health = useHealthConfig();
   const selfCare = relationship === SELF_RELATIONSHIP;
   const queryClient = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
@@ -168,7 +171,7 @@ export function MedicationsPage() {
     ...(canBulkDelete ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulk(true) }] : []),
   ];
 
-  const colCount = canSelect ? 11 : 10;
+  const colCount = canSelect ? 12 : 11;
 
   // As-needed medications have no fixed schedule, so they never appear as
   // due slots in the record. They live in their own group here, each with a
@@ -230,6 +233,9 @@ export function MedicationsPage() {
               On order{orderedDays >= 1 ? ` ${orderedDays} day${orderedDays === 1 ? '' : 's'}` : ''}{orderedOverdue ? ' · not arrived, chase up' : ''}
             </span>
           ) : null}
+        </td>
+        <td className="px-4 py-3 text-muted">
+          {m.price != null ? `${health.currency_symbol}${fmtNum(m.price)}` : '—'}
         </td>
         <td className="px-4 py-3 text-muted">
           {m.supplier ? (
@@ -299,8 +305,8 @@ export function MedicationsPage() {
               resource="medications"
               canImport={canManageMeds}
               onImported={invalidate}
-              templateHeaders={['Name', 'Units per dose', 'Dose', 'Type', 'Route', 'With food', 'As needed', 'Times', 'Instructions', 'Supply in units', 'Packs on hand', 'Supplier', 'Order link', 'Active']}
-              templateSample={['Metformin', '1', '500 mg', 'Tablet', 'By mouth', 'true', 'false', '08:00; 20:00', 'Take with a full glass of water', '60', '2', 'City Pharmacy', 'https://citypharmacy.example/reorder', 'true']}
+              templateHeaders={['Name', 'Units per dose', 'Dose', 'Type', 'Route', 'With food', 'As needed', 'Times', 'Instructions', 'Supply in units', 'Price per pack', 'Packs on hand', 'Supplier', 'Order link', 'Active']}
+              templateSample={['Metformin', '1', '500 mg', 'Tablet', 'By mouth', 'true', 'false', '08:00; 20:00', 'Take with a full glass of water', '60', '9.90', '2', 'City Pharmacy', 'https://citypharmacy.example/reorder', 'true']}
             />
             {canManageMeds ? <Button onClick={() => setAddOpen(true)}>Add medication</Button> : null}
           </div>
@@ -348,6 +354,7 @@ export function MedicationsPage() {
                   <SortableTh label="Schedule" sortKey="schedule" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
                   <SortableTh label="Packs on hand" sortKey="packs" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
                   <SortableTh label="Supply left" sortKey="supply" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
+                  <SortableTh label="Price per pack" sortKey="price" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
                   <SortableTh label="Supplier" sortKey="supplier" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
                   <th className="px-4 py-3 font-medium text-right">Actions</th>
                 </tr>
@@ -486,6 +493,7 @@ function TimeField({ value, onChange }: { value: string; onChange: (v: string) =
  */
 function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profileId: string; med?: MedicationRecord; selfCare: boolean; onClose: () => void; onSaved: () => void }) {
   const subject = selfCare ? 'I' : 'They';
+  const health = useHealthConfig();
   const [name, setName] = useState(med?.name ?? '');
   const [condition, setCondition] = useState(med?.condition_name ?? '');
   const [units, setUnits] = useState(med?.units_per_dose != null ? String(med.units_per_dose) : '1');
@@ -500,6 +508,7 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
   const [perDay, setPerDay] = useState(med?.as_needed ? 0 : initialTimes.length || 1);
   const [slots, setSlots] = useState<string[]>(initialTimes.length ? initialTimes : ['08:00']);
   const [packSize, setPackSize] = useState(med?.supply != null ? String(med.supply) : '');
+  const [price, setPrice] = useState(med?.price != null ? String(med.price) : '');
   const [remaining, setRemaining] = useState(med?.supply_remaining != null ? String(med.supply_remaining) : '');
   const [packs, setPacks] = useState(med?.packs_on_hand != null ? String(med.packs_on_hand) : '');
   const [repeatsDue, setRepeatsDue] = useState(med?.repeats_due ?? '');
@@ -580,6 +589,7 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
         critical,
         schedule_times: asNeeded ? [] : slots.slice(0, perDay),
         supply: packSize.trim() === '' ? null : Number(packSize),
+        price: price.trim() === '' ? null : Number(price),
         supply_remaining: remaining.trim() === '' ? null : Number(remaining),
         packs_on_hand: packs.trim() === '' ? null : Number(packs),
         repeats_due: repeatsDue || null,
@@ -600,6 +610,7 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
 
   const inlineSelect = `${SELECT} inline-block w-auto`;
   const inlineInput = 'inline-block w-20 rounded-md border border-border bg-card px-2 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
+  const priceMissing = health.price_required && price.trim() === '';
   const containerWord = typeMeta?.container ?? 'pack';
   // A liquid or cream is stocked by volume in its dose measure (mL);
   // everything else by count of its unit (tablets, puffs).
@@ -607,7 +618,7 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
 
   return (
     <Modal open onClose={onClose} title={med ? 'Edit medication' : 'Add medication'} wide>
-      <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); if (name.trim()) mutation.mutate(); }}>
+      <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); if (name.trim() && !priceMissing) mutation.mutate(); }}>
         <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Metformin" list="med-catalogue-options" hint="Pick an existing medication to reuse it, or type a new one." />
         <datalist id="med-catalogue-options">
           {suggestions.map((s) => <option key={s.id} value={s.name} />)}
@@ -716,6 +727,20 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
             {supplyWord}.
           </p>
           <p className="text-sm text-ink leading-8">
+            A {containerWord} costs {health.currency_symbol}
+            <input
+              className={inlineInput}
+              aria-label={`Price per ${containerWord}`}
+              type="number"
+              min="0"
+              step="any"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              required={health.price_required}
+            />
+            {health.price_required ? <span className="text-red-600"> *</span> : null}. Used to work out the yearly spend on health.
+          </p>
+          <p className="text-sm text-ink leading-8">
             Unopened, we have{' '}
             <input className={inlineInput} aria-label="Unopened packs on hand" type="number" min="0" step="any" value={packs} onChange={(e) => setPacks(e.target.value)} />{' '}
             {packs.trim() === '1' ? containerWord : `${containerWord}s`}, plus{' '}
@@ -770,7 +795,7 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>Save</Button>
+          <Button type="submit" loading={mutation.isPending} disabled={!name.trim() || priceMissing}>Save</Button>
         </div>
       </form>
 

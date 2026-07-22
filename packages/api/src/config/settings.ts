@@ -152,6 +152,22 @@ export function isMessageToneGuardEnabled(): boolean {
   return (str('messages.tone_guard') ?? 'on') !== 'off';
 }
 
+/**
+ * The single currency every price and health-spend total is shown in, across
+ * the whole account. Defaults to AUD until a super admin changes it.
+ */
+export function getHealthCurrency(): string {
+  return str('health.currency') ?? 'AUD';
+}
+
+/**
+ * Whether a price is mandatory when adding or editing a medication or a
+ * treatment. Off by default, so pricing stays optional.
+ */
+export function isHealthPriceRequired(): boolean {
+  return (str('health.price_required') ?? 'off') === 'on';
+}
+
 export function getOAuthConfig() {
   return {
     googleClientId: str('oauth.google_client_id'),

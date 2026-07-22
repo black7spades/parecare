@@ -108,6 +108,7 @@ const addMedicationSchema = z.object({
   instructions: z.string().optional().nullable(),
   units_per_dose: z.number().nonnegative().optional().nullable(),
   supply: z.number().nonnegative().optional().nullable(),
+  price: z.number().nonnegative().optional().nullable(),
   packs_on_hand: z.number().nonnegative().optional().nullable(),
   supplier: z.string().max(255).optional().nullable(),
   supplier_order_url: z.string().url().max(2000).optional().nullable(),
@@ -127,6 +128,7 @@ const updateMedicationSchema = z.object({
   units_per_dose: z.number().nonnegative().optional().nullable(),
   supply: z.number().nonnegative().optional().nullable(),
   supply_remaining: z.number().nonnegative().optional().nullable(),
+  price: z.number().nonnegative().optional().nullable(),
   packs_on_hand: z.number().nonnegative().optional().nullable(),
   supplier: z.string().max(255).optional().nullable(),
   supplier_order_url: z.string().url().max(2000).optional().nullable(),
@@ -279,6 +281,9 @@ const addTreatmentSchema = z.object({
   name: z.string().min(1).max(255),
   category: z.enum(TREATMENT_CATEGORIES).default('other'),
   condition_name: z.string().max(255).optional().nullable(),
+  // Cost of one session and how many sessions a year, for the yearly spend.
+  price: z.number().nonnegative().optional().nullable(),
+  sessions_per_year: z.number().int().nonnegative().optional().nullable(),
 });
 
 const raiseQuestionSchema = z.object({
@@ -851,6 +856,7 @@ async function executeOne(
         units_per_dose: action.units_per_dose ?? null,
         supply: action.supply ?? null,
         supply_remaining: action.supply ?? null,
+        price: action.price ?? null,
         packs_on_hand: action.packs_on_hand ?? null,
         supplier_id: supplierId,
         supplier: action.supplier ?? null,
@@ -884,6 +890,7 @@ async function executeOne(
         if (action.supply_remaining === undefined) patch['supply_remaining'] = action.supply;
       }
       if (action.supply_remaining !== undefined) patch['supply_remaining'] = action.supply_remaining;
+      if (action.price !== undefined) patch['price'] = action.price;
       if (action.packs_on_hand !== undefined) patch['packs_on_hand'] = action.packs_on_hand;
       if (action.supplier !== undefined) {
         patch['supplier'] = action.supplier;
@@ -1162,6 +1169,8 @@ async function executeOne(
         name: action.name.trim(),
         category: action.category,
         current_status: 'active',
+        price: action.price ?? null,
+        sessions_per_year: action.sessions_per_year ?? null,
       });
       await audit(profileId, account.id, 'treatments', `added treatment ${action.name}`);
       return `Added the treatment ${action.name}${action.condition_name ? ` for ${action.condition_name}` : ''}.`;

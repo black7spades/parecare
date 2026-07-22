@@ -6,7 +6,8 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { env } from '../config/env';
-import { getOAuthConfig, getStorageConfig } from '../config/settings';
+import { getOAuthConfig, getStorageConfig, getHealthCurrency, isHealthPriceRequired } from '../config/settings';
+import { currencySymbol } from '../services/healthSpend';
 import { requireAuth } from '../middleware/auth';
 import { generateSecret, otpauthUrl, verifyTotp } from '../services/totp';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
@@ -240,6 +241,13 @@ authRouter.get('/me', requireAuth, (req, res) => {
     oauth_provider: account.oauth_provider,
     has_password: !!account.password_hash,
     can_create_care_profiles: account.can_create_care_profiles,
+    // Account-wide health-spend config, so forms show the right currency and
+    // enforce a price when the account requires one.
+    health: {
+      currency: getHealthCurrency(),
+      currency_symbol: currencySymbol(getHealthCurrency()),
+      price_required: isHealthPriceRequired(),
+    },
   });
 });
 

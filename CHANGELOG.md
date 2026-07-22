@@ -5,6 +5,27 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.4.0] - 2026-07-22
+
+### Added
+
+- A **price** on medications (per pack) and treatments (per session), so the
+  **yearly spend on health** can be tracked. A medication's yearly cost is
+  worked out from its price, pack size and schedule (how many packs a year it
+  gets through); a treatment's from its price per session and how many sessions
+  a year. An as-needed medication with no set schedule is left out, since it
+  has no predictable yearly count.
+- A **Health spend** card on each person's overview, for the account owner and
+  admins only. It shows the yearly medication total, treatment total, combined
+  total, and each priced item's own yearly cost.
+- A **Health spend** report and yearly-cost columns on the medications report,
+  so spend rolls up across everyone in your care in the high-level reports.
+- A **currency** and a **require a price** switch in System settings, under a
+  new Health spend group. One currency is used across the whole account, and a
+  price can be made mandatory when adding or editing a medication or treatment.
+- A **Price per pack** column on the medications list and in medication
+  import and export.
+
 ## [0.3.0] - 2026-07-22
 
 ### Added

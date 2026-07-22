@@ -900,6 +900,8 @@ export interface MedicationRecord {
   instructions: string | null;
   /** Counted in units: a full pack provides this many. */
   supply: number | null;
+  /** Cost of one full pack, used to work out the yearly health spend. */
+  price: number | null;
   /** Loose units left in the open pack. */
   supply_remaining: number | null;
   /** Unopened full packs on hand, on top of the loose units. */
@@ -1184,6 +1186,10 @@ export interface Treatment {
   schedule_times: string[] | null;
   as_needed: boolean;
   active: boolean;
+  /** Cost of one session, used with sessions a year for the yearly spend. */
+  price: number | null;
+  /** How many sessions are expected in a year. */
+  sessions_per_year: number | null;
   metrics: TreatmentMetric[];
   last_observed_at?: string | null;
 }

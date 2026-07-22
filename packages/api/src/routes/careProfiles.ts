@@ -6,7 +6,9 @@ import { db } from '../config/database';
 import { getStorageConfig } from '../config/settings';
 import { requireAuth } from '../middleware/auth';
 import { requireAccountRight } from '../middleware/accountRights';
-import { requireCountBelow } from '../middleware/subscriptionGate';
+import { requireCountBelow, requireCareProfileAccess } from '../middleware/subscriptionGate';
+import { requireProfileOwner } from '../middleware/permissions';
+import { profileHealthSpend } from '../services/healthSpend';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
 import { resolveAddress, linkAddressToProfile } from '../services/addresses';
 import {
@@ -653,6 +655,20 @@ careProfilesRouter.post(
     });
 
     res.status(201).json({ profile });
+  }
+);
+
+// The yearly spend on this person's health: every active medication and
+// treatment with a price, each line's own yearly cost, and the totals. Owner
+// or admin only, so a family member cannot see the household's care costs.
+careProfilesRouter.get(
+  '/:id/health-spend',
+  requireAuth,
+  requireCareProfileAccess,
+  requireProfileOwner,
+  async (req, res) => {
+    const spend = await profileHealthSpend(String(req.params['id']), db);
+    res.json({ health_spend: spend });
   }
 );
 

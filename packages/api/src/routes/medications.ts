@@ -6,7 +6,7 @@ import { requireAccountRight } from '../middleware/accountRights';
 import { requireProfileOwner } from '../middleware/permissions';
 import { exportRecords, importRecords, type PortDescriptor, type PortFormat } from '../services/dataPort';
 import { resolveCatalogueId } from './medicationCatalogue';
-import { getMarRetentionMonths } from '../config/settings';
+import { getMarRetentionMonths, isHealthPriceRequired } from '../config/settings';
 import { drawDownOnHand, perDoseDrawdown } from '../services/medicationSupply';
 
 export const medicationsRouter = Router({ mergeParams: true });
@@ -42,6 +42,9 @@ const medSchema = z.object({
   medical_condition_id: z.string().uuid().optional().nullable(),
   // Free-typed condition, resolved to an existing one or created.
   medical_condition_name: z.string().max(255).optional().nullable(),
+  // Cost of one full pack, in the account's currency. The yearly spend is
+  // derived from this, the pack size and the schedule.
+  price: z.coerce.number().min(0).max(1e9).optional().nullable(),
   // A full new pack provides this many units.
   supply: z.coerce.number().min(0).max(1e9).optional().nullable(),
   // How many units are on hand now. Independently editable.
@@ -134,6 +137,7 @@ interface MedRow {
   frequency: string | null;
   schedule_times: string[] | null;
   supply: number | null;
+  price: number | null;
   supply_remaining: number | null;
   packs_on_hand: number | null;
   repeats_due: string | null;
@@ -154,6 +158,7 @@ interface MedInsert {
   frequency: string | null;
   schedule_times: string[];
   supply: number | null;
+  price: number | null;
   packs_on_hand: number | null;
   repeats_due: string | null;
   supplier: string | null;
@@ -183,6 +188,7 @@ const serializeMed = <T extends Record<string, unknown>>(m: T): T =>
     supply_remaining: numOrNull(m['supply_remaining']),
     packs_on_hand: numOrNull(m['packs_on_hand']),
     units_per_dose: numOrNull(m['units_per_dose']),
+    price: numOrNull(m['price']),
     repeats_due: dateOrNull(m['repeats_due']),
   });
 
@@ -227,6 +233,7 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
     { key: 'as_needed', header: 'As needed', aliases: ['prn'], toCell: (r) => (r.as_needed ? 'true' : 'false') },
     { key: 'schedule_times', header: 'Times', aliases: ['schedule', 'schedule times', 'time'], toCell: (r) => (r.schedule_times ?? []).join('; ') },
     { key: 'supply', header: 'A full pack provides', aliases: ['supply', 'stock', 'quantity', 'on hand', 'supply in units', 'pack size'], toCell: (r) => (r.supply ?? '').toString() },
+    { key: 'price', header: 'Price per pack', aliases: ['price', 'cost', 'pack price', 'cost per pack'], toCell: (r) => (r.price ?? '').toString() },
     { key: 'supply_remaining', header: 'Units left', aliases: ['remaining', 'supply remaining'], toCell: (r) => (r.supply_remaining ?? '').toString() },
     { key: 'packs_on_hand', header: 'Packs on hand', aliases: ['packs', 'packs left', 'unopened packs'], toCell: (r) => (r.packs_on_hand ?? '').toString() },
     { key: 'repeats_due', header: 'Repeats due', aliases: ['repeat', 'repeat due'], toCell: (r) => r.repeats_due ?? '' },
@@ -266,6 +273,10 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
         frequency: blank(raw['frequency']),
         schedule_times: parseTimes(raw['schedule_times']),
         supply: Number.isFinite(supplyNum) ? supplyNum : null,
+        price: (() => {
+          const priceNum = parseFloat(String(raw['price'] ?? '').replace(/[^0-9.]/g, ''));
+          return Number.isFinite(priceNum) ? priceNum : null;
+        })(),
         packs_on_hand: (() => {
           const packsNum = parseFloat(String(raw['packs_on_hand'] ?? '').replace(/[^0-9.]/g, ''));
           return Number.isFinite(packsNum) ? packsNum : null;
@@ -350,6 +361,7 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner, async (req, 
       as_needed: r.as_needed,
       frequency: r.frequency,
       supply: r.supply,
+      price: r.price,
       supply_remaining: r.supply,
       packs_on_hand: r.packs_on_hand,
       repeats_due: r.repeats_due,
@@ -379,6 +391,7 @@ async function conditionBelongsToProfile(conditionId: string | null | undefined,
 async function medFieldsFrom(data: z.infer<typeof medSchema> | Partial<z.infer<typeof medSchema>>, profileId: string, accountId: string) {
   const fields: Record<string, unknown> = {};
   if ('units_per_dose' in data) fields['units_per_dose'] = data.units_per_dose ?? null;
+  if ('price' in data) fields['price'] = data.price ?? null;
   if ('route' in data) fields['route'] = data.route ?? null;
   if ('with_food' in data) fields['with_food'] = data.with_food ?? false;
   if ('as_needed' in data) fields['as_needed'] = data.as_needed ?? false;
@@ -444,6 +457,10 @@ medicationsRouter.post('/', requireAuth, requireProfileOwner, async (req, res) =
     res.status(400).json({ error: 'Condition not found', code: 'VALIDATION_ERROR' });
     return;
   }
+  if (isHealthPriceRequired() && (parsed.data.price === undefined || parsed.data.price === null)) {
+    res.status(400).json({ error: 'A price per pack is required.', code: 'PRICE_REQUIRED' });
+    return;
+  }
   const catalogueId = await resolveCatalogueId(parsed.data.name, parsed.data.form ?? null, req.account!.id);
   const fields = await medFieldsFrom(parsed.data, req.params['id']!, req.account!.id);
   const [med] = await db('medications')
@@ -476,6 +493,10 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner, async (req,
   }
   if (!(await conditionBelongsToProfile(parsed.data.medical_condition_id, req.params['id']!))) {
     res.status(400).json({ error: 'Condition not found', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  if (isHealthPriceRequired() && 'price' in parsed.data && (parsed.data.price === undefined || parsed.data.price === null)) {
+    res.status(400).json({ error: 'A price per pack is required.', code: 'PRICE_REQUIRED' });
     return;
   }
   const update: Record<string, unknown> = { ...(await medFieldsFrom(parsed.data, req.params['id']!, req.account!.id)), updated_at: db.fn.now() };

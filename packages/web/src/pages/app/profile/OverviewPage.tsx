@@ -32,7 +32,7 @@ import {
   type SubstanceUse,
 } from '../../../lib/care';
 
-const CARD_KEYS = ['profile', 'conditions', 'neurotypes', 'substance-use', 'poa', 'upcoming', 'health', 'log'] as const;
+const CARD_KEYS = ['profile', 'conditions', 'neurotypes', 'substance-use', 'poa', 'upcoming', 'health', 'health-spend', 'log'] as const;
 type CardKey = (typeof CARD_KEYS)[number];
 
 const CARD_LABELS: Record<CardKey, string> = {
@@ -43,6 +43,7 @@ const CARD_LABELS: Record<CardKey, string> = {
   poa: 'Power of attorney',
   upcoming: 'Coming up',
   health: 'Current health',
+  'health-spend': 'Health spend',
   log: 'Care log',
 };
 
@@ -68,7 +69,7 @@ function loadCollapsed(): Set<CardKey> {
 }
 
 export function OverviewPage() {
-  const { profile, isOwner, canEdit } = useProfile();
+  const { profile, isOwner, canEdit, access } = useProfile();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -319,6 +320,23 @@ export function OverviewPage() {
               <CardAiSummary profileId={profile.id} cardKey="health" canEdit={canEdit} />
               <CurrentHealthSection profileId={profile.id} canEdit={canEdit} careName={careName} />
             </div>
+          </CollapsibleCard>
+        );
+      case 'health-spend':
+        // Care costs are for the owner and admins only, not the wider circle.
+        if (access !== 'owner' && access !== 'admin') return null;
+        return (
+          <CollapsibleCard
+            key={key}
+            cardKey={key}
+            label={CARD_LABELS[key]}
+            collapsed={isCollapsed}
+            editView={editView}
+            onToggle={toggleCollapse}
+            onMove={moveCard}
+            order={cardOrder}
+          >
+            <HealthSpendOverview profileId={profile.id} careName={careName} />
           </CollapsibleCard>
         );
       case 'log':
@@ -809,6 +827,118 @@ function UpcomingEvents({ profileId }: { profileId: string }) {
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+interface HealthSpendLine {
+  id: string;
+  name: string;
+  price: number | null;
+  sessions_per_year?: number | null;
+  annual_cost: number | null;
+}
+interface HealthSpendResponse {
+  health_spend: {
+    currency: string;
+    currency_symbol: string;
+    medications: HealthSpendLine[];
+    treatments: HealthSpendLine[];
+    medication_annual_total: number;
+    treatment_annual_total: number;
+    annual_total: number;
+  };
+}
+
+/**
+ * A person's yearly health spend: the medication and treatment totals, the
+ * combined total, and each priced item's own yearly cost. Every figure is its
+ * own value, worked out from the prices on the records. Owner and admin only.
+ */
+function HealthSpendOverview({ profileId, careName }: { profileId: string; careName: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['health-spend', profileId],
+    queryFn: () => api.get<HealthSpendResponse>(`/care-profiles/${profileId}/health-spend`),
+  });
+  if (isLoading) return <p className="text-sm text-muted">Working out the yearly spend…</p>;
+  const spend = data?.health_spend;
+  if (!spend) return <p className="text-sm text-muted">No spend to show yet.</p>;
+
+  const sym = spend.currency_symbol;
+  const money = (n: number | null): string =>
+    n == null ? '—' : `${sym}${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const pricedMeds = spend.medications.filter((m) => m.annual_cost != null);
+  const pricedTreatments = spend.treatments.filter((t) => t.annual_cost != null);
+  const unpricedMeds = spend.medications.filter((m) => m.price == null);
+  const nothingPriced = pricedMeds.length === 0 && pricedTreatments.length === 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-lg border border-border p-3">
+          <p className="text-xs text-muted">Medications a year</p>
+          <p className="text-lg font-semibold text-ink">{money(spend.medication_annual_total)}</p>
+        </div>
+        <div className="rounded-lg border border-border p-3">
+          <p className="text-xs text-muted">Treatments a year</p>
+          <p className="text-lg font-semibold text-ink">{money(spend.treatment_annual_total)}</p>
+        </div>
+        <div className="rounded-lg border border-primary/40 bg-primary/5 p-3">
+          <p className="text-xs text-muted">Total a year</p>
+          <p className="text-lg font-semibold text-ink">{money(spend.annual_total)}</p>
+        </div>
+      </div>
+
+      {nothingPriced ? (
+        <p className="text-sm text-muted">
+          Add a price to {careName}'s medications and treatments to see the yearly spend build up here.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {pricedMeds.length > 0 ? (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-1">Medications</p>
+              <ul className="divide-y divide-border text-sm">
+                {pricedMeds.map((m) => (
+                  <li key={m.id} className="flex items-center justify-between py-1.5">
+                    <span className="text-ink">{m.name}</span>
+                    <span className="text-muted">
+                      {money(m.price)} a pack<span className="mx-1.5">·</span>
+                      <span className="text-ink font-medium">{money(m.annual_cost)} a year</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {pricedTreatments.length > 0 ? (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-1">Treatments</p>
+              <ul className="divide-y divide-border text-sm">
+                {pricedTreatments.map((t) => (
+                  <li key={t.id} className="flex items-center justify-between py-1.5">
+                    <span className="text-ink">{t.name}</span>
+                    <span className="text-muted">
+                      {money(t.price)} a session<span className="mx-1.5">·</span>
+                      {t.sessions_per_year ?? 0} a year<span className="mx-1.5">·</span>
+                      <span className="text-ink font-medium">{money(t.annual_cost)} a year</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {unpricedMeds.length > 0 && !nothingPriced ? (
+        <p className="text-xs text-muted">
+          {unpricedMeds.length === 1 ? 'One medication has' : `${unpricedMeds.length} medications have`} no price yet, so
+          {unpricedMeds.length === 1 ? ' it is' : ' they are'} not counted. An as-needed medication with no set schedule
+          cannot be worked out into a yearly figure.
+        </p>
+      ) : null}
     </div>
   );
 }

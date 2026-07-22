@@ -6,6 +6,7 @@ import { settingsApi, type SettingField, type SettingGroup, type SettingsRespons
 
 const GROUP_TITLES: Record<string, { title: string; blurb: string }> = {
   ai: { title: 'AI assistant', blurb: 'Provider, model and keys for Ask PareCare and dispute mediation.' },
+  health: { title: 'Health spend', blurb: 'The currency prices are shown in, and whether a price is required on every medication and treatment.' },
   email: { title: 'Email (SMTP)', blurb: 'The outgoing mail server used for invites and reminders.' },
   scheduler: { title: 'Scheduler', blurb: 'How often the reminder scheduler checks for due tasks.' },
   oauth: { title: 'Social sign-in', blurb: 'Google and Facebook sign-in. Buttons appear once both fields in a pair are set.' },
