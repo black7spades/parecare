@@ -5,6 +5,20 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.5.0] - 2026-07-22
+
+### Added
+
+- **Assets**, a new Directory section for the equipment kept for someone's
+  care: a wheelchair, a hoist, a bed, a monitor. Each asset records its unit
+  name, category, serial or unit number, make or model, price, purchase date,
+  where it was bought, warranty expiry, condition and location, every fact in
+  its own field.
+- Assets sit in the **Directory** beside People, Pets, Providers, Suppliers and
+  Addresses, with the same tools: search, sort, edit, delete, bulk edit and
+  delete, bulk import and export, and the same **link-to-profiles** flow, so a
+  piece of equipment can be tied to the person or pet it belongs to.
+
 ## [0.4.0] - 2026-07-22
 
 ### Added

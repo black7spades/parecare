@@ -151,6 +151,18 @@ export function StoreIcon({ size }: IconSize) {
   );
 }
 
+/** Assets: an equipment crate. */
+export function AssetIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M21 8 12 3 3 8v8l9 5 9-5Z" />
+      <path d="M3 8h18" />
+      <path d="M9 5.5v3" />
+      <path d="M15 5.5v3" />
+    </svg>
+  );
+}
+
 /** Addresses: a map pin. */
 export function MapPinIcon({ size }: IconSize) {
   return (

@@ -20,6 +20,21 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.5.0',
+    date: '2026-07-22',
+    summary: 'An equipment register in your Directory, linked to the people and pets it belongs to.',
+    groups: [
+      {
+        heading: 'Assets',
+        items: [
+          'A new Assets section in your Directory for the equipment kept for someone’s care: a wheelchair, a hoist, a bed, a monitor.',
+          'Each asset records its unit name, category, serial or unit number, make or model, price, purchase date, where it was bought, warranty expiry, condition and location, every fact in its own field.',
+          'Assets have the same tools as the rest of the Directory: search, sort, edit, delete, bulk edit and delete, import and export, and the same link-to-profiles flow, so each piece of equipment can be tied to the person or pet it belongs to.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.4.0',
     date: '2026-07-22',
     summary: 'Track what you actually spend on health, recorded as it happens and reported over any date range.',

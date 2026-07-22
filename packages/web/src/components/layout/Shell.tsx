@@ -17,7 +17,7 @@ import { NavSortControl, type SortOption } from './NavSortControl';
 import { SortableNavGroup, type NavItemDef } from './SortableNavGroup';
 import { navHeadingClass, navLinkClass } from './navStyles';
 import { VersionBadge } from './VersionBadge';
-import { CheckIcon, ChartIcon, MapPinIcon, PawIcon, SignOutIcon, StethoscopeIcon, StoreIcon, UsersIcon } from '../ui/icons';
+import { AssetIcon, CheckIcon, ChartIcon, MapPinIcon, PawIcon, SignOutIcon, StethoscopeIcon, StoreIcon, UsersIcon } from '../ui/icons';
 
 interface PinnedProfile {
   id: string;
@@ -36,6 +36,7 @@ const DIRECTORY_NAV: NavItemDef[] = [
   { key: 'pets', label: 'Pets', to: '/app/directory/pets', icon: <PawIcon size={16} /> },
   { key: 'providers', label: 'Providers', to: '/app/directory/providers', icon: <StethoscopeIcon size={16} /> },
   { key: 'suppliers', label: 'Suppliers', to: '/app/directory/suppliers', icon: <StoreIcon size={16} /> },
+  { key: 'assets', label: 'Assets', to: '/app/directory/assets', icon: <AssetIcon size={16} /> },
   { key: 'addresses', label: 'Addresses', to: '/app/directory/addresses', icon: <MapPinIcon size={16} /> },
 ];
 

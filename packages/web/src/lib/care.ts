@@ -947,6 +947,33 @@ export interface Supplier {
   directions_link: string | null;
 }
 
+/** A piece of equipment kept for someone's care: the account's asset register. */
+export interface Asset {
+  id: string;
+  account_id: string;
+  /** The unit name, e.g. "Electric hospital bed". */
+  name: string;
+  /** What kind of equipment it is, e.g. mobility, monitoring. */
+  category: string | null;
+  /** The maker's serial number or an internal unit/asset number. */
+  serial_number: string | null;
+  /** The maker or model, for a replacement or a part. */
+  make_model: string | null;
+  /** What it cost to buy. */
+  price: number | null;
+  /** When it was bought (YYYY-MM-DD). */
+  purchase_date: string | null;
+  /** Where it was bought from. */
+  supplier: string | null;
+  /** When the warranty runs out (YYYY-MM-DD). */
+  warranty_expiry: string | null;
+  /** new | good | fair | poor | retired */
+  condition: string | null;
+  /** Where the equipment is kept. */
+  location: string | null;
+  notes: string | null;
+}
+
 /**
  * Label a supplier for the picker. When two suppliers share a vendor name,
  * the branch suburb disambiguates them as "Vendor (Suburb)"; a lone vendor
