@@ -33,6 +33,7 @@ import { ActivityPage } from './pages/app/profile/ActivityPage';
 import { AiPage } from './pages/app/profile/AiPage';
 import { DirectoryProvidersPage } from './pages/app/DirectoryProvidersPage';
 import { DirectorySuppliersPage } from './pages/app/DirectorySuppliersPage';
+import { UpdatesPage } from './pages/app/UpdatesPage';
 import { DirectoryAddressesPage } from './pages/app/DirectoryAddressesPage';
 import { DirectoryPeoplePage, DirectoryPetsPage } from './pages/app/DirectoryProfilesPage';
 import { InvitePage } from './pages/InvitePage';
@@ -103,6 +104,7 @@ export const router = createBrowserRouter([
       { path: 'app/directory/suppliers', element: <DirectorySuppliersPage /> },
       { path: 'app/directory/addresses', element: <DirectoryAddressesPage /> },
       { path: 'app/reports', element: <ReportGeneratorPage /> },
+      { path: 'app/updates', element: <UpdatesPage /> },
       {
         path: 'app/:profileId',
         element: <ProfileLayout />,
