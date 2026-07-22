@@ -1,0 +1,76 @@
+/**
+ * The on-site record of updates, rendered by the Updates page and linked from
+ * the sidebar version badge. Kept in step with CHANGELOG.md in the repo root.
+ * Plain language only, no jargon, no parentheses in headings, no em dashes,
+ * per the UI copy rules.
+ */
+
+export interface ReleaseGroup {
+  heading: string;
+  items: string[];
+}
+
+export interface Release {
+  version: string;
+  /** ISO date, or empty for the original release. */
+  date: string;
+  summary: string;
+  groups: ReleaseGroup[];
+}
+
+export const RELEASES: Release[] = [
+  {
+    version: '0.2.0',
+    date: '2026-07-22',
+    summary: 'Suppliers, the Directory, and reordering medications when they run low.',
+    groups: [
+      {
+        heading: 'Suppliers',
+        items: [
+          'Suppliers are a new shared list of the pharmacies and shops your medications are reordered from, kept separate from your care providers.',
+          'Each supplier keeps a name, phone, email, a full address filled in by the same type as you go address finder used elsewhere, a reorder link, and a map link for directions.',
+          'When two suppliers share a name, their suburb tells them apart, shown as Vendor then the suburb.',
+        ],
+      },
+      {
+        heading: 'Directory',
+        items: [
+          'Suppliers now sit in the Directory beside People, Pets, Providers and Addresses, with the same search, sort, edit, delete and link tools.',
+          'Every Directory list can be exported and imported as a spreadsheet or a JSON file, with a blank template to fill in.',
+          'Add person and Add pet buttons on the People and Pets lists.',
+          'Each Directory item has a small icon, and every top level menu group can be arranged by name or a custom order you lock in place with a tick.',
+        ],
+      },
+      {
+        heading: 'Medications',
+        items: [
+          'The reorder cart now appears on a medication only when it drops under five days of supply and has a supplier reorder link, so it means reorder now rather than sitting there always.',
+          'The reordered from field picks from the shared supplier list and can add a new supplier without leaving the form.',
+          'Edit selected applies one change, such as the supplier, route or whether it is taken with food, to many medications at once.',
+          'Row actions are now compact icons: record a dose, order, edit and remove.',
+          'Sortable column headers show a faint arrow so it is clear they can be sorted, and it brightens when you hover.',
+        ],
+      },
+      {
+        heading: 'Around the app',
+        items: [
+          'Sign out moved to the bottom of the sidebar, next to the light and dark theme switch.',
+          'A version badge in the sidebar links to the exact build it came from and to this page.',
+        ],
+      },
+    ],
+  },
+  {
+    version: '0.1.0',
+    date: '',
+    summary: 'The first PareCare platform.',
+    groups: [
+      {
+        heading: 'Foundations',
+        items: [
+          'Care profiles for the people and pets in your care, medications and the medication record, conditions, a providers and addresses directory, care plans, the assistant, reports, and account and billing.',
+        ],
+      },
+    ],
+  },
+];

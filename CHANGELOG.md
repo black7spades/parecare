@@ -31,7 +31,9 @@ source. Versions follow [semantic versioning](https://semver.org).
   and a tick to lock the order in place.
 - **Small icons** for each Directory nav item.
 - A **versioning system**: the sidebar shows the app version linked to the
-  build's commit, with a link to this changelog.
+  build's commit, next to a "What's new" link that opens an in-app Updates page
+  (`/app/updates`) rendering these notes, so the record of updates is visible
+  inside the app, not only in this file.
 
 ### Changed
 
