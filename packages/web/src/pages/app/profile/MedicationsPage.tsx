@@ -618,24 +618,44 @@ function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profil
 
         <section>
           <h3 className="text-sm font-semibold text-ink mb-2">Schedule</h3>
-          <p className="text-sm text-ink leading-8">
-            It's taken{' '}
-            <input className={inlineInput} aria-label="Times a day" type="number" min="0" max="12" value={perDay} onChange={(e) => setPerDayCount(Number(e.target.value))} />{' '}
-            {perDay === 1 ? 'time a day' : 'times a day'},{' '}
-            <label className="inline-flex items-center gap-1.5">
-              <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary" checked={withFood} onChange={(e) => setWithFood(e.target.checked)} />
-              with food
-            </label>
-            {perDay > 0 ? ', at' : '.'}
-          </p>
-          {perDay > 0 ? (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {slots.slice(0, perDay).map((s, i) => (
-                <TimeField key={i} value={s} onChange={(v) => setSlot(i, v)} />
-              ))}
-            </div>
+          <label className="flex items-start gap-2 text-sm text-ink mb-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+              checked={perDay < 1}
+              onChange={(e) => setPerDayCount(e.target.checked ? 0 : 1)}
+            />
+            <span>
+              Taken only as needed
+              <span className="block text-xs text-muted">
+                For a medication with no set schedule, such as a painkiller or diazepam taken when required. It sits in
+                the as needed group, and a dose is logged with the Record dose button whenever one is taken.
+              </span>
+            </span>
+          </label>
+          {perDay >= 1 ? (
+            <>
+              <p className="text-sm text-ink leading-8">
+                It's taken{' '}
+                <input className={inlineInput} aria-label="Times a day" type="number" min="1" max="12" value={perDay} onChange={(e) => setPerDayCount(Number(e.target.value))} />{' '}
+                {perDay === 1 ? 'time a day' : 'times a day'},{' '}
+                <label className="inline-flex items-center gap-1.5">
+                  <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary" checked={withFood} onChange={(e) => setWithFood(e.target.checked)} />
+                  with food
+                </label>
+                , at
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {slots.slice(0, perDay).map((s, i) => (
+                  <TimeField key={i} value={s} onChange={(v) => setSlot(i, v)} />
+                ))}
+              </div>
+            </>
           ) : (
-            <p className="text-xs text-muted">Set to 0 for a medication taken only as needed.</p>
+            <label className="inline-flex items-center gap-1.5 text-sm text-ink">
+              <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary" checked={withFood} onChange={(e) => setWithFood(e.target.checked)} />
+              Taken with food
+            </label>
           )}
           <label className="mt-3 flex items-start gap-2 text-sm text-ink">
             <input

@@ -15,10 +15,22 @@ import { db } from '../config/database';
  * stable key.
  */
 
-/** Above moderate on the 1 to 10 symptom scale (5 to 6 is moderate). */
+/** Above moderate on the 1 to 10 symptom scale (5 to 6 is moderate). Used as
+ * the trigger level for a condition that has no baseline set. */
 const HIGH_SEVERITY = 7;
-/** How long symptoms must stay above moderate before an alert is raised. */
+/** How long symptoms must stay above the trigger level before an alert. */
 const PERSISTENT_DAYS = 2;
+
+/**
+ * The severity a symptom must reach before it counts as elevated for its
+ * condition. When the condition has a baseline (the person's normal level),
+ * the trigger is one step above that normal, so a chronic condition that sits
+ * high every day only alerts on a genuine flare. Without a baseline it falls
+ * back to the fixed above-moderate level.
+ */
+function triggerLevel(baseline: number | null): number {
+  return baseline != null ? baseline + 1 : HIGH_SEVERITY;
+}
 /** How long an injury may stay unresolved before an alert is raised. */
 const INJURY_STALE_DAYS = 60;
 
@@ -37,6 +49,8 @@ interface ConditionRow {
   condition_type: string | null;
   expected_duration: string | null;
   category: string | null;
+  /** The person's normal severity for this condition, when set. */
+  baseline_severity: number | null;
   created_at: Date | string;
 }
 
@@ -63,7 +77,9 @@ export interface HealthAlert {
   condition_id: string;
   condition_name: string;
   condition_category: string | null;
-  /** When the situation began: symptoms went above moderate, or the injury happened. */
+  /** The person's normal severity for this condition, when a baseline is set. */
+  baseline: number | null;
+  /** When the situation began: symptoms went above the trigger level, or the injury happened. */
   since: string;
   /** Whole days since then. */
   days: number;
@@ -112,14 +128,21 @@ export async function gatherHealthAlerts(
   const profileIds = profiles.map((p) => p.id);
   const nameByProfile = new Map(profiles.map((p) => [p.id, p.name]));
 
+  // Current health conditions (passing illnesses and injuries) always qualify;
+  // so does any long-term condition that has a baseline set, so its flares
+  // above that normal level are watched too.
   const conditions = (
     await db<ConditionRow>('medical_conditions')
       .whereIn('care_profile_id', profileIds)
       .whereNull('resolved_on')
       .where((qb) => qb.whereNull('status').orWhereNot('status', 'resolved'))
-  ).filter(isCurrentHealthCondition);
+  ).filter((c) => isCurrentHealthCondition(c) || c.baseline_severity != null);
   if (conditions.length === 0) return [];
   const conditionIds = conditions.map((c) => c.id);
+  const conditionById = new Map(conditions.map((c) => [c.id, c]));
+  // Each symptom's trigger level comes from its condition's baseline.
+  const triggerForSymptom = (conditionId: string): number =>
+    triggerLevel(conditionById.get(conditionId)?.baseline_severity ?? null);
 
   // Every unresolved symptom of those conditions, plus the reading history
   // of the ones currently above moderate (to see how long they have been).
@@ -128,7 +151,7 @@ export async function gatherHealthAlerts(
       .whereIn('condition_id', conditionIds)
       .whereNull('resolved_at')
       .select('id', 'condition_id', 'name', 'severity', 'noted_at');
-  const highSymptomIds = symptoms.filter((s) => s.severity >= HIGH_SEVERITY).map((s) => s.id);
+  const highSymptomIds = symptoms.filter((s) => s.severity >= triggerForSymptom(s.condition_id)).map((s) => s.id);
   const readings: Array<{ symptom_id: string; severity: number; recorded_at: Date | string }> = highSymptomIds.length
     ? await db('condition_symptom_readings')
         .whereIn('symptom_id', highSymptomIds)
@@ -142,15 +165,16 @@ export async function gatherHealthAlerts(
     readingsBySymptom.set(r.symptom_id, arr);
   }
 
-  // When did each high symptom last go above moderate? The start of the
-  // trailing run of readings at or above HIGH_SEVERITY.
+  // When did each high symptom last go above its trigger level? The start of
+  // the trailing run of readings at or above that level.
   const highSince = new Map<string, number>();
   for (const s of symptoms) {
-    if (s.severity < HIGH_SEVERITY) continue;
+    const trigger = triggerForSymptom(s.condition_id);
+    if (s.severity < trigger) continue;
     const course = readingsBySymptom.get(s.id) ?? [];
     let runStart: number | null = null;
     for (const r of course) {
-      if (r.severity >= HIGH_SEVERITY) {
+      if (r.severity >= trigger) {
         if (runStart === null) runStart = new Date(r.recorded_at).getTime();
       } else {
         runStart = null;
@@ -220,6 +244,7 @@ export async function gatherHealthAlerts(
         condition_id: c.id,
         condition_name: c.name,
         condition_category: c.category,
+        baseline: c.baseline_severity,
         since: new Date(since).toISOString(),
         days: Math.floor((now - since) / dayMs),
         symptoms: persistent.map((s) => ({ id: s.id, name: s.name, severity: s.severity })),
@@ -239,6 +264,7 @@ export async function gatherHealthAlerts(
           condition_id: c.id,
           condition_name: c.name,
           condition_category: c.category,
+          baseline: c.baseline_severity,
           since: toIso(c.started_on ?? c.created_at),
           days: Math.floor((now - startedAt) / dayMs),
           symptoms: currentSymptoms,

@@ -32,6 +32,8 @@ export interface HealthAlert {
   condition_id: string;
   condition_name: string;
   condition_category: string | null;
+  /** The person's normal severity for this condition, when a baseline is set. */
+  baseline: number | null;
   since: string;
   days: number;
   symptoms: Array<{ id: string; name: string; severity: number }>;
@@ -81,9 +83,14 @@ function itemBrief(it: AttentionItem): string {
 const symptomSummary = (a: HealthAlert): string =>
   a.symptoms.map((s) => `${s.name} ${s.severity}/10 ${severityLabel(s.severity)}`).join(', ');
 
+// "above their normal of 7 out of 10" when a baseline is set, otherwise the
+// standard "above moderate".
+const aboveWhat = (a: HealthAlert): string =>
+  a.baseline != null ? `above their normal of ${a.baseline} out of 10` : 'above moderate';
+
 function alertHeadline(a: HealthAlert): string {
   if (a.kind === 'persistent_symptoms') {
-    return `${a.condition_name}: symptoms have stayed above moderate for ${a.days} ${a.days === 1 ? 'day' : 'days'}`;
+    return `${a.condition_name}: symptoms have stayed ${aboveWhat(a)} for ${a.days} ${a.days === 1 ? 'day' : 'days'}`;
   }
   const months = Math.max(1, Math.round(a.days / 30));
   return `${a.condition_name}: still unresolved after ${months} ${months === 1 ? 'month' : 'months'}`;
@@ -93,7 +100,7 @@ function alertBrief(a: HealthAlert): string {
   const who = a.profile_name;
   const what =
     a.kind === 'persistent_symptoms'
-      ? `${who}'s ${a.condition_name} has had symptoms above moderate for ${a.days} days (${symptomSummary(a)}).`
+      ? `${who}'s ${a.condition_name} has had symptoms ${aboveWhat(a)} for ${a.days} days (${symptomSummary(a)}).`
       : `${who}'s ${a.condition_name} is still unresolved ${Math.max(1, Math.round(a.days / 30))} months on${a.symptoms.length > 0 ? ` (${symptomSummary(a)})` : ''}.`;
   return `${what} It is probably time they saw their GP. Look through ${who}'s record for the GP's contact details, `
     + `help me decide how soon they should be seen, and draft the booking call script or message here now. `

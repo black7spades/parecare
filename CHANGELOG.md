@@ -5,6 +5,25 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.3.0] - 2026-07-22
+
+### Added
+
+- An **as needed** checkbox on the add and edit medication form, for a
+  medication with no set schedule (a painkiller, or diazepam taken when
+  required). It sits in the as needed group and a dose is logged when taken.
+- A **normal level** (baseline severity) on a condition, on the 1 to 10 symptom
+  scale. Everyone is different: if someone's chronic condition sits at a 6 or 7
+  every day, that is their normal.
+
+### Changed
+
+- Health alerts now respect a condition's normal level. An alert is raised only
+  when a symptom rises above the person's normal, not at a fixed threshold, so a
+  chronic condition that sits high every day no longer alarms at its usual
+  level. A condition without a normal level still follows the standard
+  above-moderate rule.
+
 ## [0.2.0] - 2026-07-21
 
 ### Added

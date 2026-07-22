@@ -20,6 +20,26 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.3.0',
+    date: '2026-07-22',
+    summary: 'As needed medications, and health alerts that know each person’s normal.',
+    groups: [
+      {
+        heading: 'Medications',
+        items: [
+          'An "as needed" checkbox on the add and edit medication form, for a medication with no set schedule, such as a painkiller or diazepam taken when required. It sits in the as needed group and a dose is logged when one is taken.',
+        ],
+      },
+      {
+        heading: 'Conditions',
+        items: [
+          'A condition can now have a normal level on the 1 to 10 symptom scale. Everyone is different: if a chronic condition sits at a 6 or 7 every day, that is this person’s normal and does not raise an alarm.',
+          'Health alerts use that normal level, so an alert is raised only when a symptom rises above it, and a condition without a normal level still follows the standard above moderate rule.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.2.0',
     date: '2026-07-22',
     summary: 'Suppliers, the Directory, and reordering medications when they run low.',

@@ -221,6 +221,10 @@ const conditionSchema = z.object({
   resolved_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   condition_type: z.enum(['chronic', 'acute', 'disability', 'other']).optional().nullable(),
   severity: z.enum(['mild', 'moderate', 'severe', 'profound']).optional().nullable(),
+  // The person's normal level on the 1 to 10 symptom scale for a long-term
+  // condition. Health alerts fire only above this, so a chronic condition that
+  // sits high every day does not alarm at its usual level. Null clears it.
+  baseline_severity: z.number().int().min(1).max(10).optional().nullable(),
   is_permanent: z.boolean().optional().nullable(),
   expected_duration: z.enum(['self_limiting', 'short_term', 'long_term', 'lifelong']).optional().nullable(),
   category: z.enum(['illness', 'injury', 'post_operative', 'recovery', 'mental_health', 'chronic_flare', 'acute_illness', 'disability', 'neurotype', 'other']).optional().nullable(),
