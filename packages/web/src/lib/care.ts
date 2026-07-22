@@ -972,6 +972,14 @@ export interface Asset {
   /** Where the equipment is kept. */
   location: string | null;
   notes: string | null;
+  /** Years the equipment is written down over, for depreciation. */
+  useful_life_years: number | null;
+  /** Straight-line yearly write-down, computed from price and useful life. */
+  annual_depreciation?: number | null;
+  /** How much has been written down so far, computed. */
+  depreciated_amount?: number | null;
+  /** Current book value (price less depreciation so far), computed. */
+  book_value?: number | null;
 }
 
 /**

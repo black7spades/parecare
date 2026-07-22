@@ -33,6 +33,7 @@ const SORTS: DataSort<DirectoryAsset>[] = [
   { key: 'category', label: 'Category', compare: (a, b) => (a.category ?? '').localeCompare(b.category ?? '') },
   { key: 'serial', label: 'Serial or unit number', compare: (a, b) => (a.serial_number ?? '').localeCompare(b.serial_number ?? '') },
   { key: 'price', label: 'Price', compare: (a, b) => numAsc(a.price) - numAsc(b.price) },
+  { key: 'book_value', label: 'Book value', compare: (a, b) => numAsc(a.book_value ?? null) - numAsc(b.book_value ?? null) },
   { key: 'purchase', label: 'Purchase date', compare: (a, b) => (a.purchase_date ?? '').localeCompare(b.purchase_date ?? '') },
   { key: 'condition', label: 'Condition', compare: (a, b) => (a.condition ?? '').localeCompare(b.condition ?? '') },
   { key: 'profiles', label: 'Used by', compare: (a, b) => (b.linked_profiles?.length ?? 0) - (a.linked_profiles?.length ?? 0) },
@@ -159,6 +160,7 @@ export function DirectoryAssetsPage() {
                 <SortableTh label="Category" sortKey="category" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Serial or unit number" sortKey="serial" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Price" sortKey="price" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Book value" sortKey="book_value" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Purchase date" sortKey="purchase" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Condition" sortKey="condition" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Used by" sortKey="profiles" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
@@ -183,6 +185,10 @@ export function DirectoryAssetsPage() {
                   <td className="px-3 py-2 text-muted">{a.category || '-'}</td>
                   <td className="px-3 py-2 text-muted">{a.serial_number || '-'}</td>
                   <td className="px-3 py-2 text-muted">{money(a.price)}</td>
+                  <td className="px-3 py-2 text-muted">
+                    {a.book_value != null ? money(a.book_value) : '-'}
+                    {a.annual_depreciation != null ? <span className="block text-xs">{money(a.annual_depreciation)}/yr</span> : null}
+                  </td>
                   <td className="px-3 py-2 text-muted">{a.purchase_date || '-'}</td>
                   <td className="px-3 py-2 text-muted">{a.condition ? (CONDITION_LABEL[a.condition] ?? a.condition) : '-'}</td>
                   <td className="px-3 py-2">
@@ -369,6 +375,7 @@ function DirectoryAssetEditor({
   const [supplier, setSupplier] = useState('');
   const [warrantyExpiry, setWarrantyExpiry] = useState('');
   const [condition, setCondition] = useState('');
+  const [usefulLife, setUsefulLife] = useState('');
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
@@ -383,6 +390,7 @@ function DirectoryAssetEditor({
     setSupplier(asset?.supplier ?? '');
     setWarrantyExpiry(asset?.warranty_expiry ?? '');
     setCondition(asset?.condition ?? '');
+    setUsefulLife(asset?.useful_life_years != null ? String(asset.useful_life_years) : '');
     setLocation(asset?.location ?? '');
     setNotes(asset?.notes ?? '');
     setError('');
@@ -400,6 +408,7 @@ function DirectoryAssetEditor({
         supplier: supplier.trim() || null,
         warranty_expiry: warrantyExpiry || null,
         condition: condition || null,
+        useful_life_years: usefulLife.trim() === '' ? null : Number(usefulLife),
         location: location.trim() || null,
         notes: notes.trim() || null,
       };
@@ -447,7 +456,10 @@ function DirectoryAssetEditor({
             </select>
           </label>
         </div>
-        <Input label="Location" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Where it is kept, e.g. Main bedroom" />
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Useful life (years)" type="number" min="0" step="1" value={usefulLife} onChange={(e) => setUsefulLife(e.target.value)} hint="For depreciation. The book value is worked out from this, the price and the purchase date." />
+          <Input label="Location" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Where it is kept, e.g. Main bedroom" />
+        </div>
         <Textarea label="Notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">

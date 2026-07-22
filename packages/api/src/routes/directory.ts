@@ -597,7 +597,36 @@ const assetSchema = z.object({
   condition: z.string().max(30).optional().nullable(),
   location: z.string().max(255).optional().nullable(),
   notes: z.string().max(5000).optional().nullable(),
+  // Years the equipment is written down over, for straight-line depreciation.
+  useful_life_years: z.coerce.number().int().min(0).max(100).optional().nullable(),
 });
+
+// Straight-line depreciation from the price, purchase date and useful life:
+// the yearly write-down, how much has been written down so far, and the current
+// book value. Each is its own figure, computed, never stored.
+function assetDepreciation(price: number | null, purchaseDate: string | null, usefulLife: number | null): {
+  annual_depreciation: number | null;
+  depreciated_amount: number | null;
+  book_value: number | null;
+} {
+  if (price == null) return { annual_depreciation: null, depreciated_amount: null, book_value: null };
+  if (usefulLife == null || usefulLife <= 0) {
+    return { annual_depreciation: null, depreciated_amount: null, book_value: price };
+  }
+  const annual = price / usefulLife;
+  let elapsedYears = 0;
+  if (purchaseDate) {
+    const ms = Date.now() - new Date(`${purchaseDate}T00:00:00Z`).getTime();
+    elapsedYears = Math.max(0, ms / (365.25 * 24 * 3600 * 1000));
+  }
+  const depreciated = Math.min(price, annual * elapsedYears);
+  const round2n = (n: number) => Math.round(n * 100) / 100;
+  return {
+    annual_depreciation: round2n(annual),
+    depreciated_amount: round2n(depreciated),
+    book_value: round2n(price - depreciated),
+  };
+}
 
 // Postgres returns a decimal as a string and a date as a Date; hand the client
 // a real number and a plain YYYY-MM-DD so the list and form get what they expect.
@@ -607,12 +636,19 @@ const assetDate = (v: unknown): string | null => {
   const s = String(v);
   return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
 };
-const serializeAsset = <T extends Record<string, unknown>>(a: T): T => ({
-  ...a,
-  price: a['price'] == null || a['price'] === '' ? null : Number(a['price']),
-  purchase_date: assetDate(a['purchase_date']),
-  warranty_expiry: assetDate(a['warranty_expiry']),
-});
+const serializeAsset = <T extends Record<string, unknown>>(a: T): T => {
+  const price = a['price'] == null || a['price'] === '' ? null : Number(a['price']);
+  const purchaseDate = assetDate(a['purchase_date']);
+  const usefulLife = a['useful_life_years'] == null || a['useful_life_years'] === '' ? null : Number(a['useful_life_years']);
+  return {
+    ...a,
+    price,
+    purchase_date: purchaseDate,
+    warranty_expiry: assetDate(a['warranty_expiry']),
+    useful_life_years: usefulLife,
+    ...assetDepreciation(price, purchaseDate, usefulLife),
+  };
+};
 
 // Turn a validated body into the columns to write, cleaning blank strings to null.
 function assetColumns(data: z.infer<typeof assetSchema> | Partial<z.infer<typeof assetSchema>>): Record<string, unknown> {
@@ -628,6 +664,7 @@ function assetColumns(data: z.infer<typeof assetSchema> | Partial<z.infer<typeof
   if ('condition' in data) out['condition'] = cleanField(data.condition);
   if ('location' in data) out['location'] = cleanField(data.location);
   if ('notes' in data) out['notes'] = cleanField(data.notes);
+  if ('useful_life_years' in data) out['useful_life_years'] = data.useful_life_years ?? null;
   return out;
 }
 
@@ -1101,6 +1138,17 @@ const assetPort: PortDescriptor<AnyRow, PortRecord> = {
     { key: 'supplier', header: 'Bought from', aliases: ['supplier', 'vendor', 'shop'], toCell: (r) => cell(r['supplier']) },
     { key: 'warranty_expiry', header: 'Warranty expiry', aliases: ['warranty', 'warranty ends'], toCell: (r) => cellDate(r['warranty_expiry']) },
     { key: 'condition', header: 'Condition', aliases: ['state'], toCell: (r) => cell(r['condition']) },
+    { key: 'useful_life_years', header: 'Useful life (years)', aliases: ['useful life', 'depreciation years', 'life years'], toCell: (r) => cell(r['useful_life_years']) },
+    // Computed columns for the accountant: worked out from price, purchase date
+    // and useful life at export time, read-only on import.
+    { key: 'annual_depreciation', header: 'Annual depreciation', toCell: (r) => {
+      const d = assetDepreciation(r['price'] == null ? null : Number(r['price']), cellDate(r['purchase_date']) || null, r['useful_life_years'] == null ? null : Number(r['useful_life_years']));
+      return d.annual_depreciation == null ? '' : d.annual_depreciation.toFixed(2);
+    } },
+    { key: 'book_value', header: 'Book value', toCell: (r) => {
+      const d = assetDepreciation(r['price'] == null ? null : Number(r['price']), cellDate(r['purchase_date']) || null, r['useful_life_years'] == null ? null : Number(r['useful_life_years']));
+      return d.book_value == null ? '' : d.book_value.toFixed(2);
+    } },
     { key: 'location', header: 'Location', aliases: ['kept', 'where'], toCell: (r) => cell(r['location']) },
     { key: 'notes', header: 'Notes', toCell: (r) => cell(r['notes']) },
   ],
@@ -1108,6 +1156,7 @@ const assetPort: PortDescriptor<AnyRow, PortRecord> = {
     const name = (raw['name'] ?? '').trim();
     if (!name) return { ok: false as const, error: `Row ${n}: a unit name is required.` };
     const priceNum = parseFloat(String(raw['price'] ?? '').replace(/[^0-9.]/g, ''));
+    const lifeNum = parseInt(String(raw['useful_life_years'] ?? '').replace(/[^0-9]/g, ''), 10);
     return {
       ok: true as const,
       value: {
@@ -1122,6 +1171,7 @@ const assetPort: PortDescriptor<AnyRow, PortRecord> = {
         condition: portBlank(raw['condition']),
         location: portBlank(raw['location']),
         notes: portBlank(raw['notes']),
+        useful_life_years: Number.isFinite(lifeNum) ? lifeNum : null,
       },
     };
   },

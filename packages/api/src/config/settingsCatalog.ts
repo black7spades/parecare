@@ -62,6 +62,7 @@ export const SETTINGS_CATALOG: readonly SettingEntry[] = [
 
   // Health spend
   { key: 'health.currency', group: 'health', label: 'Currency', type: 'enum', enumValues: CURRENCIES, secret: false, envKey: 'HEALTH_CURRENCY', help: 'The single currency every cost and health-spend total is shown in, across the whole account.', zod: enom(CURRENCIES) },
+  { key: 'health.financial_year_start_month', group: 'health', label: 'Financial year starts in', type: 'number', secret: false, envKey: 'HEALTH_FY_START_MONTH', help: 'The month the financial year begins, as a number 1 to 12. Australia is 7 (July); many places use 1 (January). Used by the financial-year view and the accounting export.', zod: z.coerce.number().int().min(1).max(12) },
 
   // Scheduler
   { key: 'scheduler.reminder_interval_ms', group: 'scheduler', label: 'Reminder check interval (ms)', type: 'number', secret: false, envKey: 'REMINDER_CHECK_INTERVAL_MS', help: '0 or less disables the reminder scheduler.', zod: num() },

@@ -648,6 +648,10 @@ registerSection({
       { key: 'appointment_spend', label: 'Appointments', type: 'number' },
       { key: 'other_spend', label: 'Other', type: 'number' },
       { key: 'total_spend', label: 'Total spent', type: 'number' },
+      { key: 'tax_spend', label: 'Tax within total', type: 'number' },
+      { key: 'reimbursed_spend', label: 'Reimbursed', type: 'number' },
+      { key: 'net_spend', label: 'Net out of pocket', type: 'number' },
+      { key: 'outstanding_spend', label: 'Claims outstanding', type: 'number' },
       { key: 'pending_spend', label: 'Estimated, not yet confirmed', type: 'number' },
     ],
     filters: [],
@@ -656,8 +660,9 @@ registerSection({
   },
   async fetch({ profileIds, dateRange, db }) {
     // One row per person: confirmed spend over the range, by category and
-    // combined, plus the estimated amount still awaiting confirmation. Each
-    // figure is its own column so the report can sort and total independently.
+    // combined, with the tax split out, what has been reimbursed, the net
+    // out-of-pocket, and claims still outstanding. Each figure is its own
+    // column so the report can sort and total independently.
     const range = { from: dateRange?.from ?? null, to: dateRange?.to ?? null };
     const profiles = await db('care_profiles').whereIn('id', profileIds).select('id', 'full_name');
     const nameById = new Map(profiles.map((p) => [p.id, p.full_name]));
@@ -671,6 +676,10 @@ registerSection({
         appointment_spend: s.by_category.appointment,
         other_spend: s.by_category.other,
         total_spend: s.total,
+        tax_spend: s.tax_total,
+        reimbursed_spend: s.reimbursed_total,
+        net_spend: s.net_total,
+        outstanding_spend: s.outstanding_total,
         pending_spend: s.pending_total,
       });
     }
@@ -689,6 +698,12 @@ registerSection({
       { key: 'category', label: 'Category', type: 'enum', enumValues: ['medication', 'appointment', 'other'] },
       { key: 'item_name', label: 'What it was for', type: 'text' },
       { key: 'amount', label: 'Amount', type: 'number' },
+      { key: 'tax_amount', label: 'Tax', type: 'number' },
+      { key: 'funding_source', label: 'Funding source', type: 'enum', enumValues: ['self', 'ndis', 'private_health', 'medicare', 'government', 'other'] },
+      { key: 'account_code', label: 'Account code', type: 'text' },
+      { key: 'claimable_amount', label: 'Claimable', type: 'number' },
+      { key: 'reimbursed_amount', label: 'Reimbursed', type: 'number' },
+      { key: 'claim_status', label: 'Claim status', type: 'enum', enumValues: ['none', 'unclaimed', 'submitted', 'reimbursed'] },
       { key: 'status', label: 'Status', type: 'enum', enumValues: ['confirmed', 'estimated'] },
       { key: 'description', label: 'Note', type: 'text' },
     ],
@@ -729,6 +744,7 @@ registerSection({
     const rows = await query
       .select(
         'e.care_profile_id', 'e.spent_on', 'e.category', 'e.status', 'e.amount', 'e.description',
+        'e.tax_amount', 'e.funding_source', 'e.account_code', 'e.claimable_amount', 'e.reimbursed_amount', 'e.claim_status',
         'cp.full_name as _profile_name',
         db.raw('coalesce(mc.name, ap.title, e.description) as item_name')
       )
@@ -740,9 +756,87 @@ registerSection({
       category: r.category as SpendCategory,
       item_name: r.item_name,
       amount: toNum(r.amount),
+      tax_amount: toNum(r.tax_amount),
+      funding_source: r.funding_source,
+      account_code: r.account_code,
+      claimable_amount: toNum(r.claimable_amount),
+      reimbursed_amount: toNum(r.reimbursed_amount),
+      claim_status: r.claim_status,
       status: r.status,
       description: r.description,
     }));
+  },
+});
+
+registerSection({
+  meta: {
+    key: 'health_spend_claims',
+    label: 'Health spend claims',
+    description: 'Costs that are claimable back from a funding source (NDIS, private health, Medicare), what has been reimbursed and what is still outstanding',
+    category: 'medications',
+    fields: [
+      { key: 'spent_on', label: 'Date', type: 'date' },
+      { key: 'item_name', label: 'What it was for', type: 'text' },
+      { key: 'funding_source', label: 'Funding source', type: 'enum', enumValues: ['self', 'ndis', 'private_health', 'medicare', 'government', 'other'] },
+      { key: 'amount', label: 'Amount', type: 'number' },
+      { key: 'claimable_amount', label: 'Claimable', type: 'number' },
+      { key: 'reimbursed_amount', label: 'Reimbursed', type: 'number' },
+      { key: 'outstanding_amount', label: 'Outstanding', type: 'number' },
+      { key: 'claim_status', label: 'Claim status', type: 'enum', enumValues: ['unclaimed', 'submitted', 'reimbursed'] },
+    ],
+    filters: [
+      {
+        key: 'claim_status', label: 'Claim status', type: 'multi-select', options: [
+          { value: 'unclaimed', label: 'Unclaimed' },
+          { value: 'submitted', label: 'Submitted' },
+          { value: 'reimbursed', label: 'Reimbursed' },
+        ],
+      },
+    ],
+    supportsDateRange: true,
+    crossProfileCapable: true,
+  },
+  async fetch({ profileIds, filters, dateRange, db }) {
+    let query = db('health_spend_entries as e')
+      .join('care_profiles as cp', 'cp.id', 'e.care_profile_id')
+      .leftJoin('appointments as ap', 'ap.id', 'e.appointment_id')
+      .leftJoin('medications as m', 'm.id', 'e.medication_id')
+      .leftJoin('medication_catalogue as mc', 'mc.id', 'm.medication_catalogue_id')
+      .whereIn('e.care_profile_id', profileIds)
+      .where('e.status', 'confirmed')
+      .whereNotNull('e.claimable_amount')
+      .whereNot('e.claim_status', 'none');
+    if (Array.isArray(filters['claim_status']) && filters['claim_status'].length) {
+      query = query.whereIn('e.claim_status', filters['claim_status'] as string[]);
+    }
+    if (dateRange) {
+      query = query.where('e.spent_on', '>=', dateRange.from).where('e.spent_on', '<=', dateRange.to);
+    }
+    const rows = await query
+      .select(
+        'e.care_profile_id', 'e.spent_on', 'e.amount', 'e.funding_source',
+        'e.claimable_amount', 'e.reimbursed_amount', 'e.claim_status',
+        'cp.full_name as _profile_name',
+        db.raw('coalesce(mc.name, ap.title, e.description) as item_name')
+      )
+      .orderBy('e.spent_on', 'desc');
+    return rows.map((r) => {
+      const claimable = toNum(r.claimable_amount) ?? 0;
+      const reimbursed = toNum(r.reimbursed_amount) ?? 0;
+      const outstanding = r.claim_status === 'reimbursed' ? 0 : Math.max(0, claimable - reimbursed);
+      return {
+        _profile_id: r.care_profile_id,
+        _profile_name: r._profile_name,
+        spent_on: r.spent_on,
+        item_name: r.item_name,
+        funding_source: r.funding_source,
+        amount: toNum(r.amount),
+        claimable_amount: claimable,
+        reimbursed_amount: reimbursed,
+        outstanding_amount: outstanding,
+        claim_status: r.claim_status,
+      };
+    });
   },
 });
 

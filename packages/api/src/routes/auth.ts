@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { env } from '../config/env';
-import { getOAuthConfig, getStorageConfig, getHealthCurrency } from '../config/settings';
+import { getOAuthConfig, getStorageConfig, getHealthCurrency, getFinancialYearStartMonth } from '../config/settings';
 import { currencySymbol } from '../services/healthSpend';
 import { requireAuth } from '../middleware/auth';
 import { generateSecret, otpauthUrl, verifyTotp } from '../services/totp';
@@ -245,6 +245,7 @@ authRouter.get('/me', requireAuth, (req, res) => {
     health: {
       currency: getHealthCurrency(),
       currency_symbol: currencySymbol(getHealthCurrency()),
+      financial_year_start_month: getFinancialYearStartMonth(),
     },
   });
 });

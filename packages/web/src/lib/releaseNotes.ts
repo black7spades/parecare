@@ -20,6 +20,35 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.6.0',
+    date: '2026-07-22',
+    summary: 'Health spend an accountant can reconcile: tax, claims, reimbursements, receipts, a financial-year view and an export.',
+    groups: [
+      {
+        heading: 'Claims and reimbursements',
+        items: [
+          'Each cost can now carry the tax component split out from the total, a funding source (self, NDIS, private health, Medicare, government), an account code, how much is claimable, its claim status, and how much has come back.',
+          'The Health spend card shows the net out of pocket, what has been reimbursed, and the claims still outstanding, over Last 12 months, This year, This financial year or All time.',
+        ],
+      },
+      {
+        heading: 'Receipts and export',
+        items: [
+          'Attach a receipt or invoice to any cost and download it later as evidence for a claim or the tax return.',
+          'Export for accounting: a CSV of the confirmed costs over the chosen window, tax split out, with the claim and reimbursement columns, ready for a spreadsheet or accounting software.',
+          'The Health spend report now includes tax, reimbursed, net and outstanding, and a new Health spend claims report lists what is claimable and outstanding by funding source.',
+        ],
+      },
+      {
+        heading: 'Assets',
+        items: [
+          'An asset can carry a useful life, and its straight line yearly write-down and current book value are worked out from the price and purchase date, shown in the register and the export.',
+          'A financial year start month in System settings, used by the financial-year view and the export.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.5.0',
     date: '2026-07-22',
     summary: 'An equipment register in your Directory, linked to the people and pets it belongs to.',
