@@ -19,6 +19,8 @@ source. Versions follow [semantic versioning](https://semver.org).
   a device draws from the asset register (pick an existing one, autofilling its
   details) or adds a new one with the same asset editor, and links the equipment
   to the condition it treats.
+- Under a condition, a **surgery** now opens the make-appointment editor to
+  book it properly, prefilled as a procedure, rather than sitting as a flat note.
 
 ### Changed
 
