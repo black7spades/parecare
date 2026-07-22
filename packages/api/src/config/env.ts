@@ -60,6 +60,7 @@ const envSchema = z.object({
   EMAIL_FROM: z.string().email().default('noreply@parecare.app'),
   REMINDER_CHECK_INTERVAL_MS: z.string().transform(Number).default('60000'),
   HEALTH_CURRENCY: z.enum(['AUD', 'USD', 'GBP', 'EUR', 'NZD', 'CAD']).default('AUD'),
+  HEALTH_FY_START_MONTH: z.string().transform(Number).default('7'),
   GOOGLE_CLIENT_ID: optionalStr,
   GOOGLE_CLIENT_SECRET: optionalStr,
   FACEBOOK_APP_ID: optionalStr,

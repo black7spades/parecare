@@ -160,6 +160,15 @@ export function getHealthCurrency(): string {
   return str('health.currency') ?? 'AUD';
 }
 
+/**
+ * The month the financial year begins, 1 to 12. Defaults to July (7), the
+ * Australian financial year, used by the FY view and the accounting export.
+ */
+export function getFinancialYearStartMonth(): number {
+  const m = numOr('health.financial_year_start_month', 7);
+  return m >= 1 && m <= 12 ? m : 7;
+}
+
 export function getOAuthConfig() {
   return {
     googleClientId: str('oauth.google_client_id'),

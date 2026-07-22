@@ -5,6 +5,47 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.6.0] - 2026-07-22
+
+### Added
+
+- **Accounting on health spend**, so the ledger can be reconciled and claimed
+  against. Each cost can carry the tax (GST or VAT) component split out from the
+  total, a funding source (self, NDIS, private health, Medicare, government), an
+  account code, how much is claimable, its claim status (unclaimed, submitted,
+  reimbursed) and how much has come back.
+- The Health spend card now shows the **net out of pocket**, what has been
+  **reimbursed**, and the **claims still outstanding**, alongside the total and
+  the category split, over a Last 12 months, This year, **This financial year**,
+  or All time view.
+- **Receipts**: attach a receipt or invoice to any cost, and download it later
+  as evidence for a claim or the tax return.
+- **Export for accounting**, a CSV of the confirmed costs over the chosen window
+  with the tax split out and the claim and reimbursement columns, ready for a
+  spreadsheet or accounting software.
+- Two enriched reports: **Health spend** now includes tax, reimbursed, net and
+  outstanding, and a new **Health spend claims** report lists what is claimable,
+  reimbursed and outstanding by funding source.
+- **Asset depreciation**: an asset can carry a useful life, and its straight
+  line yearly write-down and current **book value** are worked out from the
+  price and purchase date, shown in the register and the export.
+- A **financial year start month** in System settings (default July), used by
+  the financial-year view and the accounting export.
+
+## [0.5.0] - 2026-07-22
+
+### Added
+
+- **Assets**, a new Directory section for the equipment kept for someone's
+  care: a wheelchair, a hoist, a bed, a monitor. Each asset records its unit
+  name, category, serial or unit number, make or model, price, purchase date,
+  where it was bought, warranty expiry, condition and location, every fact in
+  its own field.
+- Assets sit in the **Directory** beside People, Pets, Providers, Suppliers and
+  Addresses, with the same tools: search, sort, edit, delete, bulk edit and
+  delete, bulk import and export, and the same **link-to-profiles** flow, so a
+  piece of equipment can be tied to the person or pet it belongs to.
+
 ## [0.4.0] - 2026-07-22
 
 ### Added

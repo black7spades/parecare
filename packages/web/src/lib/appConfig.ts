@@ -9,13 +9,14 @@ import { api } from '../api/client';
 export interface AppHealthConfig {
   currency: string;
   currency_symbol: string;
+  financial_year_start_month: number;
 }
 
 interface MeResponse {
   health?: AppHealthConfig;
 }
 
-const FALLBACK: AppHealthConfig = { currency: 'AUD', currency_symbol: '$' };
+const FALLBACK: AppHealthConfig = { currency: 'AUD', currency_symbol: '$', financial_year_start_month: 7 };
 
 export function useHealthConfig(): AppHealthConfig {
   const { data } = useQuery({
