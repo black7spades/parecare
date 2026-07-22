@@ -55,6 +55,8 @@ const treatmentSchema = z.object({
   // are kept in sync for existing callers.
   current_status: z.enum(TREATMENT_STATUSES).optional(),
   last_review_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  // The asset this treatment uses, for a device that manages the condition.
+  asset_id: z.string().uuid().optional().nullable(),
   // Accepted on create so a treatment and its measures are set up in one go.
   metrics: z.array(metricSchema).max(20).optional(),
 });
@@ -107,6 +109,7 @@ async function treatmentFieldsFrom(
     fields['current_status'] = data.active === false ? 'discontinued' : 'active';
   }
   if ('last_review_date' in data) fields['last_review_date'] = data.last_review_date ?? null;
+  if ('asset_id' in data) fields['asset_id'] = data.asset_id ?? null;
   if (data.schedule_times !== undefined) {
     fields['schedule_times'] = data.schedule_times ? db.raw('?::jsonb', [JSON.stringify(data.schedule_times)]) : null;
   }

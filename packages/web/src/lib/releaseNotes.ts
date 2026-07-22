@@ -20,6 +20,27 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.8.0',
+    date: '2026-07-22',
+    summary: 'Review uploads before filing, File with Pare everywhere, and equipment linked to the conditions it manages.',
+    groups: [
+      {
+        heading: 'Upload and file with Pare',
+        items: [
+          'What Pare proposes from an upload is now shown as editable cards, so you can fix an imprecise vendor or a wrong address, or drop an item, before anything is saved.',
+          'A paperclip in Pare\u2019s chat lets you drop a document mid-conversation, and a File with Pare button appears on the needs-attention items where a receipt or invoice belongs.',
+          'Pare checks a document\u2019s addresses against the ones already on file, so your own address is not mistaken for a vendor.',
+        ],
+      },
+      {
+        heading: 'Conditions and equipment',
+        items: [
+          'A device that manages a condition is now filed as a real asset: pick one from your register (its details autofill) or add a new one with the same editor, and it is linked to the condition it treats.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.7.0',
     date: '2026-07-22',
     summary: 'Upload anything and let Pare file it into the right place in the record.',

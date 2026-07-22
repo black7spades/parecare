@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { useHealthConfig } from '../../../lib/appConfig';
+import { DirectoryAssetEditor, type DirectoryAsset } from '../DirectoryAssetsPage';
 import { fuzzyRank, similarity } from '../../../lib/fuzzy';
 import {
   DOSE_MEASURES,
@@ -51,7 +53,12 @@ export interface ManagedRow {
   // Treatment details.
   status: string;
   reviewDate: string;
+  // For a device treatment: the asset in the register it represents.
+  assetId: string;
 }
+
+/** A device or assistive device is filed as an asset, not a loose treatment. */
+export const isDeviceKind = (k: string) => k === 'device' || k === 'assistive_device';
 
 let rowCounter = 0;
 
@@ -76,6 +83,7 @@ export function emptyManagedRow(kind = 'medication', name = ''): ManagedRow {
     repeatsDue: '',
     status: 'active',
     reviewDate: '',
+    assetId: '',
   };
 }
 
@@ -110,12 +118,20 @@ export async function persistManagedRows(
         repeats_due: r.repeatsDue || null,
       });
     } else {
+      // A device treatment carries the asset it represents; make sure that
+      // asset is linked to this person too, so the equipment shows in their
+      // register as well as against the condition.
+      const asDevice = isDeviceKind(r.kind) && r.assetId;
+      if (asDevice) {
+        await api.post(`/directory/assets/${r.assetId}/bulk-link`, { profile_ids: [profileId] }).catch(() => {});
+      }
       await api.post(`/care-profiles/${profileId}/treatments`, {
         name: r.name.trim(),
         category: r.kind,
         current_status: r.status,
         last_review_date: r.reviewDate || null,
         medical_condition_id: conditionId,
+        ...(asDevice ? { asset_id: r.assetId } : {}),
       });
     }
   }
@@ -369,9 +385,77 @@ function ManagedRowCard({
 
       {row.kind === 'medication' ? (
         <MedicationRowFields row={row} careName={careName} allergies={allergies} onChange={onChange} />
+      ) : isDeviceKind(row.kind) ? (
+        <DeviceRowFields row={row} onChange={onChange} />
       ) : (
         <TreatmentRowFields row={row} onChange={onChange} />
       )}
+    </div>
+  );
+}
+
+/**
+ * A device that manages the condition is a real asset. Pick one already in the
+ * register (drawing its name in) or add a new one with the same asset editor
+ * used in the directory, so the equipment is filed once and linked here.
+ */
+function DeviceRowFields({ row, onChange }: { row: ManagedRow; onChange: (patch: Partial<ManagedRow>) => void }) {
+  const health = useHealthConfig();
+  const [editorOpen, setEditorOpen] = useState(false);
+  const queryClient = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ['directory-assets'],
+    queryFn: () => api.get<{ assets: DirectoryAsset[] }>('/directory/assets'),
+  });
+  const assets = data?.assets ?? [];
+
+  return (
+    <div className="grid sm:grid-cols-3 gap-2">
+      <div className="block sm:col-span-1">
+        <span className="block text-xs text-muted mb-1">Equipment</span>
+        <div className="flex gap-1">
+          <select
+            className={`${smallInput} w-full`}
+            aria-label="Equipment from the asset register"
+            value={row.assetId}
+            onChange={(e) => {
+              const a = assets.find((x) => x.id === e.target.value);
+              onChange({ assetId: e.target.value, name: a ? a.name : row.name });
+            }}
+          >
+            <option value="">{row.name && !row.assetId ? row.name : 'Pick equipment…'}</option>
+            {assets.map((a) => (
+              <option key={a.id} value={a.id}>{a.name}{a.serial_number ? ` · ${a.serial_number}` : ''}</option>
+            ))}
+          </select>
+          <Button size="xs" variant="secondary" type="button" className="shrink-0" onClick={() => setEditorOpen(true)}>New</Button>
+        </div>
+        <p className="text-xs text-muted mt-1">From the asset register, or add a new one.</p>
+      </div>
+      <label className="block">
+        <span className="block text-xs text-muted mb-1">Status</span>
+        <select className={`${smallInput} w-full`} value={row.status} onChange={(e) => onChange({ status: e.target.value })}>
+          {TREATMENT_STATUS_OPTIONS.map((s) => (
+            <option key={s.value} value={s.value}>{treatmentStatusLabel(s.value)}</option>
+          ))}
+        </select>
+      </label>
+      <label className="block">
+        <span className="block text-xs text-muted mb-1">Last reviewed</span>
+        <input className={`${smallInput} w-full`} type="date" value={row.reviewDate} onChange={(e) => onChange({ reviewDate: e.target.value })} />
+      </label>
+
+      <DirectoryAssetEditor
+        open={editorOpen}
+        asset={null}
+        currencySymbol={health.currency_symbol}
+        onClose={() => setEditorOpen(false)}
+        onSaved={(saved) => {
+          setEditorOpen(false);
+          void queryClient.invalidateQueries({ queryKey: ['directory-assets'] });
+          if (saved) onChange({ assetId: saved.id, name: saved.name });
+        }}
+      />
     </div>
   );
 }

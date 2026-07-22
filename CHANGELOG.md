@@ -5,6 +5,26 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.8.0] - 2026-07-22
+
+### Added
+
+- Uploads filed with Pare are now **reviewed and edited before saving**: each
+  proposed record is an editable card, so an imprecise vendor or a wrong address
+  can be corrected or dropped before it is committed.
+- **File with Pare** from more places: a paperclip in Pare's chat composer, and
+  a button on the out-of-stock, reorder and appointment-cost attention items
+  where a receipt or invoice belongs.
+- **Equipment that manages a condition is now a real asset.** Under a condition,
+  a device draws from the asset register (pick an existing one, autofilling its
+  details) or adds a new one with the same asset editor, and links the equipment
+  to the condition it treats.
+
+### Changed
+
+- The assistant checks a document's addresses against the addresses already on
+  file, so the person's own "invoice to" address is not filed as a vendor.
+
 ## [0.7.0] - 2026-07-22
 
 ### Added
