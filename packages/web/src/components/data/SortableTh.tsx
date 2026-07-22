@@ -27,12 +27,14 @@ export function SortableTh({
     >
       <button
         type="button"
-        className={`flex items-center gap-1 hover:text-ink ${active ? 'text-ink' : ''}`}
+        className={`group inline-flex items-center gap-1 hover:text-ink ${active ? 'text-ink' : ''}`}
         onClick={() => onToggle(sortKey)}
         title={active ? `Sorted ${dir === 'asc' ? 'ascending' : 'descending'}. Click to reverse.` : `Sort by ${label.toLowerCase()}`}
       >
         {label}
-        <span aria-hidden="true" className={active ? '' : 'opacity-0'}>
+        {/* The arrow is solid on the active column and appears faintly on hover
+            for the rest, so every sortable header reads as clickable. */}
+        <span aria-hidden="true" className={active ? '' : 'opacity-25 group-hover:opacity-60 transition-opacity'}>
           {active && dir === 'desc' ? '▼' : '▲'}
         </span>
       </button>

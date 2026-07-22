@@ -46,6 +46,9 @@ source. Versions follow [semantic versioning](https://semver.org).
 - **Bulk edit selected medications**: an "Edit selected" action applies one
   change (supplier, route, taken with food, dangerous to miss, active status)
   to every selected medication at once.
+- Sortable table headers now show a faint sort arrow at rest (brighter on
+  hover), so every sortable column reads as clickable instead of looking like
+  static text. Applies to every sortable table, including the medications list.
 - **Sign out** moved from the top-right account menu to the sidebar footer,
   beside the theme picker.
 
