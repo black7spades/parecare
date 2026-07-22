@@ -7,6 +7,7 @@ import { useAssistantStore } from '../stores/assistant';
 import { Button } from './ui/Button';
 import { Modal } from './ui/Modal';
 import { GpModal } from './QuickAddModals';
+import { IngestModal } from './IngestModal';
 import { browserTimeZone } from '../lib/datetime';
 import { severityLabel } from '../pages/app/profile/ConditionSymptoms';
 import { coverMedDay, type ChartAdmin } from '../lib/marCoverage';
@@ -133,6 +134,7 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
   const [collapsed, setCollapsed] = useState(false);
   const [confirmDismiss, setConfirmDismiss] = useState<{ key: string; who: string; what: string; warning: string } | null>(null);
   const [addGpFor, setAddGpFor] = useState<string | null>(null);
+  const [ingestFor, setIngestFor] = useState<string | null>(null);
 
   const tz = browserTimeZone();
   const { data: attentionData } = useQuery({
@@ -344,6 +346,17 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                     Dismiss
                   </Button>
                 ) : null}
+                {it.kind === 'out_of_stock' || it.kind === 'reorder_overdue' || it.kind === 'appointment_cost' ? (
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    className="whitespace-nowrap"
+                    title="Upload a receipt or invoice for Pare to file"
+                    onClick={() => setIngestFor(it.profile_id)}
+                  >
+                    File with Pare
+                  </Button>
+                ) : null}
                 <Button
                   size="xs"
                   variant="secondary"
@@ -359,6 +372,7 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
       ) : null}
 
       {addGpFor ? <GpModal profileId={addGpFor} open onClose={() => setAddGpFor(null)} /> : null}
+      {ingestFor ? <IngestModal profileId={ingestFor} onClose={() => setIngestFor(null)} /> : null}
 
       <Modal open={confirmDismiss !== null} onClose={() => setConfirmDismiss(null)} title="Dismiss this alert">
         <p className="text-sm text-muted mb-4">
