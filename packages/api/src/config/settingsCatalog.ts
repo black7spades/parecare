@@ -61,8 +61,7 @@ export const SETTINGS_CATALOG: readonly SettingEntry[] = [
   { key: 'email.from', group: 'email', label: 'From address', type: 'string', secret: false, envKey: 'EMAIL_FROM', zod: z.string().email() },
 
   // Health spend
-  { key: 'health.currency', group: 'health', label: 'Currency', type: 'enum', enumValues: CURRENCIES, secret: false, envKey: 'HEALTH_CURRENCY', help: 'The single currency every price and health-spend total is shown in, across the whole account.', zod: enom(CURRENCIES) },
-  { key: 'health.price_required', group: 'health', label: 'Require a price on medications and treatments', type: 'enum', enumValues: ON_OFF, secret: false, envKey: 'HEALTH_PRICE_REQUIRED', help: 'Off by default, so pricing stays optional. Turn on to make a price mandatory when adding or editing a medication (per pack) or a treatment (per session), so the yearly health spend is always complete.', zod: enom(ON_OFF) },
+  { key: 'health.currency', group: 'health', label: 'Currency', type: 'enum', enumValues: CURRENCIES, secret: false, envKey: 'HEALTH_CURRENCY', help: 'The single currency every cost and health-spend total is shown in, across the whole account.', zod: enom(CURRENCIES) },
 
   // Scheduler
   { key: 'scheduler.reminder_interval_ms', group: 'scheduler', label: 'Reminder check interval (ms)', type: 'number', secret: false, envKey: 'REMINDER_CHECK_INTERVAL_MS', help: '0 or less disables the reminder scheduler.', zod: num() },

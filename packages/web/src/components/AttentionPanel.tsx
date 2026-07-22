@@ -15,7 +15,7 @@ import type { MedicationRecord } from '../lib/care';
 export interface AttentionItem {
   profile_id: string;
   profile_name: string;
-  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'reorder_overdue' | 'unresolved_outcome';
+  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'reorder_overdue' | 'unresolved_outcome' | 'appointment_cost';
   label: string;
   detail: string | null;
   section: string;
@@ -47,6 +47,7 @@ const ATTENTION_ICON: Record<AttentionItem['kind'], string> = {
   out_of_stock: '📦',
   reorder_overdue: '🚚',
   unresolved_outcome: '⚠️',
+  appointment_cost: '💷',
 };
 
 /**
@@ -80,6 +81,9 @@ function itemBrief(it: AttentionItem): string {
       return `Let's follow up the open question(s) for ${who} that have had no reply. ${useRecord}Draft the actual message to chase an answer here now.`;
     case 'unresolved_outcome':
       return `A task for ${who} was completed with a poor outcome: "${it.detail ?? it.label}". ${useRecord}Help me work out what went wrong and what to do next.`;
+    case 'appointment_cost':
+      return `An appointment for ${who} was booked with an estimated cost but the actual cost has not been confirmed: ${it.detail ?? it.label}. `
+        + `Remind me to open the appointment and log what it actually cost so the health spend stays accurate.`;
     default:
       return `Help me deal with this for ${who}: ${it.label}. ${useRecord}`;
   }

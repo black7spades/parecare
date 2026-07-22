@@ -22,22 +22,22 @@ export const RELEASES: Release[] = [
   {
     version: '0.4.0',
     date: '2026-07-22',
-    summary: 'Track the yearly spend on health, from a price on each medication and treatment.',
+    summary: 'Track what you actually spend on health, recorded as it happens and reported over any date range.',
     groups: [
       {
         heading: 'Health spend',
         items: [
-          'Medications now take a price per pack, and treatments a price per session, so the yearly spend on someone’s health can be tracked.',
-          'The yearly cost is worked out for you: a medication’s from its price, pack size and schedule (how many packs a year it gets through), and a treatment’s from its price per session and how many sessions a year. An as needed medication with no set schedule is left out, since there is no predictable yearly count.',
-          'A Health spend card on each person’s overview, for the account owner and admins only, showing the medication total, treatment total, combined total, and each priced item’s own yearly cost.',
+          'Spend is a ledger of real, dated costs, not a projection. A medication’s cost is recorded when a repeat is replenished, so the "repeat arrived" step now asks what it cost.',
+          'An appointment or therapy takes an estimated cost when you book it and a confirmed actual cost afterwards. Until you confirm it, the estimate is kept apart and does not count, and the Homeboard reminds you to log what a past appointment actually cost.',
+          'One-off costs, like a mobility aid or a dental bill, can be added by hand.',
+          'A Health spend card on each person’s overview, for the account owner and admins only, with a Last 12 months, This year or All time view, the total split into medications, appointments and other, and every dated entry.',
         ],
       },
       {
         heading: 'Reports and settings',
         items: [
-          'A Health spend report and yearly-cost columns on the medications report, so spend rolls up across everyone in your care in the high-level reports.',
-          'A new Health spend group in System settings sets one currency for the whole account and can require a price on every medication and treatment.',
-          'The medications list gains a price per pack column, and price is included in medication import and export.',
+          'Two date-range reports, Health spend and Health spend itemised, so costs roll up across everyone in your care over whatever range you choose.',
+          'A new Health spend group in System settings sets one currency for the whole account.',
         ],
       },
     ],

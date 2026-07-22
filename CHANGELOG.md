@@ -9,22 +9,26 @@ source. Versions follow [semantic versioning](https://semver.org).
 
 ### Added
 
-- A **price** on medications (per pack) and treatments (per session), so the
-  **yearly spend on health** can be tracked. A medication's yearly cost is
-  worked out from its price, pack size and schedule (how many packs a year it
-  gets through); a treatment's from its price per session and how many sessions
-  a year. An as-needed medication with no set schedule is left out, since it
-  has no predictable yearly count.
+- **Health spend tracking**, built as a ledger of real costs rather than a
+  projection. Every amount is a dated entry, so spend over any period is just
+  the entries in that window.
+- A medication's cost is recorded **when a repeat is replenished**: the "repeat
+  arrived" step now takes what it cost, logged and dated to the day it arrived.
+- An appointment or therapy takes an **estimated cost when it is booked** and a
+  confirmed **actual cost afterwards**. Until it is confirmed, the estimate is
+  kept apart and does not count towards spend, and the Homeboard's
+  needs-attention list prompts you to log what a past appointment actually
+  cost.
+- A one-off cost (a mobility aid, a dental bill) can be **added by hand**.
 - A **Health spend** card on each person's overview, for the account owner and
-  admins only. It shows the yearly medication total, treatment total, combined
-  total, and each priced item's own yearly cost.
-- A **Health spend** report and yearly-cost columns on the medications report,
-  so spend rolls up across everyone in your care in the high-level reports.
-- A **currency** and a **require a price** switch in System settings, under a
-  new Health spend group. One currency is used across the whole account, and a
-  price can be made mandatory when adding or editing a medication or treatment.
-- A **Price per pack** column on the medications list and in medication
-  import and export.
+  admins only, with a Last 12 months / This year / All time switch, the total
+  and its split into medications, appointments and other, and every dated
+  entry.
+- Two **date-range reports**: Health spend (per person, by category) and Health
+  spend, itemised (every entry), so costs roll up across everyone in your care
+  over whatever range you choose.
+- A **currency** setting in System settings, under a new Health spend group,
+  used across the whole account.
 
 ## [0.3.0] - 2026-07-22
 

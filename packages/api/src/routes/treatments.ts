@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { requireProfileOwner } from '../middleware/permissions';
-import { isHealthPriceRequired } from '../config/settings';
 import { resolveConditionId } from './medications';
 
 /**
@@ -56,10 +55,6 @@ const treatmentSchema = z.object({
   // are kept in sync for existing callers.
   current_status: z.enum(TREATMENT_STATUSES).optional(),
   last_review_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
-  // Cost of one session and how many sessions are expected in a year; together
-  // they give the yearly spend on this treatment.
-  price: z.coerce.number().min(0).max(1e9).optional().nullable(),
-  sessions_per_year: z.coerce.number().int().min(0).max(100000).optional().nullable(),
   // Accepted on create so a treatment and its measures are set up in one go.
   metrics: z.array(metricSchema).max(20).optional(),
 });
@@ -83,23 +78,11 @@ const treatmentSelect = () =>
     .leftJoin('medical_conditions as mc', 't.medical_condition_id', 'mc.id')
     .select('t.*', 'mc.name as condition_name');
 
-// Postgres returns a decimal column as a string; hand the client a real number
-// so the price arrives as the numeric type the form expects.
-const numOrNull = (v: unknown): number | null => {
-  if (v === null || v === undefined || v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
-const normaliseTreatment = <T extends Record<string, unknown>>(t: T): T => ({
-  ...t,
-  price: numOrNull(t['price']),
-});
-
 async function treatmentWithMetrics(id: string): Promise<Record<string, unknown> | null> {
   const treatment = await treatmentSelect().where('t.id', id).first();
   if (!treatment) return null;
   const metrics = await metricsFor([id]);
-  return { ...normaliseTreatment(treatment), metrics: metrics.get(id) ?? [] };
+  return { ...treatment, metrics: metrics.get(id) ?? [] };
 }
 
 // Shared field mapping for create and edit, resolving the condition tie
@@ -124,8 +107,6 @@ async function treatmentFieldsFrom(
     fields['current_status'] = data.active === false ? 'discontinued' : 'active';
   }
   if ('last_review_date' in data) fields['last_review_date'] = data.last_review_date ?? null;
-  if ('price' in data) fields['price'] = data.price ?? null;
-  if ('sessions_per_year' in data) fields['sessions_per_year'] = data.sessions_per_year ?? null;
   if (data.schedule_times !== undefined) {
     fields['schedule_times'] = data.schedule_times ? db.raw('?::jsonb', [JSON.stringify(data.schedule_times)]) : null;
   }
@@ -154,7 +135,7 @@ treatmentsRouter.get('/', requireAuth, async (req, res) => {
   const lastByTreatment = new Map(lastObserved.map((r) => [r.treatment_id, r.last_observed_at]));
   res.json({
     treatments: treatments.map((t) => ({
-      ...normaliseTreatment(t),
+      ...t,
       metrics: metrics.get(t.id) ?? [],
       last_observed_at: lastByTreatment.get(t.id) ?? null,
     })),
@@ -176,10 +157,6 @@ treatmentsRouter.post('/', requireAuth, requireProfileOwner, async (req, res) =>
   }
   if (!(await conditionBelongsToProfile(parsed.data.medical_condition_id, req.params['id']!))) {
     res.status(400).json({ error: 'Condition not found', code: 'VALIDATION_ERROR' });
-    return;
-  }
-  if (isHealthPriceRequired() && (parsed.data.price === undefined || parsed.data.price === null)) {
-    res.status(400).json({ error: 'A price per session is required.', code: 'PRICE_REQUIRED' });
     return;
   }
   const fields = await treatmentFieldsFrom(parsed.data, req.params['id']!);
@@ -209,10 +186,6 @@ treatmentsRouter.patch('/:treatmentId', requireAuth, requireProfileOwner, async 
   }
   if (!(await conditionBelongsToProfile(parsed.data.medical_condition_id, req.params['id']!))) {
     res.status(400).json({ error: 'Condition not found', code: 'VALIDATION_ERROR' });
-    return;
-  }
-  if (isHealthPriceRequired() && 'price' in parsed.data && (parsed.data.price === undefined || parsed.data.price === null)) {
-    res.status(400).json({ error: 'A price per session is required.', code: 'PRICE_REQUIRED' });
     return;
   }
   const fields = await treatmentFieldsFrom(parsed.data, req.params['id']!);

@@ -5,7 +5,6 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
-import { useHealthConfig } from '../../../lib/appConfig';
 import {
   METRIC_VALUE_TYPES,
   OBSERVATION_STATUSES,
@@ -22,7 +21,6 @@ import {
 } from '../../../lib/care';
 
 const SELECT = 'rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
-const COST_INPUT = 'inline-block w-24 rounded-md border border-border bg-card px-2 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
 function localNow(): string {
   const d = new Date();
@@ -380,13 +378,10 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved }: {
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const health = useHealthConfig();
   const [name, setName] = useState(treatment?.name ?? '');
   const [category, setCategory] = useState(treatment?.category ?? 'other');
   const [condition, setCondition] = useState(treatment?.condition_name ?? '');
   const [frequency, setFrequency] = useState(treatment?.frequency ?? '');
-  const [price, setPrice] = useState(treatment?.price != null ? String(treatment.price) : '');
-  const [sessionsPerYear, setSessionsPerYear] = useState(treatment?.sessions_per_year != null ? String(treatment.sessions_per_year) : '');
   const [asNeeded, setAsNeeded] = useState(treatment?.as_needed ?? false);
   const [instructions, setInstructions] = useState(treatment?.instructions ?? '');
   const [active, setActive] = useState(treatment?.active ?? true);
@@ -430,8 +425,6 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved }: {
         as_needed: asNeeded,
         instructions: instructions.trim() || null,
         active,
-        price: price.trim() === '' ? null : Number(price),
-        sessions_per_year: sessionsPerYear.trim() === '' ? null : Number(sessionsPerYear),
       };
       const cleanMetrics = metrics
         .map((m, i) => ({ ...m, name: m.name.trim(), unit: m.unit.trim(), sort_order: i }))
@@ -470,11 +463,9 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved }: {
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to delete'),
   });
 
-  const priceMissing = health.price_required && price.trim() === '';
-
   return (
     <Modal open onClose={onClose} title={treatment ? 'Edit treatment' : 'Add treatment'} wide>
-      <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); if (name.trim() && !priceMissing) mutation.mutate(); }}>
+      <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); if (name.trim()) mutation.mutate(); }}>
         {!treatment ? (
           <div>
             <label htmlFor="treatment-template" className="block text-sm font-medium text-ink mb-1">Start from a ready-made set-up</label>
@@ -521,34 +512,6 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved }: {
         </div>
 
         <Textarea label="Instructions" value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={2} placeholder="Anything a carer should know when doing this" />
-
-        <section>
-          <h3 className="text-sm font-semibold text-ink mb-2">Cost</h3>
-          <p className="text-sm text-ink leading-8">
-            Each session costs {health.currency_symbol}
-            <input
-              className={COST_INPUT}
-              aria-label="Price per session"
-              type="number"
-              min="0"
-              step="any"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              required={health.price_required}
-            />
-            {health.price_required ? <span className="text-red-600"> *</span> : null}, and there are about{' '}
-            <input
-              className={COST_INPUT}
-              aria-label="Sessions per year"
-              type="number"
-              min="0"
-              step="1"
-              value={sessionsPerYear}
-              onChange={(e) => setSessionsPerYear(e.target.value)}
-            />{' '}
-            sessions a year. Together they give the yearly spend on this treatment.
-          </p>
-        </section>
 
         <section>
           <h3 className="text-sm font-semibold text-ink">What each session records</h3>
@@ -602,7 +565,7 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved }: {
           ) : <span />}
           <div className="flex gap-2">
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button type="submit" loading={mutation.isPending} disabled={!name.trim() || priceMissing}>Save</Button>
+            <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>Save</Button>
           </div>
         </div>
       </form>

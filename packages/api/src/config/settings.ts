@@ -153,19 +153,11 @@ export function isMessageToneGuardEnabled(): boolean {
 }
 
 /**
- * The single currency every price and health-spend total is shown in, across
+ * The single currency every cost and health-spend total is shown in, across
  * the whole account. Defaults to AUD until a super admin changes it.
  */
 export function getHealthCurrency(): string {
   return str('health.currency') ?? 'AUD';
-}
-
-/**
- * Whether a price is mandatory when adding or editing a medication or a
- * treatment. Off by default, so pricing stays optional.
- */
-export function isHealthPriceRequired(): boolean {
-  return (str('health.price_required') ?? 'off') === 'on';
 }
 
 export function getOAuthConfig() {

@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
@@ -831,115 +832,211 @@ function UpcomingEvents({ profileId }: { profileId: string }) {
   );
 }
 
-interface HealthSpendLine {
+interface SpendEntry {
   id: string;
-  name: string;
-  price: number | null;
-  sessions_per_year?: number | null;
-  annual_cost: number | null;
+  amount: number;
+  spent_on: string;
+  category: 'medication' | 'appointment' | 'other';
+  status: 'confirmed' | 'estimated';
+  description: string | null;
+  item_name: string | null;
 }
-interface HealthSpendResponse {
-  health_spend: {
+interface SpendResponse {
+  summary: {
     currency: string;
     currency_symbol: string;
-    medications: HealthSpendLine[];
-    treatments: HealthSpendLine[];
-    medication_annual_total: number;
-    treatment_annual_total: number;
-    annual_total: number;
+    by_category: { medication: number; appointment: number; other: number };
+    total: number;
+    pending_total: number;
   };
+  entries: SpendEntry[];
+}
+
+type SpendRange = '12m' | 'year' | 'all';
+
+const CATEGORY_LABEL: Record<SpendEntry['category'], string> = {
+  medication: 'Medication',
+  appointment: 'Appointment',
+  other: 'Other',
+};
+
+function spendRangeParams(range: SpendRange): string {
+  const today = new Date();
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  if (range === 'all') return '';
+  if (range === 'year') return `?from=${today.getFullYear()}-01-01&to=${iso(today)}`;
+  const from = new Date(today);
+  from.setFullYear(from.getFullYear() - 1);
+  return `?from=${iso(from)}&to=${iso(today)}`;
 }
 
 /**
- * A person's yearly health spend: the medication and treatment totals, the
- * combined total, and each priced item's own yearly cost. Every figure is its
- * own value, worked out from the prices on the records. Owner and admin only.
+ * A person's actual health spend over a chosen window: the total and its split
+ * into medications, appointments and one-off costs, plus each dated entry.
+ * Only confirmed amounts count; an appointment estimate awaiting confirmation
+ * is shown apart. Reports do custom date ranges. Owner and admin only.
  */
 function HealthSpendOverview({ profileId, careName }: { profileId: string; careName: string }) {
+  const queryClient = useQueryClient();
+  const [range, setRange] = useState<SpendRange>('12m');
+  const [adding, setAdding] = useState(false);
+  const [confirming, setConfirming] = useState<SpendEntry | null>(null);
+
   const { data, isLoading } = useQuery({
-    queryKey: ['health-spend', profileId],
-    queryFn: () => api.get<HealthSpendResponse>(`/care-profiles/${profileId}/health-spend`),
+    queryKey: ['health-spend', profileId, range],
+    queryFn: () => api.get<SpendResponse>(`/care-profiles/${profileId}/health-spend${spendRangeParams(range)}`),
   });
-  if (isLoading) return <p className="text-sm text-muted">Working out the yearly spend…</p>;
-  const spend = data?.health_spend;
-  if (!spend) return <p className="text-sm text-muted">No spend to show yet.</p>;
 
-  const sym = spend.currency_symbol;
-  const money = (n: number | null): string =>
-    n == null ? '—' : `${sym}${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['health-spend', profileId] });
 
-  const pricedMeds = spend.medications.filter((m) => m.annual_cost != null);
-  const pricedTreatments = spend.treatments.filter((t) => t.annual_cost != null);
-  const unpricedMeds = spend.medications.filter((m) => m.price == null);
-  const nothingPriced = pricedMeds.length === 0 && pricedTreatments.length === 0;
+  const sym = data?.summary.currency_symbol ?? '$';
+  const money = (n: number): string => `${sym}${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmtDay = (d: string) => { try { return format(new Date(d), 'd MMM yyyy'); } catch { return d; } };
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-lg border border-border p-3">
-          <p className="text-xs text-muted">Medications a year</p>
-          <p className="text-lg font-semibold text-ink">{money(spend.medication_annual_total)}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex rounded-md border border-border overflow-hidden text-xs">
+          {([['12m', 'Last 12 months'], ['year', 'This year'], ['all', 'All time']] as [SpendRange, string][]).map(([val, label]) => (
+            <button
+              key={val}
+              type="button"
+              className={`px-2.5 py-1 ${range === val ? 'bg-primary text-white' : 'bg-card text-muted hover:text-ink'}`}
+              onClick={() => setRange(val)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-        <div className="rounded-lg border border-border p-3">
-          <p className="text-xs text-muted">Treatments a year</p>
-          <p className="text-lg font-semibold text-ink">{money(spend.treatment_annual_total)}</p>
-        </div>
-        <div className="rounded-lg border border-primary/40 bg-primary/5 p-3">
-          <p className="text-xs text-muted">Total a year</p>
-          <p className="text-lg font-semibold text-ink">{money(spend.annual_total)}</p>
-        </div>
+        <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>Add a cost</Button>
       </div>
 
-      {nothingPriced ? (
-        <p className="text-sm text-muted">
-          Add a price to {careName}'s medications and treatments to see the yearly spend build up here.
-        </p>
+      {isLoading || !data ? (
+        <p className="text-sm text-muted">Adding up the spend…</p>
       ) : (
-        <div className="space-y-3">
-          {pricedMeds.length > 0 ? (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-1">Medications</p>
-              <ul className="divide-y divide-border text-sm">
-                {pricedMeds.map((m) => (
-                  <li key={m.id} className="flex items-center justify-between py-1.5">
-                    <span className="text-ink">{m.name}</span>
-                    <span className="text-muted">
-                      {money(m.price)} a pack<span className="mx-1.5">·</span>
-                      <span className="text-ink font-medium">{money(m.annual_cost)} a year</span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
+        <>
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div className="rounded-lg border border-primary/40 bg-primary/5 p-3">
+              <p className="text-xs text-muted">Total spent</p>
+              <p className="text-lg font-semibold text-ink">{money(data.summary.total)}</p>
             </div>
-          ) : null}
-          {pricedTreatments.length > 0 ? (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-1">Treatments</p>
-              <ul className="divide-y divide-border text-sm">
-                {pricedTreatments.map((t) => (
-                  <li key={t.id} className="flex items-center justify-between py-1.5">
-                    <span className="text-ink">{t.name}</span>
-                    <span className="text-muted">
-                      {money(t.price)} a session<span className="mx-1.5">·</span>
-                      {t.sessions_per_year ?? 0} a year<span className="mx-1.5">·</span>
-                      <span className="text-ink font-medium">{money(t.annual_cost)} a year</span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-xs text-muted">Medications</p>
+              <p className="text-lg font-semibold text-ink">{money(data.summary.by_category.medication)}</p>
             </div>
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-xs text-muted">Appointments</p>
+              <p className="text-lg font-semibold text-ink">{money(data.summary.by_category.appointment)}</p>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <p className="text-xs text-muted">Other</p>
+              <p className="text-lg font-semibold text-ink">{money(data.summary.by_category.other)}</p>
+            </div>
+          </div>
+
+          {data.summary.pending_total > 0 ? (
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              {money(data.summary.pending_total)} in booked appointments is still an estimate, not counted above until the
+              actual cost is confirmed.
+            </p>
           ) : null}
-        </div>
+
+          {data.entries.length === 0 ? (
+            <p className="text-sm text-muted">
+              No costs recorded in this window. A medication cost is logged when a repeat is replenished, an appointment when
+              you confirm what it cost, and one-off costs with Add a cost.
+            </p>
+          ) : (
+            <ul className="divide-y divide-border text-sm">
+              {data.entries.map((e) => (
+                <li key={e.id} className="flex items-center justify-between gap-3 py-1.5">
+                  <div className="min-w-0">
+                    <span className="text-ink">{e.item_name || CATEGORY_LABEL[e.category]}</span>
+                    <span className="block text-xs text-muted">
+                      {fmtDay(e.spent_on)} · {CATEGORY_LABEL[e.category]}
+                      {e.status === 'estimated' ? ' · estimate' : ''}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={e.status === 'estimated' ? 'text-muted italic' : 'text-ink font-medium'}>{money(e.amount)}</span>
+                    {e.status === 'estimated' ? (
+                      <Button size="xs" variant="secondary" onClick={() => setConfirming(e)}>Confirm</Button>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-xs text-muted">Need a specific date range or a breakdown to export? Use Reports.</p>
+        </>
       )}
 
-      {unpricedMeds.length > 0 && !nothingPriced ? (
-        <p className="text-xs text-muted">
-          {unpricedMeds.length === 1 ? 'One medication has' : `${unpricedMeds.length} medications have`} no price yet, so
-          {unpricedMeds.length === 1 ? ' it is' : ' they are'} not counted. An as-needed medication with no set schedule
-          cannot be worked out into a yearly figure.
-        </p>
+      {adding ? (
+        <AddCostModal profileId={profileId} careName={careName} currencySymbol={sym} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); void refresh(); }} />
+      ) : null}
+      {confirming ? (
+        <ConfirmCostModal profileId={profileId} entry={confirming} currencySymbol={sym} onClose={() => setConfirming(null)} onSaved={() => { setConfirming(null); void refresh(); }} />
       ) : null}
     </div>
+  );
+}
+
+/** Record a one-off health cost by hand: amount, the day it was spent, a note. */
+function AddCostModal({ profileId, careName, currencySymbol, onClose, onSaved }: { profileId: string; careName: string; currencySymbol: string; onClose: () => void; onSaved: () => void }) {
+  const [amount, setAmount] = useState('');
+  const [spentOn, setSpentOn] = useState(new Date().toISOString().slice(0, 10));
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const mutation = useMutation({
+    mutationFn: () => api.post(`/care-profiles/${profileId}/health-spend`, {
+      amount: Number(amount),
+      spent_on: spentOn,
+      description: note.trim() || null,
+    }),
+    onSuccess: onSaved,
+    onError: (err) => setError(err instanceof Error ? err.message : 'Could not save the cost.'),
+  });
+  return (
+    <Modal open onClose={onClose} title={`Add a cost for ${careName}`}>
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (amount.trim()) mutation.mutate(); }}>
+        <Input label={`Amount (${currencySymbol})`} type="number" min="0" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+        <Input label="Date spent" type="date" value={spentOn} onChange={(e) => setSpentOn(e.target.value)} required />
+        <Input label="What was it for" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Mobility aid, dental treatment" />
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={mutation.isPending} disabled={!amount.trim()}>Save</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Confirm what a booked appointment actually cost, turning its estimate into
+ * confirmed spend. */
+function ConfirmCostModal({ profileId, entry, currencySymbol, onClose, onSaved }: { profileId: string; entry: SpendEntry; currencySymbol: string; onClose: () => void; onSaved: () => void }) {
+  const [amount, setAmount] = useState(String(entry.amount));
+  const [error, setError] = useState('');
+  const mutation = useMutation({
+    mutationFn: () => api.patch(`/care-profiles/${profileId}/health-spend/${entry.id}`, {
+      amount: Number(amount),
+      status: 'confirmed',
+    }),
+    onSuccess: onSaved,
+    onError: (err) => setError(err instanceof Error ? err.message : 'Could not confirm the cost.'),
+  });
+  return (
+    <Modal open onClose={onClose} title={`Confirm what it cost: ${entry.item_name ?? 'appointment'}`}>
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (amount.trim()) mutation.mutate(); }}>
+        <p className="text-sm text-muted">Booked with an estimate of {currencySymbol}{entry.amount}. Enter what it actually cost.</p>
+        <Input label={`Actual amount (${currencySymbol})`} type="number" min="0" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={mutation.isPending} disabled={!amount.trim()}>Confirm cost</Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
