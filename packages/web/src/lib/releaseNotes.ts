@@ -28,6 +28,7 @@ export const RELEASES: Release[] = [
         heading: 'Medications',
         items: [
           'An "as needed" checkbox on the add and edit medication form, for a medication with no set schedule, such as a painkiller or diazepam taken when required. It sits in the as needed group and a dose is logged when one is taken.',
+          'A tracked reorder workflow for a medication running low: mark it ordered when you request a repeat, and replenished when it arrives, which tops the supply back up. If something ordered has not arrived after five days, it is flagged for chasing up.',
         ],
       },
       {
