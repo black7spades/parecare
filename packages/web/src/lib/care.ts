@@ -664,6 +664,9 @@ export interface MedicalCondition {
   resolved_on: string | null;
   condition_type: string | null;
   severity: string | null;
+  /** The person's normal level on the 1 to 10 symptom scale for this condition;
+   * health alerts fire only above it. Null falls back to the standard rule. */
+  baseline_severity: number | null;
   is_permanent: boolean | null;
   expected_duration: string | null;
   category: string | null;

@@ -451,6 +451,7 @@ function ConditionEditor({
   const [category, setCategory] = useState(condition?.category ?? '');
   const [conditionType, setConditionType] = useState(condition?.condition_type ?? '');
   const [severity, setSeverity] = useState(condition?.severity ?? '');
+  const [baselineSeverity, setBaselineSeverity] = useState(condition?.baseline_severity != null ? String(condition.baseline_severity) : '');
   const [status, setStatus] = useState(condition?.status ?? 'active');
   const [startedOn, setStartedOn] = useState(condition?.started_on ?? '');
   const [resolvedOn, setResolvedOn] = useState(condition?.resolved_on ?? '');
@@ -468,6 +469,7 @@ function ConditionEditor({
     setCategory(condition.category ?? '');
     setConditionType(condition.condition_type ?? '');
     setSeverity(condition.severity ?? '');
+    setBaselineSeverity(condition.baseline_severity != null ? String(condition.baseline_severity) : '');
     setStatus(condition.status);
     setStartedOn(condition.started_on ?? '');
     setResolvedOn(condition.resolved_on ?? '');
@@ -488,6 +490,7 @@ function ConditionEditor({
         category: category || null,
         condition_type: conditionType || null,
         severity: severity || null,
+        baseline_severity: baselineSeverity ? Number(baselineSeverity) : null,
         status,
         started_on: startedOn || null,
         resolved_on: resolvedOn || null,
@@ -560,6 +563,19 @@ function ConditionEditor({
                 <option key={s.value} value={s.value}>{s.label}</option>
               ))}
             </select>
+          </label>
+          <label className="block">
+            <span className="block text-sm font-medium text-ink mb-1">Normal level</span>
+            <select className={inputClass} value={baselineSeverity} onChange={(e) => setBaselineSeverity(e.target.value)}>
+              <option value="">Not set</option>
+              {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                <option key={n} value={n}>{n} out of 10</option>
+              ))}
+            </select>
+            <p className="text-xs text-muted mt-1">
+              This person's usual level on the 1 to 10 symptom scale for a long-term condition. A health alert is raised
+              only when a symptom rises above it, so a condition that sits high every day does not alarm at its normal.
+            </p>
           </label>
           <label className="block">
             <span className="block text-sm font-medium text-ink mb-1">Status</span>
