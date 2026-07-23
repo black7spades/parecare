@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { Button } from './ui/Button';
 import { Modal } from './ui/Modal';
+import { CrossIcon } from './ui/icons';
 
 interface ProposedAction { type: string; [k: string]: unknown }
 interface IngestResult {
@@ -31,7 +32,7 @@ function ActionCard({ action, onChange, onRemove }: { action: ProposedAction; on
     <div className="rounded-lg border border-border p-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted">{ACTION_TITLE[action.type] ?? action.type.replace(/_/g, ' ')}</span>
-        <button type="button" className="text-xs text-muted hover:text-red-600" onClick={onRemove}>Remove</button>
+        <Button size="xs" variant="ghost-danger" aria-label={`Remove this ${ACTION_TITLE[action.type] ?? 'proposed'} item`} title="Remove" onClick={onRemove}><CrossIcon /></Button>
       </div>
       <div className="grid sm:grid-cols-2 gap-2">
         {keys.map((k) => (

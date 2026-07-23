@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { PencilIcon, TrashIcon, CrossIcon } from '../../../components/ui/icons';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { CatalogueCombo } from '../../../components/CatalogueCombo';
@@ -319,11 +320,11 @@ export function ConditionsPage() {
                     </td>
                     {canEdit ? (
                       <td className="px-3 py-2 text-right whitespace-nowrap">
-                        <Button size="xs" variant="ghost" className="mr-1" onClick={() => setEditing(c)}>
-                          Edit
+                        <Button size="xs" variant="ghost" className="mr-1" aria-label={`Edit ${c.name}`} title="Edit" onClick={() => setEditing(c)}>
+                          <PencilIcon />
                         </Button>
-                        <Button size="xs" variant="ghost-danger" onClick={() => setConfirmDelete(c)}>
-                          Delete
+                        <Button size="xs" variant="ghost-danger" aria-label={`Delete ${c.name}`} title="Delete" onClick={() => setConfirmDelete(c)}>
+                          <TrashIcon />
                         </Button>
                       </td>
                     ) : null}
@@ -729,8 +730,8 @@ function CodesSection({ profileId, condition }: { profileId: string; condition: 
           <div key={c.id} className="flex items-center gap-2 text-sm">
             <span className="badge bg-surface-2 text-muted text-xs w-24 justify-center">{codeSystemLabel(c.system)}</span>
             <span className="font-mono text-ink">{c.code}</span>
-            <Button size="xs" variant="ghost-danger" className="ml-auto" onClick={() => removeMutation.mutate(c.id)}>
-              Remove
+            <Button size="xs" variant="ghost-danger" className="ml-auto" aria-label={`Remove code ${c.code}`} title="Remove" onClick={() => removeMutation.mutate(c.id)}>
+              <CrossIcon />
             </Button>
           </div>
         ))}
@@ -812,8 +813,8 @@ function FunctionsSection({ profileId, condition }: { profileId: string; conditi
             <span className="text-ink capitalize">{f.limitation_level}</span>
             {f.temporal_pattern ? <span className="text-muted">{temporalPatternLabel(f.temporal_pattern)}</span> : null}
             {f.impact_on_activities ? <span className="text-muted flex-1">{f.impact_on_activities}</span> : null}
-            <Button size="xs" variant="ghost-danger" className="ml-auto" onClick={() => removeMutation.mutate(f.id)}>
-              Remove
+            <Button size="xs" variant="ghost-danger" className="ml-auto" aria-label={`Remove ${functionDomainLabel(f.domain)} limitation`} title="Remove" onClick={() => removeMutation.mutate(f.id)}>
+              <CrossIcon />
             </Button>
           </div>
         ))}

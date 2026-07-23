@@ -5,6 +5,36 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.9.0] - 2026-07-23
+
+### Added
+
+- **A people switcher in the middle of the top bar.** Search across everyone in
+  your care and jump straight to a person or pet, without first returning to the
+  All people list. The current profile is marked and listed first.
+
+### Changed
+
+- **A consistent icon for every record action across the app.** Edit, Delete,
+  Remove, Unlink, Link, Dismiss and the add-or-edit-note action on rows and
+  cards are now the same small icons everywhere, in the directories (People,
+  Pets, Providers, Suppliers, Assets, Addresses), throughout a person's record
+  (Conditions, Allergies, Neurotypes, Treatments, Substance use, Care needs,
+  Appointments, Documents, Medication record, Care circle, Care plan access,
+  Questions, Logs, the current-health and managed-with panels), on the
+  Homeboard's needs-attention items, in notification settings and the upload
+  review, and on the admin screens. Each icon keeps a tooltip and a spoken
+  label naming the record it acts on, and every icon still means one thing:
+  a pencil edits, a bin deletes, a cross removes or dismisses, a broken chain
+  unlinks, a chain links.
+- Buttons that confirm an action in a dialog, and actions that work on a whole
+  selection at once, keep their words, so the meaning stays clear where it
+  matters most.
+- **Every left-hand section of a person's record now has its own icon**, from
+  Overview and Care journey through Conditions, Medications and the Medication
+  record to Messages, Questions and Ask PareCare, so the navigation reads at a
+  glance and matches the icons already used in the Directory.
+
 ## [0.8.0] - 2026-07-22
 
 ### Added

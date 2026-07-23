@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { Button } from './ui/Button';
+import { CrossIcon } from './ui/icons';
 import { Input } from './ui/Input';
 import { Modal } from './ui/Modal';
 import { CatalogueCombo } from './CatalogueCombo';
@@ -361,9 +362,11 @@ export function MedicationModal({
                     <Button
                       size="xs"
                       variant="ghost-danger"
+                      aria-label={`Remove time ${i + 1}`}
+                      title="Remove"
                       onClick={() => setTimes(times.filter((_, j) => j !== i))}
                     >
-                      Remove
+                      <CrossIcon />
                     </Button>
                   ) : null}
                 </div>

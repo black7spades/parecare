@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
@@ -264,11 +265,11 @@ export function DocumentsPage() {
                         </Button>
                         {canEdit ? (
                           <>
-                            <Button size="sm" variant="secondary" onClick={() => setEditing(doc)}>
-                              Edit
+                            <Button size="xs" variant="ghost" aria-label={`Edit ${doc.label}`} title="Edit" onClick={() => setEditing(doc)}>
+                              <PencilIcon />
                             </Button>
-                            <Button size="sm" variant="ghost" onClick={() => setDeleting(doc)}>
-                              Delete
+                            <Button size="xs" variant="ghost-danger" aria-label={`Delete ${doc.label}`} title="Delete" onClick={() => setDeleting(doc)}>
+                              <TrashIcon />
                             </Button>
                           </>
                         ) : null}

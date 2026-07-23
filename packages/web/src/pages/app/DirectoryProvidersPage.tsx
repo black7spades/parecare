@@ -7,6 +7,7 @@ import { DataToolbar } from '../../components/data/DataToolbar';
 import { SortableTh } from '../../components/data/SortableTh';
 import { useDataView, type DataSort, type DataFilter } from '../../components/data/useDataView';
 import { Button } from '../../components/ui/Button';
+import { LinkIcon, PencilIcon, TrashIcon } from '../../components/ui/icons';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
 import {
@@ -213,9 +214,9 @@ export function DirectoryProvidersPage() {
                   {canEdit ? (
                     <td className="px-3 py-2">
                       <div className="flex gap-1">
-                        <Button size="sm" variant="secondary" onClick={() => setBulkLinking(p)}>Link</Button>
-                        <Button size="sm" variant="secondary" onClick={() => { setEditing(p); setEditorOpen(true); }}>Edit</Button>
-                        <Button size="sm" variant="ghost" onClick={() => setDeleting(p)}>Delete</Button>
+                        <Button size="xs" variant="ghost" aria-label={`Link ${p.name} to profiles`} title="Link to profiles" onClick={() => setBulkLinking(p)}><LinkIcon /></Button>
+                        <Button size="xs" variant="ghost" aria-label={`Edit ${p.name}`} title="Edit" onClick={() => { setEditing(p); setEditorOpen(true); }}><PencilIcon /></Button>
+                        <Button size="xs" variant="ghost-danger" aria-label={`Delete ${p.name}`} title="Delete" onClick={() => setDeleting(p)}><TrashIcon /></Button>
                       </div>
                     </td>
                   ) : null}

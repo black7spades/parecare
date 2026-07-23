@@ -20,6 +20,27 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.9.0',
+    date: '2026-07-23',
+    summary: 'A people switcher in the top bar, a consistent icon for every action across the app, and an icon on every section in a person’s record.',
+    groups: [
+      {
+        heading: 'Switch between people faster',
+        items: [
+          'A people switcher now sits in the middle of the top bar. Search across everyone in your care and jump straight to a person or pet, without first going back to the All people list. The current profile is marked and listed first.',
+        ],
+      },
+      {
+        heading: 'A consistent look and feel',
+        items: [
+          'Edit, delete, remove, unlink, link and dismiss are now the same small icons everywhere: in the directories, all through a person’s record, on the Homeboard’s needs-attention items, in settings and on the admin screens. Each keeps a tooltip and a spoken label naming the record it acts on.',
+          'Every icon means one thing: a pencil edits, a bin deletes, a cross removes or dismisses, a broken chain unlinks, a chain links. Buttons that confirm in a dialog, or act on a whole selection, keep their words so the meaning stays clear.',
+          'Every left-hand section of a person’s record now has its own icon, from Overview and Care journey to the Medication record, Messages and Ask PareCare, so the navigation reads at a glance and matches the Directory.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.8.0',
     date: '2026-07-22',
     summary: 'Review uploads before filing, File with Pare everywhere, and equipment linked to the conditions it manages.',
@@ -27,8 +48,8 @@ export const RELEASES: Release[] = [
       {
         heading: 'Upload and file with Pare',
         items: [
-          'What Pare proposes from an upload is now shown as editable cards, so you can fix an imprecise vendor or a wrong address, or drop an item, before anything is saved.',
-          'A paperclip in Pare\u2019s chat lets you drop a document mid-conversation, and a File with Pare button appears on the needs-attention items where a receipt or invoice belongs.',
+          'What Pare proposes from an upload is now shown as editable cards, so an imprecise vendor or a wrong address can be corrected, or an item dropped, before anything is saved.',
+          'A paperclip in Pare\u2019s chat allows you to drop a document mid-conversation, and a File with Pare button appears on the needs-attention items where a receipt or invoice belongs.',
           'Pare checks a document\u2019s addresses against the ones already on file, so your own address is not mistaken for a vendor.',
         ],
       },

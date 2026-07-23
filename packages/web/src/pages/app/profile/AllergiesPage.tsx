@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Modal } from '../../../components/ui/Modal';
 import { AllergyModal } from '../../../components/AllergyModal';
 import { PagePurpose } from '../../../components/PagePurpose';
@@ -116,11 +117,11 @@ export function AllergiesPage() {
                   <td className="px-3 py-2 text-ink">{a.reaction ?? ''}</td>
                   {canEdit ? (
                     <td className="px-3 py-2 text-right whitespace-nowrap">
-                      <Button size="xs" variant="ghost" className="mr-1" onClick={() => setEditing(a)}>
-                        Edit
+                      <Button size="xs" variant="ghost" className="mr-1" aria-label={`Edit ${a.substance}`} title="Edit" onClick={() => setEditing(a)}>
+                        <PencilIcon />
                       </Button>
-                      <Button size="xs" variant="ghost-danger" onClick={() => setConfirmDelete(a)}>
-                        Delete
+                      <Button size="xs" variant="ghost-danger" aria-label={`Delete ${a.substance}`} title="Delete" onClick={() => setConfirmDelete(a)}>
+                        <TrashIcon />
                       </Button>
                     </td>
                   ) : null}

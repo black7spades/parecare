@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, formatDistanceToNow } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { PencilIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import {
@@ -112,7 +113,7 @@ export function TreatmentsSection({ profileId, careName, canManage, canLog }: {
                   <Button size="sm" variant="secondary" onClick={() => setHistoryFor(historyFor === t.id ? null : t.id)}>
                     {historyFor === t.id ? 'Hide history' : 'History'}
                   </Button>
-                  {canManage ? <Button size="sm" variant="secondary" onClick={() => setEditing(t)}>Edit</Button> : null}
+                  {canManage ? <Button size="xs" variant="ghost" aria-label={`Edit ${t.name}`} title="Edit" onClick={() => setEditing(t)}><PencilIcon /></Button> : null}
                 </div>
               </div>
               {historyFor === t.id ? (

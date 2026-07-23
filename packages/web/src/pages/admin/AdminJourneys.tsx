@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../../api/client';
 import { Button } from '../../components/ui/Button';
+import { PencilIcon, TrashIcon } from '../../components/ui/icons';
 import { Input, Textarea } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
 import { useAuthStore } from '../../stores/auth';
@@ -112,12 +113,12 @@ function LifeStagesManager() {
                   {s.retired ? <span className="badge bg-surface-2 text-muted text-xs">Retired</span> : <span className="badge bg-primary-50 text-primary text-xs">Active</span>}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap">
-                  <Button size="xs" variant="ghost" className="mr-1" onClick={() => setEditing(s)}>
-                    Edit
+                  <Button size="xs" variant="ghost" className="mr-1" aria-label="Edit stage" title="Edit" onClick={() => setEditing(s)}>
+                    <PencilIcon />
                   </Button>
                   {s.template_count === 0 ? (
-                    <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate(s.id)}>
-                      Delete
+                    <Button size="xs" variant="ghost-danger" aria-label="Delete stage" title="Delete" onClick={() => deleteMutation.mutate(s.id)}>
+                      <TrashIcon />
                     </Button>
                   ) : (
                     <Button
@@ -372,8 +373,8 @@ function TemplateLibrary() {
                       )
                     ) : null}
                     {canEdit && t.status === 'draft' && !t.is_system ? (
-                      <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate(t.id)}>
-                        Delete
+                      <Button size="xs" variant="ghost-danger" aria-label="Delete template" title="Delete" onClick={() => deleteMutation.mutate(t.id)}>
+                        <TrashIcon />
                       </Button>
                     ) : null}
                   </td>

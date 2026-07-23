@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useAuthStore, type AccountRole } from '../../stores/auth';
 import { adminApi, type AdminAccount, type AdminCareProfile, type AdminGroup, type AdminInvitation, type AdminListParams, type AdminStats, type RightsTemplate } from '../../api/admin';
 import { Button } from '../../components/ui/Button';
+import { PencilIcon, TrashIcon } from '../../components/ui/icons';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
 import { DataToolbar } from '../../components/data/DataToolbar';
@@ -264,8 +265,8 @@ export function AdminUsers() {
                         <Button size="sm" variant="secondary" onClick={() => setAssigning(a)}>
                           Assign to care
                         </Button>
-                        <Button size="sm" variant="secondary" onClick={() => setEditing(a)}>
-                          Edit
+                        <Button size="xs" variant="ghost" aria-label={`Edit ${a.display_name}`} title="Edit" onClick={() => setEditing(a)}>
+                          <PencilIcon />
                         </Button>
                       </>
                     ) : null}
@@ -285,8 +286,8 @@ export function AdminUsers() {
                         >
                           {a.disabled_at ? 'Enable' : 'Disable'}
                         </Button>
-                        <Button size="sm" variant="danger" onClick={() => setDeleting(a)}>
-                          Delete
+                        <Button size="xs" variant="ghost-danger" aria-label={`Delete ${a.display_name}`} title="Delete" onClick={() => setDeleting(a)}>
+                          <TrashIcon />
                         </Button>
                       </>
                     ) : null}
@@ -1388,12 +1389,14 @@ function TemplatesSection({ templates, onChanged }: { templates: RightsTemplate[
                   </td>
                   <td className="px-4 py-3 text-xs text-muted">{rightsSummary(t)}</td>
                   <td className="px-4 py-3 text-right space-x-2 whitespace-nowrap">
-                    <Button size="sm" variant="secondary" onClick={() => setEditing(t)}>
-                      Edit
+                    <Button size="xs" variant="ghost" aria-label={`Edit ${t.name}`} title="Edit" onClick={() => setEditing(t)}>
+                      <PencilIcon />
                     </Button>
                     <Button
-                      size="sm"
-                      variant="danger"
+                      size="xs"
+                      variant="ghost-danger"
+                      aria-label={`Delete ${t.name}`}
+                      title="Delete"
                       onClick={async () => {
                         try {
                           await adminApi.deleteRightsTemplate(t.id);
@@ -1404,7 +1407,7 @@ function TemplatesSection({ templates, onChanged }: { templates: RightsTemplate[
                         }
                       }}
                     >
-                      Delete
+                      <TrashIcon />
                     </Button>
                   </td>
                 </tr>

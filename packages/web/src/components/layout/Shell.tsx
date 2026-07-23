@@ -17,6 +17,7 @@ import { NavSortControl, type SortOption } from './NavSortControl';
 import { SortableNavGroup, type NavItemDef } from './SortableNavGroup';
 import { navHeadingClass, navLinkClass } from './navStyles';
 import { VersionBadge } from './VersionBadge';
+import { ProfileSwitcher } from './ProfileSwitcher';
 import { AssetIcon, CheckIcon, ChartIcon, MapPinIcon, PawIcon, SignOutIcon, StethoscopeIcon, StoreIcon, UsersIcon } from '../ui/icons';
 
 interface PinnedProfile {
@@ -121,6 +122,7 @@ function ProfileNavRow({
   /** A small dot signalling something new to see in this section. */
   showPip?: boolean;
 }) {
+  const Icon = item.icon;
   return (
     <div className="group relative">
       <NavLink
@@ -129,6 +131,9 @@ function ProfileNavRow({
         className={navLinkClass}
       >
         <span className="flex items-center gap-1.5 truncate pr-5">
+          <span aria-hidden className="shrink-0 text-muted">
+            <Icon size={16} />
+          </span>
           <span className="truncate">{item.label}</span>
           {showPip ? (
             <span aria-hidden title="Ready to review" className="h-2 w-2 shrink-0 rounded-full bg-primary" />
@@ -570,7 +575,7 @@ export function Shell() {
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       {/* Top bar */}
-      <header className="shrink-0 flex items-center justify-between bg-card border-b border-border px-3 sm:px-4 h-14 z-30">
+      <header className="relative shrink-0 flex items-center justify-between bg-card border-b border-border px-3 sm:px-4 h-14 z-30">
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -602,6 +607,9 @@ export function Shell() {
           <NavLink to={homeDest} aria-label="PareCare home" className="text-lg font-semibold text-primary hover:opacity-80 transition-opacity">
             PareCare
           </NavLink>
+        </div>
+        <div className="hidden md:flex absolute left-1/2 -translate-x-1/2 w-full max-w-xs px-4 justify-center">
+          <ProfileSwitcher activeProfileId={profileId} />
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
           <TierBadge />

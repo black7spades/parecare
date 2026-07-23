@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { CrossIcon } from '../../../components/ui/icons';
 import { SymptomCourseChart } from './SymptomCourseChart';
 import type { ConditionSymptom } from '../../../lib/care';
 
@@ -170,8 +171,8 @@ export function SymptomRow({
                 <Button size="xs" variant="ghost" onClick={() => resolveMutation.mutate()}>
                   {symptom.resolved_at ? 'Reopen' : 'Resolve'}
                 </Button>
-                <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate()}>
-                  Remove
+                <Button size="xs" variant="ghost-danger" aria-label="Remove symptom" title="Remove" onClick={() => deleteMutation.mutate()}>
+                  <CrossIcon />
                 </Button>
               </>
             )}

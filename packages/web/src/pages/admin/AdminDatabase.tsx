@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../../components/ui/Button';
+import { PencilIcon, TrashIcon } from '../../components/ui/icons';
 import { Input, Textarea } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
 import { ImportExport } from '../../components/ImportExport';
@@ -507,11 +508,11 @@ export function AdminDatabase() {
                           })}
                           {hasPk ? (
                             <td className="px-3 py-2 text-right whitespace-nowrap space-x-1">
-                              <Button size="xs" variant="ghost" onClick={() => setEditing(row)}>
-                                Edit
+                              <Button size="xs" variant="ghost" aria-label="Edit row" title="Edit" onClick={() => setEditing(row)}>
+                                <PencilIcon />
                               </Button>
-                              <Button size="xs" variant="ghost-danger" onClick={() => { setDeleting(row); setDeleteError(''); }}>
-                                Delete
+                              <Button size="xs" variant="ghost-danger" aria-label="Delete row" title="Delete" onClick={() => { setDeleting(row); setDeleteError(''); }}>
+                                <TrashIcon />
                               </Button>
                             </td>
                           ) : null}

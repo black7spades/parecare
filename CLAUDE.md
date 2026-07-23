@@ -104,6 +104,10 @@ never wait to be asked for it.
   may not be trained carers. Replace clinical shorthand (e.g. "PRN" → "as
   needed") or provide inline meaning for terms like "omitted" or "held".
 - Never use em dashes in UI copy.
+- **Never write "lets you" or "you can".** They are filler. Replace "lets you"
+  with "allows you to", and drop "you can" entirely: the sentence reads fine
+  without it (e.g. "you can add a cost" becomes "add a cost"). This applies to
+  all copy, release notes and changelog entries.
 
 ## Commands
 

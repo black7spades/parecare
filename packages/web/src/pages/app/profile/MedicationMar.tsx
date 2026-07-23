@@ -7,6 +7,7 @@ import {
 } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { PencilIcon, CrossIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { MED_STATUSES, medStatusDescription, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
@@ -653,8 +654,8 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
                             <span className="text-xs text-muted" title="Archived records are a permanent history and cannot be changed.">—</span>
                           ) : (
                             <span className="inline-flex gap-3">
-                              <Button size="xs" variant="ghost" onClick={() => setEditing(a)}>Edit</Button>
-                              <Button size="xs" variant="ghost-danger" onClick={() => setPendingDelete(a)}>Remove</Button>
+                              <Button size="xs" variant="ghost" aria-label={`Edit ${a.medication_name} record`} title="Edit" onClick={() => setEditing(a)}><PencilIcon /></Button>
+                              <Button size="xs" variant="ghost-danger" aria-label={`Remove ${a.medication_name} record`} title="Remove" onClick={() => setPendingDelete(a)}><CrossIcon /></Button>
                             </span>
                           )}
                         </td>
