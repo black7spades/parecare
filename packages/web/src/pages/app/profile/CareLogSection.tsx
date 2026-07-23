@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { LOG_ENTRY_TYPES, SENTIMENTS, entryTypeLabel, sentimentEmoji, sentimentLabel, type CareLogEntry } from '../../../lib/care';
@@ -370,11 +371,11 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
                         </div>
                         {canEdit ? (
                           <div className="flex flex-col items-end gap-1 shrink-0">
-                            <Button size="xs" variant="ghost" onClick={() => { setActionError(''); setEditing(entry); }}>
-                              Edit
+                            <Button size="xs" variant="ghost" aria-label="Edit log entry" title="Edit" onClick={() => { setActionError(''); setEditing(entry); }}>
+                              <PencilIcon />
                             </Button>
-                            <Button size="xs" variant="ghost-danger" onClick={() => { setActionError(''); setConfirmDelete(entry); }}>
-                              Delete
+                            <Button size="xs" variant="ghost-danger" aria-label="Delete log entry" title="Delete" onClick={() => { setActionError(''); setConfirmDelete(entry); }}>
+                              <TrashIcon />
                             </Button>
                           </div>
                         ) : null}

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Modal } from '../../../components/ui/Modal';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { PagePurpose } from '../../../components/PagePurpose';
@@ -160,11 +161,11 @@ export function SubstanceUsePage() {
                   </td>
                   {canEdit ? (
                     <td className="px-3 py-2 text-right whitespace-nowrap">
-                      <Button size="xs" variant="ghost" className="mr-1" onClick={() => setEditing(r)}>
-                        Edit
+                      <Button size="xs" variant="ghost" className="mr-1" aria-label={`Edit ${r.substance}`} title="Edit" onClick={() => setEditing(r)}>
+                        <PencilIcon />
                       </Button>
-                      <Button size="xs" variant="ghost-danger" onClick={() => setConfirmDelete(r)}>
-                        Delete
+                      <Button size="xs" variant="ghost-danger" aria-label={`Delete ${r.substance}`} title="Delete" onClick={() => setConfirmDelete(r)}>
+                        <TrashIcon />
                       </Button>
                     </td>
                   ) : null}

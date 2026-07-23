@@ -7,6 +7,7 @@ import { DataToolbar } from '../../components/data/DataToolbar';
 import { SortableTh } from '../../components/data/SortableTh';
 import { useDataView, type DataSort } from '../../components/data/useDataView';
 import { Button } from '../../components/ui/Button';
+import { LinkIcon, PencilIcon, TrashIcon } from '../../components/ui/icons';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
 import type { Supplier } from '../../lib/care';
@@ -193,9 +194,9 @@ export function DirectorySuppliersPage() {
                   {canEdit ? (
                     <td className="px-3 py-2">
                       <div className="flex gap-1">
-                        <Button size="sm" variant="secondary" onClick={() => setBulkLinking(s)}>Link</Button>
-                        <Button size="sm" variant="secondary" onClick={() => { setEditing(s); setEditorOpen(true); }}>Edit</Button>
-                        <Button size="sm" variant="ghost" onClick={() => setDeleting(s)}>Delete</Button>
+                        <Button size="xs" variant="ghost" aria-label={`Link ${s.name} to profiles`} title="Link to profiles" onClick={() => setBulkLinking(s)}><LinkIcon /></Button>
+                        <Button size="xs" variant="ghost" aria-label={`Edit ${s.name}`} title="Edit" onClick={() => { setEditing(s); setEditorOpen(true); }}><PencilIcon /></Button>
+                        <Button size="xs" variant="ghost-danger" aria-label={`Delete ${s.name}`} title="Delete" onClick={() => setDeleting(s)}><TrashIcon /></Button>
                       </div>
                     </td>
                   ) : null}

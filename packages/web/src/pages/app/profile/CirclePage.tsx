@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { PencilIcon, CrossIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
@@ -184,11 +185,11 @@ export function CirclePage() {
                 ) : null}
                 {canManageEditors ? (
                   <div className="mt-3 flex gap-2">
-                    <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>
-                      Edit
+                    <Button size="xs" variant="ghost" aria-label={`Edit ${m.display_name}`} title="Edit" onClick={() => setEditing(m)}>
+                      <PencilIcon />
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setRemoving(m)}>
-                      Remove
+                    <Button size="xs" variant="ghost-danger" aria-label={`Remove ${m.display_name}`} title="Remove" onClick={() => setRemoving(m)}>
+                      <CrossIcon />
                     </Button>
                   </div>
                 ) : null}

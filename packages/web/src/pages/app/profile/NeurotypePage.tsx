@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { PencilIcon, TrashIcon, NoteIcon, CrossIcon } from '../../../components/ui/icons';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { CatalogueCombo } from '../../../components/CatalogueCombo';
@@ -154,8 +155,8 @@ function NeurotypeCard({
         </div>
         {canEdit ? (
           <div className="flex items-center gap-1 shrink-0">
-            <Button size="xs" variant="ghost" onClick={onEdit}>Edit</Button>
-            <Button size="xs" variant="ghost-danger" onClick={() => setConfirmDelete(true)}>Delete</Button>
+            <Button size="xs" variant="ghost" aria-label={`Edit ${condition.name}`} title="Edit" onClick={onEdit}><PencilIcon /></Button>
+            <Button size="xs" variant="ghost-danger" aria-label={`Delete ${condition.name}`} title="Delete" onClick={() => setConfirmDelete(true)}><TrashIcon /></Button>
           </div>
         ) : null}
       </div>
@@ -262,11 +263,13 @@ function AttributeKindSection({
                     <Button
                       size="xs"
                       variant="ghost"
+                      aria-label={a.notes ? `Edit note on ${a.label}` : `Add note to ${a.label}`}
+                      title={a.notes ? 'Edit note' : 'Add note'}
                       onClick={() => { setNoteFor(noteFor === a.id ? null : a.id); setNoteDraft(a.notes ?? ''); }}
                     >
-                      {a.notes ? 'Edit note' : 'Add note'}
+                      <NoteIcon />
                     </Button>
-                    <Button size="xs" variant="ghost-danger" onClick={() => remove.mutate(a.id)}>Remove</Button>
+                    <Button size="xs" variant="ghost-danger" aria-label={`Remove ${a.label}`} title="Remove" onClick={() => remove.mutate(a.id)}><CrossIcon /></Button>
                   </div>
                 ) : null}
               </div>
@@ -614,9 +617,11 @@ function NeurotypeEditor({
               <Button
                 size="xs"
                 variant="ghost"
+                aria-label="Remove diagnosis document"
+                title="Remove"
                 onClick={() => setDiagnosisDocId(null)}
               >
-                Remove
+                <CrossIcon />
               </Button>
             </div>
           ) : (

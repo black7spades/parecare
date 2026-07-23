@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Input } from '../../../components/ui/Input';
 import { CatalogueCombo, OptionChips } from '../../../components/CatalogueCombo';
 import { PagePurpose } from '../../../components/PagePurpose';
@@ -428,20 +429,24 @@ export function EmergencyContactsTable({
                             size="xs"
                             variant="ghost"
                             className="mr-1"
+                            aria-label="Edit emergency contact"
+                            title="Edit"
                             onClick={() => {
                               setEditingIndex(i);
                               setEditRelationship(c.relationship ?? '');
                               setEditPhone(c.phone);
                             }}
                           >
-                            Edit
+                            <PencilIcon />
                           </Button>
                           <Button
                             size="xs"
                             variant="ghost-danger"
+                            aria-label="Delete emergency contact"
+                            title="Delete"
                             onClick={() => onChange(contacts.filter((_, idx) => idx !== i))}
                           >
-                            Delete
+                            <TrashIcon />
                           </Button>
                         </>
                       )}

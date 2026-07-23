@@ -4,6 +4,7 @@ import { format } from 'date-fns';
 import { api } from '../../api/client';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
+import { CrossIcon } from '../../components/ui/icons';
 import { Modal } from '../../components/ui/Modal';
 
 /**
@@ -230,8 +231,8 @@ function ChannelsCard({ channels, vapidKey, onChanged }: { channels: Channel[]; 
                   >
                     {c.enabled ? 'Pause' : 'Resume'}
                   </Button>
-                  <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate(c.id)}>
-                    Remove
+                  <Button size="xs" variant="ghost-danger" aria-label="Remove notification channel" title="Remove" onClick={() => deleteMutation.mutate(c.id)}>
+                    <CrossIcon />
                   </Button>
                 </span>
               </div>

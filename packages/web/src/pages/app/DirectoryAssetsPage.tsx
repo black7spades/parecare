@@ -6,6 +6,7 @@ import { DataToolbar } from '../../components/data/DataToolbar';
 import { SortableTh } from '../../components/data/SortableTh';
 import { useDataView, type DataSort } from '../../components/data/useDataView';
 import { Button } from '../../components/ui/Button';
+import { LinkIcon, PencilIcon, TrashIcon } from '../../components/ui/icons';
 import { Input, Textarea } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
 import { useHealthConfig } from '../../lib/appConfig';
@@ -205,9 +206,9 @@ export function DirectoryAssetsPage() {
                   {canEdit ? (
                     <td className="px-3 py-2">
                       <div className="flex gap-1">
-                        <Button size="sm" variant="secondary" onClick={() => setBulkLinking(a)}>Link</Button>
-                        <Button size="sm" variant="secondary" onClick={() => { setEditing(a); setEditorOpen(true); }}>Edit</Button>
-                        <Button size="sm" variant="ghost" onClick={() => setDeleting(a)}>Delete</Button>
+                        <Button size="xs" variant="ghost" aria-label={`Link ${a.name} to profiles`} title="Link to profiles" onClick={() => setBulkLinking(a)}><LinkIcon /></Button>
+                        <Button size="xs" variant="ghost" aria-label={`Edit ${a.name}`} title="Edit" onClick={() => { setEditing(a); setEditorOpen(true); }}><PencilIcon /></Button>
+                        <Button size="xs" variant="ghost-danger" aria-label={`Delete ${a.name}`} title="Delete" onClick={() => setDeleting(a)}><TrashIcon /></Button>
                       </div>
                     </td>
                   ) : null}

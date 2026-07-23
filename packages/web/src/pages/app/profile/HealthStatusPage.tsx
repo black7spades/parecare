@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { PencilIcon, TrashIcon, CrossIcon, UnlinkIcon } from '../../../components/ui/icons';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { useProfile } from './ProfileLayout';
@@ -261,8 +262,8 @@ function SymptomRow({
           <Button size="xs" variant="ghost" onClick={() => resolveMutation.mutate()}>
             {symptom.resolved_at ? 'Reopen' : 'Resolve'}
           </Button>
-          <Button size="xs" variant="ghost-danger" onClick={() => deleteMutation.mutate()}>
-            Remove
+          <Button size="xs" variant="ghost-danger" aria-label="Remove symptom" title="Remove" onClick={() => deleteMutation.mutate()}>
+            <CrossIcon />
           </Button>
         </>
       ) : null}
@@ -393,8 +394,8 @@ function LinkedDocuments({
                 View in Documents
               </Link>
               {canEdit ? (
-                <Button size="xs" variant="ghost-danger" onClick={() => unlinkMutation.mutate(d.id)}>
-                  Unlink
+                <Button size="xs" variant="ghost-danger" aria-label={`Unlink ${d.label}`} title="Unlink" onClick={() => unlinkMutation.mutate(d.id)}>
+                  <UnlinkIcon />
                 </Button>
               ) : null}
             </div>
@@ -631,15 +632,13 @@ function StatusCard({
           </button>
           {canEdit ? (
             <>
-              <Button size="sm" variant="secondary" onClick={onEdit}>Edit</Button>
+              <Button size="xs" variant="ghost" aria-label={`Edit ${hs.name}`} title="Edit" onClick={onEdit}><PencilIcon /></Button>
               {flagged && !hs.linked_condition_id ? (
                 <Button size="sm" variant="secondary" onClick={() => migrateMutation.mutate()} loading={migrateMutation.isPending}>
                   Migrate to condition
                 </Button>
               ) : null}
-              <Button size="sm" variant="danger" onClick={() => deleteMutation.mutate()} loading={deleteMutation.isPending}>
-                Delete
-              </Button>
+              <Button size="xs" variant="ghost-danger" aria-label={`Delete ${hs.name}`} title="Delete" onClick={() => deleteMutation.mutate()} loading={deleteMutation.isPending}><TrashIcon /></Button>
             </>
           ) : null}
         </div>

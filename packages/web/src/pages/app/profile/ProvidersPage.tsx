@@ -5,6 +5,7 @@ import { AddressFields, addressFrom, addressPayload, emptyAddress, type AddressV
 import { DataToolbar } from '../../../components/data/DataToolbar';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { Button } from '../../../components/ui/Button';
+import { PencilIcon, CrossIcon, LinkIcon } from '../../../components/ui/icons';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
@@ -205,17 +206,19 @@ export function ProvidersPage() {
                   {canEdit ? (
                     <div className="mt-3 flex gap-2">
                       <Button
-                        size="sm"
-                        variant="secondary"
+                        size="xs"
+                        variant="ghost"
+                        aria-label={`Edit ${p.name}`}
+                        title="Edit"
                         onClick={() => {
                           setEditing(p);
                           setEditorOpen(true);
                         }}
                       >
-                        Edit
+                        <PencilIcon />
                       </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setRemoving(p)}>
-                        Remove
+                      <Button size="xs" variant="ghost-danger" aria-label={`Remove ${p.name}`} title="Remove" onClick={() => setRemoving(p)}>
+                        <CrossIcon />
                       </Button>
                     </div>
                   ) : null}
@@ -329,8 +332,8 @@ function ProviderPicker({
               {p.linked ? (
                 <span className="text-xs text-muted">Already linked</span>
               ) : (
-                <Button size="sm" variant="secondary" loading={linkMutation.isPending} onClick={() => linkMutation.mutate(p.id)}>
-                  Link
+                <Button size="xs" variant="ghost" aria-label={`Link ${p.name}`} title="Link" loading={linkMutation.isPending} onClick={() => linkMutation.mutate(p.id)}>
+                  <LinkIcon />
                 </Button>
               )}
             </div>

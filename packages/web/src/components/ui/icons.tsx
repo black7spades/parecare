@@ -207,3 +207,270 @@ export function SignOutIcon({ size }: IconSize) {
     </svg>
   );
 }
+
+/** Note: a small pencil writing on a line, for adding or editing a note. */
+export function NoteIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+/** Link: a chain, for linking a directory item to profiles. */
+export function LinkIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
+  );
+}
+
+/** Unlink: a broken chain, for detaching a linked record. */
+export function UnlinkIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M17 7l1-1a4 4 0 0 1 5.66 5.66l-2 2" />
+      <path d="M7 17l-1 1a4 4 0 0 1-5.66-5.66l2-2" />
+      <path d="M15 3v3" />
+      <path d="M20 8h-3" />
+      <path d="M9 21v-3" />
+      <path d="M4 16h3" />
+    </svg>
+  );
+}
+
+// ── Profile section nav glyphs ─────────────────────────────────────
+// One small icon per care-profile section, rendered beside its label in
+// the left nav. They take a size so the sidebar can render them a touch
+// smaller than in-body icons.
+
+/** Overview: a home. */
+export function HomeIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M3 9.5 12 3l9 6.5" />
+      <path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10" />
+      <path d="M9 21v-6h6v6" />
+    </svg>
+  );
+}
+
+/** Care journey: a winding route with a flag. */
+export function RouteIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <circle cx="6" cy="19" r="2" />
+      <path d="M8 19h6a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h4" />
+      <path d="M15 4h5v4h-5z" />
+    </svg>
+  );
+}
+
+/** Achievements: a trophy. */
+export function TrophyIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M6 4h12v4a6 6 0 0 1-12 0Z" />
+      <path d="M6 6H4a2 2 0 0 0 0 4h2" />
+      <path d="M18 6h2a2 2 0 0 1 0 4h-2" />
+      <path d="M12 14v4" />
+      <path d="M9 21h6" />
+      <path d="M10 18h4" />
+    </svg>
+  );
+}
+
+/** Care plan: a clipboard. */
+export function ClipboardIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <rect x="8" y="3" width="8" height="4" rx="1" />
+      <path d="M9 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-3" />
+      <path d="M9 12h6" />
+      <path d="M9 16h6" />
+    </svg>
+  );
+}
+
+/** Conditions: a heart with a pulse line. */
+export function HeartPulseIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M20.5 8.5A5 5 0 0 0 12 6a5 5 0 0 0-8.5 2.5c0 4 4.5 7.5 8.5 11 4-3.5 8.5-7 8.5-11Z" />
+      <path d="M3.5 12h3l1.5-3 2.5 6 1.5-3h3" />
+    </svg>
+  );
+}
+
+/** Allergies: a warning triangle. */
+export function AlertTriangleIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M12 3 2 20h20Z" />
+      <path d="M12 9v5" />
+      <path d="M12 17.5v.5" />
+    </svg>
+  );
+}
+
+/** Neurotypes: a brain. */
+export function BrainIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M9.5 4a2.5 2.5 0 0 0-2.5 2.5A2.5 2.5 0 0 0 4.5 9a2.5 2.5 0 0 0 0 5 2.5 2.5 0 0 0 2.5 4.5 2.5 2.5 0 0 0 5 0V4a2.5 2.5 0 0 0-2.5-2.5" />
+      <path d="M14.5 4a2.5 2.5 0 0 1 2.5 2.5A2.5 2.5 0 0 1 19.5 9a2.5 2.5 0 0 1 0 5 2.5 2.5 0 0 1-2.5 4.5 2.5 2.5 0 0 1-5 0" />
+    </svg>
+  );
+}
+
+/** Treatments: an activity pulse line. */
+export function ActivityIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M3 12h4l3 8 4-16 3 8h4" />
+    </svg>
+  );
+}
+
+/** Substance use: a mug. */
+export function MugIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M4 8h12v8a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4Z" />
+      <path d="M16 10h2a2 2 0 0 1 0 4h-2" />
+      <path d="M7 4v1" />
+      <path d="M11 4v1" />
+    </svg>
+  );
+}
+
+/** Care needs: a helping hand with a heart. */
+export function HandHeartIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M11 14 8 11a2 2 0 0 0-3 0 2 2 0 0 0 0 3l5 5 8-3a2 2 0 0 0-1-4h-5" />
+      <path d="M15 5.5a2 2 0 0 0-3-1 2 2 0 0 0-3 1c0 1.5 3 3.5 3 3.5s3-2 3-3.5Z" />
+    </svg>
+  );
+}
+
+/** Calendar: a month grid. */
+export function CalendarIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M3 9h18" />
+      <path d="M8 3v4" />
+      <path d="M16 3v4" />
+    </svg>
+  );
+}
+
+/** Appointments: a clock. */
+export function ClockIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
+/** Medication record: a clipboard with ticks. */
+export function ClipboardCheckIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <rect x="8" y="3" width="8" height="4" rx="1" />
+      <path d="M9 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-3" />
+      <path d="m9 14 1.5 1.5L13 13" />
+    </svg>
+  );
+}
+
+/** Tasks: a ticked box. */
+export function CheckSquareIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M9 11l2 2 4-4" />
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+    </svg>
+  );
+}
+
+/** Documents: a page. */
+export function FileIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+      <path d="M14 3v5h5" />
+    </svg>
+  );
+}
+
+/** Emergency sheet: a medical cross in a shield. */
+export function EmergencyIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M12 3 5 6v5c0 4 3 7 7 9 4-2 7-5 7-9V6Z" />
+      <path d="M12 8v6" />
+      <path d="M9 11h6" />
+    </svg>
+  );
+}
+
+/** Messages: a chat bubble. */
+export function ChatIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M21 12a8 8 0 0 1-11.5 7.2L4 21l1.8-5.5A8 8 0 1 1 21 12Z" />
+    </svg>
+  );
+}
+
+/** Memory book: an open book. */
+export function BookIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M12 6C10 4.5 7.5 4 4 4v13c3.5 0 6 .5 8 2 2-1.5 4.5-2 8-2V4c-3.5 0-6 .5-8 2Z" />
+      <path d="M12 6v13" />
+    </svg>
+  );
+}
+
+/** Questions: a question mark in a circle. */
+export function HelpCircleIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.5 9a2.5 2.5 0 0 1 4.5 1.5c0 1.5-2 2-2 3" />
+      <path d="M12 17v.5" />
+    </svg>
+  );
+}
+
+/** Logs: a list. */
+export function ListIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M8 6h13" />
+      <path d="M8 12h13" />
+      <path d="M8 18h13" />
+      <path d="M3.5 6v.01" />
+      <path d="M3.5 12v.01" />
+      <path d="M3.5 18v.01" />
+    </svg>
+  );
+}
+
+/** Ask PareCare: a sparkle. */
+export function SparkleIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z" />
+      <path d="M18 15l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7Z" />
+    </svg>
+  );
+}

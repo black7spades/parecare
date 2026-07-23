@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { CrossIcon } from '../../../components/ui/icons';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { AllergyModal } from '../../../components/AllergyModal';
@@ -1346,8 +1347,8 @@ function AccessModal({ profileId, onClose }: { profileId: string; onClose: () =>
                     <td className="py-2 pr-3 text-ink">{r.can_sign ? 'Yes' : 'No'}</td>
                     {canManage ? (
                       <td className="py-2 text-right">
-                        <Button size="xs" variant="ghost-danger" onClick={() => removeMutation.mutate(r.id)}>
-                          Remove
+                        <Button size="xs" variant="ghost-danger" aria-label={`Remove access for ${r.account_name ?? r.email ?? 'this person'}`} title="Remove" onClick={() => removeMutation.mutate(r.id)}>
+                          <CrossIcon />
                         </Button>
                       </td>
                     ) : null}

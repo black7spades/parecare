@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { CrossIcon } from '../../../components/ui/icons';
 import { useHealthConfig } from '../../../lib/appConfig';
 import { DirectoryAssetEditor, type DirectoryAsset } from '../DirectoryAssetsPage';
 import { AppointmentEditor } from './AppointmentsPage';
@@ -288,9 +289,10 @@ export function ManagedWithSection({
                   variant="ghost"
                   className="ml-auto"
                   aria-label={`Remove ${m.name} from this condition`}
+                  title="Remove"
                   onClick={() => unlinkMed.mutate(m.id!)}
                 >
-                  Remove
+                  <CrossIcon />
                 </Button>
               ) : null}
             </div>
@@ -315,9 +317,10 @@ export function ManagedWithSection({
                 size="xs"
                 variant="ghost-danger"
                 aria-label={`Remove ${t.name}`}
+                title="Remove"
                 onClick={() => deleteTreatment.mutate(t.id)}
               >
-                Remove
+                <CrossIcon />
               </Button>
             </div>
           ))}
@@ -384,8 +387,8 @@ function ManagedRowCard({
           ))}
         </select>
         {kindMeta ? <span className="text-xs text-muted hidden sm:inline">{kindMeta.description}</span> : null}
-        <Button size="xs" variant="ghost-danger" className="ml-auto" aria-label={`Remove row ${index + 1}`} onClick={onRemove}>
-          Remove
+        <Button size="xs" variant="ghost-danger" className="ml-auto" aria-label={`Remove row ${index + 1}`} title="Remove" onClick={onRemove}>
+          <CrossIcon />
         </Button>
       </div>
 

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { useDataView, type DataFilter, type DataSort } from '../../../components/data/useDataView';
@@ -263,11 +264,11 @@ export function AppointmentsPage() {
                   <td className="px-3 py-2 text-ink">{statusLabel(a.status)}</td>
                   {canEdit ? (
                     <td className="px-3 py-2 text-right whitespace-nowrap">
-                      <Button size="xs" variant="ghost" className="mr-1" onClick={() => setEditing(a)}>
-                        Edit
+                      <Button size="xs" variant="ghost" className="mr-1" aria-label={`Edit ${a.title}`} title="Edit" onClick={() => setEditing(a)}>
+                        <PencilIcon />
                       </Button>
-                      <Button size="xs" variant="ghost-danger" onClick={() => setConfirmDelete(a)}>
-                        Delete
+                      <Button size="xs" variant="ghost-danger" aria-label={`Delete ${a.title}`} title="Delete" onClick={() => setConfirmDelete(a)}>
+                        <TrashIcon />
                       </Button>
                     </td>
                   ) : null}

@@ -5,6 +5,7 @@ import { format, startOfDay, endOfDay } from 'date-fns';
 import { api } from '../api/client';
 import { useAssistantStore } from '../stores/assistant';
 import { Button } from './ui/Button';
+import { CrossIcon } from './ui/icons';
 import { Modal } from './ui/Modal';
 import { GpModal } from './QuickAddModals';
 import { IngestModal } from './IngestModal';
@@ -235,6 +236,8 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                     size="xs"
                     variant="ghost"
                     className="whitespace-nowrap"
+                    aria-label="Dismiss health alert"
+                    title="Dismiss"
                     onClick={() =>
                       setConfirmDismiss({
                         key: a.key,
@@ -245,7 +248,7 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                       })
                     }
                   >
-                    Dismiss
+                    <CrossIcon />
                   </Button>
                   <Button
                     size="xs"
@@ -329,6 +332,8 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                     size="xs"
                     variant="ghost"
                     className="whitespace-nowrap"
+                    aria-label="Dismiss item"
+                    title="Dismiss"
                     onClick={() =>
                       setConfirmDismiss({
                         key: it.key,
@@ -343,7 +348,7 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                       })
                     }
                   >
-                    Dismiss
+                    <CrossIcon />
                   </Button>
                 ) : null}
                 {it.kind === 'out_of_stock' || it.kind === 'reorder_overdue' || it.kind === 'appointment_cost' ? (

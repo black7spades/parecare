@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { useProfile } from './ProfileLayout';
@@ -318,13 +319,13 @@ function QuestionCard({
             </Button>
           )}
           {canEdit ? (
-            <Button size="sm" variant="secondary" onClick={onEdit}>
-              Edit
+            <Button size="xs" variant="ghost" aria-label="Edit question" title="Edit" onClick={onEdit}>
+              <PencilIcon />
             </Button>
           ) : null}
           {canManage ? (
-            <Button size="sm" variant="danger" onClick={onDelete}>
-              Delete
+            <Button size="xs" variant="ghost-danger" aria-label="Delete question" title="Delete" onClick={onDelete}>
+              <TrashIcon />
             </Button>
           ) : null}
         </div>
