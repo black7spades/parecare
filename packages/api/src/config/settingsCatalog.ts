@@ -9,7 +9,7 @@ import { z } from 'zod';
  * Adding or removing a movable setting is a change here, not a data migration.
  */
 
-export type SettingGroup = 'ai' | 'email' | 'oauth' | 'storage' | 'stripe' | 'scheduler' | 'health';
+export type SettingGroup = 'ai' | 'email' | 'oauth' | 'storage' | 'stripe' | 'scheduler' | 'health' | 'backups';
 export type SettingType = 'string' | 'number' | 'enum';
 
 export interface SettingEntry {
@@ -36,6 +36,11 @@ const AI_PROVIDERS = ['anthropic', 'openai', 'google', 'ollama', 'lmstudio', 'op
 const ON_OFF = ['on', 'off'] as const;
 const EMAIL_PROVIDERS = ['smtp', 'sendgrid', 'resend'] as const;
 const STORAGE_PROVIDERS = ['local', 's3'] as const;
+// How often a copy is taken, and how far back copies are kept. Both are
+// plain choices: the tiering that turns "30 days" into hourly, daily and
+// weekly copies is worked out from them and never shown.
+const BACKUP_FREQUENCIES = ['hourly', 'daily', 'weekly', 'monthly'] as const;
+const BACKUP_KEEP = ['7', '30', '180', '365'] as const;
 // One currency for the whole account; every price is shown with its symbol.
 const CURRENCIES = ['AUD', 'USD', 'GBP', 'EUR', 'NZD', 'CAD'] as const;
 
@@ -83,6 +88,13 @@ export const SETTINGS_CATALOG: readonly SettingEntry[] = [
   { key: 'storage.s3_secret_key', group: 'storage', label: 'S3 secret key', type: 'string', secret: true, envKey: 'S3_SECRET_KEY', zod: str() },
   { key: 'storage.s3_endpoint', group: 'storage', label: 'S3 endpoint', type: 'string', secret: false, envKey: 'S3_ENDPOINT', help: 'For MinIO or other S3-compatible stores.', zod: str() },
 
+  // Backups. On from install with these defaults, so a new installation is
+  // protected before anyone visits the screen.
+  { key: 'backups.enabled', group: 'backups', label: 'Automatic backups', type: 'enum', enumValues: ON_OFF, secret: false, envKey: 'BACKUPS_ENABLED', help: 'On by default. Turning this off leaves this installation with no copies of its data.', zod: enom(ON_OFF) },
+  { key: 'backups.frequency', group: 'backups', label: 'How often', type: 'enum', enumValues: BACKUP_FREQUENCIES, secret: false, envKey: 'BACKUPS_FREQUENCY', zod: enom(BACKUP_FREQUENCIES) },
+  { key: 'backups.keep_days', group: 'backups', label: 'Keep copies for', type: 'enum', enumValues: BACKUP_KEEP, secret: false, envKey: 'BACKUPS_KEEP_DAYS', help: 'In days. Older copies are thinned out rather than all kept.', zod: enom(BACKUP_KEEP) },
+  { key: 'backups.path', group: 'backups', label: 'Where copies are stored', type: 'string', secret: false, envKey: 'BACKUPS_PATH', help: 'A folder on this server, kept separate from uploaded documents so a copy never contains itself.', zod: str() },
+
   // Stripe billing
   { key: 'stripe.secret_key', group: 'stripe', label: 'Stripe secret key', type: 'string', secret: true, envKey: 'STRIPE_SECRET_KEY', help: 'Starts with sk_live_ (or sk_test_ for test mode).', helpLink: { label: 'Stripe API keys', url: 'https://dashboard.stripe.com/apikeys' }, zod: str() },
   { key: 'stripe.webhook_secret', group: 'stripe', label: 'Stripe webhook secret', type: 'string', secret: true, envKey: 'STRIPE_WEBHOOK_SECRET', help: 'Starts with whsec_. Create a webhook to <your site>/webhooks/stripe and copy its signing secret.', helpLink: { label: 'Stripe webhooks', url: 'https://dashboard.stripe.com/webhooks' }, zod: str() },
@@ -92,4 +104,4 @@ export const SETTINGS_CATALOG: readonly SettingEntry[] = [
 
 export const SETTINGS_BY_KEY = new Map(SETTINGS_CATALOG.map((e) => [e.key, e]));
 
-export const SETTING_GROUPS: readonly SettingGroup[] = ['ai', 'health', 'email', 'scheduler', 'oauth', 'storage', 'stripe'];
+export const SETTING_GROUPS: readonly SettingGroup[] = ['ai', 'health', 'email', 'scheduler', 'backups', 'oauth', 'storage', 'stripe'];

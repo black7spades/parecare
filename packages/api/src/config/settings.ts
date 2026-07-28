@@ -139,6 +139,20 @@ export function getSchedulerConfig() {
   };
 }
 
+/**
+ * Backups run from install with no setup: on, daily, a month of history. The
+ * defaults here are the whole configuration for most installations, so a new
+ * server is protected before anyone opens the screen.
+ */
+export function getBackupConfig() {
+  return {
+    enabled: (str('backups.enabled') ?? 'on') !== 'off',
+    frequency: (str('backups.frequency') ?? 'daily') as 'hourly' | 'daily' | 'weekly' | 'monthly',
+    keepDays: numOr('backups.keep_days', 30),
+    path: str('backups.path') ?? '/app/backups',
+  };
+}
+
 /** How many months of medication administrations stay in the live record. */
 export function getMarRetentionMonths(): number {
   return numOr('mar.retention_months', 12);

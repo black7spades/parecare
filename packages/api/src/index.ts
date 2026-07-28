@@ -47,10 +47,12 @@ import { startNotificationScheduler } from './services/notifier';
 import { journeyTemplatesRouter } from './routes/journeyTemplates';
 import { journeysRouter } from './routes/journeys';
 import { startReminderScheduler } from './services/scheduler';
+import { startBackupScheduler, isRestoring } from './services/backup';
 import { startMarArchiveScheduler } from './services/marArchive';
 import { subscriptionsRouter } from './routes/subscriptions';
 import { adminRouter } from './routes/admin';
 import { adminDatabaseRouter } from './routes/adminDatabase';
+import { adminBackupsRouter } from './routes/adminBackups';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { requireAuth } from './middleware/auth';
 import { requireCareProfileAccess } from './middleware/subscriptionGate';
@@ -94,6 +96,21 @@ app.use((_req, res, next) => {
 
 const v1 = express.Router();
 
+// While a copy is being put back, the records are mid-change. Serving half
+// of an old state and half of a new one would be worse than answering
+// plainly and asking the person to wait. The backups routes themselves stay
+// open, so the screen driving the restore keeps working.
+v1.use((req, res, next) => {
+  if (!isRestoring() || req.path.startsWith('/admin/backups') || req.path === '/health') {
+    next();
+    return;
+  }
+  res.status(503).json({
+    error: 'Putting your records back. This takes a minute or two, then everything will be here again.',
+    code: 'RESTORE_IN_PROGRESS',
+  });
+});
+
 v1.use('/auth', authRouter);
 v1.use('/auth', oauthRouter);
 v1.use('/account', accountRouter);
@@ -103,6 +120,7 @@ v1.use('/admin/settings', settingsRouter);
 // Super-admin database tools: registered before the admin router for the
 // same reason as settings.
 v1.use('/admin/database', adminDatabaseRouter);
+v1.use('/admin/backups', adminBackupsRouter);
 v1.use('/admin', adminRouter);
 v1.use('/subscriptions', subscriptionsRouter);
 // Shared, instance-wide medication catalogue (read for all; add for admins;
@@ -203,6 +221,7 @@ async function start(): Promise<void> {
     await subscribeSettingsInvalidation();
     await initWebPush();
     startReminderScheduler();
+    startBackupScheduler();
     startMarArchiveScheduler();
     startNotificationScheduler();
     app.listen(env.PORT, () => {

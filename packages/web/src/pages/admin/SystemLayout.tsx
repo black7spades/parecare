@@ -35,6 +35,9 @@ export function SystemLayout() {
             <NavLink to="/system/database" className={tabClass}>
               Data tools
             </NavLink>
+            <NavLink to="/system/backups" className={tabClass}>
+              Backups
+            </NavLink>
             <NavLink to="/system/settings" className={tabClass}>
               Settings
             </NavLink>

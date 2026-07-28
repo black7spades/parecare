@@ -47,6 +47,7 @@ import { AdminJourneys } from './pages/admin/AdminJourneys';
 import { AdminChats } from './pages/admin/AdminChats';
 import { AdminSettings } from './pages/admin/AdminSettings';
 import { AdminDatabase } from './pages/admin/AdminDatabase';
+import { AdminBackups } from './pages/admin/AdminBackups';
 import { ReportsPage } from './pages/admin/ReportsPage';
 import { ReportGeneratorPage } from './pages/app/ReportGeneratorPage';
 import { SystemLayout } from './pages/admin/SystemLayout';
@@ -164,6 +165,14 @@ export const router = createBrowserRouter([
             element: (
               <SuperAdminGuard>
                 <AdminDatabase />
+              </SuperAdminGuard>
+            ),
+          },
+          {
+            path: 'backups',
+            element: (
+              <SuperAdminGuard>
+                <AdminBackups />
               </SuperAdminGuard>
             ),
           },

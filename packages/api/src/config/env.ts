@@ -43,6 +43,12 @@ const envSchema = z.object({
   AI_MEDIATION_MODEL: optionalStr,
   STORAGE_PROVIDER: z.enum(['local', 's3']).default('local'),
   STORAGE_LOCAL_PATH: z.string().default('/app/uploads'),
+  // Backups are on with working defaults; these only exist so an install can
+  // set them from the environment instead of the screen.
+  BACKUPS_ENABLED: optionalStr,
+  BACKUPS_FREQUENCY: optionalStr,
+  BACKUPS_KEEP_DAYS: optionalStr,
+  BACKUPS_PATH: optionalStr,
   S3_BUCKET: z.string().optional(),
   S3_REGION: z.string().default('us-east-1'),
   S3_ACCESS_KEY: z.string().optional(),
