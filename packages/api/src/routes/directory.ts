@@ -4,7 +4,8 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { roleAtLeast } from '../middleware/requireRole';
 import { providerAddressFields, withComposedAddress } from './providers';
-import { addressColumns, ADDRESS_PART_KEYS, RESIDENCE_KIND, syncProfileResidence, syncResidenceForAddress } from '../services/addresses';
+import { addressColumns, ADDRESS_PART_KEYS, RESIDENCE_KIND, syncProfileResidence, syncResidenceForAddress, wifiColumns, withReadableWifi } from '../services/addresses';
+import { decryptSecret } from '../services/secretsCrypto';
 import { exportRecords, importRecords, type PortDescriptor, type PortFormat } from '../services/dataPort';
 import type { AccountRole, CareProfile, Provider, ProfileKind } from '../types';
 
@@ -820,6 +821,9 @@ const addressSchema = z.object({
   address_state: z.string().max(120).optional().nullable(),
   address_postcode: z.string().max(20).optional().nullable(),
   address_country: z.string().max(120).optional().nullable(),
+  // The Wi-Fi at this address: what the network is called, and the password.
+  wifi_network_name: z.string().max(255).optional().nullable(),
+  wifi_password: z.string().max(255).optional().nullable(),
 });
 
 /**
@@ -860,7 +864,7 @@ directoryRouter.get('/addresses', requireAuth, async (req, res) => {
       .groupBy('a.id');
   }
 
-  const addresses = await query;
+  const addresses = (await query).map(withReadableWifi);
   const canEdit = roleAtLeast(account.role, 'admin');
   res.json({ addresses, can_edit: canEdit });
 });
@@ -881,9 +885,9 @@ directoryRouter.post('/addresses', requireAuth, async (req, res) => {
     return;
   }
   const [address] = await db('addresses')
-    .insert({ account_id: account.id, ...addressColumns(parsed.data, parsed.data.label) })
+    .insert({ account_id: account.id, ...addressColumns(parsed.data, parsed.data.label), ...wifiColumns(parsed.data) })
     .returning('*');
-  res.status(201).json({ address });
+  res.status(201).json({ address: withReadableWifi(address) });
 });
 
 directoryRouter.patch('/addresses/:id', requireAuth, async (req, res) => {
@@ -905,11 +909,13 @@ directoryRouter.patch('/addresses/:id', requireAuth, async (req, res) => {
     return;
   }
   const merged = { ...current, ...parsed.data };
-  const [address] = await query.update({ ...addressColumns(merged, merged.label), updated_at: db.fn.now() }).returning('*');
+  const [address] = await query
+    .update({ ...addressColumns(merged, merged.label), ...wifiColumns(parsed.data), updated_at: db.fn.now() })
+    .returning('*');
   // Editing the shared address updates it everywhere, including each person's
   // "where they live" for whom it is their residence.
   await syncResidenceForAddress(address.id, address);
-  res.json({ address });
+  res.json({ address: withReadableWifi(address) });
 });
 
 directoryRouter.delete('/addresses/:id', requireAuth, async (req, res) => {
@@ -1187,6 +1193,15 @@ const addressPort: PortDescriptor<AnyRow, PortRecord> = {
     { key: 'address_state', header: 'State', toCell: (r) => cell(r['address_state']) },
     { key: 'address_postcode', header: 'Postcode', aliases: ['zip', 'postal code'], toCell: (r) => cell(r['address_postcode']) },
     { key: 'address_country', header: 'Country', toCell: (r) => cell(r['address_country']) },
+    // The Wi-Fi is two data points, so two columns. The password exports in
+    // the clear, because an export is for the person who already has access.
+    { key: 'wifi_network_name', header: 'Wi-Fi network name', aliases: ['wifi', 'network name', 'ssid'], toCell: (r) => cell(r['wifi_network_name']) },
+    {
+      key: 'wifi_password',
+      header: 'Wi-Fi password',
+      aliases: ['wifi key', 'network password'],
+      toCell: (r) => cell(decryptSecret(r['wifi_password'] as string | null)),
+    },
   ],
   coerce: (raw, n) => {
     const parts = {
@@ -1200,7 +1215,16 @@ const addressPort: PortDescriptor<AnyRow, PortRecord> = {
     if (!ADDRESS_PART_KEYS.some((k) => (parts as Record<string, unknown>)[k])) {
       return { ok: false as const, error: `Row ${n}: an address is required.` };
     }
-    return { ok: true as const, value: { ...addressColumns(parts, portBlank(raw['label'])) } };
+    return {
+      ok: true as const,
+      value: {
+        ...addressColumns(parts, portBlank(raw['label'])),
+        ...wifiColumns({
+          wifi_network_name: portBlank(raw['wifi_network_name']),
+          wifi_password: portBlank(raw['wifi_password']),
+        }),
+      },
+    };
   },
 };
 

@@ -13,6 +13,7 @@ import { IngestModal } from '../../../components/IngestModal';
 import { CIRCLE_ROLES, circleRoleLabel, DOCUMENT_CATEGORIES, documentCategoryLabel, type CareDocument, type CircleMember } from '../../../lib/care';
 import { PagePurpose } from '../../../components/PagePurpose';
 import { useProfile } from './ProfileLayout';
+import { SecretsSection } from './SecretsSection';
 
 function formatSize(bytes: number | null): string {
   if (!bytes) return '';
@@ -51,6 +52,9 @@ export function DocumentsPage() {
   const [file, setFile] = useState<File | null>(null);
   const [label, setLabel] = useState('');
   const [category, setCategory] = useState('medical_record');
+  // File this document against a condition, so a scan report joins the
+  // tracking thread of the ankle it was taken for.
+  const [docConditionId, setDocConditionId] = useState('');
   const [restrictedRoles, setRestrictedRoles] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState<CareDocument | null>(null);
@@ -59,6 +63,12 @@ export function DocumentsPage() {
   const [confirmBulk, setConfirmBulk] = useState(false);
   const [bulkEditQueue, setBulkEditQueue] = useState<CareDocument[]>([]);
   const [ingesting, setIngesting] = useState(false);
+
+  const { data: uploadConditionData } = useQuery({
+    queryKey: ['conditions', profile.id],
+    queryFn: () => api.get<{ conditions: { id: string; name: string }[] }>(`/care-profiles/${profile.id}/conditions`),
+  });
+  const uploadConditions = uploadConditionData?.conditions ?? [];
 
   const { data, isLoading } = useQuery({
     queryKey: ['documents', profile.id],
@@ -79,6 +89,7 @@ export function DocumentsPage() {
       form.append('file', file!);
       form.append('category', category);
       form.append('label', label.trim() || file!.name);
+      if (docConditionId) form.append('medical_condition_id', docConditionId);
       for (const role of restrictedRoles) form.append('visible_to_roles', role);
       return api.upload(`/care-profiles/${profile.id}/documents`, form);
     },
@@ -327,6 +338,23 @@ export function DocumentsPage() {
           </select>
         </div>
         <div>
+          <label htmlFor="doc-condition" className="block text-sm font-medium text-ink mb-1">What is it for</label>
+          <select
+            id="doc-condition"
+            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            value={docConditionId}
+            onChange={(e) => setDocConditionId(e.target.value)}
+          >
+            <option value="">Not for a particular condition</option>
+            {uploadConditions.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <span className="block text-xs text-muted mt-1">
+            Files it under that condition's tracking as well as here.
+          </span>
+        </div>
+        <div>
           <span className="block text-sm font-medium text-ink mb-1">Who can see it</span>
           <label className="flex items-center gap-2 text-sm text-ink">
             <input
@@ -433,6 +461,13 @@ export function DocumentsPage() {
         />
       ) : null}
       {ingesting ? <IngestModal profileId={profile.id} onClose={() => setIngesting(false)} /> : null}
+
+      {/* The secrets vault. It shows itself only to the account owner, and to
+          a power of attorney once a date of death is recorded, so it renders
+          nothing at all for everyone else. */}
+      <div className="lg:col-span-2">
+        <SecretsSection profileId={profile.id} careName={profile.preferred_name || profile.full_name} />
+      </div>
     </div>
   );
 }

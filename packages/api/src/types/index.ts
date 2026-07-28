@@ -238,6 +238,8 @@ export interface Document {
   uploaded_by: string | null;
   category: string;
   label: string;
+  /** The condition this document came out of, when it came out of one. */
+  medical_condition_id: string | null;
   file_url: string;
   file_size_bytes: number | null;
   mime_type: string | null;

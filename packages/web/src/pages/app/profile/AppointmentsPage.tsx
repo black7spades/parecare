@@ -20,6 +20,7 @@ export interface Appointment {
   title: string;
   appointment_type: string;
   provider_id: string | null;
+  medical_condition_id: string | null;
   provider_name: string | null;
   provider_organisation: string | null;
   provider_address: string | null;
@@ -352,6 +353,7 @@ export function AppointmentEditor({
   initialProviderId = '',
   initialTitle = '',
   initialType = 'consultation',
+  initialConditionId = '',
   onClose,
   onSaved,
 }: {
@@ -363,6 +365,8 @@ export function AppointmentEditor({
   initialTitle?: string;
   /** Preselects the kind on a new appointment, e.g. procedure for a surgery. */
   initialType?: string;
+  /** Preselect the condition this appointment is being booked for. */
+  initialConditionId?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -371,6 +375,9 @@ export function AppointmentEditor({
   const [title, setTitle] = useState(appointment?.title ?? initialTitle);
   const [type, setType] = useState(appointment?.appointment_type ?? initialType);
   const [providerId, setProviderId] = useState(appointment?.provider_id ?? initialProviderId);
+  // Which condition this appointment is for, so it joins that condition's
+  // tracking thread and is marked with it on the calendar.
+  const [conditionId, setConditionId] = useState(appointment?.medical_condition_id ?? initialConditionId);
   const [providerName, setProviderName] = useState('');
   const [location, setLocation] = useState(appointment?.location ?? '');
   const [startDate, setStartDate] = useState('');
@@ -389,6 +396,7 @@ export function AppointmentEditor({
       setTitle(appointment.title);
       setType(appointment.appointment_type);
       setProviderId(appointment.provider_id ?? '');
+      setConditionId(appointment.medical_condition_id ?? '');
       setLocation(appointment.location ?? '');
       const d = new Date(appointment.starts_at);
       const pad = (n: number) => String(n).padStart(2, '0');
@@ -412,6 +420,14 @@ export function AppointmentEditor({
     queryFn: () => api.get<{ providers: ProviderFull[] }>(`/care-profiles/${profileId}/providers`),
   });
   const providers = providersData?.providers ?? [];
+
+  // The conditions this appointment could be for, so an x-ray booked for a
+  // sore ankle can be tied to the ankle.
+  const { data: conditionData } = useQuery({
+    queryKey: ['conditions', profileId],
+    queryFn: () => api.get<{ conditions: { id: string; name: string }[] }>(`/care-profiles/${profileId}/conditions`),
+  });
+  const conditions = conditionData?.conditions ?? [];
 
   const handleProviderChange = (newProviderId: string) => {
     setProviderId(newProviderId);
@@ -462,6 +478,7 @@ export function AppointmentEditor({
         title: title.trim(),
         appointment_type: type,
         provider_id: providerId || null,
+        medical_condition_id: conditionId || null,
         location: location.trim() || null,
         starts_at: startsAt,
         ends_at: endsAt,
@@ -495,6 +512,18 @@ export function AppointmentEditor({
                 <option key={t.value} value={t.value}>{t.label}</option>
               ))}
             </select>
+          </label>
+          <label className="block">
+            <span className="block text-sm font-medium text-ink mb-1">What is it for</span>
+            <select className={inputClass} value={conditionId} onChange={(e) => setConditionId(e.target.value)}>
+              <option value="">Not for a particular condition</option>
+              {conditions.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            <span className="block text-xs text-muted mt-1">
+              Ties this appointment to that condition's tracking, and marks it on the calendar.
+            </span>
           </label>
           <div>
             <label className="block">

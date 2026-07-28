@@ -32,6 +32,9 @@ const documentCategory = z.enum([
 const documentMeta = z.object({
   category: documentCategory,
   label: z.string().min(1).max(255),
+  // The condition this document came out of, so a scan report files itself
+  // under the sore ankle it was taken for.
+  medical_condition_id: z.string().uuid().optional().nullable(),
   // Multipart forms deliver a single value as a string and repeated values
   // as an array — accept both.
   visible_to_roles: z
@@ -96,6 +99,7 @@ documentsRouter.post(
         care_profile_id: req.params['id'],
         category: parsed.data.category,
         label: parsed.data.label,
+        medical_condition_id: parsed.data.medical_condition_id ?? null,
         file_url: fileUrl,
         file_size_bytes: req.file.size,
         mime_type: req.file.mimetype,

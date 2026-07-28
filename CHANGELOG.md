@@ -5,6 +5,45 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.10.0] - 2026-07-28
+
+### Added
+
+- **Wi-Fi on an address.** An address now records the network name and the
+  password, each its own field, so a carer arriving at the house can get online
+  without hunting for the router. The network name is a sortable column in the
+  address directory and both fields are in the import and export. The password
+  is stored encrypted and only shown when asked for.
+- **Secrets**, a vault under Documents for the logins kept for someone's life
+  admin: social accounts, the rental, the bank. Each login records its name,
+  kind, website, who you sign in as, the password, the account number and
+  notes, every fact its own field. Passwords are stored encrypted and masked
+  until revealed, with a control to copy one without showing it.
+  - Access is deliberately narrow: **the account owner only**. Carers, editors
+    and viewers in the care circle never see the section, and neither do
+    platform administrators or super admins. A **power of attorney** in the
+    care circle gains access **once a date of death is recorded**, since
+    settling an estate means getting into the accounts.
+  - A **date of death** field on a person's details, which is what hands the
+    vault to a power of attorney.
+- **Per-condition tracking.** A condition under Current health now carries its
+  own thread, so something long-running can be followed on its own instead of
+  being hunted for across the whole care log. An ankle sprained in March that
+  still hurts in July keeps together:
+  - its **own tracking log**, separate from the care log, with each entry typed
+    as a note, a change in symptoms, a treatment, what came of an appointment,
+    or a test or scan result;
+  - the **appointments** booked under it. An appointment records what it is
+    for, and the calendar marks it with the condition;
+  - the **documents** filed against it, such as a scan report or a medical
+    certificate, chosen when the document is uploaded;
+  - the **therapies** being done for it.
+  Appointments, documents and therapies still live in their own sections; the
+  condition shows the same records from its own side.
+- The assistant can add to a condition's tracking log (a new `log_condition`
+  action), so "note that his ankle is still sore going down stairs" files
+  itself under the ankle.
+
 ## [0.9.0] - 2026-07-23
 
 ### Added

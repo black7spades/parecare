@@ -36,6 +36,10 @@ interface CalendarEvent {
   kind?: string;
   medication_id?: string;
   appointment_id?: string;
+  // The condition an appointment came out of, so the calendar can mark it and
+  // the whole thread of one condition reads at a glance.
+  medical_condition_id?: string | null;
+  medical_condition_name?: string | null;
   location?: string | null;
   // A map or directions URL for the event's location, when one is known.
   directions_link?: string | null;
@@ -55,6 +59,7 @@ function isUrl(value: string | null | undefined): boolean {
 async function expandAppointmentEvents(profileId: string, from: Date, to: Date): Promise<CalendarEvent[]> {
   const appointments = await db('appointments as a')
     .leftJoin('providers as p', 'a.provider_id', 'p.id')
+    .leftJoin('medical_conditions as mc', 'a.medical_condition_id', 'mc.id')
     .where('a.care_profile_id', profileId)
     .whereBetween('a.starts_at', [from, to])
     .whereNot('a.status', 'cancelled')
@@ -64,6 +69,8 @@ async function expandAppointmentEvents(profileId: string, from: Date, to: Date):
       'a.starts_at',
       'a.status',
       'a.location',
+      'a.medical_condition_id',
+      'mc.name as medical_condition_name',
       'p.name as provider_name',
       'p.directions_link as provider_directions_link'
     );
@@ -82,6 +89,8 @@ async function expandAppointmentEvents(profileId: string, from: Date, to: Date):
       completed: a.status === 'completed',
       kind: 'appointment',
       appointment_id: a.id,
+      medical_condition_id: a.medical_condition_id ?? null,
+      medical_condition_name: a.medical_condition_name ?? null,
       // Show a URL location only as a button, never as raw text.
       location: isUrl(a.location) ? null : (a.location ?? null),
       directions_link: directions,

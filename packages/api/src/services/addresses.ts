@@ -1,4 +1,5 @@
 import { db } from '../config/database';
+import { decryptSecret, encryptSecret } from './secretsCrypto';
 
 /**
  * Shared helpers for the reusable address book. An address is segmented
@@ -49,6 +50,31 @@ export function addressColumns(parts: AddressParts, label?: string | null): Reco
   cols['formatted'] = composeFormatted(parts) || null;
   if (label !== undefined) cols['label'] = clean(label) || null;
   return cols;
+}
+
+/**
+ * The Wi-Fi kept against an address: the name the network shows up as, and
+ * the password. Two data points, two columns. The password is written
+ * encrypted and decrypted again for anyone already allowed to see the
+ * address, because a carer arriving at the house needs to be able to read it.
+ */
+export interface WifiFields {
+  wifi_network_name?: string | null;
+  wifi_password?: string | null;
+}
+
+/** The Wi-Fi columns to write, password encrypted. */
+export function wifiColumns(fields: WifiFields): Record<string, string | null> {
+  const cols: Record<string, string | null> = {};
+  if (fields.wifi_network_name !== undefined) cols['wifi_network_name'] = clean(fields.wifi_network_name) || null;
+  if (fields.wifi_password !== undefined) cols['wifi_password'] = encryptSecret(fields.wifi_password);
+  return cols;
+}
+
+/** Put the readable Wi-Fi password back on an address row on the way out. */
+export function withReadableWifi<T extends { wifi_password?: string | null }>(row: T): T {
+  if (!row || row.wifi_password === undefined) return row;
+  return { ...row, wifi_password: decryptSecret(row.wifi_password) };
 }
 
 /**

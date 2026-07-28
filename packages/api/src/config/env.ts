@@ -15,6 +15,10 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
   JWT_SECRET: z.string().min(16),
+  // Encrypts the stored credentials (an address's Wi-Fi password, the secrets
+  // vault). Falls back to a key derived from JWT_SECRET when unset, so a
+  // self-hosted deployment needs no extra setup.
+  SECRETS_ENCRYPTION_KEY: optionalStr,
   JWT_EXPIRES_IN: z.string().default('7d'),
   // Empty string means "not set" so docker-compose can pass ${SUPER_ADMIN_EMAIL:-} safely
   SUPER_ADMIN_EMAIL: z
