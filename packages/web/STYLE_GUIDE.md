@@ -5,6 +5,12 @@ ships. When reviewing a change, walk the checklist at the bottom. When a
 rule here conflicts with an older pattern in the codebase, this guide
 wins; fix the old pattern rather than copying it.
 
+Read **"Who we build for, and the bar"** in the root `CLAUDE.md` first.
+It is the reasoning these rules enforce: the person on the other side of
+the screen is tired, worried and short of time, and assumes no technical
+knowledge at all. Where this guide tells you how, that section tells you
+why, and it settles anything this guide does not cover.
+
 ## Controls
 
 **Links navigate, buttons act.** This is the single most important rule.
