@@ -17,6 +17,7 @@ export interface AdminAccount {
   can_invite_members: boolean;
   can_use_ai: boolean;
   can_export_data: boolean;
+  can_manage_backups: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -40,6 +41,7 @@ export interface AccountRights {
   can_invite_members?: boolean;
   can_use_ai?: boolean;
   can_export_data?: boolean;
+  can_manage_backups?: boolean;
 }
 
 export interface RightsTemplate {
@@ -50,6 +52,7 @@ export interface RightsTemplate {
   can_invite_members: boolean;
   can_use_ai: boolean;
   can_export_data: boolean;
+  can_manage_backups: boolean;
   created_at: string;
   updated_at: string;
 }

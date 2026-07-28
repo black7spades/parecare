@@ -92,6 +92,7 @@ export function AdminBackups() {
   }, [load]);
 
   const rows = data?.backups ?? [];
+  const latest = rows.find((b) => b.stored && b.status === 'ok');
   const view = useDataView<Backup>({
     rows,
     getId: (b) => b.id,
@@ -180,26 +181,64 @@ export function AdminBackups() {
   if (loading) return <p className="text-sm text-muted">Loading.</p>;
   if (!data) return <p className="text-sm text-muted">Backups could not be loaded just now.</p>;
 
+  // Only a copy that has left this server counts as protection. Everything
+  // else gets an honest heading rather than a reassuring one.
   const protectedNow = data.status.state === 'protected';
+  const headline =
+    data.status.state === 'protected'
+      ? 'Your data is protected'
+      : data.status.state === 'here_only'
+        ? 'Your copies are only on this server'
+        : data.status.state === 'no_room'
+          ? 'This server has run out of room'
+          : data.status.state === 'off'
+            ? 'Copies are turned off'
+            : data.status.state === 'none'
+              ? 'No copy yet'
+              : 'Your data needs attention';
+  const onlyKeyholder = data.keyholders.length < 2;
   const restoreDate = restoring ? new Date(restoring.started_at).toISOString().slice(0, 10) : '';
 
   return (
     <div className="space-y-6">
       {/* The whole point of the screen: one line a worried person understands. */}
       <div className={`rounded-lg border p-4 ${protectedNow ? 'border-border bg-card' : 'border-amber-400 bg-amber-50 dark:bg-amber-950/30'}`}>
-        <h2 className="text-base font-semibold text-ink">
-          {protectedNow ? 'Your data is protected' : 'Your data needs attention'}
-        </h2>
+        <h2 className="text-base font-semibold text-ink">{headline}</h2>
         <p className="mt-1 text-sm text-muted">
           {data.status.message}
           {data.last_backup_at ? ` Last copy ${howLongAgo(data.last_backup_at)}.` : ''}
         </p>
+        {data.space.room_for_more > 0 ? (
+          <p className="mt-1 text-sm text-muted">
+            There is room here for about {data.space.room_for_more} more {data.space.room_for_more === 1 ? 'copy' : 'copies'}.
+          </p>
+        ) : null}
         <div className="mt-3 flex flex-wrap gap-2">
           <Button variant="primary" size="sm" onClick={runNow} loading={busy}>
             Make a copy now
           </Button>
+          {latest ? (
+            <Button variant="secondary" size="sm" onClick={() => void download(latest)}>
+              Download the latest copy
+            </Button>
+          ) : null}
         </div>
       </div>
+
+      {/*
+        One person who can reach this is one person away from nobody. In a
+        care setting that is not a hypothetical, so it is said out loud
+        rather than left to be discovered at the worst moment.
+      */}
+      {onlyKeyholder ? (
+        <div className="rounded-lg border border-amber-400 bg-amber-50 p-4 dark:bg-amber-950/30">
+          <h3 className="text-sm font-semibold text-ink">Only you can get these records back</h3>
+          <p className="mt-1 text-sm text-muted">
+            If something happens to you, or you lose access to this account, nobody else here is able to restore
+            anything. Give someone else you trust the same access, under System, then Users.
+          </p>
+        </div>
+      ) : null}
 
       {notice ? (
         <p className={`text-sm ${notice.kind === 'ok' ? 'text-ink' : 'text-red-600 dark:text-red-400'}`}>{notice.text}</p>

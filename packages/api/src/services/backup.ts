@@ -102,6 +102,81 @@ function sha256Of(file: string): Promise<string> {
   });
 }
 
+// --- Room on the disk ------------------------------------------------------
+
+/**
+ * Copies must never crowd out the thing they are protecting. A disk filled
+ * by backups takes the database down with it, which would make the safety
+ * net the outage. Two limits keep that from happening, and neither is a
+ * setting: copies never take more than this share of the disk, and a copy is
+ * not started unless this much would still be free afterwards.
+ */
+const MAX_DISK_SHARE = 0.25;
+const RESERVE_BYTES = 1024 * 1024 * 1024;
+
+/** What a copy is likely to need: the last one plus room to build it. */
+const FIRST_COPY_ESTIMATE = 256 * 1024 * 1024;
+
+export interface SpaceReport {
+  freeBytes: number;
+  totalBytes: number;
+  usedByCopies: number;
+  /** What one more copy is expected to need, from recent history. */
+  estimatedCopyBytes: number;
+  /** Roughly how many more copies fit. Shown as a sentence, never a figure. */
+  roomForMore: number;
+}
+
+async function diskOf(dir: string): Promise<{ freeBytes: number; totalBytes: number }> {
+  try {
+    await fs.promises.mkdir(dir, { recursive: true });
+    const s = await fs.promises.statfs(dir);
+    return { freeBytes: Number(s.bavail) * Number(s.bsize), totalBytes: Number(s.blocks) * Number(s.bsize) };
+  } catch {
+    // An unreadable disk must not stop a copy being attempted; the copy
+    // itself will fail loudly enough if there is genuinely no room.
+    return { freeBytes: Number.MAX_SAFE_INTEGER, totalBytes: Number.MAX_SAFE_INTEGER };
+  }
+}
+
+export async function spaceReport(): Promise<SpaceReport> {
+  const cfg = getBackupConfig();
+  const { freeBytes, totalBytes } = await diskOf(cfg.path);
+  const sizes = await db('backups').where({ status: 'ok' }).whereNotNull('size_bytes').select('size_bytes');
+  const used = sizes.reduce((sum: number, r: { size_bytes: string | number }) => sum + Number(r.size_bytes), 0);
+  const recent = sizes.slice(-5).map((r: { size_bytes: string | number }) => Number(r.size_bytes));
+  const estimate = recent.length > 0 ? Math.max(...recent) : FIRST_COPY_ESTIMATE;
+
+  // Whichever runs out first: the share of the disk copies may use, or the
+  // free space that must remain for the database to keep working.
+  const shareLeft = Math.max(0, totalBytes * MAX_DISK_SHARE - used);
+  const diskLeft = Math.max(0, freeBytes - RESERVE_BYTES);
+  const usable = Math.min(shareLeft, diskLeft);
+
+  return {
+    freeBytes,
+    totalBytes,
+    usedByCopies: used,
+    estimatedCopyBytes: estimate,
+    roomForMore: estimate > 0 ? Math.floor(usable / estimate) : 0,
+  };
+}
+
+/**
+ * Whether there is room to take a copy, and to check it afterwards. Checking
+ * restores into a scratch database, which needs the space over again, so it
+ * is judged separately: a tight disk gets an unchecked copy rather than no
+ * copy and a broken database.
+ */
+async function roomToWork(): Promise<{ canCopy: boolean; canVerify: boolean; report: SpaceReport }> {
+  const report = await spaceReport();
+  // Building a copy needs the dump and the archive side by side.
+  const needed = report.estimatedCopyBytes * 2;
+  const canCopy = report.freeBytes - needed > RESERVE_BYTES && report.usedByCopies + report.estimatedCopyBytes <= report.totalBytes * MAX_DISK_SHARE;
+  const canVerify = report.freeBytes - needed * 2 > RESERVE_BYTES;
+  return { canCopy, canVerify, report };
+}
+
 /**
  * Which bucket of history a copy belongs to. Worked out from when it was
  * taken, not chosen: the first copy of a month is the monthly one, the first
@@ -132,6 +207,54 @@ function backupFilename(when: Date, id: string): string {
 }
 
 /**
+ * The note that travels inside every copy. Written for whoever opens the
+ * file, who may never have seen this software, may be holding it because the
+ * person who set it up is gone, and should not have to guess what it is or
+ * who can help. It names no commands and assumes no knowledge.
+ */
+function readmeText(when: Date): string {
+  const taken = when.toISOString().replace('T', ' ').slice(0, 16);
+  return [
+    'WHAT THIS IS',
+    '',
+    'This is a complete copy of a PareCare care record system, taken on',
+    `${taken} UTC. PareCare is used to organise someone's care: their`,
+    'medications, appointments, conditions, care plan and documents.',
+    '',
+    'It contains health information about real people. Treat it as you would',
+    "treat someone's medical file. Keep it somewhere private, and do not send",
+    'it to anyone who is not entitled to see it.',
+    '',
+    'WHAT IS INSIDE',
+    '',
+    '  database.dump   every record: people, medications, appointments,',
+    '                  care plans, notes and who had access',
+    '  uploads/        the documents that were uploaded, such as letters,',
+    '                  scans and photographs',
+    '',
+    'The two belong together. Putting back one without the other leaves',
+    'records pointing at documents that are not there.',
+    '',
+    'HOW TO PUT IT BACK',
+    '',
+    'If PareCare is still running somewhere, sign in as an administrator, go',
+    'to System, then Backups, and use "Put this back". That is the whole job.',
+    '',
+    'If the server it came from is gone, PareCare needs to be installed again',
+    'first, and then this file put back the same way. Anyone comfortable',
+    'setting up a website can do it, and the instructions live with the',
+    'PareCare software itself.',
+    '',
+    'IF YOU ARE STUCK',
+    '',
+    'Keep this file safe and unchanged, and find someone who looks after',
+    'computers to help. Everything needed is in here. Nothing else is',
+    'required, and no password is needed to open it.',
+    '',
+  ].join('\n');
+}
+
+/**
  * Take one copy: dump the database, gather the uploaded documents alongside
  * it, and roll the pair into a single file. Then check it, then thin out the
  * old ones. A failure at any point leaves a row saying so in a sentence.
@@ -141,6 +264,12 @@ export async function runBackup(
   accountId: string | null = null
 ): Promise<BackupRow> {
   const cfg = getBackupConfig();
+
+  // Old copies are thinned out before a new one is taken, not after. Doing it
+  // afterwards means the moment of peak disk use is while the disk is at its
+  // fullest, which is exactly when it would overflow.
+  await pruneBackups().catch((err) => console.warn('Backup thinning failed:', (err as Error).message));
+
   const when = new Date();
   const [row] = await db('backups')
     .insert({ started_at: when, status: 'running', kind, tier: tierFor(when), created_by_account_id: accountId })
@@ -164,6 +293,16 @@ export async function runBackup(
     await fs.promises.mkdir(work, { recursive: true });
     await fs.promises.mkdir(cfg.path, { recursive: true });
 
+    // Never fill the disk. A copy that takes the database down with it is
+    // worse than a copy that was not taken, because the first one breaks
+    // care that is happening right now.
+    const room = await roomToWork();
+    if (!room.canCopy) {
+      return fail(
+        'There is not enough room left on this server to make a copy. Older copies have already been cleared out. Free some space, or ask whoever runs this server to.'
+      );
+    }
+
     const sourceRows = await censusOf(db, CENSUS_TABLES);
 
     // The database, in the portable custom format so it can be restored into
@@ -176,11 +315,17 @@ export async function runBackup(
       );
     }
 
+    // Whoever ends up holding this file may not be the person who made it,
+    // and may be holding it because the server it came from is gone. A plain
+    // note travels with it so it is never an anonymous archive nobody can
+    // act on.
+    await fs.promises.writeFile(path.join(work, 'READ ME FIRST.txt'), readmeText(when), 'utf8');
+
     // The uploaded documents, when they live on this server. An installation
     // storing them in the cloud already has them somewhere else.
     const storage = getStorageConfig();
     const uploadsDir = storage.provider === 'local' ? storage.localPath : null;
-    const args = ['-czf', finalPath, '-C', work, 'database.dump'];
+    const args = ['-czf', finalPath, '-C', work, 'database.dump', 'READ ME FIRST.txt'];
     if (uploadsDir && fs.existsSync(uploadsDir)) {
       args.push('-C', path.dirname(uploadsDir), path.basename(uploadsDir));
     }
@@ -205,9 +350,16 @@ export async function runBackup(
 
     // Checked straight away, so the screen can say "checked and working"
     // rather than hoping. A copy that cannot be read is worse than none,
-    // because it is believed.
-    await verifyBackup(row.id).catch((err) => console.warn('Backup check failed:', (err as Error).message));
-    await pruneBackups().catch((err) => console.warn('Backup thinning failed:', (err as Error).message));
+    // because it is believed. Checking restores into a scratch database, so
+    // on a tight disk it is skipped: the copy is then honestly described as
+    // unchecked rather than risking the database to prove it.
+    if (room.canVerify) {
+      await verifyBackup(row.id).catch((err) => console.warn('Backup check failed:', (err as Error).message));
+    } else {
+      await db('backups')
+        .where({ id: row.id })
+        .update({ error: 'Saved, but not checked: there was not enough room on this server to read it back.' });
+    }
 
     const [done] = await db('backups').where({ id: row.id }).select('*');
     return done as BackupRow;

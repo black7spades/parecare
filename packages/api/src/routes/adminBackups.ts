@@ -3,9 +3,9 @@ import * as fs from 'node:fs';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
-import { requireRole } from '../middleware/requireRole';
+import { requireAccountRight } from '../middleware/accountRights';
 import { getBackupConfig } from '../config/settings';
-import { runBackup, verifyBackup, lastGoodBackup, restoreBackup, type BackupRow } from '../services/backup';
+import { runBackup, verifyBackup, lastGoodBackup, restoreBackup, spaceReport, type BackupRow } from '../services/backup';
 
 /**
  * The Backups screen, for the super admin. Copies are taken whether or not
@@ -18,7 +18,11 @@ import { runBackup, verifyBackup, lastGoodBackup, restoreBackup, type BackupRow 
  */
 export const adminBackupsRouter = Router();
 
-adminBackupsRouter.use(requireAuth, requireRole('super_admin'));
+// Not super admin alone. If the one person who can reach this is away, has
+// lost their account, or something has happened to them, the records have to
+// still be recoverable by someone. The right is off by default because a copy
+// holds everyone's health records, so it is given deliberately.
+adminBackupsRouter.use(requireAuth, requireAccountRight('can_manage_backups'));
 
 async function audit(accountId: string, summary: string): Promise<void> {
   await db('audit_log')
@@ -29,22 +33,46 @@ async function audit(accountId: string, summary: string): Promise<void> {
 /**
  * One sentence a worried person can act on, describing where this
  * installation stands. Never a status code or a count of anything.
+ *
+ * "Protected" is earned, not assumed. Copies that have only ever existed on
+ * the machine they are protecting die with that machine, so an installation
+ * whose copies have never left it is told so plainly rather than reassured.
  */
-function reassurance(last: BackupRow | undefined, enabled: boolean): { state: 'protected' | 'stale' | 'none' | 'off'; message: string } {
+type BackupState = 'protected' | 'here_only' | 'stale' | 'none' | 'off' | 'no_room';
+
+function reassurance(
+  last: BackupRow | undefined,
+  enabled: boolean,
+  everTakenAway: boolean,
+  roomForMore: number
+): { state: BackupState; message: string } {
   if (!enabled) {
-    return { state: 'off', message: 'Automatic copies are turned off, so there is nothing to restore from if something goes wrong.' };
+    return { state: 'off', message: 'Automatic copies are turned off, so there is nothing to go back to if something goes wrong.' };
   }
   if (!last) {
     return { state: 'none', message: 'No copy has been made yet. The first one is taken within a few minutes.' };
   }
-  const ageMs = Date.now() - new Date(last.started_at).getTime();
-  const stale = ageMs > 3 * 86400_000;
-  if (stale) {
-    return { state: 'stale', message: 'Copies have not run recently. Your most recent one may be out of date.' };
+  if (roomForMore < 1) {
+    return {
+      state: 'no_room',
+      message: 'There is no room left on this server for more copies, so new ones will stop being made. Free some space, or ask whoever runs this server to.',
+    };
+  }
+  if (Date.now() - new Date(last.started_at).getTime() > 3 * 86400_000) {
+    return { state: 'stale', message: 'Copies have not run recently, so the most recent one may be out of date.' };
+  }
+  if (!everTakenAway) {
+    return {
+      state: 'here_only',
+      message:
+        'Copies are being made, but they are all on this server. If this server is lost, they go with it. Download one and keep it somewhere else.',
+    };
   }
   return {
     state: 'protected',
-    message: last.verified_at ? 'Your data is protected. The last copy was checked and works.' : 'Your data is protected.',
+    message: last.verified_at
+      ? 'Your data is protected. The last copy was checked and works, and a copy has been kept somewhere else.'
+      : 'Your data is protected, and a copy has been kept somewhere else.',
   };
 }
 
@@ -52,9 +80,28 @@ adminBackupsRouter.get('/', async (_req, res) => {
   const cfg = getBackupConfig();
   const last = await lastGoodBackup();
   const backups = await db('backups').orderBy('started_at', 'desc').limit(200);
+  const space = await spaceReport();
+  // A copy that was downloaded has left this server, which is the only thing
+  // that makes any of this survive the server dying.
+  const takenAway = await db('backups').whereNotNull('downloaded_at').first();
+
+  // Who else could get these records back if this person could not. One name
+  // is a single point of failure, and in a care setting that is not a
+  // hypothetical, so the screen says so.
+  // Grouped deliberately: without the brackets, AND binds tighter than OR in
+  // SQL and disabled accounts would be counted as people who could help.
+  const keyholders = await db('accounts')
+    .where((qb) => {
+      qb.where({ can_manage_backups: true }).orWhere({ role: 'super_admin' }).orWhere({ role: 'admin' });
+    })
+    .whereNull('disabled_at')
+    .select('id', 'display_name', 'email');
+
   res.json({
-    status: reassurance(last, cfg.enabled),
+    status: reassurance(last, cfg.enabled, !!takenAway, space.roomForMore),
     settings: { enabled: cfg.enabled, frequency: cfg.frequency, keep_days: cfg.keepDays },
+    space: { room_for_more: space.roomForMore, used_by_copies: space.usedByCopies },
+    keyholders,
     last_backup_at: last?.started_at ?? null,
     backups: backups.map((b: BackupRow) => ({
       ...b,
@@ -105,6 +152,9 @@ adminBackupsRouter.get('/:backupId/download', async (req, res) => {
     return;
   }
   await audit(req.account!.id, `downloaded the copy from ${new Date(backup.started_at).toISOString()}`);
+  // Remembered so the screen can stop claiming protection it has not earned:
+  // a copy that has left this server is the only kind that survives it.
+  await db('backups').where({ id: backup.id }).update({ downloaded_at: db.fn.now() });
   res.download(backup.file_url, backup.filename ?? 'parecare-backup.tar.gz');
 });
 

@@ -12,12 +12,23 @@ export interface Backup {
   verified_rows: number | null;
   verified_at: string | null;
   error: string | null;
+  downloaded_at: string | null;
   stored: boolean;
 }
 
+export type BackupState = 'protected' | 'here_only' | 'stale' | 'none' | 'off' | 'no_room';
+
+export interface Keyholder {
+  id: string;
+  display_name: string;
+  email: string;
+}
+
 export interface BackupsOverview {
-  status: { state: 'protected' | 'stale' | 'none' | 'off'; message: string };
+  status: { state: BackupState; message: string };
   settings: { enabled: boolean; frequency: 'hourly' | 'daily' | 'weekly' | 'monthly'; keep_days: number };
+  space: { room_for_more: number; used_by_copies: number };
+  keyholders: Keyholder[];
   last_backup_at: string | null;
   backups: Backup[];
 }
