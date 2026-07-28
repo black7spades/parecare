@@ -196,6 +196,54 @@ conditionsRouter.get('/', requireAuth, async (req, res) => {
     attributesByCondition.set(a.condition_id, arr);
   }
 
+  // The condition's own tracking thread: its log, the appointments booked
+  // under it, and the documents filed against it. Appointments and documents
+  // still live in their own sections; this is the same row seen from the
+  // condition's side, so one thing can be followed on its own.
+  const logEntries = ids.length
+    ? await db('condition_log_entries as e')
+        .leftJoin('accounts as a', 'a.id', 'e.author_account_id')
+        .whereIn('e.medical_condition_id', ids)
+        .select('e.*', 'a.display_name as author_name')
+        .orderBy('e.occurred_at', 'desc')
+    : [];
+  const logByCondition = new Map<string, unknown[]>();
+  for (const e of logEntries as Array<Record<string, unknown>>) {
+    const key = e['medical_condition_id'] as string;
+    const arr = logByCondition.get(key) ?? [];
+    arr.push(e);
+    logByCondition.set(key, arr);
+  }
+
+  const conditionAppointments = ids.length
+    ? await db('appointments as ap')
+        .leftJoin('providers as p', 'p.id', 'ap.provider_id')
+        .whereIn('ap.medical_condition_id', ids)
+        .select('ap.id', 'ap.medical_condition_id', 'ap.title', 'ap.appointment_type', 'ap.starts_at', 'ap.status', 'ap.location', 'p.name as provider_name')
+        .orderBy('ap.starts_at', 'desc')
+    : [];
+  const apptsByCondition = new Map<string, unknown[]>();
+  for (const a of conditionAppointments as Array<Record<string, unknown>>) {
+    const key = a['medical_condition_id'] as string;
+    const arr = apptsByCondition.get(key) ?? [];
+    arr.push(a);
+    apptsByCondition.set(key, arr);
+  }
+
+  const conditionDocuments = ids.length
+    ? await db('documents')
+        .whereIn('medical_condition_id', ids)
+        .select('id', 'medical_condition_id', 'label', 'category', 'mime_type', 'file_size_bytes', 'created_at')
+        .orderBy('created_at', 'desc')
+    : [];
+  const docsByCondition = new Map<string, unknown[]>();
+  for (const d of conditionDocuments as Array<Record<string, unknown>>) {
+    const key = d['medical_condition_id'] as string;
+    const arr = docsByCondition.get(key) ?? [];
+    arr.push(d);
+    docsByCondition.set(key, arr);
+  }
+
   res.json({
     conditions: conditions.map((c) =>
       serializeCondition({
@@ -206,6 +254,9 @@ conditionsRouter.get('/', requireAuth, async (req, res) => {
         functions: functionsByCondition.get(c.id) ?? [],
         symptoms: symptomsByCondition.get(c.id) ?? [],
         attributes: attributesByCondition.get(c.id) ?? [],
+        log_entries: logByCondition.get(c.id) ?? [],
+        appointments: apptsByCondition.get(c.id) ?? [],
+        documents: docsByCondition.get(c.id) ?? [],
       })
     ),
   });
@@ -738,4 +789,104 @@ conditionsRouter.post('/extract-from-document', requireAuth, async (req, res) =>
   } catch {
     res.json({ extracted: {} });
   }
+});
+
+// ---------------------------------------------------------------------------
+// A condition's own tracking log. A sprained ankle in March that still hurts in
+// July is not one fact but a run of them: what was noticed, what the doctor
+// said, what the scan showed. Kept apart from the care log so this one thing
+// can be followed on its own.
+
+const CONDITION_LOG_TYPES = [
+  'note',
+  'symptom_change',
+  'treatment',
+  'appointment_outcome',
+  'test_result',
+  'other',
+] as const;
+
+const conditionLogSchema = z.object({
+  entry_type: z.enum(CONDITION_LOG_TYPES).optional(),
+  title: z.string().max(255).optional().nullable(),
+  body: z.string().min(1).max(10000),
+  occurred_at: z.string().datetime().optional(),
+});
+
+/** Confirm the condition belongs to this profile before touching its log. */
+async function conditionInProfile(profileId: string, conditionId: string): Promise<boolean> {
+  const row = await db('medical_conditions').where({ id: conditionId, care_profile_id: profileId }).first();
+  return !!row;
+}
+
+conditionsRouter.get('/:conditionId/log', requireAuth, async (req, res) => {
+  if (!(await conditionInProfile(req.params['id']!, req.params['conditionId']!))) {
+    res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const entries = await db('condition_log_entries as e')
+    .leftJoin('accounts as a', 'a.id', 'e.author_account_id')
+    .where('e.medical_condition_id', req.params['conditionId'])
+    .select('e.*', 'a.display_name as author_name')
+    .orderBy('e.occurred_at', 'desc');
+  res.json({ entries });
+});
+
+conditionsRouter.post('/:conditionId/log', requireAuth, async (req, res) => {
+  if (!(await conditionInProfile(req.params['id']!, req.params['conditionId']!))) {
+    res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const parsed = conditionLogSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
+    return;
+  }
+  const [entry] = await db('condition_log_entries')
+    .insert({
+      medical_condition_id: req.params['conditionId'],
+      author_account_id: req.account!.id,
+      entry_type: parsed.data.entry_type ?? 'note',
+      title: parsed.data.title ?? null,
+      body: parsed.data.body,
+      ...(parsed.data.occurred_at ? { occurred_at: parsed.data.occurred_at } : {}),
+    })
+    .returning('*');
+  res.status(201).json({ entry });
+});
+
+conditionsRouter.patch('/:conditionId/log/:entryId', requireAuth, async (req, res) => {
+  if (!(await conditionInProfile(req.params['id']!, req.params['conditionId']!))) {
+    res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const parsed = conditionLogSchema.partial().safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const [entry] = await db('condition_log_entries')
+    .where({ id: req.params['entryId'], medical_condition_id: req.params['conditionId'] })
+    .update({ ...parsed.data, updated_at: db.fn.now() })
+    .returning('*');
+  if (!entry) {
+    res.status(404).json({ error: 'Not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ entry });
+});
+
+conditionsRouter.delete('/:conditionId/log/:entryId', requireAuth, async (req, res) => {
+  if (!(await conditionInProfile(req.params['id']!, req.params['conditionId']!))) {
+    res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const affected = await db('condition_log_entries')
+    .where({ id: req.params['entryId'], medical_condition_id: req.params['conditionId'] })
+    .delete();
+  if (!affected) {
+    res.status(404).json({ error: 'Not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ message: 'Deleted.' });
 });

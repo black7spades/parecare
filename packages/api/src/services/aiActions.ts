@@ -185,6 +185,21 @@ const addConditionSchema = z.object({
   notes: z.string().optional().nullable(),
 });
 
+// Add to a condition's own tracking log: how the sprained ankle is going,
+// what the scan showed, what the doctor said. Kept apart from the care log.
+const logConditionSchema = z.object({
+  type: z.literal('log_condition'),
+  // The condition by name, matched within this person's conditions.
+  condition: z.string().min(1).max(255),
+  entry_type: z
+    .enum(['note', 'symptom_change', 'treatment', 'appointment_outcome', 'test_result', 'other'])
+    .optional()
+    .nullable(),
+  title: z.string().max(255).optional().nullable(),
+  body: z.string().min(1).max(10000),
+  occurred_at: z.string().optional().nullable(),
+});
+
 const removeConditionSchema = z.object({
   type: z.literal('remove_condition'),
   name: z.string().min(1).max(255),
@@ -378,6 +393,7 @@ export const actionSchema = z.discriminatedUnion('type', [
   addAllergySchema,
   removeAllergySchema,
   addConditionSchema,
+  logConditionSchema,
   removeConditionSchema,
   addSubstanceSchema,
   updateSubstanceSchema,
@@ -998,6 +1014,23 @@ async function executeOne(
       if (!n) return `No condition called "${action.name}" was on the record.`;
       await audit(profileId, account.id, 'conditions', `removed condition ${action.name}`);
       return `Removed the condition ${action.name}.`;
+    }
+    case 'log_condition': {
+      const condition = await db('medical_conditions')
+        .where({ care_profile_id: profileId })
+        .whereRaw('lower(name) = lower(?)', [action.condition.trim()])
+        .first();
+      if (!condition) return `No condition called "${action.condition}" was on the record.`;
+      await db('condition_log_entries').insert({
+        medical_condition_id: condition.id,
+        author_account_id: account.id,
+        entry_type: action.entry_type ?? 'note',
+        title: action.title ?? null,
+        body: action.body,
+        ...(action.occurred_at ? { occurred_at: new Date(action.occurred_at).toISOString() } : {}),
+      });
+      await audit(profileId, account.id, 'conditions', `logged against ${condition.name}`);
+      return `Added that to the tracking log for ${condition.name}.`;
     }
     case 'resolve_condition': {
       const resolvedOn = action.resolved_on ?? new Date().toISOString().slice(0, 10);

@@ -16,6 +16,7 @@ import { carePlanRouter, planReviewsRouter } from './routes/carePlan';
 import { checklistsRouter } from './routes/checklists';
 import { questionsRouter } from './routes/questions';
 import { documentsRouter } from './routes/documents';
+import { secretsRouter } from './routes/secrets';
 import { documentIngestRouter } from './routes/documentIngest';
 import { providersRouter, providerSearchRouter } from './routes/providers';
 import { suppliersRouter } from './routes/suppliers';
@@ -154,6 +155,9 @@ v1.use('/care-profiles/:id/allergies', ...profileAccess, capturePlanEvents('alle
 v1.use('/care-profiles/:id/conditions', ...profileAccess, capturePlanEvents('conditions'), conditionsRouter);
 v1.use('/care-profiles/:id/questions', ...profileAccess, questionsRouter);
 v1.use('/care-profiles/:id/documents', ...profileAccess, documentsRouter);
+// The secrets vault sits under Documents but guards itself: only the account
+// owner, plus a power of attorney holder once a death is recorded.
+v1.use('/care-profiles/:id/secrets', ...profileAccess, secretsRouter);
 v1.use('/care-profiles/:id/ingest', ...profileAccess, documentIngestRouter);
 v1.use('/care-profiles/:id/providers', ...profileAccess, capturePlanEvents('providers'), providersRouter);
 v1.use('/care-profiles/:id/addresses', ...profileAccess, addressesRouter);

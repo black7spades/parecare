@@ -80,6 +80,8 @@ export interface CareProfile {
   owner_profile?: { id: string; full_name: string; preferred_name: string | null } | null;
   preferred_name: string | null;
   date_of_birth: string | null;
+  /** Recorded when someone dies; unlocks their secrets to a power of attorney. */
+  died_on?: string | null;
   /** Expected babies get a profile before birth. */
   due_date?: string | null;
   current_phase: CarePhase;
@@ -502,6 +504,59 @@ export interface HealthStatusDocument {
   created_at: string;
 }
 
+/** One entry in a condition's own log, kept apart from the care log. */
+export interface ConditionLogEntry {
+  id: string;
+  medical_condition_id: string;
+  entry_type: string;
+  title: string | null;
+  body: string;
+  occurred_at: string;
+  author_name: string | null;
+}
+
+/** An appointment that came out of a condition, seen from the condition. */
+export interface ConditionAppointment {
+  id: string;
+  title: string;
+  appointment_type: string;
+  starts_at: string;
+  status: string;
+  location: string | null;
+  provider_name: string | null;
+}
+
+/** A document filed against a condition, seen from the condition. */
+export interface ConditionDocument {
+  id: string;
+  label: string;
+  category: string;
+  mime_type: string | null;
+  file_size_bytes: number | null;
+  created_at: string;
+}
+
+/** A therapy being done for a condition, seen from the condition. */
+export interface HealthStatusTreatment {
+  id: string;
+  name: string;
+  category: string;
+  active: boolean;
+  frequency: string | null;
+}
+
+export const CONDITION_LOG_TYPES = [
+  { value: 'note', label: 'Note' },
+  { value: 'symptom_change', label: 'Change in symptoms' },
+  { value: 'treatment', label: 'Treatment' },
+  { value: 'appointment_outcome', label: 'What came of an appointment' },
+  { value: 'test_result', label: 'Test or scan result' },
+  { value: 'other', label: 'Other' },
+] as const;
+
+export const conditionLogTypeLabel = (v: string): string =>
+  CONDITION_LOG_TYPES.find((t) => t.value === v)?.label ?? 'Note';
+
 export interface HealthStatus {
   id: string;
   care_profile_id: string;
@@ -686,6 +741,11 @@ export interface MedicalCondition {
   functions?: ConditionFunction[];
   symptoms?: ConditionSymptom[];
   attributes?: NeurotypeAttribute[];
+  // The condition's own tracking thread: what has been noted about it, the
+  // appointments booked under it, and the documents filed against it.
+  log_entries?: ConditionLogEntry[];
+  appointments?: ConditionAppointment[];
+  documents?: ConditionDocument[];
 }
 
 /** A standard diagnosis code on a condition: the system and the code. */
@@ -1214,6 +1274,8 @@ export interface Treatment {
   category: string;
   medical_condition_id: string | null;
   condition_name?: string | null;
+  /** The current health entry this treatment came out of, when it did. */
+  health_status_id?: string | null;
   instructions: string | null;
   frequency: string | null;
   schedule_times: string[] | null;

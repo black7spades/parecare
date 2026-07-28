@@ -20,6 +20,36 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.10.0',
+    date: '2026-07-28',
+    summary: 'Wi-Fi kept with an address, a private vault for logins, and a condition that tracks itself.',
+    groups: [
+      {
+        heading: 'Wi-Fi at an address',
+        items: [
+          'An address now keeps the Wi-Fi network name and the password, so anyone arriving to help gets online without hunting for the router. The network name is a sortable column in the address directory, and both are in the import and export.',
+          'The password is stored encrypted and shown only when you ask to see it.',
+        ],
+      },
+      {
+        heading: 'Secrets',
+        items: [
+          'A new Secrets section under Documents for the logins kept for someone: social accounts, the rental, the bank. Each one records its name, kind, website, who you sign in as, the password, the account number and notes, every fact its own field.',
+          'Only you, as the account owner, sees them. Carers, editors and viewers in the care circle never do, and neither do platform administrators. A power of attorney in the care circle gains access once a date of death is recorded, because settling an estate means getting into the accounts.',
+          'Passwords are stored encrypted and stay masked until revealed, with a control to copy one without showing it. A date of death field now sits on a person’s details.',
+        ],
+      },
+      {
+        heading: 'Tracking a condition on its own',
+        items: [
+          'A condition under Current health now has its own thread, so a long-running thing is followed in one place instead of being hunted for across the care log. An ankle sprained in March that still hurts in July keeps its own log, the appointments booked for it, the documents filed against it, and the therapies being done for it.',
+          'An appointment records what it is for, and the calendar marks it with that condition. A document is filed against a condition when it is uploaded. All of them still appear in Appointments, Documents and Treatments as before.',
+          'Each log entry is typed as a note, a change in symptoms, a treatment, what came of an appointment, or a test or scan result. Pare can add to a condition’s log too.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.9.0',
     date: '2026-07-23',
     summary: 'A people switcher in the top bar, a consistent icon for every action across the app, and an icon on every section in a person’s record.',

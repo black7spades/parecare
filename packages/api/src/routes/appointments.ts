@@ -26,6 +26,9 @@ const appointmentSchema = z.object({
   title: z.string().min(1).max(255),
   appointment_type: z.enum(APPOINTMENT_TYPES).default('consultation'),
   provider_id: z.string().uuid().optional().nullable(),
+  // The condition this appointment arose from, so an x-ray booked for a sore
+  // ankle stays tied to the ankle in the record and on the calendar.
+  medical_condition_id: z.string().uuid().optional().nullable(),
   location: z.string().max(255).optional().nullable(),
   starts_at: z.string().datetime(),
   ends_at: z.string().datetime().optional().nullable(),

@@ -120,6 +120,9 @@ const profileSchema = z.object({
   desexed: z.boolean().optional(),
   microchip_number: z.string().max(60).optional().nullable(),
   date_of_birth: z.string().optional().nullable(),
+  // Recorded when someone dies. Besides being part of their record, this is
+  // what hands the secrets vault to a power of attorney holder.
+  died_on: z.string().optional().nullable(),
   current_phase: z
     .enum([
       'early_concern',

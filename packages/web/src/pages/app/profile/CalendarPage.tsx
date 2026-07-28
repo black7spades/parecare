@@ -19,7 +19,14 @@ import { Modal } from '../../../components/ui/Modal';
 import { useProfile } from './ProfileLayout';
 import type { Task } from '../../../lib/care';
 
-type CalendarEvent = Task & { kind?: string; medication_id?: string };
+type CalendarEvent = Task & {
+  kind?: string;
+  medication_id?: string;
+  // An appointment booked under a condition carries it, so the calendar can
+  // mark which condition the appointment belongs to.
+  medical_condition_id?: string | null;
+  medical_condition_name?: string | null;
+};
 
 type MedicationStatus = 'given' | 'missed' | 'upcoming';
 
@@ -224,10 +231,17 @@ export function CalendarPage() {
                     return (
                       <div
                         key={e.id}
-                        title={`${format(new Date(e.next_due_at), 'HH:mm')} ${e.title}${isMed ? `, ${medicationStatus(e)}` : ''}`}
-                        className={`truncate rounded px-1.5 py-0.5 text-[11px] leading-tight ${cls}`}
+                        title={`${format(new Date(e.next_due_at), 'HH:mm')} ${e.title}${isMed ? `, ${medicationStatus(e)}` : ''}${
+                          e.medical_condition_name ? `, for ${e.medical_condition_name}` : ''
+                        }`}
+                        className={`truncate rounded px-1.5 py-0.5 text-[11px] leading-tight ${cls} ${
+                          e.medical_condition_id ? 'ring-1 ring-inset ring-amber-500/60' : ''
+                        }`}
                       >
                         {format(new Date(e.next_due_at), 'HH:mm')} {e.title}
+                        {e.medical_condition_name ? (
+                          <span className="block truncate text-[10px] opacity-80">for {e.medical_condition_name}</span>
+                        ) : null}
                       </div>
                     );
                   })}
@@ -372,6 +386,11 @@ function DayEventsModal({ day, events, onClose }: { day: Date; events: CalendarE
                     {e.title}
                   </p>
                   {e.body ? <p className="text-xs text-muted mt-0.5">{e.body}</p> : null}
+                  {e.medical_condition_name ? (
+                    <span className="mt-1 inline-block badge bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300 text-[10px]">
+                      For {e.medical_condition_name}
+                    </span>
+                  ) : null}
                 </div>
                 {status ? (
                   <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium capitalize ${chipCls}`}>
