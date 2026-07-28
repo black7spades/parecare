@@ -13,6 +13,8 @@ export interface Backup {
   verified_at: string | null;
   error: string | null;
   downloaded_at: string | null;
+  offsite_at: string | null;
+  offsite_error: string | null;
   stored: boolean;
 }
 
@@ -28,6 +30,7 @@ export interface BackupsOverview {
   status: { state: BackupState; message: string };
   settings: { enabled: boolean; frequency: 'hourly' | 'daily' | 'weekly' | 'monthly'; keep_days: number };
   space: { room_for_more: number; used_by_copies: number };
+  cloud: { available: boolean; connected: boolean; account: string | null; redirect_uri: string };
   keyholders: Keyholder[];
   last_backup_at: string | null;
   backups: Backup[];
@@ -40,4 +43,7 @@ export const backupsApi = {
   restore: (id: string, confirm: string) => api.post<{ message: string }>(`/admin/backups/${id}/restore`, { confirm }),
   downloadUrl: (id: string) => `/admin/backups/${id}/download`,
   save: (settings: Record<string, string>) => api.patch<unknown>('/admin/settings', settings),
+  connectGoogle: () => api.post<{ url: string }>('/admin/backups/google/connect'),
+  disconnectGoogle: () => api.post<{ message: string }>('/admin/backups/google/disconnect'),
+  sendOffsite: (id: string) => api.post<{ message: string }>(`/admin/backups/${id}/send-offsite`),
 };

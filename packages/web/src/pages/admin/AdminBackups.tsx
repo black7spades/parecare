@@ -55,6 +55,15 @@ function sizeText(bytes: number | null): string {
   return `${mb.toFixed(1)} MB`;
 }
 
+/** Where this copy exists, said plainly. */
+function whereText(b: Backup): string {
+  if (b.status !== 'ok') return '';
+  const away = [];
+  if (b.offsite_at) away.push('Google Drive');
+  if (b.downloaded_at) away.push('downloaded');
+  return away.length > 0 ? `This server and ${away.join(', ')}` : 'This server only';
+}
+
 /** What this copy is, said plainly. Never a status code. */
 function stateText(b: Backup): string {
   if (b.status === 'running') return 'Being made';
@@ -91,6 +100,19 @@ export function AdminBackups() {
     void load();
   }, [load]);
 
+  // Google returns people here with the outcome in the address. Read it once,
+  // say it in words, and tidy the address so a refresh does not repeat it.
+  useEffect(() => {
+    const hash = window.location.hash.replace(/^#/, '');
+    if (!hash) return;
+    if (hash === 'connected=1') {
+      setNotice({ kind: 'ok', text: 'Google Drive is connected. Copies will be kept there from now on.' });
+    } else if (hash.startsWith('error=')) {
+      setNotice({ kind: 'bad', text: `Google Drive was not connected: ${hash.slice(6).replace(/-/g, ' ')}.` });
+    }
+    window.history.replaceState(null, '', window.location.pathname);
+  }, []);
+
   const rows = data?.backups ?? [];
   const latest = rows.find((b) => b.stored && b.status === 'ok');
   const view = useDataView<Backup>({
@@ -102,6 +124,7 @@ export function AdminBackups() {
         { key: 'when', label: 'When', defaultDir: 'desc' as const, compare: (a: Backup, b: Backup) => a.started_at.localeCompare(b.started_at) },
         { key: 'size', label: 'Size', compare: (a: Backup, b: Backup) => (a.size_bytes ?? 0) - (b.size_bytes ?? 0) },
         { key: 'state', label: 'State', compare: (a: Backup, b: Backup) => stateText(a).localeCompare(stateText(b)) },
+        { key: 'kept', label: 'Kept', compare: (a: Backup, b: Backup) => whereText(a).localeCompare(whereText(b)) },
         { key: 'taken', label: 'Taken', compare: (a: Backup, b: Backup) => a.kind.localeCompare(b.kind) },
       ],
       []
@@ -140,6 +163,43 @@ export function AdminBackups() {
     try {
       const result = await backupsApi.check(b.id);
       setNotice({ kind: result.ok ? 'ok' : 'bad', text: result.message });
+      await load();
+    } catch (err) {
+      setNotice({ kind: 'bad', text: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function connectGoogle() {
+    setBusy(true);
+    try {
+      const { url } = await backupsApi.connectGoogle();
+      window.location.href = url;
+    } catch (err) {
+      setNotice({ kind: 'bad', text: (err as Error).message });
+      setBusy(false);
+    }
+  }
+
+  async function disconnectGoogle() {
+    setBusy(true);
+    try {
+      const result = await backupsApi.disconnectGoogle();
+      setNotice({ kind: 'ok', text: result.message });
+      await load();
+    } catch (err) {
+      setNotice({ kind: 'bad', text: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendOffsite(b: Backup) {
+    setBusy(true);
+    try {
+      const result = await backupsApi.sendOffsite(b.id);
+      setNotice({ kind: 'ok', text: result.message });
       await load();
     } catch (err) {
       setNotice({ kind: 'bad', text: (err as Error).message });
@@ -244,6 +304,50 @@ export function AdminBackups() {
         <p className={`text-sm ${notice.kind === 'ok' ? 'text-ink' : 'text-red-600 dark:text-red-400'}`}>{notice.text}</p>
       ) : null}
 
+      {/*
+        The only thing that survives this server being lost. Presented as one
+        button, because everything it involves is our problem, not theirs.
+      */}
+      <div className="rounded-lg border border-border bg-card p-4">
+        <h3 className="text-sm font-semibold text-ink">Keep a copy off this server</h3>
+        {data.cloud.connected ? (
+          <>
+            <p className="mt-1 text-sm text-muted">
+              Copies are being kept in {data.cloud.account ?? 'Google Drive'}, in a folder called PareCare backups.
+              PareCare can only see the files it puts there.
+            </p>
+            <div className="mt-3">
+              <Button variant="secondary" size="sm" onClick={() => void disconnectGoogle()} disabled={busy}>
+                Stop using Google Drive
+              </Button>
+            </div>
+          </>
+        ) : data.cloud.available ? (
+          <>
+            <p className="mt-1 text-sm text-muted">
+              Connect Google Drive and every copy is kept there as well as here, so the records survive this server
+              being lost. PareCare only ever sees the files it puts there.
+            </p>
+            <div className="mt-3">
+              <Button variant="primary" size="sm" onClick={() => void connectGoogle()} loading={busy}>
+                Connect Google Drive
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="mt-1 text-sm text-muted">
+              Google has not been set up for this installation yet. Once the Google sign-in details are filled in under
+              Settings, copies can be kept in Google Drive automatically. Until then, download a copy and keep it
+              somewhere safe.
+            </p>
+            <p className="mt-2 text-xs text-muted">
+              Whoever sets Google up will need this address: <code className="break-all">{data.cloud.redirect_uri}</code>
+            </p>
+          </>
+        )}
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-3">
         <label className="block">
           <span className="mb-1 block text-sm font-medium text-ink">How often</span>
@@ -305,6 +409,7 @@ export function AdminBackups() {
                   <SortableTh label="When" sortKey="when" activeKey={view.sortKey} dir={view.sortDir} onToggle={view.toggleSort} />
                   <SortableTh label="State" sortKey="state" activeKey={view.sortKey} dir={view.sortDir} onToggle={view.toggleSort} />
                   <SortableTh label="Size" sortKey="size" activeKey={view.sortKey} dir={view.sortDir} onToggle={view.toggleSort} />
+                  <SortableTh label="Kept" sortKey="kept" activeKey={view.sortKey} dir={view.sortDir} onToggle={view.toggleSort} />
                   <SortableTh label="Taken" sortKey="taken" activeKey={view.sortKey} dir={view.sortDir} onToggle={view.toggleSort} />
                   <th className="px-3 py-2 font-medium">Actions</th>
                 </tr>
@@ -318,6 +423,10 @@ export function AdminBackups() {
                       {b.error ? <span className="block text-xs text-muted">{b.error}</span> : null}
                     </td>
                     <td className="px-3 py-2 text-muted">{sizeText(b.size_bytes)}</td>
+                    <td className="px-3 py-2 text-muted">
+                      {whereText(b)}
+                      {b.offsite_error ? <span className="block text-xs text-muted">{b.offsite_error}</span> : null}
+                    </td>
                     <td className="px-3 py-2 text-muted">{b.kind === 'manual' ? 'By hand' : 'Automatically'}</td>
                     <td className="px-3 py-2">
                       {b.stored ? (
@@ -328,6 +437,11 @@ export function AdminBackups() {
                           <Button variant="ghost" size="xs" onClick={() => void check(b)} disabled={busy}>
                             Check
                           </Button>
+                          {data.cloud.connected && !b.offsite_at ? (
+                            <Button variant="ghost" size="xs" onClick={() => void sendOffsite(b)} disabled={busy}>
+                              Send to Drive
+                            </Button>
+                          ) : null}
                           <Button variant="ghost-danger" size="xs" onClick={() => setRestoring(b)}>
                             Put this back
                           </Button>

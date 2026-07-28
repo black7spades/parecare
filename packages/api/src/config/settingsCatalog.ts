@@ -94,6 +94,10 @@ export const SETTINGS_CATALOG: readonly SettingEntry[] = [
   { key: 'backups.frequency', group: 'backups', label: 'How often', type: 'enum', enumValues: BACKUP_FREQUENCIES, secret: false, envKey: 'BACKUPS_FREQUENCY', zod: enom(BACKUP_FREQUENCIES) },
   { key: 'backups.keep_days', group: 'backups', label: 'Keep copies for', type: 'enum', enumValues: BACKUP_KEEP, secret: false, envKey: 'BACKUPS_KEEP_DAYS', help: 'In days. Older copies are thinned out rather than all kept.', zod: enom(BACKUP_KEEP) },
   { key: 'backups.path', group: 'backups', label: 'Where copies are stored', type: 'string', secret: false, envKey: 'BACKUPS_PATH', help: 'A folder on this server, kept separate from uploaded documents so a copy never contains itself.', zod: str() },
+  // Set by pressing Connect on the Backups screen, not typed in by hand.
+  { key: 'backups.google_refresh_token', group: 'backups', label: 'Google Drive connection', type: 'string', secret: true, envKey: 'BACKUPS_GOOGLE_REFRESH_TOKEN', help: 'Set by connecting Google Drive on the Backups screen.', zod: str() },
+  { key: 'backups.google_account', group: 'backups', label: 'Google Drive account', type: 'string', secret: false, envKey: 'BACKUPS_GOOGLE_ACCOUNT', zod: str() },
+  { key: 'backups.google_folder_id', group: 'backups', label: 'Google Drive folder', type: 'string', secret: false, envKey: 'BACKUPS_GOOGLE_FOLDER_ID', zod: str() },
 
   // Stripe billing
   { key: 'stripe.secret_key', group: 'stripe', label: 'Stripe secret key', type: 'string', secret: true, envKey: 'STRIPE_SECRET_KEY', help: 'Starts with sk_live_ (or sk_test_ for test mode).', helpLink: { label: 'Stripe API keys', url: 'https://dashboard.stripe.com/apikeys' }, zod: str() },

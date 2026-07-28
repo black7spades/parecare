@@ -52,7 +52,7 @@ import { startMarArchiveScheduler } from './services/marArchive';
 import { subscriptionsRouter } from './routes/subscriptions';
 import { adminRouter } from './routes/admin';
 import { adminDatabaseRouter } from './routes/adminDatabase';
-import { adminBackupsRouter } from './routes/adminBackups';
+import { adminBackupsRouter, adminBackupsCallbackRouter } from './routes/adminBackups';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { requireAuth } from './middleware/auth';
 import { requireCareProfileAccess } from './middleware/subscriptionGate';
@@ -120,6 +120,10 @@ v1.use('/admin/settings', settingsRouter);
 // Super-admin database tools: registered before the admin router for the
 // same reason as settings.
 v1.use('/admin/database', adminDatabaseRouter);
+// Google sends people back here from their consent screen, so it arrives as
+// a plain browser redirect with no token. Registered before the guarded
+// router; it proves who it is from its own signed state instead.
+v1.use('/admin/backups', adminBackupsCallbackRouter);
 v1.use('/admin/backups', adminBackupsRouter);
 v1.use('/admin', adminRouter);
 v1.use('/subscriptions', subscriptionsRouter);

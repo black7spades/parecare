@@ -5,7 +5,19 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { requireAccountRight } from '../middleware/accountRights';
 import { getBackupConfig } from '../config/settings';
+import jwt from 'jsonwebtoken';
+import { env } from '../config/env';
 import { runBackup, verifyBackup, lastGoodBackup, restoreBackup, spaceReport, type BackupRow } from '../services/backup';
+import {
+  driveAuthUrl,
+  driveConfigured,
+  driveConnected,
+  driveAccount,
+  driveRedirectUri,
+  completeDriveConnection,
+  disconnectDrive,
+  sendCopyOffsite,
+} from '../services/backupDrive';
 
 /**
  * The Backups screen, for the super admin. Copies are taken whether or not
@@ -83,7 +95,9 @@ adminBackupsRouter.get('/', async (_req, res) => {
   const space = await spaceReport();
   // A copy that was downloaded has left this server, which is the only thing
   // that makes any of this survive the server dying.
-  const takenAway = await db('backups').whereNotNull('downloaded_at').first();
+  const takenAway = await db('backups')
+    .where((qb) => qb.whereNotNull('downloaded_at').orWhereNotNull('offsite_at'))
+    .first();
 
   // Who else could get these records back if this person could not. One name
   // is a single point of failure, and in a care setting that is not a
@@ -101,6 +115,13 @@ adminBackupsRouter.get('/', async (_req, res) => {
     status: reassurance(last, cfg.enabled, !!takenAway, space.roomForMore),
     settings: { enabled: cfg.enabled, frequency: cfg.frequency, keep_days: cfg.keepDays },
     space: { room_for_more: space.roomForMore, used_by_copies: space.usedByCopies },
+    cloud: {
+      available: driveConfigured(),
+      connected: driveConnected(),
+      account: driveAccount() ?? null,
+      // Shown so whoever sets Google up can copy it straight across.
+      redirect_uri: driveRedirectUri(),
+    },
     keyholders,
     last_backup_at: last?.started_at ?? null,
     backups: backups.map((b: BackupRow) => ({
@@ -156,6 +177,72 @@ adminBackupsRouter.get('/:backupId/download', async (req, res) => {
   // a copy that has left this server is the only kind that survives it.
   await db('backups').where({ id: backup.id }).update({ downloaded_at: db.fn.now() });
   res.download(backup.file_url, backup.filename ?? 'parecare-backup.tar.gz');
+});
+
+// --- Keeping copies somewhere that is not this server ----------------------
+
+adminBackupsRouter.post('/google/connect', (req, res) => {
+  if (!driveConfigured()) {
+    res.status(400).json({
+      error:
+        'Google has not been set up for this installation yet. Add the Google sign-in details under Settings first, and add the address shown here to them.',
+      code: 'GOOGLE_NOT_CONFIGURED',
+    });
+    return;
+  }
+  // Short-lived and signed, so the callback cannot be forged, and carrying
+  // who started it so the connection is recorded against a real person.
+  const state = jwt.sign({ purpose: 'drive_connect', accountId: req.account!.id }, env.JWT_SECRET, { expiresIn: '10m' });
+  res.json({ url: driveAuthUrl(state) });
+});
+
+/**
+ * Google sends the person back here. This one route is reached from a browser
+ * redirect rather than the app, so it authenticates from the signed state
+ * instead of the usual header, and always lands them back on the screen.
+ */
+export const adminBackupsCallbackRouter = Router();
+
+adminBackupsCallbackRouter.get('/google/callback', async (req, res) => {
+  const back = (msg: string) => res.redirect(`${env.APP_URL}/system/backups#${msg}`);
+  let accountId: string | null = null;
+  try {
+    const payload = jwt.verify(String(req.query['state'] ?? ''), env.JWT_SECRET) as { purpose?: string; accountId?: string };
+    if (payload.purpose !== 'drive_connect') throw new Error('wrong purpose');
+    accountId = payload.accountId ?? null;
+  } catch {
+    back('error=that-link-has-expired');
+    return;
+  }
+  const code = String(req.query['code'] ?? '');
+  if (!code) {
+    back('error=connecting-was-cancelled');
+    return;
+  }
+  const result = await completeDriveConnection(code, accountId);
+  back(result.ok ? 'connected=1' : 'error=connecting-did-not-finish');
+});
+
+adminBackupsRouter.post('/google/disconnect', async (req, res) => {
+  await disconnectDrive(req.account!.id);
+  await audit(req.account!.id, 'disconnected Google Drive');
+  res.json({ message: 'Copies will no longer be kept in Google Drive. The ones already there are untouched.' });
+});
+
+// Send an existing copy across, for someone who has just connected and does
+// not want to wait for the next one.
+adminBackupsRouter.post('/:backupId/send-offsite', async (req, res) => {
+  if (!driveConnected()) {
+    res.status(400).json({ error: 'Google Drive is not connected.', code: 'NOT_CONNECTED' });
+    return;
+  }
+  const result = await sendCopyOffsite(req.params['backupId']!);
+  if (!result.ok) {
+    res.status(500).json({ error: result.message, code: 'OFFSITE_FAILED' });
+    return;
+  }
+  await audit(req.account!.id, 'sent a copy to Google Drive');
+  res.json({ message: result.message });
 });
 
 /**

@@ -40,6 +40,9 @@ export interface BackupRow {
   verified_rows: number | null;
   verified_at: Date | null;
   error: string | null;
+  offsite_at?: Date | null;
+  offsite_ref?: string | null;
+  offsite_error?: string | null;
 }
 
 /** Run a command to completion, capturing stderr for the failure sentence. */
@@ -353,6 +356,17 @@ export async function runBackup(
     // because it is believed. Checking restores into a scratch database, so
     // on a tight disk it is skipped: the copy is then honestly described as
     // unchecked rather than risking the database to prove it.
+    // The only thing that survives losing this server is a copy that is not
+    // on it. Sent after the copy is safely written, so a Drive outage never
+    // costs the local copy.
+    const { driveConnected, sendCopyOffsite } = await import('./backupDrive');
+    if (driveConnected()) {
+      const sent = await sendCopyOffsite(row.id).catch((err) => ({ ok: false, message: (err as Error).message }));
+      if (!sent.ok) {
+        await db('backups').where({ id: row.id }).update({ offsite_error: sent.message.slice(0, 500) });
+      }
+    }
+
     if (room.canVerify) {
       await verifyBackup(row.id).catch((err) => console.warn('Backup check failed:', (err as Error).message));
     } else {
@@ -486,6 +500,12 @@ export async function pruneBackups(): Promise<number> {
   for (const row of rows) {
     if (keep.has(row.id)) continue;
     if (row.file_url) await fs.promises.rm(row.file_url, { force: true }).catch(() => {});
+    // Thinned out in both places, so what is here and what is in Drive stay
+    // the same set rather than drifting apart over months.
+    if (row.offsite_ref) {
+      const { removeCopyOffsite } = await import('./backupDrive');
+      await removeCopyOffsite(row.offsite_ref).catch(() => {});
+    }
     await db('backups').where({ id: row.id }).del();
     removed += 1;
   }
@@ -659,6 +679,13 @@ async function tick(): Promise<void> {
   // saying out loud.
   if (!result.verified_at) {
     await warnSuperAdmin('The last backup was made but could not be checked. It may not be usable.');
+    return;
+  }
+  const { driveConnected } = await import('./backupDrive');
+  if (driveConnected() && !result.offsite_at) {
+    await warnSuperAdmin(
+      'The last backup was made here but could not be sent to Google Drive, so it would not survive this server being lost.'
+    );
   }
 }
 

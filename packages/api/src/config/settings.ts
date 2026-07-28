@@ -150,6 +150,9 @@ export function getBackupConfig() {
     frequency: (str('backups.frequency') ?? 'daily') as 'hourly' | 'daily' | 'weekly' | 'monthly',
     keepDays: numOr('backups.keep_days', 30),
     path: str('backups.path') ?? '/app/backups',
+    googleRefreshToken: str('backups.google_refresh_token'),
+    googleAccount: str('backups.google_account'),
+    googleFolderId: str('backups.google_folder_id'),
   };
 }
 
