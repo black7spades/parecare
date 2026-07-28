@@ -40,9 +40,10 @@ const appointmentSchema = z.object({
 /**
  * Keep an appointment's single spend entry in step with its cost. A confirmed
  * actual wins; otherwise an estimate is kept as pending; clearing both removes
- * the entry. The entry is dated to the appointment day.
+ * the entry. The entry is dated to the appointment day. Exported so the
+ * assistant books appointments through exactly this cost rule.
  */
-async function syncAppointmentSpend(
+export async function syncAppointmentSpend(
   appointmentId: string,
   profileId: string,
   accountId: string,

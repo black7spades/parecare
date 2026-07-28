@@ -42,6 +42,32 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
     expand: (a) => `Record or update this symptom on the matching condition: ${a}`,
   },
   {
+    name: 'done',
+    hint: 'the task that is finished',
+    description: 'Tick a task off, e.g. /done picked up the script',
+    expand: (a) => `Mark this task complete: ${a}`,
+  },
+  {
+    name: 'book',
+    hint: 'what the appointment is for and when',
+    description: 'Book an appointment, e.g. /book GP review with Dr Chen at 11:45 on Thursday',
+    expand: (a) =>
+      `Book this as a real appointment on the calendar, not a care log entry. Ask me only if the date or time is genuinely unclear: ${a}`,
+  },
+  {
+    name: 'cost',
+    hint: 'the amount and what it was for',
+    description: 'Record a care cost, e.g. /cost $42 at the chemist today',
+    expand: (a) => `Record this on the health spend ledger as its own dated entry: ${a}`,
+  },
+  {
+    name: 'reading',
+    hint: 'the treatment and the measurements',
+    description: 'Record a treatment reading, e.g. /reading blood pressure 128 over 82 this morning',
+    expand: (a) =>
+      `Record this as a treatment session with its measurements, against the matching treatment on the record: ${a}`,
+  },
+  {
     name: 'med',
     hint: 'medication details',
     description: 'Add a medication, e.g. /med perindopril 4mg tablet, one each morning at 8',

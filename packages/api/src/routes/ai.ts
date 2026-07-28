@@ -7,7 +7,7 @@ import { requireFeature } from '../middleware/subscriptionGate';
 import { sendMessage } from '../services/ai';
 import type { ChatMessage } from '../services/ai';
 import { buildProfileContext } from '../services/aiContext';
-import { extractActions, executeActions } from '../services/aiActions';
+import { extractActions, executeActions, CLARIFY_MARK } from '../services/aiActions';
 import { replyIntendsToAct, repairActionText, PROFILE_ACTION_REFERENCE } from '../services/actionRepair';
 import type { AiConversation, CareProfile } from '../types';
 
@@ -177,7 +177,11 @@ aiRouter.post(
       }
     }
     const outcomes = [...(await executeActions(actions, req.params['id']!, req.account!, access, timeZone)), ...parseErrors];
-    const finalReply = [cleanedReply, ...outcomes.map((o) => `✔ ${o}`)].filter(Boolean).join('\n\n');
+    // A tick means something changed. A line the assistant marked as a
+    // question back is shown as it is, so asking never looks like doing.
+    const finalReply = [cleanedReply, ...outcomes.map((o) => (o.includes(CLARIFY_MARK) ? o : `✔ ${o}`))]
+      .filter(Boolean)
+      .join('\n\n');
 
     const updatedMessages = [
       ...messages,

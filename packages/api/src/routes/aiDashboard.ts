@@ -10,7 +10,7 @@ import { accessibleProfiles, buildDashboardContext, countAttentionItems, gatherA
 import { gatherHealthAlerts } from '../services/healthAlerts';
 import { buildProfileContext } from '../services/aiContext';
 import { extractDashboardActions, splitDashboardActions, executeDashboardActions } from '../services/aiDashboardActions';
-import { executeCrossProfileActions } from '../services/aiActions';
+import { executeCrossProfileActions, CLARIFY_MARK } from '../services/aiActions';
 import { replyIntendsToAct, repairActionText, dashboardActionReference } from '../services/actionRepair';
 import { getCareAccess } from '../middleware/subscriptionGate';
 import type { AiConversation, CareProfile } from '../types';
@@ -219,7 +219,11 @@ aiDashboardRouter.post(
     // the button stays put when the conversation is reloaded. The app renders
     // them; only the person's click completes the task.
     const confirmBlocks = confirmations.map((c) => `\n\n\`\`\`parecare-confirm\n${JSON.stringify(c)}\n\`\`\``).join('');
-    const finalReply = [cleanedReply, ...allOutcomes.map((o) => `✔ ${o}`)].filter(Boolean).join('\n\n') + confirmBlocks;
+    // A tick means something changed. A line the assistant marked as a
+    // question back is shown as it is, so asking never looks like doing.
+    const finalReply =
+      [cleanedReply, ...allOutcomes.map((o) => (o.includes(CLARIFY_MARK) ? o : `✔ ${o}`))].filter(Boolean).join('\n\n') +
+      confirmBlocks;
 
     const updatedMessages = [
       ...messages,

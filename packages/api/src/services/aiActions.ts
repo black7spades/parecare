@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { db } from '../config/database';
 import type { Account, CareAccess, CareCircleMember, CareProfile } from '../types';
-import { parseZonedTime, formatInZone } from '../lib/timezone';
+import { parseZonedTime, formatInZone, dateInZone } from '../lib/timezone';
 import { matchProfileNames, type NameCandidate } from '../lib/nameMatch';
 import { drawDownOnHand, perDoseDrawdown } from './medicationSupply';
 import { resolveSupplierId } from '../routes/medications';
@@ -11,6 +11,9 @@ import { SUBSTANCE_STATUSES, SUBSTANCE_ROUTES } from '../routes/substanceUse';
 import { resolveSymptomCatalogueId } from '../routes/symptomCatalogue';
 import { resolveNeurotypeAttributeCatalogueId, ATTRIBUTE_KINDS } from '../routes/neurotypeAttributeCatalogue';
 import { linkAddressToProfile, syncProfileResidence, RESIDENCE_KIND } from './addresses';
+import { APPOINTMENT_TYPES, APPOINTMENT_STATUSES, syncAppointmentSpend } from '../routes/appointments';
+import { OBSERVATION_STATUSES } from '../routes/treatments';
+import { FUNDING_SOURCES, CLAIM_STATUSES } from './healthSpend';
 
 /**
  * Actions the assistant can carry out on the user's behalf: logging a care
@@ -366,6 +369,111 @@ const updateProfileSchema = z.object({
   owner_name: z.string().max(255).optional().nullable(),
 });
 
+/**
+ * Booking an appointment creates the appointment record that feeds the
+ * calendar, not a care log entry. The provider is named, then resolved
+ * against the account's directory the same way link_provider does. A cost
+ * given at booking time becomes an estimated spend entry, exactly as the
+ * appointment form does.
+ */
+const bookAppointmentSchema = z.object({
+  type: z.literal('book_appointment'),
+  title: z.string().min(1).max(255),
+  appointment_type: z.enum(APPOINTMENT_TYPES).default('consultation'),
+  provider_name: z.string().max(255).optional().nullable(),
+  location: z.string().max(255).optional().nullable(),
+  starts_at: z.string(),
+  ends_at: z.string().optional().nullable(),
+  notes: z.string().max(4000).optional().nullable(),
+  cost_estimate: z.number().min(0).max(1e9).optional().nullable(),
+});
+
+/**
+ * Change an appointment already on the calendar: move it (starts_at),
+ * cancel it or mark it attended (status), or confirm what it actually cost
+ * (cost_actual). Found by title among this profile's appointments.
+ */
+const updateAppointmentSchema = z.object({
+  type: z.literal('update_appointment'),
+  title: z.string().min(1).max(255),
+  new_title: z.string().max(255).optional().nullable(),
+  appointment_type: z.enum(APPOINTMENT_TYPES).optional(),
+  provider_name: z.string().max(255).optional().nullable(),
+  location: z.string().max(255).optional().nullable(),
+  starts_at: z.string().optional().nullable(),
+  ends_at: z.string().optional().nullable(),
+  status: z.enum(APPOINTMENT_STATUSES).optional(),
+  notes: z.string().max(4000).optional().nullable(),
+  cost_estimate: z.number().min(0).max(1e9).optional().nullable(),
+  cost_actual: z.number().min(0).max(1e9).optional().nullable(),
+});
+
+const completeTaskSchema = z.object({
+  type: z.literal('complete_task'),
+  title: z.string().min(1).max(255),
+  completion_note: z.string().max(240).optional().nullable(),
+});
+
+const rescheduleTaskSchema = z.object({
+  type: z.literal('reschedule_task'),
+  title: z.string().min(1).max(255),
+  due_at: z.string(),
+  repeat: z.enum(['once', 'daily', 'weekly', 'monthly']).optional(),
+});
+
+/**
+ * A care cost goes on the health spend ledger as its own dated entry, with
+ * the accounting fields kept as separate data points. The ledger is owner
+ * and admin only, matching requireProfileOwner on the REST route.
+ */
+const recordCostSchema = z.object({
+  type: z.literal('record_cost'),
+  amount: z.number().min(0).max(1e9),
+  spent_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  description: z.string().max(2000).optional().nullable(),
+  tax_amount: z.number().min(0).max(1e9).optional().nullable(),
+  funding_source: z.enum(FUNDING_SOURCES).optional().nullable(),
+  claimable_amount: z.number().min(0).max(1e9).optional().nullable(),
+  claim_status: z.enum(CLAIM_STATUSES).optional(),
+  account_code: z.string().max(50).optional().nullable(),
+});
+
+/**
+ * One session of a treatment, with its measured readings. Each reading names
+ * the measure it belongs to ("Systolic", "Weight"); the measure is resolved
+ * within that treatment, so a value never lands on the wrong metric.
+ */
+const recordReadingSchema = z.object({
+  type: z.literal('record_reading'),
+  treatment_name: z.string().min(1).max(255),
+  observed_at: z.string().optional().nullable(),
+  status: z.enum(OBSERVATION_STATUSES).default('completed'),
+  notes: z.string().max(4000).optional().nullable(),
+  values: z
+    .array(
+      z.object({
+        metric_name: z.string().min(1).max(255),
+        value_number: z.number().finite().optional().nullable(),
+        value_text: z.string().max(2000).optional().nullable(),
+        value_boolean: z.boolean().optional().nullable(),
+      })
+    )
+    .max(50)
+    .optional(),
+});
+
+/**
+ * Not a change at all: the assistant asking back rather than guessing. It
+ * writes nothing, and renders as a question with the choices it needs an
+ * answer to, so an ambiguous name or a missing time stops the action instead
+ * of landing a wrong record.
+ */
+const needClarificationSchema = z.object({
+  type: z.literal('need_clarification'),
+  question: z.string().min(1).max(500),
+  options: z.array(z.string().max(200)).max(8).optional(),
+});
+
 export const actionSchema = z.discriminatedUnion('type', [
   logEventSchema,
   recordMedicationSchema,
@@ -397,6 +505,13 @@ export const actionSchema = z.discriminatedUnion('type', [
   linkAddressSchema,
   updateCarePlanSchema,
   updateProfileSchema,
+  bookAppointmentSchema,
+  updateAppointmentSchema,
+  completeTaskSchema,
+  rescheduleTaskSchema,
+  recordCostSchema,
+  recordReadingSchema,
+  needClarificationSchema,
 ]);
 export type AssistantAction = z.infer<typeof actionSchema>;
 
@@ -697,6 +812,23 @@ function parseWhen(value: string | null | undefined, timeZone: string | null | u
   return d.getTime() > Date.now() + 60_000 ? new Date() : d;
 }
 
+/**
+ * The same wall-clock reading as parseWhen, but for things that are meant to
+ * be in the future: an appointment at 11:45 tomorrow, a task due next
+ * Tuesday. Nothing is clamped to now, and an unreadable time returns null so
+ * the caller asks rather than booking something at the wrong moment.
+ */
+function parseFutureWhen(value: string | null | undefined, timeZone: string | null | undefined): Date | null {
+  if (!value) return null;
+  return parseZonedTime(value, timeZone) ?? null;
+}
+
+/**
+ * Marks an outcome line as a question back to the person rather than a
+ * change that was made, so the chat shows it as a question instead of a tick.
+ */
+export const CLARIFY_MARK = '❓';
+
 async function audit(profileId: string, accountId: string, entityType: string, summary: string): Promise<void> {
   await db('audit_log')
     .insert({ care_profile_id: profileId, actor_account_id: accountId, action: 'created', entity_type: entityType, summary: summary.slice(0, 255) })
@@ -786,6 +918,69 @@ async function recordOneMedication(
   await audit(profileId, account.id, 'medications', `${med.name} ${entry.status}`);
   const at = formatInZone(administeredAt, timeZone);
   return `Recorded ${med.name}${entry.dose_given ?? med.dose ? ` ${entry.dose_given ?? med.dose}` : ''} as ${entry.status.replace(/_/g, ' ')} at ${at}.`;
+}
+
+/**
+ * Resolve a spoken provider name to one already in the account's directory.
+ * A name that matches nothing still books the appointment: losing the time
+ * and place because a provider is not filed yet would be worse than the
+ * missing link, so it is reported instead.
+ */
+async function resolveProviderForAppointment(
+  name: string | null | undefined,
+  profileId: string
+): Promise<{ providerId: string | null; note: string }> {
+  if (!name?.trim()) return { providerId: null, note: '' };
+  const profile = await db('care_profiles').where({ id: profileId }).select('account_id').first();
+  if (!profile) return { providerId: null, note: '' };
+  const provider = await db('providers')
+    .where({ account_id: profile.account_id })
+    .whereRaw('lower(name) = lower(?)', [name.trim()])
+    .select('id', 'name')
+    .first();
+  if (provider) return { providerId: provider.id, note: '' };
+  return {
+    providerId: null,
+    note: ` There is no provider called "${name.trim()}" in the directory yet, so it is not linked to one.`,
+  };
+}
+
+/**
+ * Find the appointment a spoken title refers to: an exact title first, then a
+ * partial match, preferring the next one still to come so "move my
+ * physio appointment" lands on the upcoming one rather than last month's.
+ */
+async function findAppointmentByTitle(
+  title: string,
+  profileId: string
+): Promise<{ id: string; title: string; starts_at: string | Date } | undefined> {
+  const needle = title.trim().toLowerCase();
+  const rows = await db('appointments')
+    .where({ care_profile_id: profileId })
+    .whereNot('status', 'cancelled')
+    .select('id', 'title', 'starts_at')
+    .orderBy('starts_at', 'asc');
+  const upcoming = (r: { starts_at: string | Date }) => new Date(r.starts_at).getTime() >= Date.now();
+  const exact = rows.filter((r) => String(r.title).toLowerCase() === needle);
+  const partial = rows.filter((r) => String(r.title).toLowerCase().includes(needle));
+  const pool = exact.length > 0 ? exact : partial;
+  return pool.find(upcoming) ?? pool[pool.length - 1];
+}
+
+/** The open task a spoken title refers to, exact match first, then partial. */
+async function findOpenTaskByTitle(
+  title: string,
+  profileId: string
+): Promise<{ id: string; title: string } | undefined> {
+  const needle = title.trim().toLowerCase();
+  const rows = await db('reminders')
+    .where({ care_profile_id: profileId, completed: false })
+    .select('id', 'title')
+    .orderBy('next_due_at', 'asc');
+  return (
+    rows.find((r) => String(r.title).toLowerCase() === needle) ??
+    rows.find((r) => String(r.title).toLowerCase().includes(needle))
+  );
 }
 
 async function executeOne(
@@ -1341,6 +1536,193 @@ async function executeOne(
       await db('care_profiles').where({ id: profileId }).update(fields);
       await audit(profileId, account.id, 'care_profiles', 'updated profile details');
       return `Updated the profile details.${ownerNote}`;
+    }
+    case 'book_appointment': {
+      const startsAt = parseFutureWhen(action.starts_at, timeZone);
+      if (!startsAt) {
+        return `${CLARIFY_MARK} I did not book "${action.title}": the date and time were unclear. When is it?`;
+      }
+      const endsAt = parseFutureWhen(action.ends_at, timeZone);
+      const { providerId, note: providerNote } = await resolveProviderForAppointment(action.provider_name, profileId);
+      const [appointment] = await db('appointments')
+        .insert({
+          care_profile_id: profileId,
+          title: action.title,
+          appointment_type: action.appointment_type,
+          provider_id: providerId,
+          location: action.location ?? null,
+          starts_at: startsAt,
+          ends_at: endsAt,
+          status: 'scheduled',
+          notes: action.notes ?? null,
+          created_by_account_id: account.id,
+        })
+        .returning('*');
+      // The cost is a ledger entry dated to the appointment day, never a
+      // field on the appointment, exactly as the booking form does it.
+      if (action.cost_estimate != null) {
+        await syncAppointmentSpend(appointment.id, profileId, account.id, startsAt, { estimate: action.cost_estimate });
+      }
+      await audit(profileId, account.id, 'appointments', action.title);
+      const costNote = action.cost_estimate != null ? ` Estimated cost ${action.cost_estimate} added to the spend ledger.` : '';
+      return `Booked "${action.title}" for ${formatInZone(startsAt, timeZone)}. It is on the calendar.${providerNote}${costNote}`;
+    }
+    case 'update_appointment': {
+      const appointment = await findAppointmentByTitle(action.title, profileId);
+      if (!appointment) {
+        return `${CLARIFY_MARK} I could not find an appointment called "${action.title}". Which one did you mean?`;
+      }
+      const fields: Record<string, unknown> = { updated_at: db.fn.now() };
+      let startsAt: Date | null = null;
+      if (action.starts_at) {
+        startsAt = parseFutureWhen(action.starts_at, timeZone);
+        if (!startsAt) {
+          return `${CLARIFY_MARK} I did not move "${appointment.title}": the new date and time were unclear. When should it be?`;
+        }
+        fields['starts_at'] = startsAt;
+      }
+      if (action.ends_at !== undefined) fields['ends_at'] = parseFutureWhen(action.ends_at, timeZone);
+      if (action.new_title) fields['title'] = action.new_title;
+      if (action.appointment_type) fields['appointment_type'] = action.appointment_type;
+      if (action.location !== undefined) fields['location'] = action.location;
+      if (action.status) fields['status'] = action.status;
+      if (action.notes !== undefined) fields['notes'] = action.notes;
+      let providerNote = '';
+      if (action.provider_name !== undefined) {
+        const resolved = await resolveProviderForAppointment(action.provider_name, profileId);
+        fields['provider_id'] = resolved.providerId;
+        providerNote = resolved.note;
+      }
+      await db('appointments').where({ id: appointment.id, care_profile_id: profileId }).update(fields);
+      if (action.cost_estimate !== undefined || action.cost_actual !== undefined) {
+        await syncAppointmentSpend(
+          appointment.id,
+          profileId,
+          account.id,
+          startsAt ?? appointment.starts_at,
+          { estimate: action.cost_estimate, actual: action.cost_actual }
+        );
+      }
+      await audit(profileId, account.id, 'appointments', `updated ${appointment.title}`);
+      const name = action.new_title ?? appointment.title;
+      if (action.status === 'cancelled') return `Cancelled "${name}". It stays on the record as cancelled.${providerNote}`;
+      if (action.status === 'completed') return `Marked "${name}" as attended.${providerNote}`;
+      if (action.status === 'missed') return `Marked "${name}" as missed.${providerNote}`;
+      if (startsAt) return `Moved "${name}" to ${formatInZone(startsAt, timeZone)}.${providerNote}`;
+      return `Updated "${name}".${providerNote}`;
+    }
+    case 'complete_task': {
+      const task = await findOpenTaskByTitle(action.title, profileId);
+      if (!task) {
+        return `${CLARIFY_MARK} I could not find an open task called "${action.title}". Which one did you mean?`;
+      }
+      await db('reminders').where({ id: task.id, care_profile_id: profileId }).update({
+        completed: true,
+        completed_at: db.fn.now(),
+        completed_by_account_id: account.id,
+        completion_note: action.completion_note ?? null,
+      });
+      await audit(profileId, account.id, 'reminders', `completed ${task.title}`);
+      return `Ticked off "${task.title}".`;
+    }
+    case 'reschedule_task': {
+      const task = await findOpenTaskByTitle(action.title, profileId);
+      if (!task) {
+        return `${CLARIFY_MARK} I could not find an open task called "${action.title}". Which one did you mean?`;
+      }
+      const due = parseFutureWhen(action.due_at, timeZone);
+      if (!due) {
+        return `${CLARIFY_MARK} I did not move "${task.title}": the new due time was unclear. When is it due?`;
+      }
+      const fields: Record<string, unknown> = { next_due_at: due };
+      if (action.repeat) fields['reminder_type'] = action.repeat;
+      await db('reminders').where({ id: task.id, care_profile_id: profileId }).update(fields);
+      await audit(profileId, account.id, 'reminders', `rescheduled ${task.title}`);
+      return `Moved "${task.title}" to ${formatInZone(due, timeZone)}.`;
+    }
+    case 'record_cost': {
+      // The spend ledger is owner and admin only, the same rule the REST
+      // route enforces with requireProfileOwner.
+      if (access.level !== 'owner' && access.level !== 'admin') {
+        return `No cost was recorded: only the profile owner can see and change the spend ledger.`;
+      }
+      const claimStatus =
+        action.claim_status ?? (action.claimable_amount != null && action.claimable_amount > 0 ? 'unclaimed' : 'none');
+      await db('health_spend_entries').insert({
+        care_profile_id: profileId,
+        amount: action.amount,
+        spent_on: action.spent_on ?? dateInZone(new Date(), timeZone),
+        category: 'other',
+        status: 'confirmed',
+        description: action.description ?? null,
+        tax_amount: action.tax_amount ?? null,
+        funding_source: action.funding_source ?? null,
+        claimable_amount: action.claimable_amount ?? null,
+        claim_status: claimStatus,
+        account_code: action.account_code ?? null,
+        created_by_account_id: account.id,
+      });
+      await audit(profileId, account.id, 'health_spend', action.description ?? `cost ${action.amount}`);
+      const on = action.spent_on ?? dateInZone(new Date(), timeZone);
+      return `Recorded a cost of ${action.amount} on ${on}${action.description ? ` for ${action.description}` : ''}.`;
+    }
+    case 'record_reading': {
+      const treatment = await db('treatments')
+        .where({ care_profile_id: profileId })
+        .whereRaw('lower(name) = lower(?)', [action.treatment_name.trim()])
+        .select('id', 'name')
+        .first();
+      if (!treatment) {
+        return `${CLARIFY_MARK} There is no treatment called "${action.treatment_name}" on this record. Which one should the reading go against?`;
+      }
+      // A session that did not go ahead needs its reason recorded, the same
+      // rule the observations endpoint applies.
+      if (action.status !== 'completed' && !action.notes?.trim()) {
+        return `Could not record the ${action.status} session of ${treatment.name}: a note explaining why is required.`;
+      }
+      const observedAt = parseWhen(action.observed_at, timeZone);
+      const metrics = await db('treatment_metrics').where({ treatment_id: treatment.id });
+      const rows: Record<string, unknown>[] = [];
+      const unmatched: string[] = [];
+      for (const v of action.values ?? []) {
+        const metric = metrics.find((m) => String(m.name).toLowerCase() === v.metric_name.trim().toLowerCase());
+        if (!metric) {
+          unmatched.push(v.metric_name);
+          continue;
+        }
+        rows.push({
+          treatment_metric_id: metric.id,
+          value_number: metric.value_type === 'number' ? v.value_number ?? null : null,
+          value_text: metric.value_type === 'text' ? v.value_text ?? null : null,
+          value_boolean: metric.value_type === 'yes_no' ? v.value_boolean ?? null : null,
+        });
+      }
+      if (unmatched.length > 0 && rows.length === 0) {
+        const known = metrics.map((m) => m.name).join(', ');
+        return `${CLARIFY_MARK} ${treatment.name} has no measure called ${unmatched.join(' or ')}. It measures: ${known || 'nothing yet'}. Which should I use?`;
+      }
+      const [observation] = await db('observations')
+        .insert({
+          care_profile_id: profileId,
+          treatment_id: treatment.id,
+          observed_at: observedAt,
+          recorded_by_account_id: account.id,
+          recorded_by_name: account.display_name,
+          source: 'manual',
+          status: action.status,
+          notes: action.notes ?? null,
+        })
+        .returning('*');
+      if (rows.length > 0) {
+        await db('observation_values').insert(rows.map((r) => ({ ...r, observation_id: observation.id })));
+      }
+      await audit(profileId, account.id, 'treatments', `reading for ${treatment.name}`);
+      const skipped = unmatched.length > 0 ? ` ${treatment.name} has no measure called ${unmatched.join(' or ')}, so that was left out.` : '';
+      return `Recorded a ${treatment.name} session at ${formatInZone(observedAt, timeZone)} with ${rows.length} reading${rows.length === 1 ? '' : 's'}.${skipped}`;
+    }
+    case 'need_clarification': {
+      const options = action.options?.length ? ` ${action.options.join(' or ')}?` : '';
+      return `${CLARIFY_MARK} ${action.question}${options}`;
     }
   }
 }
