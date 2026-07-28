@@ -40,6 +40,12 @@ export const PROFILE_ACTION_REFERENCE = [
   '- {"type":"raise_question","title":required,"body":optional}',
   '- {"type":"add_provider","provider_type":"gp|specialist|pharmacy|care_facility|allied_health|other","name":required,"phone":optional}',
   '- {"type":"add_substance","substance":required,"status":optional,"frequency":optional}',
+  '- {"type":"book_appointment","title":required,"appointment_type":"consultation|test|procedure|therapy|review|vaccination|other","provider_name":optional,"location":optional,"starts_at":ISO,"ends_at":optional ISO,"notes":optional,"cost_estimate":optional number} for an appointment being made, never a log entry',
+  '- {"type":"update_appointment","title":its current title, then any of "new_title","provider_name","location","starts_at" (to move it),"ends_at","status":"scheduled|completed|cancelled|missed","notes","cost_actual"}',
+  '- {"type":"complete_task","title":the open task title,"completion_note":optional}',
+  '- {"type":"reschedule_task","title":the open task title,"due_at":ISO,"repeat":optional "once|daily|weekly|monthly"}',
+  '- {"type":"record_cost","amount":number,"spent_on":optional YYYY-MM-DD,"description":optional,"funding_source":optional "self|ndis|private_health|medicare|government|other"}',
+  '- {"type":"record_reading","treatment_name":exact name,"observed_at":optional ISO,"status":"completed|partial|skipped|refused","notes":required unless completed,"values":[{"metric_name":exact measure name,"value_number":number}]}',
 ].join('\n');
 
 /** Compact reference for the dashboard assistant, which wraps per profile. */
