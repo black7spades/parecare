@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
-import { requireAccountRight } from '../middleware/accountRights';
+import { requireRole } from '../middleware/requireRole';
 import { getBackupConfig } from '../config/settings';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
@@ -20,27 +20,24 @@ import {
   type Destination,
 } from '../services/backupOffsite';
 import { updateSettings } from '../config/settings';
-import { runDrill, lastDrill } from '../services/backupDrill';
+import { runDrill, lastDrillEvidence, evidenceFor } from '../services/backupDrill';
 import { levelReport } from '../services/backupLevels';
-import { sendWardenBriefEmail, sendWardenInviteEmail, sendWardenCopyEmail } from '../services/email';
-import { assertCanBeWarden, createWardenInvite, wardenInviteUrl, WardenError, MAX_WARDENS } from '../services/wardens';
 
 /**
- * The Backups screen, for the super admin. Copies are taken whether or not
- * anyone comes here; this exists to say plainly that they are working, and
- * to hand the data back when it is needed.
+ * The Backups screen. Copies are taken whether or not anyone comes here; this
+ * exists to say plainly that they are working, and to hand the data back when
+ * it is needed.
  *
  * A copy holds every record in the installation, so reading one is the most
- * sensitive thing this API does. Super admin only, and every download and
- * restore is written to the audit log.
+ * sensitive thing this API does. Administrators and super admins, the same
+ * rule as everywhere else: if the one person who can reach this is away or
+ * something has happened to them, the records still have to be recoverable by
+ * somebody, and inventing a separate right for that only produced a second
+ * way to end up in the wrong place.
  */
 export const adminBackupsRouter = Router();
 
-// Not super admin alone. If the one person who can reach this is away, has
-// lost their account, or something has happened to them, the records have to
-// still be recoverable by someone. The right is off by default because a copy
-// holds everyone's health records, so it is given deliberately.
-adminBackupsRouter.use(requireAuth, requireAccountRight('can_manage_backups'));
+adminBackupsRouter.use(requireAuth, requireRole('admin'));
 
 async function audit(accountId: string, summary: string): Promise<void> {
   await db('audit_log')
@@ -94,14 +91,7 @@ function reassurance(
   };
 }
 
-adminBackupsRouter.get('/', async (req, res) => {
-  // Someone who has this only because they were nominated, opening this
-  // screen, is the whole of level five. Recorded here because visiting is
-  // the evidence; there is nothing else they could do to prove it.
-  if (req.account!.role !== 'admin' && req.account!.role !== 'super_admin') {
-    await db('accounts').where({ id: req.account!.id }).update({ backups_seen_at: db.fn.now() }).catch(() => {});
-  }
-
+adminBackupsRouter.get('/', async (_req, res) => {
   const cfg = getBackupConfig();
   const last = await lastGoodBackup();
   const backups = await db('backups').orderBy('started_at', 'desc').limit(200);
@@ -112,43 +102,12 @@ adminBackupsRouter.get('/', async (req, res) => {
     .where((qb) => qb.whereNotNull('downloaded_at').orWhereNotNull('offsite_at'))
     .first();
 
-  // Who else could get these records back if this person could not. One name
-  // is a single point of failure, and in a care setting that is not a
-  // hypothetical, so the screen says so.
-  // Grouped deliberately: without the brackets, AND binds tighter than OR in
-  // SQL and disabled accounts would be counted as people who could help.
-  const keyholders = await db('accounts')
-    .where((qb) => {
-      qb.where({ can_manage_backups: true }).orWhere({ role: 'super_admin' }).orWhere({ role: 'admin' });
-    })
-    .whereNull('disabled_at')
-    .select('id', 'display_name', 'email', 'role', 'can_manage_backups', 'warden_briefed_at', 'backups_seen_at');
-
-  // Everyone else who could be given it, so nominating someone happens here
-  // rather than by sending a worried person off to another screen to hunt
-  // for a checkbox.
-  const couldHelp = await db('accounts')
-    .whereNot({ can_manage_backups: true })
-    .whereNotIn('role', ['super_admin', 'admin'])
-    .whereNull('disabled_at')
-    .orderBy('display_name', 'asc')
-    .select('id', 'display_name', 'email')
-    .limit(200);
-
-  // People asked but not yet answered, so the screen can show the ask as
-  // in flight rather than as though nothing happened.
-  const pendingInvites = await db('warden_invites')
-    .where({ status: 'pending' })
-    .where('expires_at', '>', new Date())
-    .orderBy('created_at', 'desc')
-    .select('id', 'email', 'created_at', 'expires_at');
-
-  const [levels, drill] = await Promise.all([levelReport(), lastDrill()]);
+  const [levels, drill] = await Promise.all([levelReport(), lastDrillEvidence()]);
 
   res.json({
     status: reassurance(last, cfg.enabled, !!takenAway, space.roomForMore),
     levels,
-    last_drill: drill ?? null,
+    last_drill: drill,
     settings: { enabled: cfg.enabled, frequency: cfg.frequency, keep_days: cfg.keepDays },
     space: { room_for_more: space.roomForMore, used_by_copies: space.usedByCopies },
     cloud: {
@@ -159,23 +118,6 @@ adminBackupsRouter.get('/', async (req, res) => {
       google_redirect_uri: driveRedirectUri(),
       dropbox_redirect_uri: dropboxRedirectUri(),
     },
-    keyholders: keyholders.map((k: {
-      id: string;
-      display_name: string;
-      email: string;
-      role: string;
-      can_manage_backups: boolean;
-      warden_briefed_at: Date | null;
-      backups_seen_at: Date | null;
-    }) => ({
-      ...k,
-      // Someone who has it because of their role keeps it whatever this
-      // screen does, so it must not offer to take it away and then fail.
-      by_role: k.role === 'super_admin' || k.role === 'admin',
-    })),
-    could_help: couldHelp,
-    pending_wardens: pendingInvites,
-    max_wardens: MAX_WARDENS,
     last_backup_at: last?.started_at ?? null,
     backups: backups.map((b: BackupRow) => ({
       ...b,
@@ -186,61 +128,6 @@ adminBackupsRouter.get('/', async (req, res) => {
       stored: !!b.file_url,
     })),
   });
-});
-
-/**
- * Nominate someone else who can get the records back, or take that away.
- *
- * Handing this out is itself an administrator's decision, so only an admin
- * can do it: otherwise the first person given access could quietly widen it
- * to anyone.
- */
-const keyholderSchema = z.object({ account_id: z.string().uuid() });
-
-function canNominate(role: string | undefined): boolean {
-  return role === 'admin' || role === 'super_admin';
-}
-
-adminBackupsRouter.post('/keyholders', async (req, res) => {
-  if (!canNominate(req.account!.role)) {
-    res.status(403).json({ error: 'Only an administrator can give someone else access to backups.', code: 'FORBIDDEN' });
-    return;
-  }
-  const parsed = keyholderSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: 'Choose someone from the list first.', code: 'VALIDATION_ERROR' });
-    return;
-  }
-  const person = await db('accounts').where({ id: parsed.data.account_id }).whereNull('disabled_at').first();
-  if (!person) {
-    res.status(404).json({ error: 'That person is no longer here.', code: 'NOT_FOUND' });
-    return;
-  }
-  await db('accounts').where({ id: person.id }).update({ can_manage_backups: true, updated_at: db.fn.now() });
-  await audit(req.account!.id, `gave ${person.email} access to backups`);
-  res.json({ message: `${person.display_name} can now get these records back too.` });
-});
-
-adminBackupsRouter.delete('/keyholders/:accountId', async (req, res) => {
-  if (!canNominate(req.account!.role)) {
-    res.status(403).json({ error: 'Only an administrator can change who has access to backups.', code: 'FORBIDDEN' });
-    return;
-  }
-  const person = await db('accounts').where({ id: req.params['accountId'] }).first();
-  if (!person) {
-    res.status(404).json({ error: 'That person is no longer here.', code: 'NOT_FOUND' });
-    return;
-  }
-  if (person.role === 'admin' || person.role === 'super_admin') {
-    res.status(400).json({
-      error: `${person.display_name} has this because they are an administrator, so it cannot be taken away here.`,
-      code: 'BY_ROLE',
-    });
-    return;
-  }
-  await db('accounts').where({ id: person.id }).update({ can_manage_backups: false, updated_at: db.fn.now() });
-  await audit(req.account!.id, `removed backup access from ${person.email}`);
-  res.json({ message: `${person.display_name} no longer has access to backups.` });
 });
 
 /**
@@ -256,115 +143,28 @@ adminBackupsRouter.post('/drill', async (req, res) => {
     return;
   }
   await audit(req.account!.id, 'ran a backup practice run');
-  const drill = await runDrill(req.account!.id);
+  const evidence = await runDrill(req.account!.id);
   res.status(201).json({
-    drill,
+    ...evidence,
     message:
-      drill.status === 'passed'
-        ? `Practice run passed. ${drill.rows_before} records were destroyed and all ${drill.rows_restored} came back.`
-        : drill.error ?? 'The practice run did not finish.',
+      evidence.drill.status === 'passed'
+        ? `Practice run passed. ${evidence.drill.rows_before} records were destroyed and all ${evidence.drill.rows_restored} came back, unchanged.`
+        : evidence.drill.error ?? 'The practice run did not finish.',
   });
 });
 
 /**
- * Ask somebody to be a data warden, by email address rather than by picking
- * from a list. The person most likely to be asked is a sibling or a friend
- * who has never used this, and a list of existing accounts cannot offer
- * them at all.
- *
- * Every refusal says what to do instead. Being told no without a reason is
- * how somebody ends up with no warden.
+ * Everything one practice run wrote down: what it did step by step, what it
+ * counted kind by kind, and the named records it followed through being
+ * destroyed and coming back.
  */
-const askSchema = z.object({ email: z.string().min(3).max(255) });
-
-adminBackupsRouter.post('/wardens', async (req, res) => {
-  if (!canNominate(req.account!.role)) {
-    res.status(403).json({ error: 'Only an administrator can ask someone to be a data warden.', code: 'FORBIDDEN' });
+adminBackupsRouter.get('/drills/:drillId', async (req, res) => {
+  const evidence = await evidenceFor(req.params['drillId']!);
+  if (!evidence.drill) {
+    res.status(404).json({ error: 'That practice run is no longer here.', code: 'NOT_FOUND' });
     return;
   }
-  const parsed = askSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: 'Enter their email address.', code: 'VALIDATION_ERROR' });
-    return;
-  }
-
-  let candidate;
-  try {
-    candidate = await assertCanBeWarden(parsed.data.email, req.account!);
-  } catch (err) {
-    if (err instanceof WardenError) {
-      res.status(err.status).json({ error: err.message, code: err.code });
-      return;
-    }
-    throw err;
-  }
-
-  const invite = await createWardenInvite(candidate.email, req.account!);
-  const url = wardenInviteUrl(invite.token);
-  try {
-    await sendWardenInviteEmail(candidate.email, req.account!.display_name, url);
-  } catch (err) {
-    // Nothing was granted, so the invitation is cancelled rather than left
-    // pending against an address that never heard about it.
-    await db('warden_invites').where({ id: invite.id }).update({ status: 'cancelled' });
-    const why = (err as Error).message.replace(/\.$/, '');
-    res.status(500).json({
-      error: `The invitation could not be sent: ${why}. Set up email under Settings, then try again.`,
-      code: 'EMAIL_FAILED',
-    });
-    return;
-  }
-  // A copy for the person who asked, so they know what their friend was told
-  // and can talk them through it. Never blocks the invitation itself.
-  await sendWardenCopyEmail(req.account!.email, req.account!.display_name, candidate.email, url).catch((err) =>
-    console.warn('Data warden copy email failed:', (err as Error).message)
-  );
-  await audit(req.account!.id, `asked ${candidate.email} to be a data warden`);
-  res.status(201).json({
-    message: candidate.account
-      ? `Sent. ${candidate.account.display_name} has been asked, and a copy is in your inbox.`
-      : `Sent to ${candidate.email}. They can set themselves up from the link, and a copy is in your inbox.`,
-  });
-});
-
-/**
- * Tell someone what being a data warden means. Being nominated quietly is
- * not the same as knowing you have been asked, and someone who does not know
- * is not a second pair of hands.
- */
-adminBackupsRouter.post('/keyholders/:accountId/brief', async (req, res) => {
-  if (!canNominate(req.account!.role)) {
-    res.status(403).json({ error: 'Only an administrator can ask someone to be a data warden.', code: 'FORBIDDEN' });
-    return;
-  }
-  const person = await db('accounts').where({ id: req.params['accountId'] }).whereNull('disabled_at').first();
-  if (!person) {
-    res.status(404).json({ error: 'That person is no longer here.', code: 'NOT_FOUND' });
-    return;
-  }
-  if (!person.can_manage_backups) {
-    res.status(400).json({ error: 'Give them access to backups first, then send the instructions.', code: 'NOT_A_KEYHOLDER' });
-    return;
-  }
-  try {
-    await sendWardenBriefEmail(
-      person.email,
-      person.display_name,
-      req.account!.display_name,
-      `${env.APP_URL}/system/backups`
-    );
-  } catch (err) {
-    // The reason already reads as a sentence, so it is not punctuated twice.
-    const why = (err as Error).message.replace(/\.$/, '');
-    res.status(500).json({
-      error: `The email could not be sent: ${why}. Set up email under Settings, or simply tell them yourself.`,
-      code: 'EMAIL_FAILED',
-    });
-    return;
-  }
-  await db('accounts').where({ id: person.id }).update({ warden_briefed_at: db.fn.now() });
-  await audit(req.account!.id, `asked ${person.email} to be a data warden`);
-  res.json({ message: `Sent. ${person.display_name} now knows what to do if it is ever needed.` });
+  res.json(evidence);
 });
 
 // Take one now. Copies made by hand are never thinned out automatically.
@@ -495,10 +295,6 @@ const googleAppSchema = z.object({ client_id: z.string().min(1).max(500), client
 const dropboxAppSchema = z.object({ app_key: z.string().min(1).max(500), app_secret: z.string().min(1).max(500) });
 
 adminBackupsRouter.post('/:provider(google|dropbox)/app', async (req, res) => {
-  if (!canNominate(req.account!.role)) {
-    res.status(403).json({ error: 'Only an administrator can change how this connects to Google or Dropbox.', code: 'FORBIDDEN' });
-    return;
-  }
   const which = req.params['provider'] as 'google' | 'dropbox';
   if (which === 'google') {
     const parsed = googleAppSchema.safeParse(req.body);

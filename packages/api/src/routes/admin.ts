@@ -52,7 +52,6 @@ const ACCOUNT_COLUMNS = [
   'can_invite_members',
   'can_use_ai',
   'can_export_data',
-  'can_manage_backups',
   'created_at',
   'updated_at',
 ] as const;
@@ -190,7 +189,6 @@ const updateAccountSchema = z.object({
   can_invite_members: z.boolean().optional(),
   can_use_ai: z.boolean().optional(),
   can_export_data: z.boolean().optional(),
-  can_manage_backups: z.boolean().optional(),
 });
 
 adminRouter.patch('/accounts/:accountId', async (req, res) => {
@@ -266,7 +264,6 @@ const createAccountSchema = z.object({
   can_invite_members: z.boolean().default(true),
   can_use_ai: z.boolean().default(true),
   can_export_data: z.boolean().default(true),
-  can_manage_backups: z.boolean().default(false),
 });
 
 // Create a user directly, with a password the admin hands over. Elevated
@@ -339,7 +336,7 @@ adminRouter.patch('/accounts/:accountId/disabled', async (req, res) => {
 // Applying stamps the values onto each account; individual accounts can
 // still be adjusted afterwards.
 
-const RIGHT_FIELDS = ['can_create_care_profiles', 'can_invite_members', 'can_use_ai', 'can_export_data', 'can_manage_backups'] as const;
+const RIGHT_FIELDS = ['can_create_care_profiles', 'can_invite_members', 'can_use_ai', 'can_export_data'] as const;
 
 const templateSchema = z.object({
   name: z.string().min(1).max(100),
@@ -348,7 +345,6 @@ const templateSchema = z.object({
   can_invite_members: z.boolean(),
   can_use_ai: z.boolean(),
   can_export_data: z.boolean(),
-  can_manage_backups: z.boolean().default(false),
 });
 
 adminRouter.get('/rights-templates', async (_req, res) => {

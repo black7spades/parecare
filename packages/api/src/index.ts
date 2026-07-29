@@ -53,7 +53,6 @@ import { subscriptionsRouter } from './routes/subscriptions';
 import { adminRouter } from './routes/admin';
 import { adminDatabaseRouter } from './routes/adminDatabase';
 import { adminBackupsRouter, adminBackupsCallbackRouter } from './routes/adminBackups';
-import { wardenInvitesRouter } from './routes/wardenInvites';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { requireAuth } from './middleware/auth';
 import { requireCareProfileAccess } from './middleware/subscriptionGate';
@@ -112,9 +111,6 @@ v1.use((req, res, next) => {
   });
 });
 
-// Public: the person being asked to be a data warden may have no account at
-// all, so the token in their link is the credential.
-v1.use('/warden-invites', wardenInvitesRouter);
 v1.use('/auth', authRouter);
 v1.use('/auth', oauthRouter);
 v1.use('/account', accountRouter);

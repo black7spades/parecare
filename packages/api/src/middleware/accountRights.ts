@@ -7,7 +7,7 @@ import type { Account } from '../types';
  * admins and super admins always pass.
  */
 
-type RightField = 'can_create_care_profiles' | 'can_invite_members' | 'can_use_ai' | 'can_export_data' | 'can_manage_backups';
+type RightField = 'can_create_care_profiles' | 'can_invite_members' | 'can_use_ai' | 'can_export_data';
 
 const RIGHT_MESSAGES: Record<RightField, { code: string; message: string }> = {
   can_create_care_profiles: {
@@ -25,10 +25,6 @@ const RIGHT_MESSAGES: Record<RightField, { code: string; message: string }> = {
   can_export_data: {
     code: 'EXPORT_NOT_ALLOWED',
     message: 'Your account cannot export data. Ask an administrator to enable it.',
-  },
-  can_manage_backups: {
-    code: 'BACKUPS_NOT_ALLOWED',
-    message: 'Your account cannot work with backups. Ask an administrator to enable it.',
   },
 };
 
