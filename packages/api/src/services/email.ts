@@ -296,3 +296,80 @@ export async function sendWardenAcceptedEmail(
     html: lines.map((l) => (l === '' ? '<br>' : `<p style="margin:0 0 8px">${l.trim()}</p>`)).join(''),
   });
 }
+
+/**
+ * The link back in, for somebody who cannot get to their records.
+ *
+ * Short, because a person who has forgotten a password is already annoyed,
+ * and every extra sentence is one more thing between them and being back.
+ * It says plainly what to do if they did not ask for it, since an unexpected
+ * reset email is alarming and the right answer is almost always "nothing".
+ */
+export async function sendPasswordResetEmail(
+  toEmail: string,
+  displayName: string,
+  url: string,
+  minutes: number
+): Promise<void> {
+  const cfg = getEmailConfig();
+  if (!cfg.smtpHost) {
+    throw new Error('Email has not been set up for this installation yet, so nothing could be sent');
+  }
+
+  const lines = [
+    `Hello ${displayName},`,
+    '',
+    'Follow this link to choose a new password:',
+    '',
+    `  ${url}`,
+    '',
+    `It works once, and it stops working after ${minutes} minutes. Ask for another whenever you need one.`,
+    '',
+    'Choosing a new password also signs out anything already signed in as you, on every device.',
+    '',
+    'If you did not ask for this, you can ignore it. Your password has not changed, and nobody can use this link without your inbox.',
+  ];
+
+  const transport = getTransport();
+  await transport.sendMail({
+    from: cfg.from,
+    to: toEmail,
+    subject: 'Choose a new PareCare password',
+    text: lines.join('\n'),
+    html: lines.map((l) => (l === '' ? '<br>' : `<p style="margin:0 0 8px">${l.trim()}</p>`)).join(''),
+  });
+}
+
+/**
+ * For somebody who asked to reset a password they do not have, because they
+ * sign in with Google or Facebook. Sending them a reset link would set a
+ * password they would never use and leave them no closer to getting in.
+ */
+export async function sendOAuthReminderEmail(
+  toEmail: string,
+  displayName: string,
+  provider: string
+): Promise<void> {
+  const cfg = getEmailConfig();
+  if (!cfg.smtpHost) return;
+
+  const nice = provider === 'facebook' ? 'Facebook' : 'Google';
+  const lines = [
+    `Hello ${displayName},`,
+    '',
+    `Somebody asked to reset the password on this PareCare account, but this account does not have one: you sign in with ${nice}.`,
+    '',
+    `Go to the sign-in page and press the ${nice} button instead. There is no password to remember or to change.`,
+    '',
+    'If you did not ask for this, you can ignore it. Nothing has changed.',
+  ];
+
+  const transport = getTransport();
+  await transport.sendMail({
+    from: cfg.from,
+    to: toEmail,
+    subject: `You sign in to PareCare with ${nice}`,
+    text: lines.join('\n'),
+    html: lines.map((l) => (l === '' ? '<br>' : `<p style="margin:0 0 8px">${l.trim()}</p>`)).join(''),
+  });
+}

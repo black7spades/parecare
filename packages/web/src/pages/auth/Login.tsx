@@ -97,6 +97,16 @@ export function Login() {
                   Sign in
                 </Button>
               </form>
+              {/*
+                Right under the password box, because that is where somebody
+                realises they cannot remember it, and hunting for the way out
+                at that moment is how people give up.
+              */}
+              <div className="mt-3 text-center text-sm">
+                <Link to="/forgot-password" className="text-primary hover:underline">
+                  Forgotten your password?
+                </Link>
+              </div>
               <div className="mt-4 text-center text-sm text-muted">
                 No account?{' '}
                 <Link

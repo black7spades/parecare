@@ -4,6 +4,7 @@ import path from 'path';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import { requestPasswordReset, checkResetToken, completePasswordReset, ResetError } from '../services/passwordReset';
 import { db } from '../config/database';
 import { env } from '../config/env';
 import { getOAuthConfig, getStorageConfig, getHealthCurrency, getFinancialYearStartMonth } from '../config/settings';
@@ -88,6 +89,72 @@ authRouter.post('/register', async (req, res) => {
     res.status(201).json({ token: issueSessionToken(account.id), account: accountSummary(account) });
   } catch (err) {
     if (err instanceof AccountError) {
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
+    throw err;
+  }
+});
+
+/**
+ * Forgetting a password.
+ *
+ * The reply never changes, whoever asks and whatever is true, because the
+ * difference between two answers here is how a stranger finds out which
+ * addresses belong to people using a care system. What actually happens
+ * depends on facts the asker never sees.
+ */
+authRouter.post('/forgot-password', async (req, res) => {
+  const parsed = z.object({ email: z.string().min(3).max(255) }).safeParse(req.body);
+  const said = {
+    message:
+      'If that address has an account, a link to choose a new password is on its way. It may take a minute, and it is worth checking the junk folder.',
+  };
+  if (!parsed.success) {
+    res.json(said);
+    return;
+  }
+  // Deliberately not awaited into the response: how long this takes must not
+  // reveal whether there was an account to act on.
+  requestPasswordReset(parsed.data.email).catch((err) =>
+    console.warn('Password reset request failed:', (err as Error).message)
+  );
+  res.json(said);
+});
+
+/** What the reset page shows before anything is typed. */
+authRouter.get('/reset-password/:token', async (req, res) => {
+  const check = await checkResetToken(String(req.params['token']));
+  if (!check.valid) {
+    res.status(410).json({
+      error: 'This link has already been used, or it has run out. Ask for a new one and it will arrive in a moment.',
+      code: 'INVALID_TOKEN',
+    });
+    return;
+  }
+  res.json({ email: check.email });
+});
+
+authRouter.post('/reset-password', async (req, res) => {
+  const parsed = z
+    .object({ token: z.string().min(10), password: z.string().min(8).max(200) })
+    .safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Choose a password of at least eight characters.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  try {
+    const account = await completePasswordReset(parsed.data.token, parsed.data.password);
+    // Signed straight in, because making somebody who has just proved who
+    // they are type it again immediately is a step that earns nothing. MFA
+    // still applies on the next ordinary sign-in.
+    res.json({
+      token: issueSessionToken(account.id),
+      account: accountSummary(account),
+      message: 'Your password has been changed, and anything else signed in as you has been signed out.',
+    });
+  } catch (err) {
+    if (err instanceof ResetError) {
       res.status(err.status).json({ error: err.message, code: err.code });
       return;
     }
