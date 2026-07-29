@@ -7,7 +7,7 @@ import { useDataView } from '../../components/data/useDataView';
 import { api } from '../../api/client';
 import { SetupGuide } from '../../components/SetupGuide';
 import { googleSteps, dropboxSteps } from './backupSetupSteps';
-import { backupsApi, type Backup, type BackupsOverview, type Destination } from '../../api/backups';
+import { backupsApi, type Backup, type BackupsOverview, type Destination, type Drill } from '../../api/backups';
 
 /** How each destination is named to a person. Never the protocol. */
 const DESTINATION_LABELS: Record<Destination, string> = {
@@ -123,6 +123,7 @@ export function AdminBackups() {
   const [showStorage, setShowStorage] = useState(false);
   const [nominee, setNominee] = useState('');
   const [guide, setGuide] = useState<'google' | 'dropbox' | null>(null);
+  const [drillResult, setDrillResult] = useState<Drill | null>(null);
   const [storage, setStorage] = useState({ bucket: '', region: '', access_key: '', secret_key: '', endpoint: '' });
 
   const load = useCallback(async () => {
@@ -202,6 +203,37 @@ export function AdminBackups() {
     try {
       const result = await backupsApi.check(b.id);
       setNotice({ kind: result.ok ? 'ok' : 'bad', text: result.message });
+      await load();
+    } catch (err) {
+      setNotice({ kind: 'bad', text: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // The practice emergency. Deliberately destructive, on a practice copy
+  // that never touches anything real, because a backup nobody has ever
+  // restored is a rumour.
+  async function runPractice() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await backupsApi.runDrill();
+      setDrillResult(result.drill);
+      setNotice({ kind: result.drill.status === 'passed' ? 'ok' : 'bad', text: result.message });
+      await load();
+    } catch (err) {
+      setNotice({ kind: 'bad', text: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function briefWarden(id: string) {
+    setBusy(true);
+    try {
+      const result = await backupsApi.briefWarden(id);
+      setNotice({ kind: 'ok', text: result.message });
       await load();
     } catch (err) {
       setNotice({ kind: 'bad', text: (err as Error).message });
@@ -371,6 +403,57 @@ export function AdminBackups() {
 
   return (
     <div className="space-y-6">
+      {/*
+        The ladder. Every level is worked out from what has actually happened,
+        never from a box someone ticked, so it cannot be reached by intending
+        to. The two nobody ever does, proving a restore and having a second
+        person, are levels three and five on purpose: putting them at the top
+        of the climb is the only honest way found to make the boring half feel
+        like progress rather than nagging.
+      */}
+      <div className="rounded-lg border border-border bg-card p-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-base font-semibold text-ink">
+            Level {data.levels.current} of {data.levels.total}
+          </h2>
+          <span className="text-sm text-muted">{data.levels.current === 5 ? 'Everything in place' : 'Keep going'}</span>
+        </div>
+        <p className="mt-1 text-sm text-muted">{data.levels.headline}</p>
+
+        <div className="mt-3 flex gap-1">
+          {data.levels.levels.map((l) => (
+            <span
+              key={l.level}
+              className={`h-2 flex-1 rounded-full ${l.reached ? 'bg-primary' : 'bg-border'}`}
+              aria-hidden="true"
+            />
+          ))}
+        </div>
+
+        <ol className="mt-4 space-y-3">
+          {data.levels.levels.map((l) => {
+            const isNext = !l.reached && l.level === data.levels.current + 1;
+            return (
+              <li key={l.level} className="flex gap-3">
+                <span
+                  className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+                    l.reached ? 'bg-primary text-white' : isNext ? 'border-2 border-primary text-primary' : 'border border-border text-muted'
+                  }`}
+                  aria-hidden="true"
+                >
+                  {l.reached ? '✓' : l.level}
+                </span>
+                <div className="min-w-0">
+                  <p className={`text-sm font-medium ${l.reached || isNext ? 'text-ink' : 'text-muted'}`}>{l.title}</p>
+                  <p className="text-sm text-muted">{l.meaning}</p>
+                  {isNext && l.next ? <p className="mt-1 text-sm text-ink">{l.next}</p> : null}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      </div>
+
       {/* The whole point of the screen: one line a worried person understands. */}
       <div className={`rounded-lg border p-4 ${protectedNow ? 'border-border bg-card' : 'border-amber-400 bg-amber-50 dark:bg-amber-950/30'}`}>
         <h2 className="text-base font-semibold text-ink">{headline}</h2>
@@ -393,6 +476,47 @@ export function AdminBackups() {
             </Button>
           ) : null}
         </div>
+      </div>
+
+      {/*
+        Proving it. The only way to know copies work is to destroy something
+        and bring it back, so this does exactly that, on a practice copy.
+      */}
+      <div className="rounded-lg border border-border bg-card p-4">
+        <h3 className="text-sm font-semibold text-ink">Practice an emergency</h3>
+        <p className="mt-1 text-sm text-muted">
+          This makes a practice copy of everything, deliberately destroys it, and puts it back, then counts what
+          returned. Your real records are never touched at any point.
+        </p>
+        {data.last_drill ? (
+          <p className="mt-2 text-sm text-muted">
+            {data.last_drill.status === 'passed' ? (
+              <>
+                Last practice {howLongAgo(data.last_drill.started_at)}: {data.last_drill.rows_before} records destroyed,
+                all {data.last_drill.rows_restored} came back.
+              </>
+            ) : data.last_drill.status === 'running' ? (
+              <>A practice run is going now.</>
+            ) : (
+              <span className="text-red-600 dark:text-red-400">
+                Last practice did not pass: {data.last_drill.error ?? 'it did not finish.'}
+              </span>
+            )}
+          </p>
+        ) : (
+          <p className="mt-2 text-sm text-muted">Never practised. Until you have, nobody knows the copies work.</p>
+        )}
+        <div className="mt-3">
+          <Button variant={data.levels.current === 2 ? 'primary' : 'secondary'} size="sm" onClick={() => void runPractice()} loading={busy}>
+            Practise now
+          </Button>
+        </div>
+        {drillResult && drillResult.status === 'passed' ? (
+          <p className="mt-2 text-xs text-muted">
+            Records went from {drillResult.rows_before} to {drillResult.rows_after_destroy} to{' '}
+            {drillResult.rows_restored}. The middle number is the point: they really were gone.
+          </p>
+        ) : null}
       </div>
 
       {/* Whatever just happened, said in a sentence, right where they acted. */}
@@ -428,9 +552,23 @@ export function AdminBackups() {
               {k.by_role ? (
                 <span className="text-xs text-muted">administrator</span>
               ) : (
-                <Button variant="ghost-danger" size="xs" onClick={() => void removeKeyholder(k.id)} disabled={busy}>
-                  Remove
-                </Button>
+                <>
+                  <span className="text-xs text-muted">
+                    {k.backups_seen_at
+                      ? 'has been here'
+                      : k.warden_briefed_at
+                        ? 'asked, not been here yet'
+                        : 'not told yet'}
+                  </span>
+                  {!k.backups_seen_at ? (
+                    <Button variant="secondary" size="xs" onClick={() => void briefWarden(k.id)} disabled={busy}>
+                      {k.warden_briefed_at ? 'Send again' : 'Send instructions'}
+                    </Button>
+                  ) : null}
+                  <Button variant="ghost-danger" size="xs" onClick={() => void removeKeyholder(k.id)} disabled={busy}>
+                    Remove
+                  </Button>
+                </>
               )}
             </li>
           ))}

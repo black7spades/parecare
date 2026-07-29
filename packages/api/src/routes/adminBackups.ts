@@ -20,6 +20,9 @@ import {
   type Destination,
 } from '../services/backupOffsite';
 import { updateSettings } from '../config/settings';
+import { runDrill, lastDrill } from '../services/backupDrill';
+import { levelReport } from '../services/backupLevels';
+import { sendWardenBriefEmail } from '../services/email';
 
 /**
  * The Backups screen, for the super admin. Copies are taken whether or not
@@ -90,7 +93,14 @@ function reassurance(
   };
 }
 
-adminBackupsRouter.get('/', async (_req, res) => {
+adminBackupsRouter.get('/', async (req, res) => {
+  // Someone who has this only because they were nominated, opening this
+  // screen, is the whole of level five. Recorded here because visiting is
+  // the evidence; there is nothing else they could do to prove it.
+  if (req.account!.role !== 'admin' && req.account!.role !== 'super_admin') {
+    await db('accounts').where({ id: req.account!.id }).update({ backups_seen_at: db.fn.now() }).catch(() => {});
+  }
+
   const cfg = getBackupConfig();
   const last = await lastGoodBackup();
   const backups = await db('backups').orderBy('started_at', 'desc').limit(200);
@@ -111,7 +121,7 @@ adminBackupsRouter.get('/', async (_req, res) => {
       qb.where({ can_manage_backups: true }).orWhere({ role: 'super_admin' }).orWhere({ role: 'admin' });
     })
     .whereNull('disabled_at')
-    .select('id', 'display_name', 'email', 'role', 'can_manage_backups');
+    .select('id', 'display_name', 'email', 'role', 'can_manage_backups', 'warden_briefed_at', 'backups_seen_at');
 
   // Everyone else who could be given it, so nominating someone happens here
   // rather than by sending a worried person off to another screen to hunt
@@ -124,8 +134,12 @@ adminBackupsRouter.get('/', async (_req, res) => {
     .select('id', 'display_name', 'email')
     .limit(200);
 
+  const [levels, drill] = await Promise.all([levelReport(), lastDrill()]);
+
   res.json({
     status: reassurance(last, cfg.enabled, !!takenAway, space.roomForMore),
+    levels,
+    last_drill: drill ?? null,
     settings: { enabled: cfg.enabled, frequency: cfg.frequency, keep_days: cfg.keepDays },
     space: { room_for_more: space.roomForMore, used_by_copies: space.usedByCopies },
     cloud: {
@@ -136,7 +150,15 @@ adminBackupsRouter.get('/', async (_req, res) => {
       google_redirect_uri: driveRedirectUri(),
       dropbox_redirect_uri: dropboxRedirectUri(),
     },
-    keyholders: keyholders.map((k: { id: string; display_name: string; email: string; role: string; can_manage_backups: boolean }) => ({
+    keyholders: keyholders.map((k: {
+      id: string;
+      display_name: string;
+      email: string;
+      role: string;
+      can_manage_backups: boolean;
+      warden_briefed_at: Date | null;
+      backups_seen_at: Date | null;
+    }) => ({
       ...k,
       // Someone who has it because of their role keeps it whatever this
       // screen does, so it must not offer to take it away and then fail.
@@ -208,6 +230,69 @@ adminBackupsRouter.delete('/keyholders/:accountId', async (req, res) => {
   await db('accounts').where({ id: person.id }).update({ can_manage_backups: false, updated_at: db.fn.now() });
   await audit(req.account!.id, `removed backup access from ${person.email}`);
   res.json({ message: `${person.display_name} no longer has access to backups.` });
+});
+
+/**
+ * Practise the emergency. Destroys and restores a practice copy of the
+ * records, on a scratch database that is always dropped, so nothing live is
+ * ever at risk. This is the only thing that turns "there are copies" into
+ * "the copies work".
+ */
+adminBackupsRouter.post('/drill', async (req, res) => {
+  const running = await db('backup_drills').where({ status: 'running' }).first();
+  if (running) {
+    res.status(409).json({ error: 'A practice run is already going. It will appear here when it finishes.', code: 'ALREADY_RUNNING' });
+    return;
+  }
+  await audit(req.account!.id, 'ran a backup practice run');
+  const drill = await runDrill(req.account!.id);
+  res.status(201).json({
+    drill,
+    message:
+      drill.status === 'passed'
+        ? `Practice run passed. ${drill.rows_before} records were destroyed and all ${drill.rows_restored} came back.`
+        : drill.error ?? 'The practice run did not finish.',
+  });
+});
+
+/**
+ * Tell someone what being a data warden means. Being nominated quietly is
+ * not the same as knowing you have been asked, and someone who does not know
+ * is not a second pair of hands.
+ */
+adminBackupsRouter.post('/keyholders/:accountId/brief', async (req, res) => {
+  if (!canNominate(req.account!.role)) {
+    res.status(403).json({ error: 'Only an administrator can ask someone to be a data warden.', code: 'FORBIDDEN' });
+    return;
+  }
+  const person = await db('accounts').where({ id: req.params['accountId'] }).whereNull('disabled_at').first();
+  if (!person) {
+    res.status(404).json({ error: 'That person is no longer here.', code: 'NOT_FOUND' });
+    return;
+  }
+  if (!person.can_manage_backups) {
+    res.status(400).json({ error: 'Give them access to backups first, then send the instructions.', code: 'NOT_A_KEYHOLDER' });
+    return;
+  }
+  try {
+    await sendWardenBriefEmail(
+      person.email,
+      person.display_name,
+      req.account!.display_name,
+      `${env.APP_URL}/system/backups`
+    );
+  } catch (err) {
+    // The reason already reads as a sentence, so it is not punctuated twice.
+    const why = (err as Error).message.replace(/\.$/, '');
+    res.status(500).json({
+      error: `The email could not be sent: ${why}. Set up email under Settings, or simply tell them yourself.`,
+      code: 'EMAIL_FAILED',
+    });
+    return;
+  }
+  await db('accounts').where({ id: person.id }).update({ warden_briefed_at: db.fn.now() });
+  await audit(req.account!.id, `asked ${person.email} to be a data warden`);
+  res.json({ message: `Sent. ${person.display_name} now knows what to do if it is ever needed.` });
 });
 
 // Take one now. Copies made by hand are never thinned out automatically.
