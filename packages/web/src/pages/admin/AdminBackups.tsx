@@ -476,6 +476,7 @@ export function AdminBackups() {
       {/*
         The working behind the result, so it can be read rather than taken on
         trust. Three numbers going up, down and back up again is only a claim.
+        Named records going missing and coming back is not.
       */}
       {evidence ? <RestoreTestReport evidence={evidence} /> : null}
 
