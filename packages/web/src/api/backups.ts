@@ -44,6 +44,14 @@ export interface Keyholder {
   id: string;
   display_name: string;
   email: string;
+  /** Has it because of their role, so it cannot be taken away here. */
+  by_role: boolean;
+}
+
+export interface Person {
+  id: string;
+  display_name: string;
+  email: string;
 }
 
 export interface BackupsOverview {
@@ -58,6 +66,7 @@ export interface BackupsOverview {
     dropbox_redirect_uri: string;
   };
   keyholders: Keyholder[];
+  could_help: Person[];
   last_backup_at: string | null;
   backups: Backup[];
 }
@@ -73,5 +82,7 @@ export const backupsApi = {
   disconnect: (provider: 'google' | 'dropbox') => api.post<{ message: string }>(`/admin/backups/${provider}/disconnect`),
   saveStorage: (details: StorageDetails) => api.post<{ message: string }>('/admin/backups/storage', details),
   disconnectStorage: () => api.post<{ message: string }>('/admin/backups/storage/disconnect'),
+  addKeyholder: (accountId: string) => api.post<{ message: string }>('/admin/backups/keyholders', { account_id: accountId }),
+  removeKeyholder: (accountId: string) => api.delete<{ message: string }>(`/admin/backups/keyholders/${accountId}`),
   sendOffsite: (id: string) => api.post<{ message: string }>(`/admin/backups/${id}/send-offsite`),
 };

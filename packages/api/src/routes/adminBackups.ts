@@ -111,7 +111,18 @@ adminBackupsRouter.get('/', async (_req, res) => {
       qb.where({ can_manage_backups: true }).orWhere({ role: 'super_admin' }).orWhere({ role: 'admin' });
     })
     .whereNull('disabled_at')
-    .select('id', 'display_name', 'email');
+    .select('id', 'display_name', 'email', 'role', 'can_manage_backups');
+
+  // Everyone else who could be given it, so nominating someone happens here
+  // rather than by sending a worried person off to another screen to hunt
+  // for a checkbox.
+  const couldHelp = await db('accounts')
+    .whereNot({ can_manage_backups: true })
+    .whereNotIn('role', ['super_admin', 'admin'])
+    .whereNull('disabled_at')
+    .orderBy('display_name', 'asc')
+    .select('id', 'display_name', 'email')
+    .limit(200);
 
   res.json({
     status: reassurance(last, cfg.enabled, !!takenAway, space.roomForMore),
@@ -125,7 +136,13 @@ adminBackupsRouter.get('/', async (_req, res) => {
       google_redirect_uri: driveRedirectUri(),
       dropbox_redirect_uri: dropboxRedirectUri(),
     },
-    keyholders,
+    keyholders: keyholders.map((k: { id: string; display_name: string; email: string; role: string; can_manage_backups: boolean }) => ({
+      ...k,
+      // Someone who has it because of their role keeps it whatever this
+      // screen does, so it must not offer to take it away and then fail.
+      by_role: k.role === 'super_admin' || k.role === 'admin',
+    })),
+    could_help: couldHelp,
     last_backup_at: last?.started_at ?? null,
     backups: backups.map((b: BackupRow) => ({
       ...b,
@@ -136,6 +153,61 @@ adminBackupsRouter.get('/', async (_req, res) => {
       stored: !!b.file_url,
     })),
   });
+});
+
+/**
+ * Nominate someone else who can get the records back, or take that away.
+ *
+ * Handing this out is itself an administrator's decision, so only an admin
+ * can do it: otherwise the first person given access could quietly widen it
+ * to anyone.
+ */
+const keyholderSchema = z.object({ account_id: z.string().uuid() });
+
+function canNominate(role: string | undefined): boolean {
+  return role === 'admin' || role === 'super_admin';
+}
+
+adminBackupsRouter.post('/keyholders', async (req, res) => {
+  if (!canNominate(req.account!.role)) {
+    res.status(403).json({ error: 'Only an administrator can give someone else access to backups.', code: 'FORBIDDEN' });
+    return;
+  }
+  const parsed = keyholderSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Choose someone from the list first.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const person = await db('accounts').where({ id: parsed.data.account_id }).whereNull('disabled_at').first();
+  if (!person) {
+    res.status(404).json({ error: 'That person is no longer here.', code: 'NOT_FOUND' });
+    return;
+  }
+  await db('accounts').where({ id: person.id }).update({ can_manage_backups: true, updated_at: db.fn.now() });
+  await audit(req.account!.id, `gave ${person.email} access to backups`);
+  res.json({ message: `${person.display_name} can now get these records back too.` });
+});
+
+adminBackupsRouter.delete('/keyholders/:accountId', async (req, res) => {
+  if (!canNominate(req.account!.role)) {
+    res.status(403).json({ error: 'Only an administrator can change who has access to backups.', code: 'FORBIDDEN' });
+    return;
+  }
+  const person = await db('accounts').where({ id: req.params['accountId'] }).first();
+  if (!person) {
+    res.status(404).json({ error: 'That person is no longer here.', code: 'NOT_FOUND' });
+    return;
+  }
+  if (person.role === 'admin' || person.role === 'super_admin') {
+    res.status(400).json({
+      error: `${person.display_name} has this because they are an administrator, so it cannot be taken away here.`,
+      code: 'BY_ROLE',
+    });
+    return;
+  }
+  await db('accounts').where({ id: person.id }).update({ can_manage_backups: false, updated_at: db.fn.now() });
+  await audit(req.account!.id, `removed backup access from ${person.email}`);
+  res.json({ message: `${person.display_name} no longer has access to backups.` });
 });
 
 // Take one now. Copies made by hand are never thinned out automatically.
