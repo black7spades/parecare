@@ -81,6 +81,8 @@ export const backupsApi = {
   connect: (provider: 'google' | 'dropbox') => api.post<{ url: string }>(`/admin/backups/${provider}/connect`),
   disconnect: (provider: 'google' | 'dropbox') => api.post<{ message: string }>(`/admin/backups/${provider}/disconnect`),
   saveStorage: (details: StorageDetails) => api.post<{ message: string }>('/admin/backups/storage', details),
+  saveApp: (provider: 'google' | 'dropbox', values: Record<string, string>) =>
+    api.post<{ message: string }>(`/admin/backups/${provider}/app`, values),
   disconnectStorage: () => api.post<{ message: string }>('/admin/backups/storage/disconnect'),
   addKeyholder: (accountId: string) => api.post<{ message: string }>('/admin/backups/keyholders', { account_id: accountId }),
   removeKeyholder: (accountId: string) => api.delete<{ message: string }>(`/admin/backups/keyholders/${accountId}`),
