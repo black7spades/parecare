@@ -41,6 +41,7 @@ export interface BackupRow {
   verified_at: Date | null;
   error: string | null;
   offsite_at?: Date | null;
+  offsite_kind?: string | null;
   offsite_ref?: string | null;
   offsite_error?: string | null;
 }
@@ -359,12 +360,11 @@ export async function runBackup(
     // The only thing that survives losing this server is a copy that is not
     // on it. Sent after the copy is safely written, so a Drive outage never
     // costs the local copy.
-    const { driveConnected, sendCopyOffsite } = await import('./backupDrive');
-    if (driveConnected()) {
-      const sent = await sendCopyOffsite(row.id).catch((err) => ({ ok: false, message: (err as Error).message }));
-      if (!sent.ok) {
-        await db('backups').where({ id: row.id }).update({ offsite_error: sent.message.slice(0, 500) });
-      }
+    const { offsiteReady, sendCopyOffsite } = await import('./backupOffsite');
+    if (offsiteReady()) {
+      await sendCopyOffsite(row.id).catch((err) =>
+        db('backups').where({ id: row.id }).update({ offsite_error: String((err as Error).message).slice(0, 500) })
+      );
     }
 
     if (room.canVerify) {
@@ -503,8 +503,8 @@ export async function pruneBackups(): Promise<number> {
     // Thinned out in both places, so what is here and what is in Drive stay
     // the same set rather than drifting apart over months.
     if (row.offsite_ref) {
-      const { removeCopyOffsite } = await import('./backupDrive');
-      await removeCopyOffsite(row.offsite_ref).catch(() => {});
+      const { removeCopyOffsite } = await import('./backupOffsite');
+      await removeCopyOffsite(row.offsite_kind ?? null, row.offsite_ref).catch(() => {});
     }
     await db('backups').where({ id: row.id }).del();
     removed += 1;
@@ -681,10 +681,10 @@ async function tick(): Promise<void> {
     await warnSuperAdmin('The last backup was made but could not be checked. It may not be usable.');
     return;
   }
-  const { driveConnected } = await import('./backupDrive');
-  if (driveConnected() && !result.offsite_at) {
+  const { offsiteReady, activeDestination, DESTINATION_NAMES } = await import('./backupOffsite');
+  if (offsiteReady() && !result.offsite_at) {
     await warnSuperAdmin(
-      'The last backup was made here but could not be sent to Google Drive, so it would not survive this server being lost.'
+      `The last backup was made here but could not be sent to ${DESTINATION_NAMES[activeDestination()]}, so it would not survive this server being lost.`
     );
   }
 }

@@ -41,6 +41,9 @@ const STORAGE_PROVIDERS = ['local', 's3'] as const;
 // weekly copies is worked out from them and never shown.
 const BACKUP_FREQUENCIES = ['hourly', 'daily', 'weekly', 'monthly'] as const;
 const BACKUP_KEEP = ['7', '30', '180', '365'] as const;
+// Where copies are kept besides this server. One at a time on purpose: a
+// choice of destinations is useful, a matrix of them is a chore.
+const BACKUP_DESTINATIONS = ['none', 'google', 'dropbox', 's3'] as const;
 // One currency for the whole account; every price is shown with its symbol.
 const CURRENCIES = ['AUD', 'USD', 'GBP', 'EUR', 'NZD', 'CAD'] as const;
 
@@ -94,10 +97,20 @@ export const SETTINGS_CATALOG: readonly SettingEntry[] = [
   { key: 'backups.frequency', group: 'backups', label: 'How often', type: 'enum', enumValues: BACKUP_FREQUENCIES, secret: false, envKey: 'BACKUPS_FREQUENCY', zod: enom(BACKUP_FREQUENCIES) },
   { key: 'backups.keep_days', group: 'backups', label: 'Keep copies for', type: 'enum', enumValues: BACKUP_KEEP, secret: false, envKey: 'BACKUPS_KEEP_DAYS', help: 'In days. Older copies are thinned out rather than all kept.', zod: enom(BACKUP_KEEP) },
   { key: 'backups.path', group: 'backups', label: 'Where copies are stored', type: 'string', secret: false, envKey: 'BACKUPS_PATH', help: 'A folder on this server, kept separate from uploaded documents so a copy never contains itself.', zod: str() },
+  { key: 'backups.destination', group: 'backups', label: 'Where copies are also kept', type: 'enum', enumValues: BACKUP_DESTINATIONS, secret: false, envKey: 'BACKUPS_DESTINATION', zod: enom(BACKUP_DESTINATIONS) },
   // Set by pressing Connect on the Backups screen, not typed in by hand.
   { key: 'backups.google_refresh_token', group: 'backups', label: 'Google Drive connection', type: 'string', secret: true, envKey: 'BACKUPS_GOOGLE_REFRESH_TOKEN', help: 'Set by connecting Google Drive on the Backups screen.', zod: str() },
   { key: 'backups.google_account', group: 'backups', label: 'Google Drive account', type: 'string', secret: false, envKey: 'BACKUPS_GOOGLE_ACCOUNT', zod: str() },
   { key: 'backups.google_folder_id', group: 'backups', label: 'Google Drive folder', type: 'string', secret: false, envKey: 'BACKUPS_GOOGLE_FOLDER_ID', zod: str() },
+  { key: 'backups.dropbox_refresh_token', group: 'backups', label: 'Dropbox connection', type: 'string', secret: true, envKey: 'BACKUPS_DROPBOX_REFRESH_TOKEN', help: 'Set by connecting Dropbox on the Backups screen.', zod: str() },
+  { key: 'backups.dropbox_account', group: 'backups', label: 'Dropbox account', type: 'string', secret: false, envKey: 'BACKUPS_DROPBOX_ACCOUNT', zod: str() },
+  { key: 'backups.dropbox_app_key', group: 'backups', label: 'Dropbox app key', type: 'string', secret: false, envKey: 'BACKUPS_DROPBOX_APP_KEY', help: 'From your Dropbox app under App console. Add the address shown on the Backups screen to its redirect URIs.', helpLink: { label: 'Dropbox app console', url: 'https://www.dropbox.com/developers/apps' }, zod: str() },
+  { key: 'backups.dropbox_app_secret', group: 'backups', label: 'Dropbox app secret', type: 'string', secret: true, envKey: 'BACKUPS_DROPBOX_APP_SECRET', zod: str() },
+  { key: 'backups.s3_bucket', group: 'backups', label: 'Storage bucket for copies', type: 'string', secret: false, envKey: 'BACKUPS_S3_BUCKET', help: 'Works with Backblaze B2, Wasabi, Cloudflare R2, MinIO and anything else that speaks the same protocol.', zod: str() },
+  { key: 'backups.s3_region', group: 'backups', label: 'Storage region', type: 'string', secret: false, envKey: 'BACKUPS_S3_REGION', zod: str() },
+  { key: 'backups.s3_access_key', group: 'backups', label: 'Storage access key', type: 'string', secret: true, envKey: 'BACKUPS_S3_ACCESS_KEY', zod: str() },
+  { key: 'backups.s3_secret_key', group: 'backups', label: 'Storage secret key', type: 'string', secret: true, envKey: 'BACKUPS_S3_SECRET_KEY', zod: str() },
+  { key: 'backups.s3_endpoint', group: 'backups', label: 'Storage address', type: 'string', secret: false, envKey: 'BACKUPS_S3_ENDPOINT', help: 'Leave empty for Amazon S3 itself.', zod: str() },
 
   // Stripe billing
   { key: 'stripe.secret_key', group: 'stripe', label: 'Stripe secret key', type: 'string', secret: true, envKey: 'STRIPE_SECRET_KEY', help: 'Starts with sk_live_ (or sk_test_ for test mode).', helpLink: { label: 'Stripe API keys', url: 'https://dashboard.stripe.com/apikeys' }, zod: str() },

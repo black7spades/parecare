@@ -5,7 +5,15 @@ import { Modal } from '../../components/ui/Modal';
 import { SortableTh } from '../../components/data/SortableTh';
 import { useDataView } from '../../components/data/useDataView';
 import { api } from '../../api/client';
-import { backupsApi, type Backup, type BackupsOverview } from '../../api/backups';
+import { backupsApi, type Backup, type BackupsOverview, type Destination } from '../../api/backups';
+
+/** How each destination is named to a person. Never the protocol. */
+const DESTINATION_LABELS: Record<Destination, string> = {
+  none: 'nowhere else',
+  google: 'Google Drive',
+  dropbox: 'Dropbox',
+  s3: 'your storage',
+};
 
 const SELECT_CLASS =
   'rounded-md border border-border bg-card px-2 py-1.5 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -58,8 +66,8 @@ function sizeText(bytes: number | null): string {
 /** Where this copy exists, said plainly. */
 function whereText(b: Backup): string {
   if (b.status !== 'ok') return '';
-  const away = [];
-  if (b.offsite_at) away.push('Google Drive');
+  const away: string[] = [];
+  if (b.offsite_at) away.push(DESTINATION_LABELS[(b.offsite_kind ?? 'none') as Destination]);
   if (b.downloaded_at) away.push('downloaded');
   return away.length > 0 ? `This server and ${away.join(', ')}` : 'This server only';
 }
@@ -85,6 +93,8 @@ export function AdminBackups() {
   const [notice, setNotice] = useState<{ kind: 'ok' | 'bad'; text: string } | null>(null);
   const [restoring, setRestoring] = useState<Backup | null>(null);
   const [confirmText, setConfirmText] = useState('');
+  const [showStorage, setShowStorage] = useState(false);
+  const [storage, setStorage] = useState({ bucket: '', region: '', access_key: '', secret_key: '', endpoint: '' });
 
   const load = useCallback(async () => {
     try {
@@ -106,9 +116,9 @@ export function AdminBackups() {
     const hash = window.location.hash.replace(/^#/, '');
     if (!hash) return;
     if (hash === 'connected=1') {
-      setNotice({ kind: 'ok', text: 'Google Drive is connected. Copies will be kept there from now on.' });
+      setNotice({ kind: 'ok', text: 'Connected. Copies will be kept there as well as here from now on.' });
     } else if (hash.startsWith('error=')) {
-      setNotice({ kind: 'bad', text: `Google Drive was not connected: ${hash.slice(6).replace(/-/g, ' ')}.` });
+      setNotice({ kind: 'bad', text: `That did not connect: ${hash.slice(6).replace(/-/g, ' ')}.` });
     }
     window.history.replaceState(null, '', window.location.pathname);
   }, []);
@@ -171,10 +181,10 @@ export function AdminBackups() {
     }
   }
 
-  async function connectGoogle() {
+  async function connect(provider: 'google' | 'dropbox') {
     setBusy(true);
     try {
-      const { url } = await backupsApi.connectGoogle();
+      const { url } = await backupsApi.connect(provider);
       window.location.href = url;
     } catch (err) {
       setNotice({ kind: 'bad', text: (err as Error).message });
@@ -182,10 +192,37 @@ export function AdminBackups() {
     }
   }
 
-  async function disconnectGoogle() {
+  async function disconnect(provider: 'google' | 'dropbox') {
     setBusy(true);
     try {
-      const result = await backupsApi.disconnectGoogle();
+      const result = await backupsApi.disconnect(provider);
+      setNotice({ kind: 'ok', text: result.message });
+      await load();
+    } catch (err) {
+      setNotice({ kind: 'bad', text: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveStorage() {
+    setBusy(true);
+    try {
+      const result = await backupsApi.saveStorage(storage);
+      setNotice({ kind: 'ok', text: result.message });
+      setShowStorage(false);
+      await load();
+    } catch (err) {
+      setNotice({ kind: 'bad', text: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnectStorage() {
+    setBusy(true);
+    try {
+      const result = await backupsApi.disconnectStorage();
       setNotice({ kind: 'ok', text: result.message });
       await load();
     } catch (err) {
@@ -257,6 +294,9 @@ export function AdminBackups() {
               ? 'No copy yet'
               : 'Your data needs attention';
   const onlyKeyholder = data.keyholders.length < 2;
+  const googleReady = data.cloud.destinations.find((d) => d.id === 'google')?.available ?? false;
+  const dropboxReady = data.cloud.destinations.find((d) => d.id === 'dropbox')?.available ?? false;
+  const activeAccount = data.cloud.destinations.find((d) => d.id === data.cloud.active)?.account ?? null;
   const restoreDate = restoring ? new Date(restoring.started_at).toISOString().slice(0, 10) : '';
 
   return (
@@ -305,45 +345,105 @@ export function AdminBackups() {
       ) : null}
 
       {/*
-        The only thing that survives this server being lost. Presented as one
-        button, because everything it involves is our problem, not theirs.
+        The only thing that survives this server being lost. Two buttons for
+        the services people already have, and everything else folded away
+        under Advanced for the few who want it.
       */}
       <div className="rounded-lg border border-border bg-card p-4">
         <h3 className="text-sm font-semibold text-ink">Keep a copy off this server</h3>
-        {data.cloud.connected ? (
+        {data.cloud.ready ? (
           <>
             <p className="mt-1 text-sm text-muted">
-              Copies are being kept in {data.cloud.account ?? 'Google Drive'}, in a folder called PareCare backups.
-              PareCare can only see the files it puts there.
+              Copies are being kept in {activeAccount ?? DESTINATION_LABELS[data.cloud.active]}, as well as here. Only
+              the files PareCare puts there are ever visible to it.
             </p>
             <div className="mt-3">
-              <Button variant="secondary" size="sm" onClick={() => void disconnectGoogle()} disabled={busy}>
-                Stop using Google Drive
-              </Button>
-            </div>
-          </>
-        ) : data.cloud.available ? (
-          <>
-            <p className="mt-1 text-sm text-muted">
-              Connect Google Drive and every copy is kept there as well as here, so the records survive this server
-              being lost. PareCare only ever sees the files it puts there.
-            </p>
-            <div className="mt-3">
-              <Button variant="primary" size="sm" onClick={() => void connectGoogle()} loading={busy}>
-                Connect Google Drive
-              </Button>
+              {data.cloud.active === 's3' ? (
+                <Button variant="secondary" size="sm" onClick={() => void disconnectStorage()} disabled={busy}>
+                  Stop sending copies there
+                </Button>
+              ) : (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void disconnect(data.cloud.active as 'google' | 'dropbox')}
+                  disabled={busy}
+                >
+                  Stop using {DESTINATION_LABELS[data.cloud.active]}
+                </Button>
+              )}
             </div>
           </>
         ) : (
           <>
             <p className="mt-1 text-sm text-muted">
-              Google has not been set up for this installation yet. Once the Google sign-in details are filled in under
-              Settings, copies can be kept in Google Drive automatically. Until then, download a copy and keep it
-              somewhere safe.
+              Connect one of these and every copy is kept there as well as here, so the records survive this server
+              being lost. PareCare only ever sees the files it puts there.
             </p>
-            <p className="mt-2 text-xs text-muted">
-              Whoever sets Google up will need this address: <code className="break-all">{data.cloud.redirect_uri}</code>
-            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button variant="primary" size="sm" onClick={() => void connect('google')} disabled={busy || !googleReady}>
+                Connect Google Drive
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => void connect('dropbox')} disabled={busy || !dropboxReady}>
+                Connect Dropbox
+              </Button>
+            </div>
+            {!googleReady || !dropboxReady ? (
+              <p className="mt-2 text-xs text-muted">
+                {!googleReady && !dropboxReady
+                  ? 'Neither has been set up for this installation yet. '
+                  : !googleReady
+                    ? 'Google has not been set up for this installation yet. '
+                    : 'Dropbox has not been set up for this installation yet. '}
+                Whoever sets them up will need these addresses:{' '}
+                <code className="break-all">{data.cloud.google_redirect_uri}</code> and{' '}
+                <code className="break-all">{data.cloud.dropbox_redirect_uri}</code>
+              </p>
+            ) : null}
+            <div className="mt-3">
+              <Button variant="ghost" size="xs" onClick={() => setShowStorage((v) => !v)}>
+                {showStorage ? 'Hide other storage' : 'Use other storage instead'}
+              </Button>
+            </div>
+            {showStorage ? (
+              <div className="mt-3 space-y-2 border-t border-border pt-3">
+                <p className="text-xs text-muted">
+                  For anyone who already has storage they trust. Works with Backblaze B2, Wasabi, Cloudflare R2, MinIO
+                  and Amazon. The details are checked before anything relies on them.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input
+                    placeholder="Bucket name"
+                    value={storage.bucket}
+                    onChange={(e) => setStorage({ ...storage, bucket: e.target.value })}
+                  />
+                  <Input
+                    placeholder="Region, if it has one"
+                    value={storage.region}
+                    onChange={(e) => setStorage({ ...storage, region: e.target.value })}
+                  />
+                  <Input
+                    placeholder="Access key"
+                    value={storage.access_key}
+                    onChange={(e) => setStorage({ ...storage, access_key: e.target.value })}
+                  />
+                  <Input
+                    type="password"
+                    placeholder="Secret key"
+                    value={storage.secret_key}
+                    onChange={(e) => setStorage({ ...storage, secret_key: e.target.value })}
+                  />
+                  <Input
+                    placeholder="Address, if it is not Amazon"
+                    value={storage.endpoint}
+                    onChange={(e) => setStorage({ ...storage, endpoint: e.target.value })}
+                  />
+                </div>
+                <Button variant="primary" size="sm" onClick={() => void saveStorage()} loading={busy}>
+                  Check and use this storage
+                </Button>
+              </div>
+            ) : null}
           </>
         )}
       </div>
@@ -437,9 +537,9 @@ export function AdminBackups() {
                           <Button variant="ghost" size="xs" onClick={() => void check(b)} disabled={busy}>
                             Check
                           </Button>
-                          {data.cloud.connected && !b.offsite_at ? (
+                          {data.cloud.ready && !b.offsite_at ? (
                             <Button variant="ghost" size="xs" onClick={() => void sendOffsite(b)} disabled={busy}>
-                              Send to Drive
+                              Send a copy away
                             </Button>
                           ) : null}
                           <Button variant="ghost-danger" size="xs" onClick={() => setRestoring(b)}>

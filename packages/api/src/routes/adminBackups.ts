@@ -8,16 +8,18 @@ import { getBackupConfig } from '../config/settings';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import { runBackup, verifyBackup, lastGoodBackup, restoreBackup, spaceReport, type BackupRow } from '../services/backup';
+import { driveAuthUrl, driveRedirectUri, completeDriveConnection, disconnectDrive } from '../services/backupDrive';
+import { dropboxAuthUrl, dropboxRedirectUri, completeDropboxConnection, disconnectDropbox } from '../services/backupDropbox';
+import { testS3 } from '../services/backupS3';
 import {
-  driveAuthUrl,
-  driveConfigured,
-  driveConnected,
-  driveAccount,
-  driveRedirectUri,
-  completeDriveConnection,
-  disconnectDrive,
+  activeDestination,
+  destinationStates,
+  offsiteReady,
   sendCopyOffsite,
-} from '../services/backupDrive';
+  DESTINATION_NAMES,
+  type Destination,
+} from '../services/backupOffsite';
+import { updateSettings } from '../config/settings';
 
 /**
  * The Backups screen, for the super admin. Copies are taken whether or not
@@ -116,11 +118,12 @@ adminBackupsRouter.get('/', async (_req, res) => {
     settings: { enabled: cfg.enabled, frequency: cfg.frequency, keep_days: cfg.keepDays },
     space: { room_for_more: space.roomForMore, used_by_copies: space.usedByCopies },
     cloud: {
-      available: driveConfigured(),
-      connected: driveConnected(),
-      account: driveAccount() ?? null,
-      // Shown so whoever sets Google up can copy it straight across.
-      redirect_uri: driveRedirectUri(),
+      active: activeDestination(),
+      ready: offsiteReady(),
+      destinations: destinationStates(),
+      // Shown so whoever registers the apps can copy them straight across.
+      google_redirect_uri: driveRedirectUri(),
+      dropbox_redirect_uri: dropboxRedirectUri(),
     },
     keyholders,
     last_backup_at: last?.started_at ?? null,
@@ -181,34 +184,47 @@ adminBackupsRouter.get('/:backupId/download', async (req, res) => {
 
 // --- Keeping copies somewhere that is not this server ----------------------
 
-adminBackupsRouter.post('/google/connect', (req, res) => {
-  if (!driveConfigured()) {
+const OAUTH_DESTINATIONS = {
+  google: { configured: () => destinationStates().find((d) => d.id === 'google')!.available, url: driveAuthUrl, name: 'Google Drive' },
+  dropbox: { configured: () => destinationStates().find((d) => d.id === 'dropbox')!.available, url: dropboxAuthUrl, name: 'Dropbox' },
+} as const;
+
+adminBackupsRouter.post('/:provider(google|dropbox)/connect', (req, res) => {
+  const which = req.params['provider'] as 'google' | 'dropbox';
+  const dest = OAUTH_DESTINATIONS[which];
+  if (!dest.configured()) {
     res.status(400).json({
-      error:
-        'Google has not been set up for this installation yet. Add the Google sign-in details under Settings first, and add the address shown here to them.',
-      code: 'GOOGLE_NOT_CONFIGURED',
+      error: `${dest.name} has not been set up for this installation yet. Fill in its details first, and add the address shown here to them.`,
+      code: 'NOT_CONFIGURED',
     });
     return;
   }
   // Short-lived and signed, so the callback cannot be forged, and carrying
   // who started it so the connection is recorded against a real person.
-  const state = jwt.sign({ purpose: 'drive_connect', accountId: req.account!.id }, env.JWT_SECRET, { expiresIn: '10m' });
-  res.json({ url: driveAuthUrl(state) });
+  const state = jwt.sign({ purpose: 'offsite_connect', provider: which, accountId: req.account!.id }, env.JWT_SECRET, {
+    expiresIn: '10m',
+  });
+  res.json({ url: dest.url(state) });
 });
 
 /**
- * Google sends the person back here. This one route is reached from a browser
- * redirect rather than the app, so it authenticates from the signed state
- * instead of the usual header, and always lands them back on the screen.
+ * Google and Dropbox send the person back here. These arrive from a browser
+ * redirect rather than the app, so they authenticate from the signed state
+ * instead of the usual header, and always land back on the screen.
  */
 export const adminBackupsCallbackRouter = Router();
 
-adminBackupsCallbackRouter.get('/google/callback', async (req, res) => {
+adminBackupsCallbackRouter.get('/:provider(google|dropbox)/callback', async (req, res) => {
+  const which = req.params['provider'] as 'google' | 'dropbox';
   const back = (msg: string) => res.redirect(`${env.APP_URL}/system/backups#${msg}`);
   let accountId: string | null = null;
   try {
-    const payload = jwt.verify(String(req.query['state'] ?? ''), env.JWT_SECRET) as { purpose?: string; accountId?: string };
-    if (payload.purpose !== 'drive_connect') throw new Error('wrong purpose');
+    const payload = jwt.verify(String(req.query['state'] ?? ''), env.JWT_SECRET) as {
+      purpose?: string;
+      provider?: string;
+      accountId?: string;
+    };
+    if (payload.purpose !== 'offsite_connect' || payload.provider !== which) throw new Error('wrong purpose');
     accountId = payload.accountId ?? null;
   } catch {
     back('error=that-link-has-expired');
@@ -219,21 +235,78 @@ adminBackupsCallbackRouter.get('/google/callback', async (req, res) => {
     back('error=connecting-was-cancelled');
     return;
   }
-  const result = await completeDriveConnection(code, accountId);
+  const result =
+    which === 'google' ? await completeDriveConnection(code, accountId) : await completeDropboxConnection(code, accountId);
+  if (result.ok) {
+    // Choosing it is part of connecting it. Making someone connect and then
+    // separately switch it on is a step that earns nothing.
+    await updateSettings({ 'backups.destination': which }, accountId);
+  }
   back(result.ok ? 'connected=1' : 'error=connecting-did-not-finish');
 });
 
-adminBackupsRouter.post('/google/disconnect', async (req, res) => {
-  await disconnectDrive(req.account!.id);
-  await audit(req.account!.id, 'disconnected Google Drive');
-  res.json({ message: 'Copies will no longer be kept in Google Drive. The ones already there are untouched.' });
+adminBackupsRouter.post('/:provider(google|dropbox)/disconnect', async (req, res) => {
+  const which = req.params['provider'] as 'google' | 'dropbox';
+  if (which === 'google') await disconnectDrive(req.account!.id);
+  else await disconnectDropbox(req.account!.id);
+  if (activeDestination() === which) await updateSettings({ 'backups.destination': 'none' }, req.account!.id);
+  await audit(req.account!.id, `disconnected ${OAUTH_DESTINATIONS[which].name}`);
+  res.json({
+    message: `Copies will no longer be kept in ${OAUTH_DESTINATIONS[which].name}. The ones already there are untouched.`,
+  });
+});
+
+/**
+ * Storage details are typed rather than granted, so they are saved and then
+ * proved before anyone relies on them. Storage that quietly rejects every
+ * copy looks exactly like storage that works, until the day it is needed.
+ */
+const s3Schema = z.object({
+  bucket: z.string().min(1).max(255),
+  region: z.string().max(100).optional(),
+  access_key: z.string().min(1).max(255),
+  secret_key: z.string().min(1).max(255),
+  endpoint: z.string().max(500).optional(),
+});
+
+adminBackupsRouter.post('/storage', async (req, res) => {
+  const parsed = s3Schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Fill in the bucket, the access key and the secret key.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const d = parsed.data;
+  await updateSettings(
+    {
+      'backups.s3_bucket': d.bucket,
+      'backups.s3_region': d.region ?? 'us-east-1',
+      'backups.s3_access_key': d.access_key,
+      'backups.s3_secret_key': d.secret_key,
+      'backups.s3_endpoint': d.endpoint ?? '',
+    },
+    req.account!.id
+  );
+  const test = await testS3();
+  if (!test.ok) {
+    res.status(400).json({ error: test.message, code: 'STORAGE_UNREACHABLE' });
+    return;
+  }
+  await updateSettings({ 'backups.destination': 's3' }, req.account!.id);
+  await audit(req.account!.id, 'connected storage for copies');
+  res.json({ message: test.message });
+});
+
+adminBackupsRouter.post('/storage/disconnect', async (req, res) => {
+  if (activeDestination() === 's3') await updateSettings({ 'backups.destination': 'none' }, req.account!.id);
+  await audit(req.account!.id, 'stopped using storage for copies');
+  res.json({ message: 'Copies will no longer be sent to your storage. The ones already there are untouched.' });
 });
 
 // Send an existing copy across, for someone who has just connected and does
 // not want to wait for the next one.
 adminBackupsRouter.post('/:backupId/send-offsite', async (req, res) => {
-  if (!driveConnected()) {
-    res.status(400).json({ error: 'Google Drive is not connected.', code: 'NOT_CONNECTED' });
+  if (!offsiteReady()) {
+    res.status(400).json({ error: 'Copies are not being kept anywhere other than this server yet.', code: 'NOT_CONNECTED' });
     return;
   }
   const result = await sendCopyOffsite(req.params['backupId']!);
@@ -241,7 +314,7 @@ adminBackupsRouter.post('/:backupId/send-offsite', async (req, res) => {
     res.status(500).json({ error: result.message, code: 'OFFSITE_FAILED' });
     return;
   }
-  await audit(req.account!.id, 'sent a copy to Google Drive');
+  await audit(req.account!.id, `sent a copy to ${DESTINATION_NAMES[activeDestination() as Destination]}`);
   res.json({ message: result.message });
 });
 

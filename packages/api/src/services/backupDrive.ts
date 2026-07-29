@@ -1,6 +1,5 @@
 import * as fs from 'node:fs';
 import { Readable } from 'node:stream';
-import { db } from '../config/database';
 import { env } from '../config/env';
 import { getOAuthConfig, getBackupConfig, updateSettings } from '../config/settings';
 
@@ -161,11 +160,10 @@ async function folderId(token: string, accountId: string | null): Promise<string
  * copy of a well-used installation is large enough that a dropped connection
  * partway through is a normal event, not an exceptional one.
  */
-export async function sendCopyOffsite(backupId: string): Promise<{ ok: boolean; message: string }> {
-  const backup = await db('backups').where({ id: backupId }).first();
-  if (!backup?.file_url || !fs.existsSync(backup.file_url)) {
-    return { ok: false, message: 'That copy is no longer on this server.' };
-  }
+export async function sendToDrive(
+  filePath: string,
+  filename: string
+): Promise<{ ok: boolean; ref?: string; message: string }> {
   const token = await accessToken();
   if (!token) {
     return { ok: false, message: 'The connection to Google Drive has stopped working. Connect it again.' };
@@ -175,7 +173,7 @@ export async function sendCopyOffsite(backupId: string): Promise<{ ok: boolean; 
     return { ok: false, message: 'The backups folder in Google Drive could not be opened.' };
   }
 
-  const size = fs.statSync(backup.file_url).size;
+  const size = fs.statSync(filePath).size;
   const start = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id', {
     method: 'POST',
     headers: {
@@ -184,7 +182,7 @@ export async function sendCopyOffsite(backupId: string): Promise<{ ok: boolean; 
       'X-Upload-Content-Type': 'application/gzip',
       'X-Upload-Content-Length': String(size),
     },
-    body: JSON.stringify({ name: backup.filename, parents: [parent] }),
+    body: JSON.stringify({ name: filename, parents: [parent] }),
   });
   const session = start.headers.get('location');
   if (!start.ok || !session) {
@@ -198,7 +196,7 @@ export async function sendCopyOffsite(backupId: string): Promise<{ ok: boolean; 
   const upload = await fetch(session, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/gzip', 'Content-Length': String(size) },
-    body: Readable.toWeb(fs.createReadStream(backup.file_url)) as unknown as ReadableStream,
+    body: Readable.toWeb(fs.createReadStream(filePath)) as unknown as ReadableStream,
     duplex: 'half',
   } as RequestInit & { duplex: 'half' });
 
@@ -206,14 +204,11 @@ export async function sendCopyOffsite(backupId: string): Promise<{ ok: boolean; 
     return { ok: false, message: 'The copy did not finish uploading to Google Drive.' };
   }
   const done = (await upload.json()) as { id?: string };
-  await db('backups')
-    .where({ id: backupId })
-    .update({ offsite_at: db.fn.now(), offsite_ref: done.id ?? null, offsite_error: null });
-  return { ok: true, message: 'A copy has been kept in Google Drive.' };
+  return { ok: true, ref: done.id, message: 'A copy has been kept in Google Drive.' };
 }
 
 /** Remove a copy from Drive when it is thinned out here, so the two agree. */
-export async function removeCopyOffsite(offsiteRef: string): Promise<void> {
+export async function removeFromDrive(offsiteRef: string): Promise<void> {
   const token = await accessToken();
   if (!token) return;
   await fetch(`https://www.googleapis.com/drive/v3/files/${offsiteRef}`, {
