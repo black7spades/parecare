@@ -67,9 +67,9 @@ export async function levelReport(): Promise<LevelReport> {
     {
       level: 3,
       title: 'A restore has been proved',
-      meaning: 'The copies are known to work, because records were destroyed and brought back.',
+      meaning: 'The copies are known to work, because records were deleted and brought back.',
       reached: !!drill,
-      next: 'Run a practice emergency. It destroys and restores a practice copy, and never touches anything real.',
+      next: 'Test a restore. It deletes and puts back a practice copy, and never touches anything real.',
     },
   ];
 

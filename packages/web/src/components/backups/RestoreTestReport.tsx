@@ -5,30 +5,26 @@ import { useDataView } from '../data/useDataView';
 import type { DrillEvidence, DrillRecord, DrillTable } from '../../api/backups';
 
 /**
- * Three ways of showing that a practice emergency really happened.
+ * What a restore test did, shown three ways. Meant to be compared and reduced
+ * to one:
  *
- * "Some records were destroyed, and then they came back" is a claim, not
- * proof, and reading it does nothing for somebody who is worried. These are
- * three different answers to the same question, meant to be looked at side by
- * side and reduced to one:
- *
- *   The transcript  — what happened, in order, with the time each part took.
- *   The witnesses   — real named records, followed through gone and back.
- *   The ledger      — every kind of record counted and fingerprinted.
+ *   What happened    every step in order, with the time each one took.
+ *   Impact on data   every kind of record counted and fingerprinted.
+ *   Records checked  named records, followed through deletion and back.
  *
  * A fingerprint is a short code worked out from the contents of a record.
  * Same contents, same code. It is what turns "the right number came back"
- * into "the same things came back", and it is explained on screen every time
+ * into "the same records came back", and it is explained on screen every time
  * it appears, because nobody should need to know what a checksum is.
  */
 
-const PROTOTYPES = [
-  { key: 'transcript', label: 'The transcript' },
-  { key: 'witness', label: 'The witnesses' },
-  { key: 'ledger', label: 'The ledger' },
+const VIEWS = [
+  { key: 'steps', label: 'What happened' },
+  { key: 'data', label: 'Impact on data' },
+  { key: 'records', label: 'Records checked' },
 ] as const;
 
-type Prototype = (typeof PROTOTYPES)[number]['key'];
+type View = (typeof VIEWS)[number]['key'];
 
 function timeText(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -63,11 +59,11 @@ function tableProved(t: DrillTable): boolean {
   );
 }
 
-/** Everything one drill wrote down, as a plain text file to keep or send on. */
-function transcriptText(evidence: DrillEvidence): string {
+/** Everything one test wrote down, as a plain text file to keep or send on. */
+function reportText(evidence: DrillEvidence): string {
   const { drill, steps, tables, records } = evidence;
   const lines: string[] = [
-    'PareCare practice emergency',
+    'PareCare restore test',
     `Started ${new Date(drill.started_at).toLocaleString()}`,
     drill.finished_at ? `Finished ${new Date(drill.finished_at).toLocaleString()}` : 'Did not finish',
     `Result: ${drill.status === 'passed' ? 'Everything came back, unchanged' : 'Did not pass'}`,
@@ -78,19 +74,19 @@ function transcriptText(evidence: DrillEvidence): string {
     lines.push(`  ${timeText(s.started_at)}  ${s.title}${s.seconds == null ? '' : ` (${secondsText(s.seconds)})`}`);
     if (s.detail) lines.push(`            ${s.detail}`);
   }
-  lines.push('', 'Counted, kind by kind');
+  lines.push('', 'Impact on data');
   for (const t of tables) {
     lines.push(
-      `  ${t.kind}: ${t.rows_before} before, ${t.rows_after_destroy} after destroying, ${t.rows_restored} back` +
+      `  ${t.kind}: ${t.rows_before} before, ${t.rows_after_destroy} after deleting, ${t.rows_restored} back` +
         ` (fingerprint ${shortCode(t.fingerprint_before)} then ${shortCode(t.fingerprint_after)})`
     );
   }
   if (records.length > 0) {
-    lines.push('', 'Records followed individually');
+    lines.push('', 'Records checked');
     for (const r of records) {
       lines.push(
         `  ${r.kind}: ${r.label}${r.owner_label ? `, ${r.owner_label}` : ''}: ` +
-          `${r.present_after_destroy ? 'survived being destroyed' : 'destroyed'}, ` +
+          `${r.present_after_destroy ? 'was still there after deleting' : 'deleted'}, ` +
           `${recordProved(r) ? 'came back identical' : 'did not come back identical'}`
       );
     }
@@ -98,8 +94,8 @@ function transcriptText(evidence: DrillEvidence): string {
   return lines.join('\n');
 }
 
-function downloadTranscript(evidence: DrillEvidence): void {
-  const blob = new Blob([transcriptText(evidence)], { type: 'text/plain' });
+function downloadReport(evidence: DrillEvidence): void {
+  const blob = new Blob([reportText(evidence)], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -108,20 +104,17 @@ function downloadTranscript(evidence: DrillEvidence): void {
   URL.revokeObjectURL(url);
 }
 
-/* ------------------------------------------------------------------------ */
-/* Prototype one: the transcript                                            */
-/* ------------------------------------------------------------------------ */
+/* --- What happened -------------------------------------------------------- */
 
 /**
- * What happened, in order, with the clock running. The appeal of this one is
- * that it reads like somebody standing next to you narrating it: nothing is
- * summarised, and the destroying step is right there in the middle with its
- * own timestamp.
+ * Every step in the order it ran, with a timestamp and how long it took.
+ * Nothing is summarised, so the deletion step is visible in the middle with
+ * its own time against it.
  */
-function Transcript({ evidence }: { evidence: DrillEvidence }) {
+function Steps({ evidence }: { evidence: DrillEvidence }) {
   const { steps } = evidence;
   if (steps.length === 0) {
-    return <p className="text-sm text-muted">This practice run did not get far enough to write anything down.</p>;
+    return <p className="text-sm text-muted">This test did not get far enough to write anything down.</p>;
   }
   return (
     <div>
@@ -144,7 +137,7 @@ function Transcript({ evidence }: { evidence: DrillEvidence }) {
         ))}
       </ol>
       <div className="mt-4">
-        <Button variant="secondary" size="sm" onClick={() => downloadTranscript(evidence)}>
+        <Button variant="secondary" size="sm" onClick={() => downloadReport(evidence)}>
           Save this as a file
         </Button>
       </div>
@@ -152,19 +145,17 @@ function Transcript({ evidence }: { evidence: DrillEvidence }) {
   );
 }
 
-/* ------------------------------------------------------------------------ */
-/* Prototype two: the witnesses                                             */
-/* ------------------------------------------------------------------------ */
+/* --- Records checked ------------------------------------------------------ */
 
 /**
- * Real records, named, followed through all three moments. This is the one
- * that answers the question people are actually asking, which is not "did the
- * counts match" but "would my mother's medication list come back".
+ * Named records at all three points: found, deleted, back. Counts matching is
+ * not the question most people are asking; whether a particular medication
+ * list would come back is.
  */
-function Witnesses({ evidence }: { evidence: DrillEvidence }) {
+function Records({ evidence }: { evidence: DrillEvidence }) {
   const { records } = evidence;
   if (records.length === 0) {
-    return <p className="text-sm text-muted">There were no records to follow in this practice run.</p>;
+    return <p className="text-sm text-muted">There were no records to follow in this test.</p>;
   }
   const allProved = records.every(recordProved);
 
@@ -187,8 +178,8 @@ function Witnesses({ evidence }: { evidence: DrillEvidence }) {
   return (
     <div>
       <p className="mb-3 text-sm text-muted">
-        These are real records out of the copy. Each one was found by name, watched while everything was deleted, and
-        looked for again afterwards.
+        These are real records out of the copy. Each one was found by name, looked for again after everything was
+        deleted, and compared with how it was once it had been put back.
       </p>
       <div className="grid gap-3 md:grid-cols-3">
         <Column title="Before" caption="Found in the copy, and its contents noted.">
@@ -202,7 +193,7 @@ function Witnesses({ evidence }: { evidence: DrillEvidence }) {
           </ul>
         </Column>
 
-        <Column title="After everything was destroyed" caption="Looked for again, one by one.">
+        <Column title="After deleting" caption="Looked for again, one by one.">
           <ul className="space-y-2">
             {records.map((r) => (
               <li key={`d-${r.id}`}>
@@ -215,7 +206,7 @@ function Witnesses({ evidence }: { evidence: DrillEvidence }) {
           </ul>
         </Column>
 
-        <Column title="After it was put back" caption="Found again, and compared field by field.">
+        <Column title="After putting it back" caption="Found again, and compared field by field.">
           <ul className="space-y-2">
             {records.map((r) => (
               <li key={`a-${r.id}`}>
@@ -234,23 +225,21 @@ function Witnesses({ evidence }: { evidence: DrillEvidence }) {
       </div>
       <p className="mt-3 text-sm text-ink">
         {allProved
-          ? `All ${records.length} were really gone, and all ${records.length} came back exactly as they were.`
+          ? `All ${records.length} were deleted, and all ${records.length} came back with the same contents.`
           : 'Some of these did not come back as they were, so this copy cannot be relied on yet.'}
       </p>
     </div>
   );
 }
 
-/* ------------------------------------------------------------------------ */
-/* Prototype three: the ledger                                              */
-/* ------------------------------------------------------------------------ */
+/* --- Impact on data ------------------------------------------------------- */
 
 /**
- * Every kind of record, counted at all three moments and fingerprinted at
- * two. The appeal of this one is that it is complete: nothing is a sample,
- * and every column can be sorted, so an odd row is easy to find.
+ * Every kind of record, counted at all three points and fingerprinted at two.
+ * Complete rather than a sample, and every column sorts, so an odd row is
+ * easy to find.
  */
-function Ledger({ evidence }: { evidence: DrillEvidence }) {
+function DataImpact({ evidence }: { evidence: DrillEvidence }) {
   const rows = evidence.tables;
   const view = useDataView<DrillTable>({
     rows,
@@ -260,8 +249,8 @@ function Ledger({ evidence }: { evidence: DrillEvidence }) {
         { key: 'kind', label: 'Kind', compare: (a: DrillTable, b: DrillTable) => a.kind.localeCompare(b.kind) },
         { key: 'before', label: 'Before', defaultDir: 'desc' as const, compare: (a: DrillTable, b: DrillTable) => a.rows_before - b.rows_before },
         {
-          key: 'destroyed',
-          label: 'After destroying',
+          key: 'deleted',
+          label: 'After deleting',
           compare: (a: DrillTable, b: DrillTable) => a.rows_after_destroy - b.rows_after_destroy,
         },
         { key: 'restored', label: 'Came back', defaultDir: 'desc' as const, compare: (a: DrillTable, b: DrillTable) => a.rows_restored - b.rows_restored },
@@ -287,7 +276,7 @@ function Ledger({ evidence }: { evidence: DrillEvidence }) {
   });
 
   if (rows.length === 0) {
-    return <p className="text-sm text-muted">This practice run did not get as far as counting anything.</p>;
+    return <p className="text-sm text-muted">This test did not get as far as counting anything.</p>;
   }
 
   return (
@@ -298,7 +287,7 @@ function Ledger({ evidence }: { evidence: DrillEvidence }) {
             <tr>
               <SortableTh label="Kind of record" sortKey="kind" activeKey={view.sortKey} dir={view.sortDir} onToggle={view.toggleSort} />
               <SortableTh label="Before" sortKey="before" activeKey={view.sortKey} dir={view.sortDir} onToggle={view.toggleSort} />
-              <SortableTh label="After destroying" sortKey="destroyed" activeKey={view.sortKey} dir={view.sortDir} onToggle={view.toggleSort} />
+              <SortableTh label="After deleting" sortKey="deleted" activeKey={view.sortKey} dir={view.sortDir} onToggle={view.toggleSort} />
               <SortableTh label="Came back" sortKey="restored" activeKey={view.sortKey} dir={view.sortDir} onToggle={view.toggleSort} />
               <SortableTh
                 label="Fingerprint before"
@@ -335,7 +324,7 @@ function Ledger({ evidence }: { evidence: DrillEvidence }) {
         </table>
       </div>
       <p className="mt-2 text-xs text-muted">
-        The middle column is the one that matters: it is zero because everything really was deleted. {FINGERPRINT_NOTE}
+        The middle column is zero because everything was deleted before it was put back. {FINGERPRINT_NOTE}
       </p>
     </div>
   );
@@ -344,19 +333,19 @@ function Ledger({ evidence }: { evidence: DrillEvidence }) {
 /* ------------------------------------------------------------------------ */
 
 /**
- * The three prototypes together, with a chooser across the top.
+ * The three views together, with a chooser across the top.
  *
  * The chooser is temporary. Three ways of saying the same thing is two too
- * many, and the point of showing them at once is to pick the one that
- * actually lands and delete the others.
+ * many; showing them at once is only so one can be picked and the other two
+ * deleted.
  */
-export function DrillProof({ evidence }: { evidence: DrillEvidence }) {
-  const [shown, setShown] = useState<Prototype>('witness');
+export function RestoreTestReport({ evidence }: { evidence: DrillEvidence }) {
+  const [shown, setShown] = useState<View>('steps');
 
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold text-ink">What the practice run did</h3>
+        <h3 className="text-sm font-semibold text-ink">What the test did</h3>
         <span className="text-sm text-muted">
           {new Date(evidence.drill.started_at).toLocaleString()}
           {evidence.drill.status === 'passed' ? ' · everything came back' : ' · did not pass'}
@@ -366,7 +355,7 @@ export function DrillProof({ evidence }: { evidence: DrillEvidence }) {
       {/* A segmented view switch, the same control as cards and table
           elsewhere: it changes what is shown, not what is true. */}
       <div className="mt-3 flex w-fit items-center gap-1 rounded-md bg-surface-2 p-0.5">
-        {PROTOTYPES.map((p) => (
+        {VIEWS.map((p) => (
           <button
             key={p.key}
             type="button"
@@ -381,9 +370,9 @@ export function DrillProof({ evidence }: { evidence: DrillEvidence }) {
       </div>
 
       <div className="mt-4">
-        {shown === 'transcript' ? <Transcript evidence={evidence} /> : null}
-        {shown === 'witness' ? <Witnesses evidence={evidence} /> : null}
-        {shown === 'ledger' ? <Ledger evidence={evidence} /> : null}
+        {shown === 'steps' ? <Steps evidence={evidence} /> : null}
+        {shown === 'data' ? <DataImpact evidence={evidence} /> : null}
+        {shown === 'records' ? <Records evidence={evidence} /> : null}
       </div>
     </div>
   );

@@ -11,12 +11,11 @@ import type { Knex } from 'knex';
  * understands: a super admin can reach them, and so can an administrator.
  * Nothing else to nominate, nothing else to explain.
  *
- * What is left, then, is proving the copies work, and that has to carry its
- * own weight. Counting rows and reporting three numbers is not proof anybody
- * can feel. So a drill now writes down what it did, kind by kind of record,
- * and picks out real named records to follow all the way through being
- * destroyed and coming back. Three tables rather than one blob, because every
- * one of these is a discrete fact somebody may want to sort a column by.
+ * What is left is proving the copies work, and three numbers do not do that
+ * on their own. So a restore test now writes down what it did, kind by kind
+ * of record, and picks out real named records to follow through being deleted
+ * and coming back. Three tables rather than one blob, because every one of
+ * these is a discrete fact somebody may want to sort a column by.
  */
 export async function up(knex: Knex): Promise<void> {
   // --- The data warden, removed -------------------------------------------
@@ -31,11 +30,11 @@ export async function up(knex: Knex): Promise<void> {
     await knex.schema.alterTable('rights_templates', (t) => t.dropColumn('can_manage_backups'));
   }
 
-  // --- What a drill actually did ------------------------------------------
+  // --- What a restore test actually did -----------------------------------
 
-  // Every stage, in order, with how long it took. This is the running
-  // commentary: what was opened, what was counted, what was destroyed, what
-  // came back, and when the practice area was thrown away.
+  // Every step, in order, with how long it took: what was opened, what was
+  // counted, what was deleted, what came back, and when the practice copy was
+  // deleted.
   if (!(await knex.schema.hasTable('backup_drill_steps'))) {
     await knex.schema.createTable('backup_drill_steps', (t) => {
       t.uuid('id').primary().defaultTo(knex.raw('gen_random_uuid()'));
@@ -57,11 +56,11 @@ export async function up(knex: Knex): Promise<void> {
     });
   }
 
-  // One row per kind of record, so the ledger can be read across: how many
-  // there were, how many were left after they were destroyed, and how many
-  // came back. The fingerprints are worked out from the contents, so two
-  // identical fingerprints mean the records came back unchanged rather than
-  // merely came back in the right number.
+  // One row per kind of record, read across: how many there were, how many
+  // were left after they were deleted, and how many came back. The
+  // fingerprints are worked out from the contents, so two identical
+  // fingerprints mean the records came back unchanged rather than merely came
+  // back in the right number.
   if (!(await knex.schema.hasTable('backup_drill_tables'))) {
     await knex.schema.createTable('backup_drill_tables', (t) => {
       t.uuid('id').primary().defaultTo(knex.raw('gen_random_uuid()'));
@@ -79,9 +78,8 @@ export async function up(knex: Knex): Promise<void> {
   }
 
   // Named records followed individually. A count going back up proves
-  // arithmetic; Margaret's blood pressure note from Tuesday being gone and
-  // then being back, word for word, proves the thing people actually worry
-  // about.
+  // arithmetic. One named care note being gone and then being back, field for
+  // field, proves what people are actually asking about.
   if (!(await knex.schema.hasTable('backup_drill_records'))) {
     await knex.schema.createTable('backup_drill_records', (t) => {
       t.uuid('id').primary().defaultTo(knex.raw('gen_random_uuid()'));

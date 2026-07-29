@@ -131,37 +131,36 @@ adminBackupsRouter.get('/', async (_req, res) => {
 });
 
 /**
- * Practise the emergency. Destroys and restores a practice copy of the
- * records, on a scratch database that is always dropped, so nothing live is
- * ever at risk. This is the only thing that turns "there are copies" into
- * "the copies work".
+ * Test a restore. Deletes and puts back a practice copy of the records, on a
+ * scratch database that is always dropped, so nothing live is ever at risk.
+ * It is the only thing that turns "there are copies" into "the copies work".
  */
 adminBackupsRouter.post('/drill', async (req, res) => {
   const running = await db('backup_drills').where({ status: 'running' }).first();
   if (running) {
-    res.status(409).json({ error: 'A practice run is already going. It will appear here when it finishes.', code: 'ALREADY_RUNNING' });
+    res.status(409).json({ error: 'A test is already running. It will appear here when it finishes.', code: 'ALREADY_RUNNING' });
     return;
   }
-  await audit(req.account!.id, 'ran a backup practice run');
+  await audit(req.account!.id, 'tested a backup restore');
   const evidence = await runDrill(req.account!.id);
   res.status(201).json({
     ...evidence,
     message:
       evidence.drill.status === 'passed'
-        ? `Practice run passed. ${evidence.drill.rows_before} records were destroyed and all ${evidence.drill.rows_restored} came back, unchanged.`
-        : evidence.drill.error ?? 'The practice run did not finish.',
+        ? `Test passed. ${evidence.drill.rows_before} records were deleted and all ${evidence.drill.rows_restored} came back, unchanged.`
+        : evidence.drill.error ?? 'The test did not finish.',
   });
 });
 
 /**
- * Everything one practice run wrote down: what it did step by step, what it
- * counted kind by kind, and the named records it followed through being
- * destroyed and coming back.
+ * Everything one test wrote down: what it did step by step, what it counted
+ * kind by kind, and the named records it followed through being deleted and
+ * coming back.
  */
 adminBackupsRouter.get('/drills/:drillId', async (req, res) => {
   const evidence = await evidenceFor(req.params['drillId']!);
   if (!evidence.drill) {
-    res.status(404).json({ error: 'That practice run is no longer here.', code: 'NOT_FOUND' });
+    res.status(404).json({ error: 'That test is no longer here.', code: 'NOT_FOUND' });
     return;
   }
   res.json(evidence);

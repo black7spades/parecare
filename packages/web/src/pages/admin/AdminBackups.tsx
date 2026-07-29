@@ -7,7 +7,7 @@ import { useDataView } from '../../components/data/useDataView';
 import { api } from '../../api/client';
 import { SetupGuide } from '../../components/SetupGuide';
 import { googleSteps, dropboxSteps } from './backupSetupSteps';
-import { DrillProof } from '../../components/backups/DrillProof';
+import { RestoreTestReport } from '../../components/backups/RestoreTestReport';
 import { backupsApi, type Backup, type BackupsOverview, type Destination, type DrillEvidence } from '../../api/backups';
 
 /** How each destination is named to a person. Never the protocol. */
@@ -211,9 +211,8 @@ export function AdminBackups() {
     }
   }
 
-  // The practice emergency. Deliberately destructive, on a practice copy
-  // that never touches anything real, because a backup nobody has ever
-  // restored is a rumour.
+  // Deliberately destructive, on a practice copy that never touches anything
+  // real. A backup nobody has ever restored is only assumed to work.
   async function runPractice() {
     setBusy(true);
     setNotice(null);
@@ -440,47 +439,45 @@ export function AdminBackups() {
       </div>
 
       {/*
-        Proving it. The only way to know copies work is to destroy something
-        and bring it back, so this does exactly that, on a practice copy.
+        The only way to know copies work is to delete something and bring it
+        back, so this does exactly that, on a practice copy.
       */}
       <div className="rounded-lg border border-border bg-card p-4">
-        <h3 className="text-sm font-semibold text-ink">Practice an emergency</h3>
+        <h3 className="text-sm font-semibold text-ink">Test a restore</h3>
         <p className="mt-1 text-sm text-muted">
-          This makes a practice copy of everything, deliberately destroys every record and every document file in it,
-          and puts it all back, then checks what returned is the same as what was there. Your real records are never
-          touched at any point.
+          This makes a practice copy of everything, deletes every record and every document file in it, puts it all
+          back, and compares what returned with what was there. Your real records are never touched at any point.
         </p>
         {lastDrill ? (
           <p className="mt-2 text-sm text-muted">
             {lastDrill.status === 'passed' ? (
               <>
-                Last practice {howLongAgo(lastDrill.started_at)}: {lastDrill.rows_before} records destroyed, all{' '}
+                Last tested {howLongAgo(lastDrill.started_at)}: {lastDrill.rows_before} records deleted, all{' '}
                 {lastDrill.rows_restored} came back unchanged.
               </>
             ) : lastDrill.status === 'running' ? (
-              <>A practice run is going now.</>
+              <>A test is running now.</>
             ) : (
               <span className="text-red-600 dark:text-red-400">
-                Last practice did not pass: {lastDrill.error ?? 'it did not finish.'}
+                The last test did not pass: {lastDrill.error ?? 'it did not finish.'}
               </span>
             )}
           </p>
         ) : (
-          <p className="mt-2 text-sm text-muted">Never practised. Until you have, nobody knows the copies work.</p>
+          <p className="mt-2 text-sm text-muted">Never tested. Until it has been, nobody knows the copies work.</p>
         )}
         <div className="mt-3">
           <Button variant={data.levels.current === 2 ? 'primary' : 'secondary'} size="sm" onClick={() => void runPractice()} loading={busy}>
-            Practise now
+            Test a restore
           </Button>
         </div>
       </div>
 
       {/*
-        The proof itself. Three numbers going up, down and back up again is a
-        claim; this is the working behind it, so somebody who is worried can
-        look rather than take our word.
+        The working behind the result, so it can be read rather than taken on
+        trust. Three numbers going up, down and back up again is only a claim.
       */}
-      {evidence ? <DrillProof evidence={evidence} /> : null}
+      {evidence ? <RestoreTestReport evidence={evidence} /> : null}
 
       {/* Whatever just happened, said in a sentence, right where they acted. */}
       {notice ? (

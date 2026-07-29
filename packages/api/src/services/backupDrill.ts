@@ -8,37 +8,35 @@ import { getBackupConfig } from '../config/settings';
 import { runBackup, lastGoodBackup } from './backup';
 
 /**
- * The fire drill.
+ * The practice run.
  *
  * Every other check reads a copy back into an empty scratch database. That
- * proves the copy can be opened. It does not prove the thing anyone actually
- * cares about, which is whether records can be got back after they have been
- * destroyed, onto a database that already has the wrong things in it. That is
- * a different path through Postgres and a different set of ways to fail.
+ * proves the copy can be opened. It does not prove what anyone actually needs
+ * to know, which is whether records can be got back after they have been
+ * deleted, onto a database that already has the wrong things in it. That is a
+ * different path through Postgres and a different set of ways to fail.
  *
- * So this deliberately destroys, and then restores, and then compares. On a
- * practice database built for the purpose and dropped whatever happens, and
- * on a practice copy of the document files, never the real ones.
+ * So this deletes, then restores, then compares. On a practice database built
+ * for the purpose and dropped whatever happens, and on a practice copy of the
+ * document files, never the real ones.
  *
- * The reason it writes so much down is that "some records were destroyed, and
- * then they came back" is not something anybody can feel. Three numbers prove
- * arithmetic. What proves the thing people lie awake about is watching a
- * named medication, belonging to a named person, be there, then be gone, then
- * come back with every field identical. So the drill keeps a running
- * commentary, a count and a fingerprint for every kind of record, and a
- * handful of real records followed individually all the way through.
+ * It writes down what it did because three numbers only prove arithmetic. A
+ * named medication belonging to a named person, present, then gone, then back
+ * with every field identical, proves the thing being asked about. So the run
+ * records every step, a count and a fingerprint for every kind of record, and
+ * a handful of real records followed individually.
  *
  * A fingerprint here is a short code worked out from the contents of a
  * record. Same contents, same code; one character different anywhere and the
  * code is completely different. It is what turns "the right number came back"
- * into "the same things came back".
+ * into "the same records came back".
  */
 
 /**
- * The kinds of record the drill destroys and follows, in the order they are
- * shown. Each one knows what it is called in plain words, what a single
- * record of it is called, and who it belongs to, so a followed record can be
- * named on screen without folding two facts into one string.
+ * The kinds of record the practice run deletes and follows. Each one knows
+ * what it is called in plain words, what a single record of it is called, and
+ * who it belongs to, so a followed record can be named on screen without
+ * folding two facts into one string.
  */
 interface Kind {
   table: string;
@@ -200,7 +198,7 @@ async function tally(
  *
  * Naming a record depends on the shape of the tables, and the tables change.
  * If naming one ever stops working, that is a fault in this file and not a
- * fault in the copy, so it drops the record rather than failing the drill and
+ * fault in the copy, so it drops the record rather than failing the run and
  * telling somebody their backups are broken when they are fine.
  */
 async function pickRecord(
@@ -210,7 +208,7 @@ async function pickRecord(
   try {
     return await pickRecordUnguarded(knex, spec);
   } catch (err) {
-    console.warn(`Drill could not name a ${spec.table} record:`, (err as Error).message);
+    console.warn(`The practice run could not name a ${spec.table} record:`, (err as Error).message);
     return null;
   }
 }
@@ -251,9 +249,8 @@ async function findRecord(
 }
 
 /**
- * The running commentary. Each step is written down as it starts and closed
- * with what it found, so a drill that dies halfway still leaves a record of
- * how far it got.
+ * The step log. Each step is written down as it starts and closed with what
+ * it found, so a run that dies halfway still shows how far it got.
  */
 class StepLog {
   private position = 0;
@@ -374,13 +371,13 @@ async function perform(
 
     // 2. Build a practice database and put the copy into it.
     await db('backup_drills').where({ id: drill.id }).update({ stage: 'building a practice copy' });
-    await log.begin('Built a separate practice area');
+    await log.begin('Made a separate practice copy');
     await dropScratch();
     const create = await run('psql', ['--quiet', '--no-psqlrc', '-c', `CREATE DATABASE "${scratch}"`, adminUrl.toString()]);
     if (!create.ok) return fail('building a practice copy', 'A practice database could not be created.');
-    await log.close('Empty, separate, and thrown away at the end. Nothing from here on touches your real records.');
+    await log.close('Empty, separate, and deleted at the end. Nothing from here on touches your real records.');
 
-    await log.begin('Loaded the copy into the practice area');
+    await log.begin('Loaded the copy into it');
     const restoreFirst = await run('pg_restore', [
       '--no-owner', '--no-acl', '--dbname', scratchUrl.toString(), path.join(work, 'database.dump'),
     ]);
@@ -424,7 +421,7 @@ async function perform(
       `${countText(rowsBefore, 'record')} across ${countText(present.length, 'kind', 'kinds')} of record, plus ${countText(filesBefore.count, 'document file')}.`
     );
 
-    await log.begin('Chose real records to follow');
+    await log.begin('Picked records to check');
     const followed: { spec: Kind; id: string; label: string; owner: string | null; fingerprint: string }[] = [];
     for (const spec of present) {
       const picked = await pickRecord(scratchDb, spec);
@@ -443,12 +440,12 @@ async function perform(
     await log.close(
       followed.length === 0
         ? 'There were no records to follow.'
-        : `${followed.map((f) => f.label).join(', ')}. Each one is watched through being destroyed and coming back.`
+        : `${followed.map((f) => f.label).join(', ')}. Each one is checked after deleting and again after putting it back.`
     );
 
-    // 4. Destroy it. This is the part that makes the drill worth doing.
-    await db('backup_drills').where({ id: drill.id }).update({ stage: 'destroying the practice records' });
-    await log.begin('Destroyed everything in the practice area');
+    // 4. Delete it. Without this step the rest proves nothing.
+    await db('backup_drills').where({ id: drill.id }).update({ stage: 'deleting the practice records' });
+    await log.begin('Deleted everything in the practice copy');
     for (const spec of present) {
       await scratchDb.raw(`TRUNCATE TABLE "${spec.table}" CASCADE`);
     }
@@ -469,15 +466,13 @@ async function perform(
       .update({ rows_after_destroy: filesAfterDestroy.count });
     const leftOver = [...afterDestroy.values()].reduce((n, c) => n + c, 0) + filesAfterDestroy.count;
     if (leftOver !== 0) {
-      return fail('destroying the practice records', 'The practice records could not be cleared, so nothing was proved.');
+      return fail('deleting the practice records', 'The practice records could not be cleared, so nothing was proved.');
     }
     await db('backup_drills').where({ id: drill.id }).update({ rows_before: rowsBefore, rows_after_destroy: 0, files_before: filesBefore.count });
-    await log.close(
-      `Every record and every document file deleted. Counted again afterwards: nothing left, in any of them. This is the part that matters, and it really happened.`
-    );
+    await log.close('Every record and every document file deleted, then counted again: nothing left in any of them.');
 
     // The followed records, checked individually rather than in aggregate.
-    await log.begin('Checked the followed records were really gone');
+    await log.begin('Checked the picked records were gone');
     let stillThere = 0;
     for (const f of followed) {
       const found = await findRecord(scratchDb, f.spec.table, f.id);
@@ -487,7 +482,7 @@ async function perform(
         .update({ present_after_destroy: !!found });
     }
     if (stillThere > 0) {
-      return fail('destroying the practice records', `${stillThere} of the followed records survived being destroyed, so nothing was proved.`);
+      return fail('deleting the practice records', `${stillThere} of the picked records were still there after deleting, so nothing was proved.`);
     }
     await log.close(
       followed.length === 0 ? 'There were none to check.' : `Looked for each one by name. All ${followed.length} gone.`
@@ -504,13 +499,13 @@ async function perform(
       '--dbname', scratchUrl.toString(), path.join(work, 'database.dump'),
     ]);
     if (!restoreAgain.ok) {
-      return fail('putting everything back', 'The records could not be put back after being destroyed.');
+      return fail('putting everything back', 'The records could not be put back after being deleted.');
     }
     const untarAgain = await run('tar', ['-xzf', backup.file_url, '-C', work]);
     if (!untarAgain.ok) {
-      return fail('putting everything back', 'The document files could not be put back after being destroyed.');
+      return fail('putting everything back', 'The document files could not be put back after being deleted.');
     }
-    await log.close('From the same copy, onto the practice area that already existed, exactly as a real emergency would.');
+    await log.close('From the same copy, onto the practice copy that already existed, the same way a real restore runs.');
 
     // 6. Count what came back, and compare it with what was there.
     await log.begin('Counted and compared what came back');
@@ -538,7 +533,7 @@ async function perform(
           : `${countText(mismatched, 'kind', 'kinds')} of record did not come back the same.`)
     );
 
-    await log.begin('Compared the followed records word for word');
+    await log.begin('Compared the picked records field by field');
     let changed = 0;
     for (const f of followed) {
       const found = await findRecord(scratchDb, f.spec.table, f.id);
@@ -579,14 +574,14 @@ async function perform(
     if (scratchDb) await scratchDb.destroy().catch(() => {});
     await dropScratch().catch(() => {});
     await fs.promises.rm(work, { recursive: true, force: true }).catch(() => {});
-    // Recorded last, because "and then we cleared it all away" is part of
-    // what makes this safe to run whenever anybody wants reassurance.
-    await log.begin('Threw the practice area away').catch(() => {});
+    // Recorded last: clearing it away is part of why this is safe to run
+    // whenever somebody wants to check.
+    await log.begin('Deleted the practice copy').catch(() => {});
     await log.close('The practice database and the practice files are gone. Nothing was left behind.').catch(() => {});
   }
 }
 
-/** A drill that never got as far as having anything to write down. */
+/** A run that never got as far as having anything to write down. */
 async function bareFailure(accountId: string | null, stage: string, message: string): Promise<DrillEvidence> {
   const [row] = await db('backup_drills')
     .insert({ status: 'failed', stage, finished_at: db.fn.now(), error: message, run_by_account_id: accountId })
@@ -599,7 +594,7 @@ async function openScratch(connection: string) {
   return knex({ client: 'pg', connection });
 }
 
-/** Everything written down about one drill, ready for the screen. */
+/** Everything written down about one practice run, ready for the screen. */
 export async function evidenceFor(drillId: string): Promise<DrillEvidence> {
   const [drill, steps, tables, records] = await Promise.all([
     db('backup_drills').where({ id: drillId }).first(),
