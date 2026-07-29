@@ -94,6 +94,7 @@ export function AdminBackups() {
   const [restoring, setRestoring] = useState<Backup | null>(null);
   const [confirmText, setConfirmText] = useState('');
   const [showStorage, setShowStorage] = useState(false);
+  const [nominee, setNominee] = useState('');
   const [storage, setStorage] = useState({ bucket: '', region: '', access_key: '', secret_key: '', endpoint: '' });
 
   const load = useCallback(async () => {
@@ -196,6 +197,34 @@ export function AdminBackups() {
     setBusy(true);
     try {
       const result = await backupsApi.disconnect(provider);
+      setNotice({ kind: 'ok', text: result.message });
+      await load();
+    } catch (err) {
+      setNotice({ kind: 'bad', text: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addKeyholder() {
+    if (!nominee) return;
+    setBusy(true);
+    try {
+      const result = await backupsApi.addKeyholder(nominee);
+      setNotice({ kind: 'ok', text: result.message });
+      setNominee('');
+      await load();
+    } catch (err) {
+      setNotice({ kind: 'bad', text: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeKeyholder(id: string) {
+    setBusy(true);
+    try {
+      const result = await backupsApi.removeKeyholder(id);
       setNotice({ kind: 'ok', text: result.message });
       await load();
     } catch (err) {
@@ -325,24 +354,70 @@ export function AdminBackups() {
         </div>
       </div>
 
-      {/*
-        One person who can reach this is one person away from nobody. In a
-        care setting that is not a hypothetical, so it is said out loud
-        rather than left to be discovered at the worst moment.
-      */}
-      {onlyKeyholder ? (
-        <div className="rounded-lg border border-amber-400 bg-amber-50 p-4 dark:bg-amber-950/30">
-          <h3 className="text-sm font-semibold text-ink">Only you can get these records back</h3>
-          <p className="mt-1 text-sm text-muted">
-            If something happens to you, or you lose access to this account, nobody else here is able to restore
-            anything. Give someone else you trust the same access, under System, then Users.
-          </p>
-        </div>
-      ) : null}
-
+      {/* Whatever just happened, said in a sentence, right where they acted. */}
       {notice ? (
         <p className={`text-sm ${notice.kind === 'ok' ? 'text-ink' : 'text-red-600 dark:text-red-400'}`}>{notice.text}</p>
       ) : null}
+
+      {/*
+        One person who can reach this is one person away from nobody. In a
+        care setting that is not a hypothetical, so it is said out loud, and
+        fixed right here: sending someone to another screen to hunt for a
+        checkbox is a chore, and this is the moment they are thinking about it.
+      */}
+      <div
+        className={`rounded-lg border p-4 ${
+          onlyKeyholder ? 'border-amber-400 bg-amber-50 dark:bg-amber-950/30' : 'border-border bg-card'
+        }`}
+      >
+        <h3 className="text-sm font-semibold text-ink">
+          {onlyKeyholder ? 'Only you can get these records back' : 'Who can get these records back'}
+        </h3>
+        <p className="mt-1 text-sm text-muted">
+          {onlyKeyholder
+            ? 'If something happens to you, or you lose access to this account, nobody else here is able to restore anything.'
+            : 'These people are able to take, download and put back copies.'}
+        </p>
+
+        <ul className="mt-3 space-y-1">
+          {data.keyholders.map((k) => (
+            <li key={k.id} className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-ink">{k.display_name}</span>
+              <span className="text-muted">{k.email}</span>
+              {k.by_role ? (
+                <span className="text-xs text-muted">administrator</span>
+              ) : (
+                <Button variant="ghost-danger" size="xs" onClick={() => void removeKeyholder(k.id)} disabled={busy}>
+                  Remove
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+
+        {data.could_help.length > 0 ? (
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-ink">Give someone else you trust the same access</span>
+              <select className={SELECT_CLASS} value={nominee} onChange={(e) => setNominee(e.target.value)} disabled={busy}>
+                <option value="">Choose a person</option>
+                {data.could_help.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.display_name} ({p.email})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button variant="primary" size="sm" onClick={() => void addKeyholder()} disabled={busy || !nominee}>
+              Give them access
+            </Button>
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-muted">
+            There is nobody else here to give access to yet. Anyone invited later can be given it from this screen.
+          </p>
+        )}
+      </div>
 
       {/*
         The only thing that survives this server being lost. Two buttons for
