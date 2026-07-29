@@ -329,6 +329,46 @@ adminBackupsRouter.post('/:provider(google|dropbox)/disconnect', async (req, res
 });
 
 /**
+ * The details of the Google or Dropbox app this installation uses. Saved from
+ * the Backups screen so setting up a destination never sends someone off to
+ * another screen mid-way through a walkthrough, holding two values they have
+ * just been told to copy.
+ */
+const googleAppSchema = z.object({ client_id: z.string().min(1).max(500), client_secret: z.string().min(1).max(500) });
+const dropboxAppSchema = z.object({ app_key: z.string().min(1).max(500), app_secret: z.string().min(1).max(500) });
+
+adminBackupsRouter.post('/:provider(google|dropbox)/app', async (req, res) => {
+  if (!canNominate(req.account!.role)) {
+    res.status(403).json({ error: 'Only an administrator can change how this connects to Google or Dropbox.', code: 'FORBIDDEN' });
+    return;
+  }
+  const which = req.params['provider'] as 'google' | 'dropbox';
+  if (which === 'google') {
+    const parsed = googleAppSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Paste both the client ID and the client secret from Google.', code: 'VALIDATION_ERROR' });
+      return;
+    }
+    await updateSettings(
+      { 'oauth.google_client_id': parsed.data.client_id.trim(), 'oauth.google_client_secret': parsed.data.client_secret.trim() },
+      req.account!.id
+    );
+  } else {
+    const parsed = dropboxAppSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Paste both the app key and the app secret from Dropbox.', code: 'VALIDATION_ERROR' });
+      return;
+    }
+    await updateSettings(
+      { 'backups.dropbox_app_key': parsed.data.app_key.trim(), 'backups.dropbox_app_secret': parsed.data.app_secret.trim() },
+      req.account!.id
+    );
+  }
+  await audit(req.account!.id, `saved the ${which} app details for backups`);
+  res.json({ message: 'Saved. You can carry on with the next step.' });
+});
+
+/**
  * Storage details are typed rather than granted, so they are saved and then
  * proved before anyone relies on them. Storage that quietly rejects every
  * copy looks exactly like storage that works, until the day it is needed.

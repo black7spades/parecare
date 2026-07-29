@@ -5,6 +5,8 @@ import { Modal } from '../../components/ui/Modal';
 import { SortableTh } from '../../components/data/SortableTh';
 import { useDataView } from '../../components/data/useDataView';
 import { api } from '../../api/client';
+import { SetupGuide } from '../../components/SetupGuide';
+import { googleSteps, dropboxSteps } from './backupSetupSteps';
 import { backupsApi, type Backup, type BackupsOverview, type Destination } from '../../api/backups';
 
 /** How each destination is named to a person. Never the protocol. */
@@ -63,6 +65,31 @@ function sizeText(bytes: number | null): string {
   return `${mb.toFixed(1)} MB`;
 }
 
+/**
+ * An address someone has to paste somewhere else exactly. Selecting a long
+ * URL by hand is where transcription errors come from, so it is one press.
+ */
+function CopyableAddress({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-xs font-medium text-ink">{label}</span>
+      <code className="flex-1 break-all rounded bg-surface px-2 py-1 text-xs text-muted">{value}</code>
+      <Button
+        variant="ghost"
+        size="xs"
+        onClick={() => {
+          void navigator.clipboard?.writeText(value);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 2000);
+        }}
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </Button>
+    </div>
+  );
+}
+
 /** Where this copy exists, said plainly. */
 function whereText(b: Backup): string {
   if (b.status !== 'ok') return '';
@@ -95,6 +122,7 @@ export function AdminBackups() {
   const [confirmText, setConfirmText] = useState('');
   const [showStorage, setShowStorage] = useState(false);
   const [nominee, setNominee] = useState('');
+  const [guide, setGuide] = useState<'google' | 'dropbox' | null>(null);
   const [storage, setStorage] = useState({ bucket: '', region: '', access_key: '', secret_key: '', endpoint: '' });
 
   const load = useCallback(async () => {
@@ -231,6 +259,19 @@ export function AdminBackups() {
       setNotice({ kind: 'bad', text: (err as Error).message });
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Saving what a step collected, so the walkthrough never sends someone to
+  // another screen holding two values they were just told to copy.
+  async function saveGuideValues(values: Record<string, string>): Promise<string | null> {
+    if (!guide) return null;
+    try {
+      await backupsApi.saveApp(guide, values);
+      await load();
+      return null;
+    } catch (err) {
+      return (err as Error).message;
     }
   }
 
@@ -456,25 +497,65 @@ export function AdminBackups() {
               being lost. PareCare only ever sees the files it puts there.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button variant="primary" size="sm" onClick={() => void connect('google')} disabled={busy || !googleReady}>
-                Connect Google Drive
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => (googleReady ? void connect('google') : setGuide('google'))}
+                disabled={busy}
+              >
+                {googleReady ? 'Connect Google Drive' : 'Set up Google Drive'}
               </Button>
-              <Button variant="secondary" size="sm" onClick={() => void connect('dropbox')} disabled={busy || !dropboxReady}>
-                Connect Dropbox
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => (dropboxReady ? void connect('dropbox') : setGuide('dropbox'))}
+                disabled={busy}
+              >
+                {dropboxReady ? 'Connect Dropbox' : 'Set up Dropbox'}
               </Button>
             </div>
+            {googleReady || dropboxReady ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-muted">Something not working?</span>
+                <Button variant="ghost" size="xs" onClick={() => setGuide('google')}>
+                  Walk through the Google steps
+                </Button>
+                <Button variant="ghost" size="xs" onClick={() => setGuide('dropbox')}>
+                  Walk through the Dropbox steps
+                </Button>
+              </div>
+            ) : null}
             {!googleReady || !dropboxReady ? (
               <p className="mt-2 text-xs text-muted">
                 {!googleReady && !dropboxReady
-                  ? 'Neither has been set up for this installation yet. '
+                  ? 'Neither has been set up for this installation yet.'
                   : !googleReady
-                    ? 'Google has not been set up for this installation yet. '
-                    : 'Dropbox has not been set up for this installation yet. '}
-                Whoever sets them up will need these addresses:{' '}
-                <code className="break-all">{data.cloud.google_redirect_uri}</code> and{' '}
-                <code className="break-all">{data.cloud.dropbox_redirect_uri}</code>
+                    ? 'Google has not been set up for this installation yet.'
+                    : 'Dropbox has not been set up for this installation yet.'}{' '}
+                The addresses below are what whoever sets it up will need.
               </p>
             ) : null}
+
+            {/*
+              Always shown, not only before anything is set up. Google and
+              Dropbox both refuse with their own error page if this address is
+              not registered against the app, and that error arrives on their
+              site with no way back to here. Someone who has just been bounced
+              to a raw "redirect_uri_mismatch" needs the exact string in front
+              of them, not a screen that assumes everything went well.
+            */}
+            <div className="mt-3 space-y-2 border-t border-border pt-3">
+              <p className="text-xs text-muted">
+                If Google or Dropbox shows an error about a redirect address, it is because this address has not been
+                added to the app there yet. Copy it in exactly, with nothing after it.
+              </p>
+              <CopyableAddress label="Google" value={data.cloud.google_redirect_uri} />
+              <CopyableAddress label="Dropbox" value={data.cloud.dropbox_redirect_uri} />
+              <p className="text-xs text-muted">
+                Google also needs the Drive API turned on for that project, and permission to see the files it creates.
+              </p>
+            </div>
+
             <div className="mt-3">
               <Button variant="ghost" size="xs" onClick={() => setShowStorage((v) => !v)}>
                 {showStorage ? 'Hide other storage' : 'Use other storage instead'}
@@ -636,6 +717,28 @@ export function AdminBackups() {
         a button clicked past. A copy of how things are right now is taken
         first, so this is still not a one-way door.
       */}
+      <SetupGuide
+        open={guide === 'google'}
+        title="Setting up Google Drive"
+        steps={googleSteps(data.cloud.google_redirect_uri, googleReady)}
+        onClose={() => setGuide(null)}
+        onSave={saveGuideValues}
+        onFinish={() => void connect('google')}
+        finishLabel="Connect Google Drive"
+        busy={busy}
+      />
+
+      <SetupGuide
+        open={guide === 'dropbox'}
+        title="Setting up Dropbox"
+        steps={dropboxSteps(data.cloud.dropbox_redirect_uri, dropboxReady)}
+        onClose={() => setGuide(null)}
+        onSave={saveGuideValues}
+        onFinish={() => void connect('dropbox')}
+        finishLabel="Connect Dropbox"
+        busy={busy}
+      />
+
       <Modal open={!!restoring} onClose={() => setRestoring(null)} title="Put this copy back">
         {restoring ? (
           <div className="space-y-3">
