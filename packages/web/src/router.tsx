@@ -38,6 +38,7 @@ import { UpdatesPage } from './pages/app/UpdatesPage';
 import { DirectoryAddressesPage } from './pages/app/DirectoryAddressesPage';
 import { DirectoryPeoplePage, DirectoryPetsPage } from './pages/app/DirectoryProfilesPage';
 import { InvitePage } from './pages/InvitePage';
+import { WardenInvitePage } from './pages/WardenInvitePage';
 import { SubscriptionPage } from './pages/account/Subscription';
 import { AccountSettings } from './pages/account/Settings';
 import { NotificationSettings } from './pages/account/NotificationSettings';
@@ -87,6 +88,8 @@ export const router = createBrowserRouter([
   { path: '/register', element: <Register /> },
   { path: '/auth/callback', element: <OAuthCallback /> },
   { path: '/invite/:token', element: <InvitePage /> },
+  // Public: whoever was asked to be a data warden may have no account yet.
+  { path: '/warden/:token', element: <WardenInvitePage /> },
   // Public: the secure-link receiving end of a care plan review invitation.
   { path: '/plan-review/:token', element: <PlanReviewPage /> },
   {

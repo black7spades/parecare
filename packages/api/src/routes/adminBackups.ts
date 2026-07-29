@@ -22,7 +22,8 @@ import {
 import { updateSettings } from '../config/settings';
 import { runDrill, lastDrill } from '../services/backupDrill';
 import { levelReport } from '../services/backupLevels';
-import { sendWardenBriefEmail } from '../services/email';
+import { sendWardenBriefEmail, sendWardenInviteEmail, sendWardenCopyEmail } from '../services/email';
+import { assertCanBeWarden, createWardenInvite, wardenInviteUrl, WardenError, MAX_WARDENS } from '../services/wardens';
 
 /**
  * The Backups screen, for the super admin. Copies are taken whether or not
@@ -134,6 +135,14 @@ adminBackupsRouter.get('/', async (req, res) => {
     .select('id', 'display_name', 'email')
     .limit(200);
 
+  // People asked but not yet answered, so the screen can show the ask as
+  // in flight rather than as though nothing happened.
+  const pendingInvites = await db('warden_invites')
+    .where({ status: 'pending' })
+    .where('expires_at', '>', new Date())
+    .orderBy('created_at', 'desc')
+    .select('id', 'email', 'created_at', 'expires_at');
+
   const [levels, drill] = await Promise.all([levelReport(), lastDrill()]);
 
   res.json({
@@ -165,6 +174,8 @@ adminBackupsRouter.get('/', async (req, res) => {
       by_role: k.role === 'super_admin' || k.role === 'admin',
     })),
     could_help: couldHelp,
+    pending_wardens: pendingInvites,
+    max_wardens: MAX_WARDENS,
     last_backup_at: last?.started_at ?? null,
     backups: backups.map((b: BackupRow) => ({
       ...b,
@@ -252,6 +263,67 @@ adminBackupsRouter.post('/drill', async (req, res) => {
       drill.status === 'passed'
         ? `Practice run passed. ${drill.rows_before} records were destroyed and all ${drill.rows_restored} came back.`
         : drill.error ?? 'The practice run did not finish.',
+  });
+});
+
+/**
+ * Ask somebody to be a data warden, by email address rather than by picking
+ * from a list. The person most likely to be asked is a sibling or a friend
+ * who has never used this, and a list of existing accounts cannot offer
+ * them at all.
+ *
+ * Every refusal says what to do instead. Being told no without a reason is
+ * how somebody ends up with no warden.
+ */
+const askSchema = z.object({ email: z.string().min(3).max(255) });
+
+adminBackupsRouter.post('/wardens', async (req, res) => {
+  if (!canNominate(req.account!.role)) {
+    res.status(403).json({ error: 'Only an administrator can ask someone to be a data warden.', code: 'FORBIDDEN' });
+    return;
+  }
+  const parsed = askSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Enter their email address.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+
+  let candidate;
+  try {
+    candidate = await assertCanBeWarden(parsed.data.email, req.account!);
+  } catch (err) {
+    if (err instanceof WardenError) {
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
+    throw err;
+  }
+
+  const invite = await createWardenInvite(candidate.email, req.account!);
+  const url = wardenInviteUrl(invite.token);
+  try {
+    await sendWardenInviteEmail(candidate.email, req.account!.display_name, url);
+  } catch (err) {
+    // Nothing was granted, so the invitation is cancelled rather than left
+    // pending against an address that never heard about it.
+    await db('warden_invites').where({ id: invite.id }).update({ status: 'cancelled' });
+    const why = (err as Error).message.replace(/\.$/, '');
+    res.status(500).json({
+      error: `The invitation could not be sent: ${why}. Set up email under Settings, then try again.`,
+      code: 'EMAIL_FAILED',
+    });
+    return;
+  }
+  // A copy for the person who asked, so they know what their friend was told
+  // and can talk them through it. Never blocks the invitation itself.
+  await sendWardenCopyEmail(req.account!.email, req.account!.display_name, candidate.email, url).catch((err) =>
+    console.warn('Data warden copy email failed:', (err as Error).message)
+  );
+  await audit(req.account!.id, `asked ${candidate.email} to be a data warden`);
+  res.status(201).json({
+    message: candidate.account
+      ? `Sent. ${candidate.account.display_name} has been asked, and a copy is in your inbox.`
+      : `Sent to ${candidate.email}. They can set themselves up from the link, and a copy is in your inbox.`,
   });
 });
 

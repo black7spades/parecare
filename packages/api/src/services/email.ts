@@ -179,3 +179,120 @@ export async function sendWardenBriefEmail(
       .join(''),
   });
 }
+
+/**
+ * The invitation, for someone who may not have an account at all.
+ *
+ * One link that works whoever they are: it makes their account if they have
+ * none, signs them in if they do, and puts them on the one screen they would
+ * ever need. Nothing is asked of them beyond following it once.
+ */
+export async function sendWardenInviteEmail(
+  toEmail: string,
+  askedByName: string,
+  inviteUrl: string
+): Promise<void> {
+  const cfg = getEmailConfig();
+  if (!cfg.smtpHost) {
+    throw new Error('Email has not been set up for this installation yet, so nothing could be sent');
+  }
+
+  const lines = [
+    'Hello,',
+    '',
+    `${askedByName} has asked you to be a data warden on their PareCare, which keeps track of someone's care: their medications, appointments, conditions and documents.`,
+    '',
+    'It means one thing. If something ever happens to that record, or to them, you are able to get everything back. Copies are made automatically every day, so there is nothing for you to look after and nothing to remember.',
+    '',
+    'There is one screen. It says whether the copies are working, and it has a button to put everything back as it was on a chosen day. You do not need to understand how any of it works, and you cannot break anything by looking.',
+    '',
+    'To say yes, follow this link:',
+    '',
+    `  ${inviteUrl}`,
+    '',
+    'It will set you up if you have never used PareCare before, or simply sign you in if you have, and take you straight to that screen. It is worth doing now, while nothing is wrong, so that if it is ever needed you have already been there once on an ordinary day.',
+    '',
+    'If you would rather not, you can ignore this and nothing happens.',
+    '',
+    'Thank you for considering it.',
+  ];
+
+  const transport = getTransport();
+  await transport.sendMail({
+    from: cfg.from,
+    to: toEmail,
+    subject: `${askedByName} has asked you to look after their PareCare records`,
+    text: lines.join('\n'),
+    html: lines.map((l) => (l === '' ? '<br>' : `<p style="margin:0 0 8px">${l.trim()}</p>`)).join(''),
+  });
+}
+
+/**
+ * A copy for the person who did the asking, so they know exactly what was
+ * said and can talk their warden through it. Someone who has just asked a
+ * favour of a friend should not have to guess what that friend received.
+ */
+export async function sendWardenCopyEmail(
+  toEmail: string,
+  askerName: string,
+  wardenEmail: string,
+  inviteUrl: string
+): Promise<void> {
+  const cfg = getEmailConfig();
+  if (!cfg.smtpHost) return;
+
+  const lines = [
+    `Hello ${askerName},`,
+    '',
+    `You have asked ${wardenEmail} to be a data warden on your PareCare. This is what they were sent, so you know what they have been told.`,
+    '',
+    'They were told that copies of everything are made automatically every day, that there is nothing for them to look after, and that if something ever happens to the records or to you, they are able to get everything back from one screen.',
+    '',
+    'They were given this link, which sets up their account if they need one and takes them to that screen:',
+    '',
+    `  ${inviteUrl}`,
+    '',
+    'They have two weeks to follow it. If they get stuck, the link is the only thing they need, and you can send it to them again from the Backups screen.',
+    '',
+    'You will hear from us again when they have accepted.',
+  ];
+
+  const transport = getTransport();
+  await transport.sendMail({
+    from: cfg.from,
+    to: toEmail,
+    subject: `What ${wardenEmail} was asked`,
+    text: lines.join('\n'),
+    html: lines.map((l) => (l === '' ? '<br>' : `<p style="margin:0 0 8px">${l.trim()}</p>`)).join(''),
+  });
+}
+
+/** Telling the person who asked that their warden has actually said yes. */
+export async function sendWardenAcceptedEmail(
+  toEmail: string,
+  askerName: string,
+  wardenName: string,
+  wardenEmail: string
+): Promise<void> {
+  const cfg = getEmailConfig();
+  if (!cfg.smtpHost) return;
+
+  const lines = [
+    `Hello ${askerName},`,
+    '',
+    `${wardenName} (${wardenEmail}) has accepted, and is now a data warden on your PareCare.`,
+    '',
+    'That means if anything ever happens to your records, or to you, they are able to get everything back without needing you. It is one of the few things that genuinely cannot be arranged after the fact, so it is worth knowing it is done.',
+    '',
+    'Nothing else is needed from either of you.',
+  ];
+
+  const transport = getTransport();
+  await transport.sendMail({
+    from: cfg.from,
+    to: toEmail,
+    subject: `${wardenName} is now a data warden`,
+    text: lines.join('\n'),
+    html: lines.map((l) => (l === '' ? '<br>' : `<p style="margin:0 0 8px">${l.trim()}</p>`)).join(''),
+  });
+}

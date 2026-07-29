@@ -102,6 +102,8 @@ export interface BackupsOverview {
   };
   keyholders: Keyholder[];
   could_help: Person[];
+  pending_wardens: { id: string; email: string; created_at: string; expires_at: string }[];
+  max_wardens: number;
   last_backup_at: string | null;
   backups: Backup[];
 }
@@ -120,6 +122,7 @@ export const backupsApi = {
     api.post<{ message: string }>(`/admin/backups/${provider}/app`, values),
   disconnectStorage: () => api.post<{ message: string }>('/admin/backups/storage/disconnect'),
   addKeyholder: (accountId: string) => api.post<{ message: string }>('/admin/backups/keyholders', { account_id: accountId }),
+  askWarden: (email: string) => api.post<{ message: string }>('/admin/backups/wardens', { email }),
   removeKeyholder: (accountId: string) => api.delete<{ message: string }>(`/admin/backups/keyholders/${accountId}`),
   sendOffsite: (id: string) => api.post<{ message: string }>(`/admin/backups/${id}/send-offsite`),
   runDrill: () => api.post<{ drill: Drill; message: string }>('/admin/backups/drill'),

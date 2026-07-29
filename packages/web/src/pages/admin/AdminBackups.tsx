@@ -121,7 +121,7 @@ export function AdminBackups() {
   const [restoring, setRestoring] = useState<Backup | null>(null);
   const [confirmText, setConfirmText] = useState('');
   const [showStorage, setShowStorage] = useState(false);
-  const [nominee, setNominee] = useState('');
+  const [wardenEmail, setWardenEmail] = useState('');
   const [guide, setGuide] = useState<'google' | 'dropbox' | null>(null);
   const [drillResult, setDrillResult] = useState<Drill | null>(null);
   const [storage, setStorage] = useState({ bucket: '', region: '', access_key: '', secret_key: '', endpoint: '' });
@@ -266,13 +266,13 @@ export function AdminBackups() {
     }
   }
 
-  async function addKeyholder() {
-    if (!nominee) return;
+  async function askWarden() {
+    if (!wardenEmail.trim()) return;
     setBusy(true);
     try {
-      const result = await backupsApi.addKeyholder(nominee);
+      const result = await backupsApi.askWarden(wardenEmail.trim());
       setNotice({ kind: 'ok', text: result.message });
-      setNominee('');
+      setWardenEmail('');
       await load();
     } catch (err) {
       setNotice({ kind: 'bad', text: (err as Error).message });
@@ -574,28 +574,42 @@ export function AdminBackups() {
           ))}
         </ul>
 
-        {data.could_help.length > 0 ? (
-          <div className="mt-3 flex flex-wrap items-end gap-2">
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium text-ink">Give someone else you trust the same access</span>
-              <select className={SELECT_CLASS} value={nominee} onChange={(e) => setNominee(e.target.value)} disabled={busy}>
-                <option value="">Choose a person</option>
-                {data.could_help.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.display_name} ({p.email})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Button variant="primary" size="sm" onClick={() => void addKeyholder()} disabled={busy || !nominee}>
-              Give them access
-            </Button>
-          </div>
-        ) : (
-          <p className="mt-3 text-sm text-muted">
-            There is nobody else here to give access to yet. Anyone invited later can be given it from this screen.
-          </p>
-        )}
+        {data.pending_wardens.length > 0 ? (
+          <ul className="mt-3 space-y-1">
+            {data.pending_wardens.map((p) => (
+              <li key={p.id} className="text-sm text-muted">
+                {p.email} has been asked and has not answered yet.
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        {/*
+          Asked by email address, not chosen from a list. The person most
+          likely to be asked is a sibling or a friend who has never used
+          this, and a list of existing accounts cannot offer them at all.
+        */}
+        <div className="mt-3 flex flex-wrap items-end gap-2">
+          <label className="block flex-1 min-w-[16rem]">
+            <span className="mb-1 block text-sm font-medium text-ink">Ask someone you trust</span>
+            <Input
+              type="email"
+              placeholder="their email address"
+              value={wardenEmail}
+              onChange={(e) => setWardenEmail(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void askWarden();
+              }}
+            />
+          </label>
+          <Button variant="primary" size="sm" onClick={() => void askWarden()} disabled={busy || !wardenEmail.trim()}>
+            Send the invitation
+          </Button>
+        </div>
+        <p className="mt-2 text-xs text-muted">
+          They do not need a PareCare account. The invitation sets one up if they need it, and takes them straight to
+          this screen. Up to {data.max_wardens} people, because a copy holds everyone's records.
+        </p>
       </div>
 
       {/*
