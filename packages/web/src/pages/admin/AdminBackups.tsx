@@ -63,6 +63,31 @@ function sizeText(bytes: number | null): string {
   return `${mb.toFixed(1)} MB`;
 }
 
+/**
+ * An address someone has to paste somewhere else exactly. Selecting a long
+ * URL by hand is where transcription errors come from, so it is one press.
+ */
+function CopyableAddress({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-xs font-medium text-ink">{label}</span>
+      <code className="flex-1 break-all rounded bg-surface px-2 py-1 text-xs text-muted">{value}</code>
+      <Button
+        variant="ghost"
+        size="xs"
+        onClick={() => {
+          void navigator.clipboard?.writeText(value);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 2000);
+        }}
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </Button>
+    </div>
+  );
+}
+
 /** Where this copy exists, said plainly. */
 function whereText(b: Backup): string {
   if (b.status !== 'ok') return '';
@@ -466,15 +491,34 @@ export function AdminBackups() {
             {!googleReady || !dropboxReady ? (
               <p className="mt-2 text-xs text-muted">
                 {!googleReady && !dropboxReady
-                  ? 'Neither has been set up for this installation yet. '
+                  ? 'Neither has been set up for this installation yet.'
                   : !googleReady
-                    ? 'Google has not been set up for this installation yet. '
-                    : 'Dropbox has not been set up for this installation yet. '}
-                Whoever sets them up will need these addresses:{' '}
-                <code className="break-all">{data.cloud.google_redirect_uri}</code> and{' '}
-                <code className="break-all">{data.cloud.dropbox_redirect_uri}</code>
+                    ? 'Google has not been set up for this installation yet.'
+                    : 'Dropbox has not been set up for this installation yet.'}{' '}
+                The addresses below are what whoever sets it up will need.
               </p>
             ) : null}
+
+            {/*
+              Always shown, not only before anything is set up. Google and
+              Dropbox both refuse with their own error page if this address is
+              not registered against the app, and that error arrives on their
+              site with no way back to here. Someone who has just been bounced
+              to a raw "redirect_uri_mismatch" needs the exact string in front
+              of them, not a screen that assumes everything went well.
+            */}
+            <div className="mt-3 space-y-2 border-t border-border pt-3">
+              <p className="text-xs text-muted">
+                If Google or Dropbox shows an error about a redirect address, it is because this address has not been
+                added to the app there yet. Copy it in exactly, with nothing after it.
+              </p>
+              <CopyableAddress label="Google" value={data.cloud.google_redirect_uri} />
+              <CopyableAddress label="Dropbox" value={data.cloud.dropbox_redirect_uri} />
+              <p className="text-xs text-muted">
+                Google also needs the Drive API turned on for that project, and permission to see the files it creates.
+              </p>
+            </div>
+
             <div className="mt-3">
               <Button variant="ghost" size="xs" onClick={() => setShowStorage((v) => !v)}>
                 {showStorage ? 'Hide other storage' : 'Use other storage instead'}
