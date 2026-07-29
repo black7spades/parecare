@@ -13,6 +13,54 @@ Guidance for Claude Code sessions in this repository.
   rather than leaving gaps to be reported back. If a request is genuinely
   ambiguous, ask before building, not after.
 
+## Who we build for, and the bar
+
+Read this before designing anything. It outranks every other section here.
+
+PareCare exists to help people organise what they have been putting off,
+cannot face, or keep finding reasons to avoid. The person using it is
+usually tired, often worried, and rarely at a desk. They are not stupid and
+they are not lazy: they are carrying something heavy and this is one more
+thing. If a feature adds to that load, it has failed, however correct it is
+underneath.
+
+Assume nothing about technical knowledge, ever. Someone with thirty years
+in this industry still should not need to know what a bucket, a cron
+expression, a passphrase, an endpoint or a shell is in order to keep their
+mother's medication list safe. Terms like those are ours, not theirs, and
+they never belong on a screen.
+
+The rules that follow are how that becomes real work rather than a slogan.
+
+- **Protection is on by default.** Anything that keeps a person's data safe
+  or their care on track runs from install, with sensible defaults and no
+  setup. Configuration is for changing our choice, never for making it.
+- **A setting is a decision we failed to make.** Every option is work handed
+  to someone who has less time than we do. Earn each one, or pick a good
+  default and move on.
+- **Keep the clever part, hide it.** Sophistication belongs in the code, not
+  on the screen. Tiered retention, fuzzy name matching, scheduling logic:
+  all good, none of it named in the interface. The user picks "30 days" and
+  we do the rest.
+- **Never ask for what we can work out.** Infer from the record, act, and
+  make it easy to correct. Ask only when a wrong guess would do harm, and
+  then ask one plain question with the choices spelled out.
+- **Never punish a mistake.** Prefer undo to a confirmation dialog. Nothing
+  should be one click from unrecoverable, and no one should feel stupid for
+  having clicked it.
+- **Silence is not success.** When something fails, say so in a sentence a
+  worried person can act on, and say what happens next. Never a stack trace,
+  an error code, or nothing at all.
+- **The empty state is the most important screen.** It is where people give
+  up. It must say what this is for and offer one obvious first step.
+- **One screen, one job.** If a page needs explaining, it is doing too much.
+- **Write like a person, not a system.** "Checked and working", not
+  "integrity verification passed". See the UI copy rules below, which are
+  the enforceable form of this.
+
+When a design decision is hard, the tie-break is always: which version asks
+less of someone who is already stretched? Build that one.
+
 ## Project overview
 
 PareCare is a care coordination platform for anyone in your care: your own

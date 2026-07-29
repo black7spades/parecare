@@ -433,6 +433,12 @@ const ACCOUNT_RIGHTS = [
     label: 'Export data',
     description: 'Download CSV and JSON exports of records.',
   },
+  {
+    key: 'can_manage_backups',
+    label: 'Work with backups',
+    description:
+      'Take, download and put back copies of everything. Give this to at least one other person, so the records are not lost if one person is unavailable.',
+  },
 ] as const;
 
 type RightsState = Record<(typeof ACCOUNT_RIGHTS)[number]['key'], boolean>;
@@ -442,6 +448,7 @@ const templateRights = (t: RightsTemplate): RightsState => ({
   can_invite_members: t.can_invite_members,
   can_use_ai: t.can_use_ai,
   can_export_data: t.can_export_data,
+  can_manage_backups: t.can_manage_backups,
 });
 
 /** One line summary of a template's rights, e.g. "Use the AI assistant, Export data". */
@@ -525,6 +532,7 @@ function EditAccountModal({
     can_invite_members: true,
     can_use_ai: true,
     can_export_data: true,
+    can_manage_backups: false,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -542,6 +550,7 @@ function EditAccountModal({
         can_invite_members: account.can_invite_members,
         can_use_ai: account.can_use_ai,
         can_export_data: account.can_export_data,
+        can_manage_backups: account.can_manage_backups,
       });
       setError('');
     }
@@ -714,6 +723,7 @@ function CreateUserModal({
     can_invite_members: true,
     can_use_ai: true,
     can_export_data: true,
+    can_manage_backups: false,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -726,7 +736,7 @@ function CreateUserModal({
       setLastName('');
       setPassword('');
       setRole('user');
-      setRights({ can_create_care_profiles: false, can_invite_members: true, can_use_ai: true, can_export_data: true });
+      setRights({ can_create_care_profiles: false, can_invite_members: true, can_use_ai: true, can_export_data: true, can_manage_backups: false });
       setError('');
     }
   }, [open]);
@@ -1457,6 +1467,7 @@ function TemplateModal({
     can_invite_members: true,
     can_use_ai: true,
     can_export_data: true,
+    can_manage_backups: false,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -1468,7 +1479,7 @@ function TemplateModal({
       setRights(
         template
           ? templateRights(template)
-          : { can_create_care_profiles: false, can_invite_members: true, can_use_ai: true, can_export_data: true }
+          : { can_create_care_profiles: false, can_invite_members: true, can_use_ai: true, can_export_data: true, can_manage_backups: false }
       );
       setError('');
     }

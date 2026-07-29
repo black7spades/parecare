@@ -69,8 +69,15 @@ services:
       AI_TOKENS_FREE: ${AI_TOKENS_FREE:-0}
       AI_TOKENS_FAMILY: ${AI_TOKENS_FAMILY:-100000}
       AI_TOKENS_PROFESSIONAL: ${AI_TOKENS_PROFESSIONAL:--1}
+      BACKUPS_ENABLED: ${BACKUPS_ENABLED:-on}
+      BACKUPS_FREQUENCY: ${BACKUPS_FREQUENCY:-daily}
+      BACKUPS_KEEP_DAYS: ${BACKUPS_KEEP_DAYS:-30}
+      BACKUPS_PATH: /app/backups
     volumes:
       - uploads_data:/app/uploads
+      # Kept apart from uploads so a copy never ends up containing itself,
+      # and on its own volume so copies outlive the container.
+      - backups_data:/app/backups
     # Lets the container reach Ollama / LM Studio running on the host
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -99,3 +106,4 @@ volumes:
   postgres_data:
   redis_data:
   uploads_data:
+  backups_data:

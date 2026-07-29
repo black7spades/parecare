@@ -33,6 +33,8 @@ export interface Account {
   can_invite_members: boolean;
   can_use_ai: boolean;
   can_export_data: boolean;
+  /** Reach the Backups screen: take, check, download and put copies back. */
+  can_manage_backups: boolean;
   /** IANA zone the browser last reported, for on-their-clock calculations. */
   timezone: string | null;
   /** Per-kind notification choices; a kind is on unless switched off. */
@@ -49,6 +51,7 @@ export interface RightsTemplate {
   can_invite_members: boolean;
   can_use_ai: boolean;
   can_export_data: boolean;
+  can_manage_backups: boolean;
   created_by_account_id: string | null;
   created_at: string | Date;
   updated_at: string | Date;

@@ -139,6 +139,33 @@ export function getSchedulerConfig() {
   };
 }
 
+/**
+ * Backups run from install with no setup: on, daily, a month of history. The
+ * defaults here are the whole configuration for most installations, so a new
+ * server is protected before anyone opens the screen.
+ */
+export function getBackupConfig() {
+  return {
+    enabled: (str('backups.enabled') ?? 'on') !== 'off',
+    frequency: (str('backups.frequency') ?? 'daily') as 'hourly' | 'daily' | 'weekly' | 'monthly',
+    keepDays: numOr('backups.keep_days', 30),
+    path: str('backups.path') ?? '/app/backups',
+    destination: (str('backups.destination') ?? 'none') as 'none' | 'google' | 'dropbox' | 's3',
+    googleRefreshToken: str('backups.google_refresh_token'),
+    googleAccount: str('backups.google_account'),
+    googleFolderId: str('backups.google_folder_id'),
+    dropboxRefreshToken: str('backups.dropbox_refresh_token'),
+    dropboxAccount: str('backups.dropbox_account'),
+    dropboxAppKey: str('backups.dropbox_app_key'),
+    dropboxAppSecret: str('backups.dropbox_app_secret'),
+    s3Bucket: str('backups.s3_bucket'),
+    s3Region: str('backups.s3_region') ?? 'us-east-1',
+    s3AccessKey: str('backups.s3_access_key'),
+    s3SecretKey: str('backups.s3_secret_key'),
+    s3Endpoint: str('backups.s3_endpoint'),
+  };
+}
+
 /** How many months of medication administrations stay in the live record. */
 export function getMarRetentionMonths(): number {
   return numOr('mar.retention_months', 12);
