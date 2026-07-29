@@ -46,6 +46,10 @@ export interface Keyholder {
   email: string;
   /** Has it because of their role, so it cannot be taken away here. */
   by_role: boolean;
+  /** Sent what being a data warden means. */
+  warden_briefed_at: string | null;
+  /** Has actually opened this screen themselves. */
+  backups_seen_at: string | null;
 }
 
 export interface Person {
@@ -54,7 +58,38 @@ export interface Person {
   email: string;
 }
 
+export interface BackupLevel {
+  level: number;
+  title: string;
+  meaning: string;
+  reached: boolean;
+  next?: string;
+}
+
+export interface LevelReport {
+  current: number;
+  total: number;
+  levels: BackupLevel[];
+  headline: string;
+}
+
+export interface Drill {
+  id: string;
+  started_at: string;
+  finished_at: string | null;
+  status: 'running' | 'passed' | 'failed';
+  stage: string | null;
+  rows_before: number | null;
+  rows_after_destroy: number | null;
+  rows_restored: number | null;
+  files_before: number | null;
+  files_restored: number | null;
+  error: string | null;
+}
+
 export interface BackupsOverview {
+  levels: LevelReport;
+  last_drill: Drill | null;
   status: { state: BackupState; message: string };
   settings: { enabled: boolean; frequency: 'hourly' | 'daily' | 'weekly' | 'monthly'; keep_days: number };
   space: { room_for_more: number; used_by_copies: number };
@@ -87,4 +122,6 @@ export const backupsApi = {
   addKeyholder: (accountId: string) => api.post<{ message: string }>('/admin/backups/keyholders', { account_id: accountId }),
   removeKeyholder: (accountId: string) => api.delete<{ message: string }>(`/admin/backups/keyholders/${accountId}`),
   sendOffsite: (id: string) => api.post<{ message: string }>(`/admin/backups/${id}/send-offsite`),
+  runDrill: () => api.post<{ drill: Drill; message: string }>('/admin/backups/drill'),
+  briefWarden: (accountId: string) => api.post<{ message: string }>(`/admin/backups/keyholders/${accountId}/brief`),
 };
