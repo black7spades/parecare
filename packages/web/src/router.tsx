@@ -2,6 +2,8 @@ import { Navigate, createBrowserRouter } from 'react-router-dom';
 import { useAuthStore } from './stores/auth';
 import { Shell } from './components/layout/Shell';
 import { Login } from './pages/auth/Login';
+import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage';
+import { ResetPasswordPage } from './pages/auth/ResetPasswordPage';
 import { Register } from './pages/auth/Register';
 import { OAuthCallback } from './pages/auth/OAuthCallback';
 import { Dashboard } from './pages/app/Dashboard';
@@ -86,6 +88,9 @@ function SuperAdminGuard({ children }: { children: React.ReactNode }) {
 export const router = createBrowserRouter([
   { path: '/login', element: <Login /> },
   { path: '/register', element: <Register /> },
+  // Public: somebody who cannot get in has no session to prove anything with.
+  { path: '/forgot-password', element: <ForgotPasswordPage /> },
+  { path: '/reset-password/:token', element: <ResetPasswordPage /> },
   { path: '/auth/callback', element: <OAuthCallback /> },
   { path: '/invite/:token', element: <InvitePage /> },
   // Public: whoever was asked to be a data warden may have no account yet.

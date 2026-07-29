@@ -47,7 +47,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
   try {
-    const payload = jwt.verify(token, env.JWT_SECRET) as { accountId: string; purpose?: string };
+    const payload = jwt.verify(token, env.JWT_SECRET) as { accountId: string; purpose?: string; iat?: number };
     // Special-purpose tokens (MFA challenge, OAuth state) are not sessions
     if (payload.purpose) {
       res.status(401).json({ error: 'Invalid or expired token', code: 'UNAUTHORIZED' });
@@ -62,6 +62,14 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     // immediately, not just at the next sign-in.
     if (account.disabled_at) {
       res.status(403).json({ error: 'This account has been disabled. Contact your administrator.', code: 'ACCOUNT_DISABLED' });
+      return;
+    }
+    // A password reset ends everything issued before it. Otherwise somebody
+    // who reset because they were worried about who else was signed in would
+    // have changed nothing for that person. Seconds, because that is the
+    // resolution a JWT issued-at has.
+    if (account.sessions_valid_from && payload.iat && payload.iat * 1000 < new Date(account.sessions_valid_from).getTime() - 1000) {
+      res.status(401).json({ error: 'You were signed out when the password changed. Sign in again.', code: 'SESSION_ENDED' });
       return;
     }
     req.account = account;
