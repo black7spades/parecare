@@ -1,8 +1,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  addDays, addMonths, addWeeks, eachDayOfInterval, endOfDay, endOfMonth, endOfWeek,
+import { addDays, addMonths, addWeeks, eachDayOfInterval, endOfDay, endOfMonth, endOfWeek,
   format, isSameDay, startOfDay, startOfMonth, startOfWeek, subMonths,
 } from 'date-fns';
 import { api } from '../../../api/client';
@@ -13,7 +12,7 @@ import { Modal } from '../../../components/ui/Modal';
 import { MED_STATUSES, medStatusDescription, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
 import { coverMedDay } from '../../../lib/marCoverage';
 import { C64_PALETTE, contrastText } from '../../../components/ui/Avatar';
-import { AdministerModal } from './MedicationsPage';
+import { AdministerModal } from './medications/AdministerModal';
 
 const SELECT = 'rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
