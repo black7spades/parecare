@@ -20,6 +20,20 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.11.1',
+    date: '2026-07-30',
+    summary: 'Each person’s overview is now arranged separately, and Pare stops rewriting a summary every time a card is opened.',
+    groups: [
+      {
+        heading: 'Fixed',
+        items: [
+          'Folding cards away or moving them around on someone’s overview used to change the overview for everybody in your care at once, and two people signing in on the same computer overwrote each other. Each person’s overview is now remembered separately, for each carer. Arrangements made before this start again from the standard order once.',
+          'Pare’s summary on a card no longer rewrites itself every time the card is folded away and opened again.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.11.0',
     date: '2026-07-30',
     summary:

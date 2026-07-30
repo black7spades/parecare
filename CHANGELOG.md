@@ -5,6 +5,19 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.11.1] - 2026-07-30
+
+### Fixed
+
+- **The arrangement of a person's overview is now kept for that person alone.**
+  Folding cards away or moving them around used to change the overview for
+  everybody in your care at once, and two people signing in on the same computer
+  overwrote each other's arrangement. Each person's overview is now remembered
+  separately, for each carer. Existing arrangements start again from the
+  standard order once.
+- Pare's summary on a card no longer rewrites itself every time the card is
+  folded away and opened again.
+
 ## [0.11.0] - 2026-07-30
 
 ### Added
