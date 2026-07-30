@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -14,6 +14,7 @@ import { CurrentHealthSection } from './CurrentHealthSection';
 import { CareLogSection } from './CareLogSection';
 import { CardAiSummary } from './CardAiSummary';
 import { useProfile } from './ProfileLayout';
+import { useAuthStore } from '../../../stores/auth';
 import {
   conditionCategoryLabel,
   conditionStatusLabel,
@@ -48,9 +49,19 @@ const CARD_LABELS: Record<CardKey, string> = {
   log: 'Care log',
 };
 
-function loadCardOrder(): CardKey[] {
+/**
+ * How this browser remembers the arrangement of somebody's overview.
+ *
+ * Scoped to the person signed in and the person they are looking at. Without
+ * that, arranging one mother's overview rearranged everybody else's, and two
+ * people sharing a machine quietly overwrote each other's work.
+ */
+const orderKeyFor = (accountId: string, profileId: string) => `parecare-overview-order:${accountId}:${profileId}`;
+const collapsedKeyFor = (accountId: string, profileId: string) => `parecare-overview-collapsed:${accountId}:${profileId}`;
+
+function loadCardOrder(storageKey: string): CardKey[] {
   try {
-    const raw = localStorage.getItem('overview-card-order');
+    const raw = localStorage.getItem(storageKey);
     if (raw) {
       const parsed = JSON.parse(raw) as string[];
       const valid = parsed.filter((k): k is CardKey => (CARD_KEYS as readonly string[]).includes(k));
@@ -61,9 +72,9 @@ function loadCardOrder(): CardKey[] {
   return [...CARD_KEYS];
 }
 
-function loadCollapsed(): Set<CardKey> {
+function loadCollapsed(storageKey: string): Set<CardKey> {
   try {
-    const raw = localStorage.getItem('overview-collapsed');
+    const raw = localStorage.getItem(storageKey);
     if (raw) return new Set(JSON.parse(raw) as CardKey[]);
   } catch { /* ignore */ }
   return new Set();
@@ -73,10 +84,20 @@ export function OverviewPage() {
   const { profile, isOwner, canEdit, access } = useProfile();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const accountId = useAuthStore((s) => s.account?.id) ?? 'anon';
+  const orderKey = orderKeyFor(accountId, profile.id);
+  const collapsedKey = collapsedKeyFor(accountId, profile.id);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [editView, setEditView] = useState(false);
-  const [cardOrder, setCardOrder] = useState<CardKey[]>(loadCardOrder);
-  const [collapsed, setCollapsed] = useState<Set<CardKey>>(loadCollapsed);
+  const [cardOrder, setCardOrder] = useState<CardKey[]>(() => loadCardOrder(orderKey));
+  const [collapsed, setCollapsed] = useState<Set<CardKey>>(() => loadCollapsed(collapsedKey));
+
+  // Moving from one person to another keeps this component mounted, so the
+  // arrangement has to be re-read or the previous person's stays on screen.
+  useEffect(() => {
+    setCardOrder(loadCardOrder(orderKey));
+    setCollapsed(loadCollapsed(collapsedKey));
+  }, [orderKey, collapsedKey]);
 
   const { data: circleData } = useQuery({
     queryKey: ['circle', profile.id],
@@ -159,20 +180,20 @@ export function OverviewPage() {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
-      localStorage.setItem('overview-collapsed', JSON.stringify([...next]));
+      localStorage.setItem(collapsedKey, JSON.stringify([...next]));
       return next;
     });
-  }, []);
+  }, [collapsedKey]);
 
   // The header control folds or unfolds every card at once.
   const allCollapsed = CARD_KEYS.every((k) => collapsed.has(k));
   const toggleAllCollapsed = useCallback(() => {
     setCollapsed((prev) => {
       const next: Set<CardKey> = prev.size >= CARD_KEYS.length ? new Set() : new Set(CARD_KEYS);
-      localStorage.setItem('overview-collapsed', JSON.stringify([...next]));
+      localStorage.setItem(collapsedKey, JSON.stringify([...next]));
       return next;
     });
-  }, []);
+  }, [collapsedKey]);
 
   const moveCard = useCallback((key: CardKey, dir: -1 | 1) => {
     setCardOrder((prev) => {
@@ -181,10 +202,10 @@ export function OverviewPage() {
       if (target < 0 || target >= prev.length) return prev;
       const next = [...prev];
       [next[idx], next[target]] = [next[target], next[idx]];
-      localStorage.setItem('overview-card-order', JSON.stringify(next));
+      localStorage.setItem(orderKey, JSON.stringify(next));
       return next;
     });
-  }, []);
+  }, [orderKey]);
 
   const isPet = profile.kind === 'pet';
   const careName = profile.preferred_name ?? profile.full_name;

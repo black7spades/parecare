@@ -14,6 +14,13 @@ export interface OverviewCardSummary {
 }
 
 /**
+ * Cards whose first-load summary has already been asked for, as
+ * "profileId:cardKey". Module level on purpose: it has to survive a card
+ * being collapsed, which unmounts it.
+ */
+const alreadyAsked = new Set<string>();
+
+/**
  * The stored Pare summary shown at the top of an overview card. Written
  * once by the assistant and kept, never regenerated on page load; carers
  * with edit access get icon controls to regenerate, edit and save it.
@@ -34,7 +41,6 @@ export function CardAiSummary({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
-  const autoTried = useRef(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['overview-summaries', profileId],
@@ -84,12 +90,19 @@ export function CardAiSummary({
 
   // First load only: if nothing is stored yet, ask Pare once. The result
   // is persisted, so later visits read the stored text instead.
+  //
+  // The record of having asked has to outlive this component. Collapsing a
+  // card unmounts it, so a guard held in a ref reset every time somebody
+  // folded the card away and opened it again, and each of those cost a real
+  // AI call and a write. Remembered per card and per person for as long as
+  // the app is open instead.
   useEffect(() => {
-    if (!autoGenerate || !canEdit || isLoading || summary || autoTried.current || generateMutation.isPending) return;
-    autoTried.current = true;
+    const asked = `${profileId}:${cardKey}`;
+    if (!autoGenerate || !canEdit || isLoading || summary || alreadyAsked.has(asked) || generateMutation.isPending) return;
+    alreadyAsked.add(asked);
     silentAttempt.current = true;
     generateMutation.mutate();
-  }, [autoGenerate, canEdit, isLoading, summary, generateMutation]);
+  }, [autoGenerate, canEdit, isLoading, summary, generateMutation, profileId, cardKey]);
 
   if (isLoading) return null;
   if (!summary && !canEdit) return null;

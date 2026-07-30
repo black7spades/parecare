@@ -177,6 +177,14 @@ parentheses in headings and no "lets you" or "you can".
 A feature that was added and then removed before it ever shipped in a version
 is not news. Leave it out entirely rather than recording both.
 
+**Fetch the default branch before writing any of it.** These three files are
+the most likely thing in the repository to collide: every change touches the
+same first twenty lines of the same three files, and another branch may have
+already taken the version number. Run `git fetch origin main` and read the
+current top of `CHANGELOG.md` first, then write the next version up from
+whatever is actually there. On a long-lived branch, merge the default branch
+in before writing rather than after.
+
 ## Commands
 
 Run inside the package directory (`packages/api` or `packages/web`):
