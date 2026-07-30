@@ -5,6 +5,20 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.12.0] - 2026-07-30
+
+### Changed
+
+- **The app downloads less before it will open.** Opening PareCare used to pull
+  down every screen in it, including all the administration screens most people
+  never see. It now fetches the screen being opened and keeps the rest until
+  they are asked for, which cuts what has to arrive first by about a third.
+  This is most noticeable on a phone and on a slow connection.
+- The parts that rarely change are now kept by the browser between releases,
+  so an update downloads only what actually changed.
+- While a screen is still arriving, the navigation and the headings stay on
+  screen and only the part still coming says so.
+
 ## [0.11.1] - 2026-07-30
 
 ### Fixed

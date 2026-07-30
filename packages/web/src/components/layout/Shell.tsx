@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation, useMatch } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore, type AccountRole } from '../../stores/auth';
@@ -17,6 +17,7 @@ import { NavSortControl, type SortOption } from './NavSortControl';
 import { SortableNavGroup, type NavItemDef } from './SortableNavGroup';
 import { navHeadingClass, navLinkClass } from './navStyles';
 import { VersionBadge } from './VersionBadge';
+import { RouteFallback } from './RouteFallback';
 import { ProfileSwitcher } from './ProfileSwitcher';
 import { AssetIcon, CheckIcon, ChartIcon, MapPinIcon, PawIcon, SignOutIcon, StethoscopeIcon, StoreIcon, UsersIcon } from '../ui/icons';
 
@@ -657,7 +658,9 @@ export function Shell() {
 
         <main className="flex-1 min-w-0 overflow-auto bg-surface">
           <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-            <Outlet />
+            <Suspense fallback={<RouteFallback />}>
+              <Outlet />
+            </Suspense>
           </div>
         </main>
       </div>

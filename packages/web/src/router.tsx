@@ -1,3 +1,4 @@
+import { lazy } from 'react';
 import { Navigate, createBrowserRouter } from 'react-router-dom';
 import { useAuthStore } from './stores/auth';
 import { Shell } from './components/layout/Shell';
@@ -9,26 +10,19 @@ import { OAuthCallback } from './pages/auth/OAuthCallback';
 import { Dashboard } from './pages/app/Dashboard';
 import { NewCareProfile } from './pages/app/NewCareProfile';
 import { ProfileLayout } from './pages/app/profile/ProfileLayout';
-import { OverviewPage } from './pages/app/profile/OverviewPage';
 import { JourneyPage } from './pages/app/profile/JourneyPage';
 import { CirclePage } from './pages/app/profile/CirclePage';
-import { PlanPage } from './pages/app/profile/PlanPage';
-import { MedicationsPage } from './pages/app/profile/MedicationsPage';
 import { TasksPage } from './pages/app/profile/TasksPage';
 import { CalendarPage } from './pages/app/profile/CalendarPage';
 import { MessagesPage } from './pages/app/profile/MessagesPage';
 import { AchievementsPage, MemoryBookPage } from './pages/app/profile/MemoryBookPage';
-import { ConditionsPage } from './pages/app/profile/ConditionsPage';
 import { AllergiesPage } from './pages/app/profile/AllergiesPage';
 import { CareNeedsPage } from './pages/app/profile/CareNeedsPage';
 import { PlanReviewPage } from './pages/PlanReviewPage';
 import { AppointmentsPage } from './pages/app/profile/AppointmentsPage';
-import { MarPage } from './pages/app/profile/MarPage';
 import { EmergencySheetPage } from './pages/app/profile/EmergencySheetPage';
-import { DocumentsPage } from './pages/app/profile/DocumentsPage';
 import { QuestionsPage } from './pages/app/profile/QuestionsPage';
 import { ProvidersPage } from './pages/app/profile/ProvidersPage';
-import { NeurotypePage } from './pages/app/profile/NeurotypePage';
 import { TreatmentsPage } from './pages/app/profile/TreatmentsPage';
 import { SubstanceUsePage } from './pages/app/profile/SubstanceUsePage';
 import { ActivityPage } from './pages/app/profile/ActivityPage';
@@ -44,15 +38,34 @@ import { SubscriptionPage } from './pages/account/Subscription';
 import { AccountSettings } from './pages/account/Settings';
 import { NotificationSettings } from './pages/account/NotificationSettings';
 import { Profile } from './pages/account/Profile';
-import { AdminUsers } from './pages/admin/AdminUsers';
-import { AdminJourneys } from './pages/admin/AdminJourneys';
-import { AdminChats } from './pages/admin/AdminChats';
-import { AdminSettings } from './pages/admin/AdminSettings';
-import { AdminDatabase } from './pages/admin/AdminDatabase';
-import { AdminBackups } from './pages/admin/AdminBackups';
-import { ReportsPage } from './pages/admin/ReportsPage';
-import { ReportGeneratorPage } from './pages/app/ReportGeneratorPage';
 import { SystemLayout } from './pages/admin/SystemLayout';
+
+/**
+ * Pages fetched only when somebody actually opens them.
+ *
+ * Everything under System, which most carers never see at all, and the
+ * handful of profile screens heavy enough to be worth their own download.
+ * The chrome, the sign-in screen and the Homeboard stay in the first
+ * download, because those are what a person waits for.
+ *
+ * Each page is a named export, so each needs re-shaping into the default
+ * export that lazy loading expects.
+ */
+const AdminUsers = lazy(() => import('./pages/admin/AdminUsers').then((m) => ({ default: m.AdminUsers })));
+const AdminJourneys = lazy(() => import('./pages/admin/AdminJourneys').then((m) => ({ default: m.AdminJourneys })));
+const AdminChats = lazy(() => import('./pages/admin/AdminChats').then((m) => ({ default: m.AdminChats })));
+const AdminSettings = lazy(() => import('./pages/admin/AdminSettings').then((m) => ({ default: m.AdminSettings })));
+const AdminDatabase = lazy(() => import('./pages/admin/AdminDatabase').then((m) => ({ default: m.AdminDatabase })));
+const AdminBackups = lazy(() => import('./pages/admin/AdminBackups').then((m) => ({ default: m.AdminBackups })));
+const ReportsPage = lazy(() => import('./pages/admin/ReportsPage').then((m) => ({ default: m.ReportsPage })));
+const ReportGeneratorPage = lazy(() => import('./pages/app/ReportGeneratorPage').then((m) => ({ default: m.ReportGeneratorPage })));
+const OverviewPage = lazy(() => import('./pages/app/profile/OverviewPage').then((m) => ({ default: m.OverviewPage })));
+const PlanPage = lazy(() => import('./pages/app/profile/PlanPage').then((m) => ({ default: m.PlanPage })));
+const MedicationsPage = lazy(() => import('./pages/app/profile/MedicationsPage').then((m) => ({ default: m.MedicationsPage })));
+const MarPage = lazy(() => import('./pages/app/profile/MarPage').then((m) => ({ default: m.MarPage })));
+const ConditionsPage = lazy(() => import('./pages/app/profile/ConditionsPage').then((m) => ({ default: m.ConditionsPage })));
+const DocumentsPage = lazy(() => import('./pages/app/profile/DocumentsPage').then((m) => ({ default: m.DocumentsPage })));
+const NeurotypePage = lazy(() => import('./pages/app/profile/NeurotypePage').then((m) => ({ default: m.NeurotypePage })));
 
 function NotFound() {
   return (

@@ -25,6 +25,20 @@ export default defineConfig({
     __APP_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
   },
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        // The libraries the app is built on change far less often than the app
+        // does, so they are downloaded once and then kept, instead of being
+        // fetched again with every release.
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          query: ['@tanstack/react-query'],
+          dates: ['date-fns'],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {
