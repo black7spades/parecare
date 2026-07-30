@@ -29,6 +29,9 @@ export function EditProfileModal({
   const [suffix, setSuffix] = useState('');
   const [preferredName, setPreferredName] = useState('');
   const [dob, setDob] = useState('');
+  // Recorded when someone dies. Besides being part of their record, this is
+  // what hands the secrets vault to a power of attorney holder.
+  const [diedOn, setDiedOn] = useState('');
   const [pronouns, setPronouns] = useState('');
   const [notes, setNotes] = useState('');
   const [species, setSpecies] = useState('');
@@ -66,6 +69,7 @@ export function EditProfileModal({
     setSuffix(profile.suffix ?? '');
     setPreferredName(profile.preferred_name ?? '');
     setDob(profile.date_of_birth ? profile.date_of_birth.slice(0, 10) : '');
+    setDiedOn(profile.died_on ? profile.died_on.slice(0, 10) : '');
     setPronouns(profile.pronouns ?? '');
     setNotes(profile.notes ?? '');
     setSpecies(profile.species ?? '');
@@ -112,6 +116,7 @@ export function EditProfileModal({
             last_name: lastName.trim() || null,
             preferred_name: preferredName.trim() || null,
             date_of_birth: dob || null,
+            died_on: diedOn || null,
             pronouns: pronouns.trim() || null,
             species: species || null,
             breed: breed.trim() || null,
@@ -128,6 +133,7 @@ export function EditProfileModal({
             suffix: suffix.trim() || null,
             preferred_name: preferredName.trim() || null,
             date_of_birth: dob || null,
+            died_on: diedOn || null,
             pronouns: pronouns.trim() || null,
           };
       return api.patch(`/care-profiles/${profile.id}`, { ...identity, ...contactBody, ...residenceBody });
@@ -240,6 +246,13 @@ export function EditProfileModal({
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <Input label="Date of birth" type="date" value={dob} onChange={(e) => setDob(e.target.value)} />
+              <Input
+                label="Date of death"
+                type="date"
+                value={diedOn}
+                onChange={(e) => setDiedOn(e.target.value)}
+                hint="Left blank unless they have died. Recording it gives a power of attorney in the care circle access to the secrets kept for them."
+              />
               <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
             </div>
             <Input label="Microchip number" value={microchip} onChange={(e) => setMicrochip(e.target.value)} />
@@ -292,6 +305,13 @@ export function EditProfileModal({
             <div className="grid gap-4 sm:grid-cols-2">
               <Input label="Preferred name" value={preferredName} onChange={(e) => setPreferredName(e.target.value)} />
               <Input label="Date of birth" type="date" value={dob} onChange={(e) => setDob(e.target.value)} />
+              <Input
+                label="Date of death"
+                type="date"
+                value={diedOn}
+                onChange={(e) => setDiedOn(e.target.value)}
+                hint="Left blank unless they have died. Recording it gives a power of attorney in the care circle access to the secrets kept for them."
+              />
             </div>
             <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
           </>

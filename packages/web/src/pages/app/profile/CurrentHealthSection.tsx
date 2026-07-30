@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
@@ -12,6 +12,7 @@ import {
   type MedicalCondition,
 } from '../../../lib/care';
 import { SymptomsSection } from './ConditionSymptoms';
+import { ConditionTracking } from './ConditionTracking';
 
 /** The passing-health kinds offered when recording from this card. */
 const CURRENT_HEALTH_CATEGORIES = CONDITION_CATEGORIES.filter((c) =>
@@ -60,6 +61,13 @@ export function CurrentHealthSection({
   careName: string;
 }) {
   const [adding, setAdding] = useState(false);
+  // Which condition has its tracking thread open. Collapsed by default so the
+  // card stays a glance, and opens into the full history on demand.
+  const [openTracking, setOpenTracking] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ['conditions', profileId] });
+  };
   const { data } = useQuery({
     queryKey: ['conditions', profileId],
     queryFn: () => api.get<{ conditions: MedicalCondition[] }>(`/care-profiles/${profileId}/conditions`),
@@ -135,6 +143,35 @@ export function CurrentHealthSection({
           <div className="mt-3">
             <SymptomsSection profileId={profileId} conditionId={c.id} canEdit={canEdit} showIntro={false} />
           </div>
+
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => setOpenTracking(openTracking === c.id ? null : c.id)}
+            >
+              {openTracking === c.id ? 'Hide tracking' : 'Track this'}
+            </Button>
+            <span className="text-xs text-muted">
+              {[
+                `${c.log_entries?.length ?? 0} logged`,
+                (c.appointments?.length ?? 0) > 0
+                  ? `${c.appointments!.length} appointment${c.appointments!.length === 1 ? '' : 's'}`
+                  : null,
+                (c.documents?.length ?? 0) > 0
+                  ? `${c.documents!.length} document${c.documents!.length === 1 ? '' : 's'}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(', ')}
+            </span>
+          </div>
+
+          {openTracking === c.id ? (
+            <div className="mt-3 space-y-3">
+              <ConditionTracking profileId={profileId} condition={c} canEdit={canEdit} onChanged={refresh} />
+            </div>
+          ) : null}
         </div>
       ))}
     </div>

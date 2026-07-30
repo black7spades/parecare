@@ -28,6 +28,8 @@ interface DirectoryAddress {
   address_postcode: string | null;
   address_country: string | null;
   formatted: string | null;
+  wifi_network_name: string | null;
+  wifi_password: string | null;
   linked_profiles: LinkedProfile[] | null;
 }
 
@@ -35,6 +37,7 @@ const SORTS: DataSort<DirectoryAddress>[] = [
   { key: 'label', label: 'Label', compare: (a, b) => (a.label ?? '').localeCompare(b.label ?? '') },
   { key: 'address', label: 'Address', compare: (a, b) => (a.formatted ?? '').localeCompare(b.formatted ?? '') },
   { key: 'suburb', label: 'Suburb', compare: (a, b) => (a.address_suburb ?? '').localeCompare(b.address_suburb ?? '') },
+  { key: 'wifi', label: 'Wi-Fi network', compare: (a, b) => (a.wifi_network_name ?? '').localeCompare(b.wifi_network_name ?? '') },
   { key: 'profiles', label: 'Linked profiles', compare: (a, b) => (b.linked_profiles?.length ?? 0) - (a.linked_profiles?.length ?? 0) },
 ];
 
@@ -84,7 +87,7 @@ export function DirectoryAddressesPage() {
             resource="addresses"
             canImport={canEdit}
             onImported={invalidate}
-            templateHeaders={['Label', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country']}
+            templateHeaders={['Label', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country', 'Wi-Fi network name', 'Wi-Fi password']}
             templateSample={['Home', '1 Main St', '', 'Morayfield', 'QLD', '4506', 'Australia']}
           />
           {canEdit ? <Button onClick={() => { setEditing(null); setEditorOpen(true); }}>Add address</Button> : null}
@@ -148,6 +151,7 @@ export function DirectoryAddressesPage() {
                 <SortableTh label="Label" sortKey="label" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Address" sortKey="address" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Suburb" sortKey="suburb" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Wi-Fi network" sortKey="wifi" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Linked to" sortKey="profiles" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 {canEdit ? <th className="px-3 py-2 w-36" /> : null}
               </tr>
@@ -164,6 +168,9 @@ export function DirectoryAddressesPage() {
                   <td className="px-3 py-2 text-ink font-medium">{a.label || <span className="text-muted font-normal">-</span>}</td>
                   <td className="px-3 py-2 text-muted">{a.formatted || '-'}</td>
                   <td className="px-3 py-2 text-muted">{a.address_suburb || '-'}</td>
+                  {/* The password is deliberately not a column; it is read in
+                      the editor, where showing it is a deliberate act. */}
+                  <td className="px-3 py-2 text-muted">{a.wifi_network_name || '-'}</td>
                   <td className="px-3 py-2">
                     {a.linked_profiles && a.linked_profiles.length > 0 ? (
                       <div className="flex flex-wrap gap-1">
@@ -237,17 +244,28 @@ function AddressEditor({
 }) {
   const [label, setLabel] = useState('');
   const [value, setValue] = useState<AddressValue>(emptyAddress);
+  const [wifiName, setWifiName] = useState('');
+  const [wifiPassword, setWifiPassword] = useState('');
+  const [showWifiPassword, setShowWifiPassword] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     setLabel(address?.label ?? '');
     setValue(address ? addressFrom(address) : emptyAddress);
+    setWifiName(address?.wifi_network_name ?? '');
+    setWifiPassword(address?.wifi_password ?? '');
+    setShowWifiPassword(false);
     setError('');
   }, [address, open]);
 
   const mutation = useMutation({
     mutationFn: () => {
-      const body = { label: label.trim() || null, ...addressPayload(value) };
+      const body = {
+        label: label.trim() || null,
+        ...addressPayload(value),
+        wifi_network_name: wifiName.trim() || null,
+        wifi_password: wifiPassword.trim() || null,
+      };
       return address ? api.patch(`/directory/addresses/${address.id}`, body) : api.post('/directory/addresses', body);
     },
     onSuccess: onSaved,
@@ -261,6 +279,40 @@ function AddressEditor({
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (anyPart) mutation.mutate(); }}>
         <Input label="Label" value={label} onChange={(e) => setLabel(e.target.value)} hint="Optional, e.g. Mum's house" />
         <AddressFields value={value} onChange={setValue} />
+
+        <div className="pt-3 border-t border-border space-y-3">
+          <div>
+            <h3 className="text-sm font-medium text-ink">Wi-Fi at this address</h3>
+            <p className="text-xs text-muted mt-0.5">
+              So anyone arriving to help can get online without hunting for the router.
+            </p>
+          </div>
+          <Input
+            label="Network name"
+            value={wifiName}
+            onChange={(e) => setWifiName(e.target.value)}
+            hint="The name the Wi-Fi shows up as in the list on a phone or laptop"
+          />
+          <div>
+            <Input
+              label="Wi-Fi password"
+              type={showWifiPassword ? 'text' : 'password'}
+              value={wifiPassword}
+              onChange={(e) => setWifiPassword(e.target.value)}
+              hint="Stored encrypted, and visible only to people who already have access to this address"
+            />
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              className="mt-1"
+              onClick={() => setShowWifiPassword((v) => !v)}
+            >
+              {showWifiPassword ? 'Hide password' : 'Show password'}
+            </Button>
+          </div>
+        </div>
+
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>

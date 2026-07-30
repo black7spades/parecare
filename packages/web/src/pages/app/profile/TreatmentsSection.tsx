@@ -399,6 +399,7 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved }: {
   });
   const conditions = conditionData?.conditions ?? [];
 
+
   const applyTemplate = (templateName: string) => {
     const tpl = TREATMENT_TEMPLATES.find((t) => t.name === templateName);
     if (!tpl) return;
@@ -498,6 +499,7 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved }: {
           </div>
           <Input label="How often" value={frequency} onChange={(e) => setFrequency(e.target.value)} placeholder="e.g. Every night" />
         </div>
+
 
         <div className="flex flex-wrap gap-4">
           <label className="inline-flex items-center gap-1.5 text-sm text-ink">
