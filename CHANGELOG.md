@@ -5,6 +5,15 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.12.1] - 2026-07-30
+
+### Fixed
+
+- **The contact details card no longer sits empty with nothing under it.** When
+  no phone number, email address or address has been recorded for someone, the
+  card now says what it is for and offers one button to fill it in, rather than
+  showing a heading over blank space.
+
 ## [0.12.0] - 2026-07-30
 
 ### Changed
