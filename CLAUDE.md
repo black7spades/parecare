@@ -157,6 +157,26 @@ never wait to be asked for it.
   without it (e.g. "you can add a cost" becomes "add a cost"). This applies to
   all copy, release notes and changelog entries.
 
+## Releases and What's new
+
+**Every user-visible change updates the release notes in the same change.**
+Not afterwards, not when asked. Three files move together:
+
+- `CHANGELOG.md` in the repo root, newest version at the top, with
+  `### Added`, `### Changed`, `### Fixed` as needed.
+- `packages/web/src/lib/releaseNotes.ts`, which is what people actually read
+  on the What's new screen. Same content, grouped under plain headings.
+- `packages/web/package.json` version, which is what the sidebar badge shows.
+  Semantic versioning: a feature is a minor bump, a fix is a patch.
+
+Write both for the person using PareCare, never for a developer: say what is
+now possible and what changed for them, never the mechanism, the table name
+or the endpoint. The UI copy rules above apply in full, including no
+parentheses in headings and no "lets you" or "you can".
+
+A feature that was added and then removed before it ever shipped in a version
+is not news. Leave it out entirely rather than recording both.
+
 ## Commands
 
 Run inside the package directory (`packages/api` or `packages/web`):

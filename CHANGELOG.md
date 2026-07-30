@@ -5,6 +5,54 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.10.0] - 2026-07-30
+
+### Added
+
+- **Copies of everything are made from the day you install.** Nothing to set up
+  and nothing to remember: a copy of every record and every uploaded document is
+  taken automatically. Change how often they are taken and how long they are kept
+  under Backups, or leave it alone and it looks after itself.
+- **Keep a copy off this server.** Connect Google Drive or Dropbox and every copy
+  is kept there as well as here, so the records survive the server being lost.
+  Anyone who already has their own storage may use that instead. PareCare only
+  ever sees the files it puts there.
+- **A walkthrough for connecting Google Drive and Dropbox**, one step at a time,
+  with the address they need to be given shown ready to copy, so setting one up
+  never means holding two values and hunting for another screen.
+- **Put a copy back.** Choose a copy and restore everything as it was on that
+  day. A copy of how things are right now is taken first, so restoring the wrong
+  one is itself undoable.
+- **Test a restore.** This makes a practice copy of everything, deletes every
+  record and every document file in it, puts it all back, and compares what
+  returned with what was there. Real records are never touched at any point. The
+  result names real records out of the copy and shows each one found, then gone,
+  then back with every field identical, and the full report saves to a file.
+- **Three levels showing how protected the records are**, worked out from what
+  has actually happened rather than from anything ticked: copies are being made,
+  a copy lives somewhere else, and a restore has been proved.
+- **Forgotten your password.** A link on the sign-in screen sends a way back in
+  by email. It works once, lasts an hour, and choosing a new password signs out
+  everything else signed in as you, on every device.
+- **Pare does more of the work.** Ask for an appointment and it goes on the
+  calendar as an appointment rather than a note. Pare also records a medication
+  as given straight into the medication record, closes a task, records a cost,
+  and records a reading such as a blood pressure or a blood sugar.
+
+### Changed
+
+- Backups are reached by an administrator as well as a super admin, so one
+  person being away is never the difference between having the records and
+  losing them.
+- The Backups screen says plainly when copies exist but have never left this
+  server, rather than calling that protected.
+- Copies stop before they fill the server, and say so, instead of taking the
+  machine down with them.
+
+### Fixed
+
+- The app no longer becomes unreachable after the server is updated.
+
 ## [0.9.0] - 2026-07-23
 
 ### Added

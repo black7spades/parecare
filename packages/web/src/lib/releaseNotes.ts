@@ -20,6 +20,50 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.10.0',
+    date: '2026-07-30',
+    summary:
+      'Copies of everything from the day you install, kept off this server if you want, and a way to prove they work. Plus a way back in when a password is forgotten.',
+    groups: [
+      {
+        heading: 'Copies of everything, without setting anything up',
+        items: [
+          'A copy of every record and every uploaded document is now taken automatically, from the day you install. Nothing to set up and nothing to remember. Change how often they are taken and how long they are kept under Backups, or leave it alone and it looks after itself.',
+          'Connect Google Drive or Dropbox and every copy is kept there as well as here, so the records survive this server being lost. Anyone who already has their own storage may use that instead. PareCare only ever sees the files it puts there.',
+          'Connecting Google Drive or Dropbox is now a walkthrough, one step at a time, with the address they need to be given shown ready to copy.',
+          'Choose any copy and put everything back as it was on that day. A copy of how things are right now is taken first, so restoring the wrong one is itself undoable.',
+          'The screen says plainly when copies exist but have never left this server, rather than calling that protected. Copies also stop before they fill the server, and say so.',
+        ],
+      },
+      {
+        heading: 'Knowing the copies actually work',
+        items: [
+          'Test a restore makes a practice copy of everything, deletes every record and every document file in it, puts it all back, and compares what returned with what was there. Your real records are never touched at any point.',
+          'The result names real records out of the copy and shows each one found, then gone, then back with every field identical, so it is something to read rather than something to take on trust. The full report saves to a file.',
+          'Three levels show how protected the records are, worked out from what has actually happened rather than anything ticked: copies are being made, a copy lives somewhere else, and a restore has been proved.',
+          'Backups are reached by an administrator as well as a super admin, so one person being away is never the difference between having the records and losing them.',
+        ],
+      },
+      {
+        heading: 'A way back in',
+        items: [
+          'Forgotten your password on the sign-in screen sends a way back in by email. The link works once and lasts an hour, and choosing a new password signs out everything else signed in as you, on every device.',
+        ],
+      },
+      {
+        heading: 'Pare does more of the work',
+        items: [
+          'Ask Pare for an appointment and it goes on the calendar as an appointment rather than a note.',
+          'Pare also records a medication as given straight into the medication record, closes a task, records a cost, and records a reading such as a blood pressure or a blood sugar.',
+        ],
+      },
+      {
+        heading: 'Fixed',
+        items: ['The app no longer becomes unreachable after the server is updated.'],
+      },
+    ],
+  },
+  {
     version: '0.9.0',
     date: '2026-07-23',
     summary: 'A people switcher in the top bar, a consistent icon for every action across the app, and an icon on every section in a person’s record.',
