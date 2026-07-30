@@ -223,7 +223,7 @@ export function ConditionTracking({
         {appointments.length === 0 ? (
           <p className="text-xs text-muted">
             None booked for this yet.{' '}
-            <Link to="../appointments" className="text-primary hover:underline">Make an appointment</Link>{' '}
+            <Link to={`/app/${profileId}/appointments`} className="text-primary hover:underline">Make an appointment</Link>{' '}
             and choose this condition to tie it here.
           </p>
         ) : (
@@ -275,7 +275,7 @@ export function ConditionTracking({
         {treatments.length === 0 ? (
           <p className="text-xs text-muted">
             None recorded for this yet.{' '}
-            <Link to="../treatments" className="text-primary hover:underline">Add a treatment</Link>{' '}
+            <Link to={`/app/${profileId}/treatments`} className="text-primary hover:underline">Add a treatment</Link>{' '}
             and choose this condition to tie it here.
           </p>
         ) : (
