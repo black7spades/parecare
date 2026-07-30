@@ -7,7 +7,8 @@ import { useDataView } from '../../components/data/useDataView';
 import { api } from '../../api/client';
 import { SetupGuide } from '../../components/SetupGuide';
 import { googleSteps, dropboxSteps } from './backupSetupSteps';
-import { backupsApi, type Backup, type BackupsOverview, type Destination, type Drill } from '../../api/backups';
+import { RestoreTestReport } from '../../components/backups/RestoreTestReport';
+import { backupsApi, type Backup, type BackupsOverview, type Destination, type DrillEvidence } from '../../api/backups';
 
 /** How each destination is named to a person. Never the protocol. */
 const DESTINATION_LABELS: Record<Destination, string> = {
@@ -121,9 +122,8 @@ export function AdminBackups() {
   const [restoring, setRestoring] = useState<Backup | null>(null);
   const [confirmText, setConfirmText] = useState('');
   const [showStorage, setShowStorage] = useState(false);
-  const [wardenEmail, setWardenEmail] = useState('');
   const [guide, setGuide] = useState<'google' | 'dropbox' | null>(null);
-  const [drillResult, setDrillResult] = useState<Drill | null>(null);
+  const [drillResult, setDrillResult] = useState<DrillEvidence | null>(null);
   const [storage, setStorage] = useState({ bucket: '', region: '', access_key: '', secret_key: '', endpoint: '' });
 
   const load = useCallback(async () => {
@@ -211,29 +211,15 @@ export function AdminBackups() {
     }
   }
 
-  // The practice emergency. Deliberately destructive, on a practice copy
-  // that never touches anything real, because a backup nobody has ever
-  // restored is a rumour.
+  // Deliberately destructive, on a practice copy that never touches anything
+  // real. A backup nobody has ever restored is only assumed to work.
   async function runPractice() {
     setBusy(true);
     setNotice(null);
     try {
       const result = await backupsApi.runDrill();
-      setDrillResult(result.drill);
+      setDrillResult(result);
       setNotice({ kind: result.drill.status === 'passed' ? 'ok' : 'bad', text: result.message });
-      await load();
-    } catch (err) {
-      setNotice({ kind: 'bad', text: (err as Error).message });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function briefWarden(id: string) {
-    setBusy(true);
-    try {
-      const result = await backupsApi.briefWarden(id);
-      setNotice({ kind: 'ok', text: result.message });
       await load();
     } catch (err) {
       setNotice({ kind: 'bad', text: (err as Error).message });
@@ -257,34 +243,6 @@ export function AdminBackups() {
     setBusy(true);
     try {
       const result = await backupsApi.disconnect(provider);
-      setNotice({ kind: 'ok', text: result.message });
-      await load();
-    } catch (err) {
-      setNotice({ kind: 'bad', text: (err as Error).message });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function askWarden() {
-    if (!wardenEmail.trim()) return;
-    setBusy(true);
-    try {
-      const result = await backupsApi.askWarden(wardenEmail.trim());
-      setNotice({ kind: 'ok', text: result.message });
-      setWardenEmail('');
-      await load();
-    } catch (err) {
-      setNotice({ kind: 'bad', text: (err as Error).message });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function removeKeyholder(id: string) {
-    setBusy(true);
-    try {
-      const result = await backupsApi.removeKeyholder(id);
       setNotice({ kind: 'ok', text: result.message });
       await load();
     } catch (err) {
@@ -395,28 +353,30 @@ export function AdminBackups() {
             : data.status.state === 'none'
               ? 'No copy yet'
               : 'Your data needs attention';
-  const onlyKeyholder = data.keyholders.length < 2;
   const googleReady = data.cloud.destinations.find((d) => d.id === 'google')?.available ?? false;
   const dropboxReady = data.cloud.destinations.find((d) => d.id === 'dropbox')?.available ?? false;
   const activeAccount = data.cloud.destinations.find((d) => d.id === data.cloud.active)?.account ?? null;
   const restoreDate = restoring ? new Date(restoring.started_at).toISOString().slice(0, 10) : '';
+  // Whatever just ran wins over whatever was there when the screen loaded.
+  const evidence = drillResult ?? data.last_drill;
+  const lastDrill = evidence?.drill ?? null;
 
   return (
     <div className="space-y-6">
       {/*
         The ladder. Every level is worked out from what has actually happened,
         never from a box someone ticked, so it cannot be reached by intending
-        to. The two nobody ever does, proving a restore and having a second
-        person, are levels three and five on purpose: putting them at the top
-        of the climb is the only honest way found to make the boring half feel
-        like progress rather than nagging.
+        to. The one nobody ever does, proving a restore really works, is the
+        last on purpose: putting it at the top of the climb is the only honest
+        way found to make the boring half feel like progress rather than
+        nagging.
       */}
       <div className="rounded-lg border border-border bg-card p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-base font-semibold text-ink">
             Level {data.levels.current} of {data.levels.total}
           </h2>
-          <span className="text-sm text-muted">{data.levels.current === 5 ? 'Everything in place' : 'Keep going'}</span>
+          <span className="text-sm text-muted">{data.levels.current === data.levels.total ? 'Everything in place' : 'Keep going'}</span>
         </div>
         <p className="mt-1 text-sm text-muted">{data.levels.headline}</p>
 
@@ -479,138 +439,51 @@ export function AdminBackups() {
       </div>
 
       {/*
-        Proving it. The only way to know copies work is to destroy something
-        and bring it back, so this does exactly that, on a practice copy.
+        The only way to know copies work is to delete something and bring it
+        back, so this does exactly that, on a practice copy.
       */}
       <div className="rounded-lg border border-border bg-card p-4">
-        <h3 className="text-sm font-semibold text-ink">Practice an emergency</h3>
+        <h3 className="text-sm font-semibold text-ink">Test a restore</h3>
         <p className="mt-1 text-sm text-muted">
-          This makes a practice copy of everything, deliberately destroys it, and puts it back, then counts what
-          returned. Your real records are never touched at any point.
+          This makes a practice copy of everything, deletes every record and every document file in it, puts it all
+          back, and compares what returned with what was there. Your real records are never touched at any point.
         </p>
-        {data.last_drill ? (
+        {lastDrill ? (
           <p className="mt-2 text-sm text-muted">
-            {data.last_drill.status === 'passed' ? (
+            {lastDrill.status === 'passed' ? (
               <>
-                Last practice {howLongAgo(data.last_drill.started_at)}: {data.last_drill.rows_before} records destroyed,
-                all {data.last_drill.rows_restored} came back.
+                Last tested {howLongAgo(lastDrill.started_at)}: {lastDrill.rows_before} records deleted, all{' '}
+                {lastDrill.rows_restored} came back unchanged.
               </>
-            ) : data.last_drill.status === 'running' ? (
-              <>A practice run is going now.</>
+            ) : lastDrill.status === 'running' ? (
+              <>A test is running now.</>
             ) : (
               <span className="text-red-600 dark:text-red-400">
-                Last practice did not pass: {data.last_drill.error ?? 'it did not finish.'}
+                The last test did not pass: {lastDrill.error ?? 'it did not finish.'}
               </span>
             )}
           </p>
         ) : (
-          <p className="mt-2 text-sm text-muted">Never practised. Until you have, nobody knows the copies work.</p>
+          <p className="mt-2 text-sm text-muted">Never tested. Until it has been, nobody knows the copies work.</p>
         )}
         <div className="mt-3">
           <Button variant={data.levels.current === 2 ? 'primary' : 'secondary'} size="sm" onClick={() => void runPractice()} loading={busy}>
-            Practise now
+            Test a restore
           </Button>
         </div>
-        {drillResult && drillResult.status === 'passed' ? (
-          <p className="mt-2 text-xs text-muted">
-            Records went from {drillResult.rows_before} to {drillResult.rows_after_destroy} to{' '}
-            {drillResult.rows_restored}. The middle number is the point: they really were gone.
-          </p>
-        ) : null}
       </div>
+
+      {/*
+        The working behind the result, so it can be read rather than taken on
+        trust. Three numbers going up, down and back up again is only a claim.
+        Named records going missing and coming back is not.
+      */}
+      {evidence ? <RestoreTestReport evidence={evidence} /> : null}
 
       {/* Whatever just happened, said in a sentence, right where they acted. */}
       {notice ? (
         <p className={`text-sm ${notice.kind === 'ok' ? 'text-ink' : 'text-red-600 dark:text-red-400'}`}>{notice.text}</p>
       ) : null}
-
-      {/*
-        One person who can reach this is one person away from nobody. In a
-        care setting that is not a hypothetical, so it is said out loud, and
-        fixed right here: sending someone to another screen to hunt for a
-        checkbox is a chore, and this is the moment they are thinking about it.
-      */}
-      <div
-        className={`rounded-lg border p-4 ${
-          onlyKeyholder ? 'border-amber-400 bg-amber-50 dark:bg-amber-950/30' : 'border-border bg-card'
-        }`}
-      >
-        <h3 className="text-sm font-semibold text-ink">
-          {onlyKeyholder ? 'Only you can get these records back' : 'Who can get these records back'}
-        </h3>
-        <p className="mt-1 text-sm text-muted">
-          {onlyKeyholder
-            ? 'If something happens to you, or you lose access to this account, nobody else here is able to restore anything.'
-            : 'These people are able to take, download and put back copies.'}
-        </p>
-
-        <ul className="mt-3 space-y-1">
-          {data.keyholders.map((k) => (
-            <li key={k.id} className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="text-ink">{k.display_name}</span>
-              <span className="text-muted">{k.email}</span>
-              {k.by_role ? (
-                <span className="text-xs text-muted">administrator</span>
-              ) : (
-                <>
-                  <span className="text-xs text-muted">
-                    {k.backups_seen_at
-                      ? 'has been here'
-                      : k.warden_briefed_at
-                        ? 'asked, not been here yet'
-                        : 'not told yet'}
-                  </span>
-                  {!k.backups_seen_at ? (
-                    <Button variant="secondary" size="xs" onClick={() => void briefWarden(k.id)} disabled={busy}>
-                      {k.warden_briefed_at ? 'Send again' : 'Send instructions'}
-                    </Button>
-                  ) : null}
-                  <Button variant="ghost-danger" size="xs" onClick={() => void removeKeyholder(k.id)} disabled={busy}>
-                    Remove
-                  </Button>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
-
-        {data.pending_wardens.length > 0 ? (
-          <ul className="mt-3 space-y-1">
-            {data.pending_wardens.map((p) => (
-              <li key={p.id} className="text-sm text-muted">
-                {p.email} has been asked and has not answered yet.
-              </li>
-            ))}
-          </ul>
-        ) : null}
-
-        {/*
-          Asked by email address, not chosen from a list. The person most
-          likely to be asked is a sibling or a friend who has never used
-          this, and a list of existing accounts cannot offer them at all.
-        */}
-        <div className="mt-3 flex flex-wrap items-end gap-2">
-          <label className="block flex-1 min-w-[16rem]">
-            <span className="mb-1 block text-sm font-medium text-ink">Ask someone you trust</span>
-            <Input
-              type="email"
-              placeholder="their email address"
-              value={wardenEmail}
-              onChange={(e) => setWardenEmail(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void askWarden();
-              }}
-            />
-          </label>
-          <Button variant="primary" size="sm" onClick={() => void askWarden()} disabled={busy || !wardenEmail.trim()}>
-            Send the invitation
-          </Button>
-        </div>
-        <p className="mt-2 text-xs text-muted">
-          They do not need a PareCare account. The invitation sets one up if they need it, and takes them straight to
-          this screen. Up to {data.max_wardens} people, because a copy holds everyone's records.
-        </p>
-      </div>
 
       {/*
         The only thing that survives this server being lost. Two buttons for

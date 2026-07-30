@@ -40,24 +40,6 @@ export interface StorageDetails {
   endpoint?: string;
 }
 
-export interface Keyholder {
-  id: string;
-  display_name: string;
-  email: string;
-  /** Has it because of their role, so it cannot be taken away here. */
-  by_role: boolean;
-  /** Sent what being a data warden means. */
-  warden_briefed_at: string | null;
-  /** Has actually opened this screen themselves. */
-  backups_seen_at: string | null;
-}
-
-export interface Person {
-  id: string;
-  display_name: string;
-  email: string;
-}
-
 export interface BackupLevel {
   level: number;
   title: string;
@@ -87,9 +69,52 @@ export interface Drill {
   error: string | null;
 }
 
+/** One stage of a practice run, with how long it took and what it found. */
+export interface DrillStep {
+  id: string;
+  position: number;
+  started_at: string;
+  finished_at: string | null;
+  seconds: string | number | null;
+  title: string;
+  detail: string | null;
+  outcome: 'done' | 'failed';
+}
+
+/** One kind of record, counted and fingerprinted at all three points. */
+export interface DrillTable {
+  id: string;
+  table_name: string;
+  kind: string;
+  rows_before: number;
+  rows_after_destroy: number;
+  rows_restored: number;
+  fingerprint_before: string | null;
+  fingerprint_after: string | null;
+}
+
+/** One real, named record followed all the way through. */
+export interface DrillRecord {
+  id: string;
+  table_name: string;
+  kind: string;
+  label: string;
+  owner_label: string | null;
+  fingerprint_before: string | null;
+  present_after_destroy: boolean;
+  fingerprint_after: string | null;
+}
+
+export interface DrillEvidence {
+  drill: Drill;
+  steps: DrillStep[];
+  tables: DrillTable[];
+  records: DrillRecord[];
+}
+
 export interface BackupsOverview {
   levels: LevelReport;
-  last_drill: Drill | null;
+  last_drill: DrillEvidence | null;
   status: { state: BackupState; message: string };
   settings: { enabled: boolean; frequency: 'hourly' | 'daily' | 'weekly' | 'monthly'; keep_days: number };
   space: { room_for_more: number; used_by_copies: number };
@@ -100,10 +125,6 @@ export interface BackupsOverview {
     google_redirect_uri: string;
     dropbox_redirect_uri: string;
   };
-  keyholders: Keyholder[];
-  could_help: Person[];
-  pending_wardens: { id: string; email: string; created_at: string; expires_at: string }[];
-  max_wardens: number;
   last_backup_at: string | null;
   backups: Backup[];
 }
@@ -121,10 +142,7 @@ export const backupsApi = {
   saveApp: (provider: 'google' | 'dropbox', values: Record<string, string>) =>
     api.post<{ message: string }>(`/admin/backups/${provider}/app`, values),
   disconnectStorage: () => api.post<{ message: string }>('/admin/backups/storage/disconnect'),
-  addKeyholder: (accountId: string) => api.post<{ message: string }>('/admin/backups/keyholders', { account_id: accountId }),
-  askWarden: (email: string) => api.post<{ message: string }>('/admin/backups/wardens', { email }),
-  removeKeyholder: (accountId: string) => api.delete<{ message: string }>(`/admin/backups/keyholders/${accountId}`),
   sendOffsite: (id: string) => api.post<{ message: string }>(`/admin/backups/${id}/send-offsite`),
-  runDrill: () => api.post<{ drill: Drill; message: string }>('/admin/backups/drill'),
-  briefWarden: (accountId: string) => api.post<{ message: string }>(`/admin/backups/keyholders/${accountId}/brief`),
+  runDrill: () => api.post<DrillEvidence & { message: string }>('/admin/backups/drill'),
+  drill: (id: string) => api.get<DrillEvidence>(`/admin/backups/drills/${id}`),
 };
