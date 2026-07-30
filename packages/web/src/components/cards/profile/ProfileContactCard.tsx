@@ -4,7 +4,10 @@ import { api } from '../../../api/client';
 import { residenceTypeLabel, roomAreaTypeLabel, type CareProfile } from '../../../lib/care';
 import { keys } from '../../../lib/queryKeys';
 import { EmailLink, PhoneLink } from './links';
-import { CardShell, CardTrouble, CardWaiting } from '../CardShell';
+import { useState } from 'react';
+import { Button } from '../../ui/Button';
+import { EditProfileModal } from '../../../pages/app/profile/EditProfileModal';
+import { CardEmpty, CardShell, CardTrouble, CardWaiting } from '../CardShell';
 import type { CardProps } from '../types';
 
 /**
@@ -16,7 +19,8 @@ import type { CardProps } from '../types';
  * card that reaches up into the page for its data is a card that cannot be
  * moved somewhere else later.
  */
-export function ProfileContactCard({ profileId }: CardProps) {
+export function ProfileContactCard({ profileId, canEdit, careName }: CardProps) {
+  const [editing, setEditing] = useState(false);
   const { data, isPending, isError } = useQuery({
     queryKey: keys.profile(profileId),
     queryFn: () => api.get<{ profile: CareProfile }>(`/care-profiles/${profileId}`),
@@ -26,6 +30,21 @@ export function ProfileContactCard({ profileId }: CardProps) {
   if (isError) return <CardShell><CardTrouble what="Contact details" /></CardShell>;
 
   const profile = data.profile;
+
+  // A heading over nothing is where somebody gives up, so an empty card says
+  // what it is for and offers the one thing to do about it.
+  const nothingYet = (
+    <CardEmpty
+      says={`Nothing here yet. This is where a phone number, an email address and where ${careName} lives are kept, so anybody helping knows how to get in touch.`}
+    >
+      {canEdit ? (
+        <Button variant="primary" size="sm" onClick={() => setEditing(true)}>
+          Add contact details
+        </Button>
+      ) : null}
+    </CardEmpty>
+  );
+
   return (
     <CardShell>
       {profile.kind === 'pet' ? (
@@ -37,11 +56,12 @@ export function ProfileContactCard({ profileId }: CardProps) {
             microchip={profile.microchip_number}
             owner={profile.owner_profile ?? null}
           />
-          <ProfileContact profile={profile} />
+          <ProfileContact profile={profile} whenEmpty={nothingYet} />
         </div>
       ) : (
-        <ProfileContact profile={profile} />
+        <ProfileContact profile={profile} whenEmpty={nothingYet} />
       )}
+      <EditProfileModal profile={profile} open={editing} onClose={() => setEditing(false)} />
     </CardShell>
   );
 }
@@ -95,7 +115,7 @@ function residenceLines(profile: CareProfile): { label: string; value: React.Rea
   return rows;
 }
 
-function ProfileContact({ profile }: { profile: CareProfile }) {
+function ProfileContact({ profile, whenEmpty }: { profile: CareProfile; whenEmpty?: React.ReactNode }) {
   // The phone's kind becomes the row label, so it informs without taking
   // up a row of its own.
   const phoneLabel =
@@ -131,7 +151,7 @@ function ProfileContact({ profile }: { profile: CareProfile }) {
     if (profile.contact_phone) rows.push({ label: phoneLabel, value: <PhoneLink phone={profile.contact_phone} /> });
     if (profile.contact_email) rows.push({ label: 'Email', value: <EmailLink email={profile.contact_email} /> });
   }
-  if (rows.length === 0) return null;
+  if (rows.length === 0) return <>{whenEmpty ?? null}</>;
   return (
     <dl className="grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-2">
       {rows.map((r) => (

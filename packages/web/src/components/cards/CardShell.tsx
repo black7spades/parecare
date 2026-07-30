@@ -109,3 +109,20 @@ export function CardWaiting() {
 export function CardTrouble({ what }: { what: string }) {
   return <p className="text-sm text-red-600 dark:text-red-400">{what} could not be loaded just now.</p>;
 }
+
+/**
+ * What a card shows when it is genuinely empty and staying on screen anyway.
+ *
+ * A heading over nothing is where somebody decides this was not worth the
+ * effort, so an empty card has to do two things: say what it is for, and
+ * offer the one obvious thing to do about it. The action is optional, since
+ * somebody who cannot edit should not be shown a button they cannot press.
+ */
+export function CardEmpty({ says, children }: { says: string; children?: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-sm text-muted">{says}</p>
+      {children ? <div className="mt-3">{children}</div> : null}
+    </div>
+  );
+}

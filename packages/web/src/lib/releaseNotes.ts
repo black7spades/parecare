@@ -20,6 +20,19 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.12.1',
+    date: '2026-07-30',
+    summary: 'The contact details card now says what it is for when nothing has been recorded yet.',
+    groups: [
+      {
+        heading: 'Fixed',
+        items: [
+          'When no phone number, email address or address has been recorded for someone, their contact details card used to show a heading with blank space under it. It now says what the card is for and offers one button to fill it in.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.12.0',
     date: '2026-07-30',
     summary: 'PareCare downloads less before it opens, so screens arrive faster, especially on a phone.',
