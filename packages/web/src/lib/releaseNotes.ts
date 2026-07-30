@@ -20,6 +20,19 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.12.2',
+    date: '2026-07-30',
+    summary: 'Two links under a condition led nowhere. They now open the screens they name.',
+    groups: [
+      {
+        heading: 'Fixed',
+        items: [
+          'Under a condition on someone’s overview, Make an appointment and Add a treatment both led nowhere. They now open the appointments and treatments screens for that person.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.12.1',
     date: '2026-07-30',
     summary: 'The contact details card now says what it is for when nothing has been recorded yet.',

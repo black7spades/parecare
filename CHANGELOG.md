@@ -5,6 +5,14 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.12.2] - 2026-07-30
+
+### Fixed
+
+- **Make an appointment and Add a treatment now go where they say.** Under a
+  condition on someone's overview, both links led nowhere. They now open the
+  appointments and treatments screens for that person.
+
 ## [0.12.1] - 2026-07-30
 
 ### Fixed
