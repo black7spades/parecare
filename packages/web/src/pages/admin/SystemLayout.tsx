@@ -1,4 +1,6 @@
+import { Suspense } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
+import { RouteFallback } from '../../components/layout/RouteFallback';
 import { useAuthStore } from '../../stores/auth';
 
 /** Shared shell for the admin/system tools: Users (admin+) and Settings (super admin). */
@@ -44,7 +46,9 @@ export function SystemLayout() {
           </>
         ) : null}
       </nav>
-      <Outlet />
+      <Suspense fallback={<RouteFallback />}>
+        <Outlet />
+      </Suspense>
     </div>
   );
 }

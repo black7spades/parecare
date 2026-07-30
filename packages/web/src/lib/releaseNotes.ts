@@ -20,6 +20,21 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.12.0',
+    date: '2026-07-30',
+    summary: 'PareCare downloads less before it opens, so screens arrive faster, especially on a phone.',
+    groups: [
+      {
+        heading: 'Faster to open',
+        items: [
+          'Opening PareCare used to pull down every screen in it, including all the administration screens most people never see. It now fetches the screen being opened and keeps the rest until they are asked for, which cuts what has to arrive first by about a third.',
+          'The parts that rarely change are now kept by your browser between releases, so an update downloads only what actually changed.',
+          'While a screen is still arriving, the navigation and the headings stay put and only the part still coming says so.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.11.1',
     date: '2026-07-30',
     summary: 'Each person’s overview is now arranged separately, and Pare stops rewriting a summary every time a card is opened.',

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { Outlet, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
@@ -6,6 +6,7 @@ import { Button } from '../../../components/ui/Button';
 import { Modal } from '../../../components/ui/Modal';
 import { Avatar } from '../../../components/ui/Avatar';
 import { PencilIcon } from '../../../components/ui/icons';
+import { RouteFallback } from '../../../components/layout/RouteFallback';
 import { RelationshipSelect } from '../../../components/RelationshipSelect';
 import { EditProfileModal } from './EditProfileModal';
 import { format } from 'date-fns';
@@ -211,7 +212,9 @@ export function ProfileLayout() {
         onClose={() => setRelOpen(false)}
       />
 
-      <Outlet context={context} />
+      <Suspense fallback={<RouteFallback />}>
+        <Outlet context={context} />
+      </Suspense>
     </div>
   );
 }
