@@ -5,6 +5,15 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.12.3] - 2026-07-30
+
+### Fixed
+
+- **The calendar now goes as far ahead as the appointments in it.** Moving to
+  any future month was blocked, so an appointment booked for next month, or
+  next year, could not be seen on the calendar at all. It now moves forward and
+  back without limit.
+
 ## [0.12.2] - 2026-07-30
 
 ### Fixed

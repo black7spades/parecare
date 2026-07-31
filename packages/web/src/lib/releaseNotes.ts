@@ -20,6 +20,19 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.12.3',
+    date: '2026-07-30',
+    summary: 'The calendar now goes as far ahead as the appointments in it.',
+    groups: [
+      {
+        heading: 'Fixed',
+        items: [
+          'Moving the calendar to any future month was blocked, so an appointment booked for next month, or next year, could not be seen on the calendar at all. It now moves forward and back without limit.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.12.2',
     date: '2026-07-30',
     summary: 'Two links under a condition led nowhere. They now open the screens they name.',
