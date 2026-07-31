@@ -5,6 +5,14 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.12.5] - 2026-07-30
+
+### Fixed
+
+- **A care plan that fails to generate now says so where you are looking.** The
+  message appeared on the screen behind the open window, so the person who had
+  just pressed Generate saw nothing happen at all.
+
 ## [0.12.4] - 2026-07-30
 
 ### Fixed

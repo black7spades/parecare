@@ -20,6 +20,19 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.12.5',
+    date: '2026-07-30',
+    summary: 'A care plan that fails to generate now says so where you are looking.',
+    groups: [
+      {
+        heading: 'Fixed',
+        items: [
+          'When generating a care plan failed, the message appeared on the screen behind the open window, so the person who had just pressed Generate saw nothing happen at all. It now appears in the window, above the button.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.12.4',
     date: '2026-07-30',
     summary: 'Sorting the conditions table now works one way rather than two.',
