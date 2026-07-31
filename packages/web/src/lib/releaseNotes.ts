@@ -20,6 +20,19 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.12.4',
+    date: '2026-07-30',
+    summary: 'Sorting the conditions table now works one way rather than two.',
+    groups: [
+      {
+        heading: 'Fixed',
+        items: [
+          'The sort chosen from the toolbar and the sort shown on the column headings were separate, so choosing one left the other showing something else. They are now the same control, and the Resolved, Codes and Treatments columns sort as well.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.12.3',
     date: '2026-07-30',
     summary: 'The calendar now goes as far ahead as the appointments in it.',

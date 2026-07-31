@@ -5,6 +5,15 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.12.4] - 2026-07-30
+
+### Fixed
+
+- **Sorting the conditions table now works one way rather than two.** The sort
+  chosen from the toolbar and the sort shown on the column headings were
+  separate, so choosing one left the other showing something else. They are now
+  the same control, and Resolved, Codes and Treatments sort as well.
+
 ## [0.12.3] - 2026-07-30
 
 ### Fixed
