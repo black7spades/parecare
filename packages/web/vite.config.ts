@@ -44,8 +44,8 @@ export default defineConfig({
     proxy: {
       // The API serves under /api/v1 itself — do not strip the prefix
       // (same bug nginx had, fixed in 9e26ac3)
-      '/api': { target: 'http://api:3001' },
-      '/webhooks': { target: 'http://api:3001' },
+      '/api': { target: 'http://127.0.0.1:3001' },
+      '/webhooks': { target: 'http://127.0.0.1:3001' },
     },
   },
 });
