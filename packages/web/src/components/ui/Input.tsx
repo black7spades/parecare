@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -7,7 +7,12 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
 }
 
 export function Input({ label, error, hint, id, className = '', ...props }: InputProps) {
-  const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-');
+  // React makes this unique per instance. Deriving it from the label text
+  // meant two "Name" fields on one screen shared an id, and a label points at
+  // whichever came first, so a screen reader announced the wrong field and
+  // clicking the second label put the cursor in the first.
+  const generated = useId();
+  const inputId = id ?? generated;
   return (
     <div>
       {label ? (
@@ -33,7 +38,12 @@ interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement
 }
 
 export function Textarea({ label, error, hint, id, className = '', ...props }: TextareaProps) {
-  const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-');
+  // React makes this unique per instance. Deriving it from the label text
+  // meant two "Name" fields on one screen shared an id, and a label points at
+  // whichever came first, so a screen reader announced the wrong field and
+  // clicking the second label put the cursor in the first.
+  const generated = useId();
+  const inputId = id ?? generated;
   return (
     <div>
       {label ? (

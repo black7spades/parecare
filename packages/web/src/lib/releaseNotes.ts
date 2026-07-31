@@ -20,6 +20,45 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.12.5',
+    date: '2026-07-30',
+    summary: 'A care plan that fails to generate now says so where you are looking.',
+    groups: [
+      {
+        heading: 'Fixed',
+        items: [
+          'When generating a care plan failed, the message appeared on the screen behind the open window, so the person who had just pressed Generate saw nothing happen at all. It now appears in the window, above the button.',
+        ],
+      },
+    ],
+  },
+  {
+    version: '0.12.4',
+    date: '2026-07-30',
+    summary: 'Sorting the conditions table now works one way rather than two.',
+    groups: [
+      {
+        heading: 'Fixed',
+        items: [
+          'The sort chosen from the toolbar and the sort shown on the column headings were separate, so choosing one left the other showing something else. They are now the same control, and the Resolved, Codes and Treatments columns sort as well.',
+        ],
+      },
+    ],
+  },
+  {
+    version: '0.12.3',
+    date: '2026-07-30',
+    summary: 'The calendar now goes as far ahead as the appointments in it.',
+    groups: [
+      {
+        heading: 'Fixed',
+        items: [
+          'Moving the calendar to any future month was blocked, so an appointment booked for next month, or next year, could not be seen on the calendar at all. It now moves forward and back without limit.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.12.2',
     date: '2026-07-30',
     summary: 'Two links under a condition led nowhere. They now open the screens they name.',

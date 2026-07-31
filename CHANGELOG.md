@@ -5,6 +5,32 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.12.5] - 2026-07-30
+
+### Fixed
+
+- **A care plan that fails to generate now says so where you are looking.** The
+  message appeared on the screen behind the open window, so the person who had
+  just pressed Generate saw nothing happen at all.
+
+## [0.12.4] - 2026-07-30
+
+### Fixed
+
+- **Sorting the conditions table now works one way rather than two.** The sort
+  chosen from the toolbar and the sort shown on the column headings were
+  separate, so choosing one left the other showing something else. They are now
+  the same control, and Resolved, Codes and Treatments sort as well.
+
+## [0.12.3] - 2026-07-30
+
+### Fixed
+
+- **The calendar now goes as far ahead as the appointments in it.** Moving to
+  any future month was blocked, so an appointment booked for next month, or
+  next year, could not be seen on the calendar at all. It now moves forward and
+  back without limit.
+
 ## [0.12.2] - 2026-07-30
 
 ### Fixed

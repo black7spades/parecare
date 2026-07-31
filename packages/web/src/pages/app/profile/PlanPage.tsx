@@ -1,38 +1,36 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import {  } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
-import { CrossIcon } from '../../../components/ui/icons';
-import { Input } from '../../../components/ui/Input';
+import {  } from '../../../components/ui/icons';
+import {  } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
-import { AllergyModal } from '../../../components/AllergyModal';
+import {  } from '../../../components/AllergyModal';
 import { PagePurpose } from '../../../components/PagePurpose';
-import { ProseReport } from '../../../components/ProseReport';
-import { OptionChips } from '../../../components/CatalogueCombo';
+import {  } from '../../../components/ProseReport';
+import {  } from '../../../components/CatalogueCombo';
 import { useAuthStore } from '../../../stores/auth';
 import { useProfile } from './ProfileLayout';
+import {  entryName, fmtWhen } from './plan/shared';
+import { VersionViewer } from './plan/VersionViewer';
+import { GenerateWizard } from './plan/GenerateWizard';
+import { SignModal } from './plan/SignModal';
+import { InviteReviewerModal } from './plan/InviteReviewerModal';
+import { AccessModal } from './plan/AccessModal';
 import {
-  PLAN_ACCESS_ROLES,
-  PLAN_NARRATIVE_SECTIONS,
-  PLAN_SECTION_ORDER,
-  RELATIONSHIPS,
-  planAccessRoleLabel,
+  
+  
+  
+  
+  
   planSectionLabel,
   planVersionStatusLabel,
-  type CarePlan,
-  type CircleMember,
-  type PlanAccessRow,
   type PlanChange,
-  type PlanContent,
-  type PlanEntry,
   type PlanPendingInfo,
   type PlanPermissions,
-  type PlanReview,
-  type PlanSignature,
-  type PlanVersionMeta,
-} from '../../../lib/care';
+  type PlanVersionMeta } from '../../../lib/care';
 
 /**
  * The Care plan page is OUTPUT ONLY. Nothing is collected here: every
@@ -52,35 +50,6 @@ interface GenerationJob {
   version: PlanVersionMeta | null;
 }
 
-const SECTION_MANAGE_LINKS: Record<string, { to: string; label: string }> = {
-  allergies: { to: '../allergies', label: 'Allergies page' },
-  conditions: { to: '../conditions', label: 'Conditions page' },
-  medications: { to: '../medications', label: 'Medications page' },
-  treatments: { to: '../treatments', label: 'Treatments page' },
-  needs: { to: '../care-needs', label: 'Care needs page' },
-  directive: { to: '../care-needs', label: 'Care needs page' },
-  emergency_contacts: { to: '../care-needs', label: 'Care needs page' },
-  providers: { to: '../providers', label: 'Providers page' },
-};
-
-const SECTION_ORDER = PLAN_SECTION_ORDER;
-
-const fieldLabel = (f: string): string => f.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
-
-const fieldText = (v: string | number | boolean | null | undefined): string => {
-  if (v === null || v === undefined) return '';
-  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
-  return String(v);
-};
-
-const entryName = (fields: Record<string, string | number | boolean | null> | null | undefined): string => {
-  if (!fields) return '';
-  const v = fields['substance'] ?? fields['name'] ?? fields['value'] ?? fields['location'] ?? '';
-  return fieldText(v);
-};
-
-const fmtWhen = (d: string) => format(new Date(d), 'd MMM yyyy HH:mm');
-
 export function PlanPage() {
   const { profile, careName, canEdit } = useProfile();
   const queryClient = useQueryClient();
@@ -97,27 +66,23 @@ export function PlanPage() {
 
   const { data: pendingData, isLoading: pendingLoading } = useQuery({
     queryKey: ['plan-pending', profile.id],
-    queryFn: () => api.get<PlanPendingInfo>(`/care-profiles/${profile.id}/plan/versions/pending`),
-  });
+    queryFn: () => api.get<PlanPendingInfo>(`/care-profiles/${profile.id}/plan/versions/pending`) });
   const { data: versionData, isLoading: versionsLoading } = useQuery({
     queryKey: ['plan-versions', profile.id],
     queryFn: () =>
       api.get<{ versions: PlanVersionMeta[]; permissions: PlanPermissions }>(
         `/care-profiles/${profile.id}/plan/versions`
-      ),
-  });
+      ) });
   const { data: changelogData } = useQuery({
     queryKey: ['plan-changelog', profile.id],
-    queryFn: () => api.get<{ changes: PlanChange[] }>(`/care-profiles/${profile.id}/plan/changelog`),
-  });
+    queryFn: () => api.get<{ changes: PlanChange[] }>(`/care-profiles/${profile.id}/plan/changelog`) });
 
   // Generation runs in the background; poll its job while one is running, so a
   // slow model (or a page reload mid-run) never leaves the page hanging.
   const { data: genStatus } = useQuery({
     queryKey: ['plan-gen-status', profile.id],
     queryFn: () => api.get<{ job: GenerationJob | null }>(`/care-profiles/${profile.id}/plan/versions/generate/status`),
-    refetchInterval: (query) => (query.state.data?.job?.status === 'running' ? 2000 : false),
-  });
+    refetchInterval: (query) => (query.state.data?.job?.status === 'running' ? 2000 : false) });
   const genJob = genStatus?.job ?? null;
   const jobRunning = genJob?.status === 'running';
 
@@ -126,8 +91,7 @@ export function PlanPage() {
     view: true,
     comment: false,
     edit: canEdit,
-    sign: false,
-  };
+    sign: false };
   const latestPublished = versions.find((v) => v.status === 'published') ?? null;
   const awaiting = pendingData?.awaiting_signoff ?? null;
   const pendingEvents = pendingData?.pending_events ?? [];
@@ -149,16 +113,14 @@ export function PlanPage() {
       queryClient.setQueryData(['plan-gen-status', profile.id], { job: res.job });
       void queryClient.invalidateQueries({ queryKey: ['plan-gen-status', profile.id] });
     },
-    onError: (err) => setError(err instanceof Error ? err.message : 'Could not update the care plan.'),
-  });
+    onError: (err) => setError(err instanceof Error ? err.message : 'Could not update the care plan.') });
 
   // Opening this page is reviewing the plan, so any "care plan ready" notice
   // for this person is cleared: its bell entry is marked read and the nav pip
   // goes out. Keyed by the finished job, done once per job.
   const markPlanSeen = useMutation({
     mutationFn: (key: string) => api.post('/notifications/read', { keys: [key] }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['notifications'] }),
-  });
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['notifications'] }) });
   const seenJobRef = useRef<string | null>(null);
   useEffect(() => {
     if (genJob?.status === 'succeeded' && genJob.version && genJob.id !== seenJobRef.current) {
@@ -190,14 +152,12 @@ export function PlanPage() {
     mutationFn: (versionId: string) =>
       api.post(`/care-profiles/${profile.id}/plan/versions/${versionId}/approve`),
     onSuccess: invalidate,
-    onError: (err) => setError(err instanceof Error ? err.message : 'Could not approve the version.'),
-  });
+    onError: (err) => setError(err instanceof Error ? err.message : 'Could not approve the version.') });
   const rejectMutation = useMutation({
     mutationFn: (versionId: string) =>
       api.post(`/care-profiles/${profile.id}/plan/versions/${versionId}/reject`),
     onSuccess: invalidate,
-    onError: (err) => setError(err instanceof Error ? err.message : 'Could not reject the version.'),
-  });
+    onError: (err) => setError(err instanceof Error ? err.message : 'Could not reject the version.') });
   const revertMutation = useMutation({
     mutationFn: (versionId: string) =>
       api.post(`/care-profiles/${profile.id}/plan/versions/${versionId}/revert`),
@@ -205,8 +165,7 @@ export function PlanPage() {
       setConfirmRevert(null);
       invalidate();
     },
-    onError: (err) => setError(err instanceof Error ? err.message : 'Could not restore the version.'),
-  });
+    onError: (err) => setError(err instanceof Error ? err.message : 'Could not restore the version.') });
   const deleteAllMutation = useMutation({
     mutationFn: () => api.delete(`/care-profiles/${profile.id}/plan/versions`),
     onSuccess: () => {
@@ -217,8 +176,7 @@ export function PlanPage() {
     onError: (err) => {
       setConfirmDeleteAll(false);
       setError(err instanceof Error ? err.message : 'Could not delete the care plan.');
-    },
-  });
+    } });
 
   const exportPdf = async (v: PlanVersionMeta) => {
     const blob = await api.blob(`/care-profiles/${profile.id}/plan/versions/${v.id}/export`);
@@ -386,6 +344,7 @@ export function PlanPage() {
           careName={careName}
           gaps={pendingData?.baseline_gaps ?? { allergies: false, emergency_contacts: false, gp: false, needs: false }}
           generating={generateMutation.isPending || jobRunning}
+          error={error}
           onGenerate={() => generateMutation.mutate()}
           onClose={() => setGenerateOpen(false)}
         />
@@ -477,8 +436,7 @@ function CurrentVersionCard({
   onExport,
   onSign,
   onInvite,
-  onAccess,
-}: {
+  onAccess }: {
   version: PlanVersionMeta;
   permissions: PlanPermissions;
   canEdit: boolean;
@@ -605,8 +563,7 @@ function VersionsCard({
   canRevert,
   onView,
   onExport,
-  onRevert,
-}: {
+  onRevert }: {
   versions: PlanVersionMeta[];
   latestPublishedId: string | null;
   canRevert: boolean;
@@ -677,761 +634,3 @@ function VersionsCard({
 // ---------------------------------------------------------------------------
 // Version viewer
 
-function ContentSections({ content }: { content: PlanContent }) {
-  const sections = SECTION_ORDER.filter((s) => (content.sections[s] ?? []).length > 0);
-  if (sections.length === 0) return <p className="text-sm text-muted">This version is empty.</p>;
-  return (
-    <div className="space-y-4">
-      {sections.map((s) => {
-        const entries = content.sections[s] ?? [];
-        const fieldNames = [...new Set(entries.flatMap((e: PlanEntry) => Object.keys(e.fields)))];
-        const manage = SECTION_MANAGE_LINKS[s];
-        const synthesized = PLAN_NARRATIVE_SECTIONS.has(s);
-        return (
-          <div key={s}>
-            <div className="flex items-baseline justify-between gap-2">
-              <h4 className="text-sm font-semibold text-ink">{planSectionLabel(s)}</h4>
-              {synthesized ? (
-                <span className="text-xs text-muted">Synthesized from the recorded facts</span>
-              ) : manage ? (
-                <Link to={manage.to} className="text-xs text-primary hover:underline">
-                  Manage on the {manage.label}
-                </Link>
-              ) : null}
-            </div>
-            <div className="overflow-x-auto mt-1">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted">
-                    {fieldNames.map((f) => (
-                      <th key={f} className="py-1.5 pr-3">
-                        {fieldLabel(f)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {entries.map((e: PlanEntry) => (
-                    <tr key={e.key}>
-                      {fieldNames.map((f) => (
-                        <td key={f} className="py-1.5 pr-3 text-ink align-top whitespace-pre-line">
-                          {fieldText(e.fields[f])}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-interface VersionDetail {
-  version: PlanVersionMeta & { content: PlanContent; report: string | null };
-  changes: PlanChange[];
-  signatures: PlanSignature[];
-  reviews: PlanReview[];
-  permissions: PlanPermissions;
-}
-
-function VersionViewer({
-  profileId,
-  meta,
-  onClose,
-}: {
-  profileId: string;
-  meta: PlanVersionMeta;
-  onClose: () => void;
-}) {
-  const [showRecord, setShowRecord] = useState(false);
-  const { data, isLoading } = useQuery({
-    queryKey: ['plan-version', profileId, meta.id],
-    queryFn: () => api.get<VersionDetail>(`/care-profiles/${profileId}/plan/versions/${meta.id}`),
-  });
-
-  return (
-    <Modal open onClose={onClose} title={`Care plan version ${meta.version}`} wide>
-      {isLoading || !data ? (
-        <p className="text-sm text-muted">Loading…</p>
-      ) : (
-        <div className="space-y-4">
-          <p className="text-xs text-muted">
-            {planVersionStatusLabel(data.version.status)} · Created {fmtWhen(data.version.created_at)}
-            {data.version.author_name ? ` by ${data.version.author_name}` : ''} · SHA-256{' '}
-            {data.version.content_hash}
-          </p>
-          {data.version.report ? <ProseReport report={data.version.report} /> : null}
-          {data.version.changelog ? (
-            <div>
-              <h4 className="text-sm font-semibold text-ink mb-1">What changed in this version</h4>
-              <pre className="text-xs text-muted whitespace-pre-wrap font-sans bg-surface-2 rounded-md p-3">
-                {data.version.changelog}
-              </pre>
-            </div>
-          ) : null}
-          {data.version.report ? (
-            <div className="border-t border-border pt-3">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <h4 className="text-sm font-semibold text-ink">Data record</h4>
-                  <p className="text-xs text-muted">The structured facts this report was written from.</p>
-                </div>
-                <Button size="xs" variant="ghost" onClick={() => setShowRecord((v) => !v)}>
-                  {showRecord ? 'Hide' : 'Show'}
-                </Button>
-              </div>
-              {showRecord ? (
-                <div className="mt-3">
-                  <ContentSections content={data.version.content} />
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <ContentSections content={data.version.content} />
-          )}
-          {data.signatures.length > 0 ? (
-            <div>
-              <h4 className="text-sm font-semibold text-ink mb-1">Signatures</h4>
-              <ul className="space-y-1">
-                {data.signatures.map((s) => (
-                  <li key={s.id} className="text-xs text-muted">
-                    Signed by <span className="text-ink">{s.signer_name}</span> at {fmtWhen(s.signed_at)} ·
-                    hash {s.signature_hash.slice(0, 16)}…
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {data.reviews.length > 0 ? (
-            <div>
-              <h4 className="text-sm font-semibold text-ink mb-1">Reviews</h4>
-              <ul className="space-y-1">
-                {data.reviews.map((r) => (
-                  <li key={r.id} className="text-xs text-muted">
-                    {r.invited_name ?? r.invited_email ?? 'Reviewer'}: {r.status}
-                    {r.comment ? ` · "${r.comment}"` : ''}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          <div className="flex justify-end">
-            <Button variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
-    </Modal>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// First-run wizard: collect missing baseline facts via inline modals
-
-function GenerateWizard({
-  profileId,
-  careName,
-  gaps,
-  generating,
-  onGenerate,
-  onClose,
-}: {
-  profileId: string;
-  careName: string;
-  gaps: { allergies: boolean; emergency_contacts: boolean; gp: boolean; needs: boolean };
-  generating: boolean;
-  onGenerate: () => void;
-  onClose: () => void;
-}) {
-  const queryClient = useQueryClient();
-  const [allergyOpen, setAllergyOpen] = useState(false);
-  const [allergiesAdded, setAllergiesAdded] = useState(0);
-  const [noKnownAllergies, setNoKnownAllergies] = useState(false);
-
-  const { data: planData } = useQuery({
-    queryKey: ['care-plan', profileId],
-    queryFn: () => api.get<{ plan: CarePlan | null }>(`/care-profiles/${profileId}/plan`),
-  });
-  const asArray = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
-  const plan: CarePlan = {
-    dietary_requirements: asArray<string>(planData?.plan?.dietary_requirements),
-    mobility_aids: asArray<string>(planData?.plan?.mobility_aids),
-    communication_needs: asArray<string>(planData?.plan?.communication_needs),
-    advance_care_directive: planData?.plan?.advance_care_directive ?? false,
-    advance_care_directive_location: planData?.plan?.advance_care_directive_location ?? null,
-    emergency_contacts: asArray(planData?.plan?.emergency_contacts),
-  };
-
-  const savePlanMutation = useMutation({
-    mutationFn: (next: CarePlan) => api.put(`/care-profiles/${profileId}/plan`, next),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['care-plan', profileId] }),
-  });
-
-  return (
-    <Modal open onClose={onClose} title="Generate care plan" wide>
-      <div className="space-y-4">
-        <p className="text-sm text-muted">
-          Version 1 is assembled from everything already recorded for {careName}. A few basics are still
-          missing; fill them in here or skip them, they can always be added later.
-        </p>
-
-        {gaps.allergies && !noKnownAllergies && allergiesAdded === 0 ? (
-          <GapRow label="Allergies" detail="No allergies are recorded.">
-            <Button size="sm" variant="secondary" onClick={() => setAllergyOpen(true)}>
-              Add allergy
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setNoKnownAllergies(true)}>
-              None known
-            </Button>
-          </GapRow>
-        ) : null}
-
-        {gaps.emergency_contacts && plan.emergency_contacts.length === 0 ? (
-          <GapRow label="Emergency contacts" detail="Nobody is listed to call first.">
-            <InlineContactForm
-              saving={savePlanMutation.isPending}
-              onAdd={(contact) =>
-                savePlanMutation.mutate({ ...plan, emergency_contacts: [...plan.emergency_contacts, contact] })
-              }
-            />
-          </GapRow>
-        ) : null}
-
-        {gaps.gp ? <GpGapRow profileId={profileId} /> : null}
-
-        {gaps.needs ? (
-          <GapRow label="Day-to-day needs" detail="No dietary requirements, mobility aids or communication needs are recorded.">
-            <div className="space-y-3 w-full">
-              <OptionChips
-                label="Dietary requirements"
-                category="dietary_requirement"
-                values={plan.dietary_requirements}
-                onChange={(v) => savePlanMutation.mutate({ ...plan, dietary_requirements: v })}
-                canEdit
-                addLabel="Add, e.g. Low salt"
-              />
-              <OptionChips
-                label="Mobility aids"
-                category="mobility_aid"
-                values={plan.mobility_aids}
-                onChange={(v) => savePlanMutation.mutate({ ...plan, mobility_aids: v })}
-                canEdit
-                addLabel="Add, e.g. Walking frame"
-              />
-            </div>
-          </GapRow>
-        ) : null}
-
-        {!gaps.allergies && !gaps.emergency_contacts && !gaps.gp && !gaps.needs ? (
-          <p className="text-sm text-ink">Everything needed for a useful first version is already recorded.</p>
-        ) : null}
-
-        <div className="flex justify-end gap-2 pt-2 border-t border-border">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button loading={generating} onClick={onGenerate}>
-            Generate version 1
-          </Button>
-        </div>
-      </div>
-
-      {allergyOpen ? (
-        <AllergyModal
-          profileId={profileId}
-          open
-          onClose={() => setAllergyOpen(false)}
-          onSaved={() => setAllergiesAdded((n) => n + 1)}
-        />
-      ) : null}
-    </Modal>
-  );
-}
-
-function GapRow({ label, detail, children }: { label: string; detail: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-md border border-border p-3">
-      <p className="text-sm font-semibold text-ink">{label}</p>
-      <p className="text-xs text-muted mb-2">{detail}</p>
-      <div className="flex flex-wrap items-end gap-2">{children}</div>
-    </div>
-  );
-}
-
-function InlineContactForm({
-  saving,
-  onAdd,
-}: {
-  saving: boolean;
-  onAdd: (contact: { name: string; relationship?: string; phone: string }) => void;
-}) {
-  const [name, setName] = useState('');
-  const [relationship, setRelationship] = useState('');
-  const [phone, setPhone] = useState('');
-  const selectClass =
-    'rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
-  return (
-    <>
-      <Input aria-label="Contact name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} className="w-36" />
-      <select aria-label="Relationship" className={selectClass} value={relationship} onChange={(e) => setRelationship(e.target.value)}>
-        <option value="">Relationship</option>
-        {RELATIONSHIPS.filter((r) => r !== 'Myself').map((r) => (
-          <option key={r} value={r}>
-            {r}
-          </option>
-        ))}
-      </select>
-      <Input aria-label="Contact phone" type="tel" placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-32" />
-      <Button
-        size="sm"
-        variant="secondary"
-        disabled={!name.trim() || !phone.trim()}
-        loading={saving}
-        onClick={() => {
-          onAdd({ name: name.trim(), relationship: relationship || undefined, phone: phone.trim() });
-          setName('');
-          setRelationship('');
-          setPhone('');
-        }}
-      >
-        Add
-      </Button>
-    </>
-  );
-}
-
-function GpGapRow({ profileId }: { profileId: string }) {
-  const queryClient = useQueryClient();
-  const [name, setName] = useState('');
-  const [practice, setPractice] = useState('');
-  const [phone, setPhone] = useState('');
-  const [added, setAdded] = useState(false);
-
-  const addMutation = useMutation({
-    mutationFn: () =>
-      api.post(`/care-profiles/${profileId}/providers`, {
-        provider_type: 'gp',
-        name: name.trim(),
-        organisation: practice.trim() || null,
-        phone: phone.trim() || null,
-      }),
-    onSuccess: () => {
-      setAdded(true);
-      void queryClient.invalidateQueries({ queryKey: ['providers', profileId] });
-    },
-  });
-
-  if (added) return null;
-  return (
-    <GapRow label="GP" detail="No GP is recorded.">
-      <Input aria-label="GP name" placeholder="GP name" value={name} onChange={(e) => setName(e.target.value)} className="w-36" />
-      <Input aria-label="GP practice" placeholder="Practice" value={practice} onChange={(e) => setPractice(e.target.value)} className="w-36" />
-      <Input aria-label="GP phone" type="tel" placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-32" />
-      <Button size="sm" variant="secondary" disabled={!name.trim()} loading={addMutation.isPending} onClick={() => addMutation.mutate()}>
-        Add GP
-      </Button>
-    </GapRow>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Signing
-
-function SignaturePad({ onChange }: { onChange: (dataUrl: string | null) => void }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawing = useRef(false);
-  const drew = useRef(false);
-
-  const pos = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-  };
-
-  return (
-    <div>
-      <canvas
-        ref={canvasRef}
-        width={360}
-        height={120}
-        className="border border-border rounded-md bg-card touch-none w-full"
-        aria-label="Draw your signature"
-        onPointerDown={(e) => {
-          drawing.current = true;
-          const ctx = e.currentTarget.getContext('2d');
-          if (!ctx) return;
-          const p = pos(e);
-          ctx.beginPath();
-          ctx.moveTo(p.x, p.y);
-        }}
-        onPointerMove={(e) => {
-          if (!drawing.current) return;
-          const ctx = e.currentTarget.getContext('2d');
-          if (!ctx) return;
-          const p = pos(e);
-          ctx.lineWidth = 2;
-          ctx.lineCap = 'round';
-          ctx.strokeStyle = '#1a1a1a';
-          ctx.lineTo(p.x, p.y);
-          ctx.stroke();
-          drew.current = true;
-        }}
-        onPointerUp={(e) => {
-          drawing.current = false;
-          if (drew.current) onChange(e.currentTarget.toDataURL('image/png'));
-        }}
-        onPointerLeave={(e) => {
-          if (drawing.current && drew.current) onChange(e.currentTarget.toDataURL('image/png'));
-          drawing.current = false;
-        }}
-      />
-      <Button
-        size="xs"
-        variant="ghost"
-        className="mt-1"
-        onClick={() => {
-          const canvas = canvasRef.current;
-          const ctx = canvas?.getContext('2d');
-          if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-          drew.current = false;
-          onChange(null);
-        }}
-      >
-        Clear
-      </Button>
-    </div>
-  );
-}
-
-function SignModal({
-  profileId,
-  version,
-  defaultName,
-  onClose,
-  onSigned,
-}: {
-  profileId: string;
-  version: PlanVersionMeta;
-  defaultName: string;
-  onClose: () => void;
-  onSigned: () => void;
-}) {
-  const [name, setName] = useState(defaultName);
-  const [consent, setConsent] = useState(false);
-  const [image, setImage] = useState<string | null>(null);
-  const [error, setError] = useState('');
-
-  const signMutation = useMutation({
-    mutationFn: () =>
-      api.post(`/care-profiles/${profileId}/plan/versions/${version.id}/sign`, {
-        signer_name: name.trim(),
-        signature_image: image,
-        consent: true,
-      }),
-    onSuccess: () => {
-      onSigned();
-      onClose();
-    },
-    onError: (err) => setError(err instanceof Error ? err.message : 'Could not record the signature.'),
-  });
-
-  return (
-    <Modal open onClose={onClose} title={`Sign care plan version ${version.version}`}>
-      <div className="space-y-4">
-        <p className="text-xs text-muted">
-          Your signature is bound to this exact version by its integrity hash, with the time, your account,
-          and the device it came from. A signed version is locked: later automatic updates wait for
-          sign-off instead of publishing themselves.
-        </p>
-        <Input label="Your full name" value={name} onChange={(e) => setName(e.target.value)} />
-        <div>
-          <span className="block text-sm font-medium text-ink mb-1">Signature</span>
-          <SignaturePad onChange={setImage} />
-        </div>
-        <label className="flex items-start gap-2 text-sm text-ink">
-          <input
-            type="checkbox"
-            className="h-4 w-4 mt-0.5 rounded border-border text-primary focus:ring-primary"
-            checked={consent}
-            onChange={(e) => setConsent(e.target.checked)}
-          />
-          I have reviewed version {version.version} and consent to signing it electronically.
-        </label>
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button loading={signMutation.isPending} disabled={!name.trim() || !consent} onClick={() => signMutation.mutate()}>
-            Sign
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Reviewer invitations
-
-function InviteReviewerModal({
-  profileId,
-  version,
-  onClose,
-}: {
-  profileId: string;
-  version: PlanVersionMeta;
-  onClose: () => void;
-}) {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [canApprove, setCanApprove] = useState(false);
-  const [link, setLink] = useState('');
-  const [copied, setCopied] = useState(false);
-  const [error, setError] = useState('');
-
-  const inviteMutation = useMutation({
-    mutationFn: () =>
-      api.post<{ review_path: string }>(`/care-profiles/${profileId}/plan/versions/${version.id}/reviews`, {
-        invited_name: name.trim() || null,
-        invited_email: email.trim() || null,
-        can_comment: true,
-        can_approve: canApprove,
-      }),
-    onSuccess: (res) => setLink(`${window.location.origin}${res.review_path}`),
-    onError: (err) => setError(err instanceof Error ? err.message : 'Could not create the review link.'),
-  });
-
-  return (
-    <Modal open onClose={onClose} title={`Invite a reviewer for version ${version.version}`}>
-      <div className="space-y-4">
-        {link ? (
-          <>
-            <p className="text-sm text-ink">Share this secure link. It expires after 14 days.</p>
-            <div className="flex items-center gap-2">
-              <Input aria-label="Review link" value={link} readOnly className="flex-1" />
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  void navigator.clipboard.writeText(link);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                }}
-              >
-                {copied ? 'Copied' : 'Copy link'}
-              </Button>
-            </div>
-            <div className="flex justify-end">
-              <Button variant="ghost" onClick={onClose}>
-                Cancel
-              </Button>
-            </div>
-          </>
-        ) : (
-          <>
-            <p className="text-xs text-muted">
-              The reviewer opens a secure link to read this version and leave a comment, without needing an
-              account. Every view and response is recorded in the activity log.
-            </p>
-            <Input label="Reviewer name" value={name} onChange={(e) => setName(e.target.value)} />
-            <Input label="Reviewer email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} hint="Used to label their responses. The link itself is what grants access." />
-            <label className="flex items-center gap-2 text-sm text-ink">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                checked={canApprove}
-                onChange={(e) => setCanApprove(e.target.checked)}
-              />
-              Allow this reviewer to approve the version
-            </label>
-            {error ? <p className="text-sm text-red-600">{error}</p> : null}
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button loading={inviteMutation.isPending} onClick={() => inviteMutation.mutate()}>
-                Create link
-              </Button>
-            </div>
-          </>
-        )}
-      </div>
-    </Modal>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Access control
-
-function AccessModal({ profileId, onClose }: { profileId: string; onClose: () => void }) {
-  const queryClient = useQueryClient();
-  const [who, setWho] = useState('');
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState('carer');
-  const [perms, setPerms] = useState({ can_view: true, can_comment: true, can_edit: false, can_sign: false });
-  const [error, setError] = useState('');
-
-  const { data } = useQuery({
-    queryKey: ['plan-access', profileId],
-    queryFn: () => api.get<{ access: PlanAccessRow[]; can_manage: boolean }>(`/care-profiles/${profileId}/plan/access`),
-  });
-  const { data: circleData } = useQuery({
-    queryKey: ['circle', profileId],
-    queryFn: () => api.get<{ members: CircleMember[] }>(`/care-profiles/${profileId}/circle`),
-  });
-  const members = circleData?.members ?? [];
-  const rows = data?.access ?? [];
-  const canManage = data?.can_manage ?? false;
-  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['plan-access', profileId] });
-
-  const addMutation = useMutation({
-    mutationFn: () =>
-      api.post(`/care-profiles/${profileId}/plan/access`, {
-        account_id: who && who !== 'email' ? who : null,
-        email: who === 'email' ? email.trim() : null,
-        access_role: role,
-        ...perms,
-      }),
-    onSuccess: () => {
-      setWho('');
-      setEmail('');
-      invalidate();
-    },
-    onError: (err) => setError(err instanceof Error ? err.message : 'Could not grant access.'),
-  });
-  const removeMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profileId}/plan/access/${id}`),
-    onSuccess: invalidate,
-  });
-
-  const selectClass =
-    'rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
-
-  return (
-    <Modal open onClose={onClose} title="Care plan access" wide>
-      <div className="space-y-4">
-        <p className="text-xs text-muted">
-          Without an entry here, circle access applies: the owner and lead coordinators do everything,
-          contributors view, comment and update, and viewers only read. An entry below replaces that for
-          the person named.
-        </p>
-        {rows.length === 0 ? (
-          <p className="text-sm text-muted">No explicit access entries.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left text-xs text-muted">
-                  <th className="py-1.5 pr-3">Who</th>
-                  <th className="py-1.5 pr-3">Role</th>
-                  <th className="py-1.5 pr-3">View</th>
-                  <th className="py-1.5 pr-3">Comment</th>
-                  <th className="py-1.5 pr-3">Edit</th>
-                  <th className="py-1.5 pr-3">Sign</th>
-                  {canManage ? <th className="py-1.5 w-20" /> : null}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {rows.map((r) => (
-                  <tr key={r.id}>
-                    <td className="py-2 pr-3 text-ink">{r.account_name ?? r.email ?? r.account_email ?? ''}</td>
-                    <td className="py-2 pr-3 text-ink">{planAccessRoleLabel(r.access_role)}</td>
-                    <td className="py-2 pr-3 text-ink">{r.can_view ? 'Yes' : 'No'}</td>
-                    <td className="py-2 pr-3 text-ink">{r.can_comment ? 'Yes' : 'No'}</td>
-                    <td className="py-2 pr-3 text-ink">{r.can_edit ? 'Yes' : 'No'}</td>
-                    <td className="py-2 pr-3 text-ink">{r.can_sign ? 'Yes' : 'No'}</td>
-                    {canManage ? (
-                      <td className="py-2 text-right">
-                        <Button size="xs" variant="ghost-danger" aria-label={`Remove access for ${r.account_name ?? r.email ?? 'this person'}`} title="Remove" onClick={() => removeMutation.mutate(r.id)}>
-                          <CrossIcon />
-                        </Button>
-                      </td>
-                    ) : null}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {canManage ? (
-          <div className="border-t border-border pt-3 space-y-3">
-            <h4 className="text-sm font-semibold text-ink">Grant access</h4>
-            <div className="flex flex-wrap items-end gap-2">
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-muted">Who</span>
-                <select aria-label="Who to grant access" className={selectClass} value={who} onChange={(e) => setWho(e.target.value)}>
-                  <option value="">Choose a person</option>
-                  {members
-                    .filter((m) => m.account_id)
-                    .map((m) => (
-                      <option key={m.id} value={m.account_id!}>
-                        {m.display_name}
-                      </option>
-                    ))}
-                  <option value="email">Someone by email</option>
-                </select>
-              </label>
-              {who === 'email' ? (
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs text-muted">Email</span>
-                  <Input aria-label="Email to share with" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-48" />
-                </label>
-              ) : null}
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-muted">Role</span>
-                <select aria-label="Access role" className={selectClass} value={role} onChange={(e) => setRole(e.target.value)}>
-                  {PLAN_ACCESS_ROLES.map((r) => (
-                    <option key={r.value} value={r.value}>
-                      {r.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="flex flex-wrap items-center gap-4">
-              {(
-                [
-                  ['can_view', 'View'],
-                  ['can_comment', 'Comment'],
-                  ['can_edit', 'Edit'],
-                  ['can_sign', 'Sign'],
-                ] as const
-              ).map(([key, label]) => (
-                <label key={key} className="flex items-center gap-1.5 text-sm text-ink">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                    checked={perms[key]}
-                    onChange={(e) => setPerms({ ...perms, [key]: e.target.checked })}
-                  />
-                  {label}
-                </label>
-              ))}
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={!who || (who === 'email' && !email.trim())}
-                loading={addMutation.isPending}
-                onClick={() => addMutation.mutate()}
-              >
-                Grant
-              </Button>
-            </div>
-          </div>
-        ) : null}
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        <div className="flex justify-end">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  );
-}

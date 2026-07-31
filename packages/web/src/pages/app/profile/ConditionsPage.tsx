@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
@@ -6,6 +6,7 @@ import { Button } from '../../../components/ui/Button';
 import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Modal } from '../../../components/ui/Modal';
 import { useDataView, type DataFilter, type DataSort } from '../../../components/data/useDataView';
+import { SortableTh } from '../../../components/data/SortableTh';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
 import {
   CONDITION_CATEGORIES,
@@ -26,25 +27,25 @@ import { ConditionEditor } from './conditions/ConditionEditor';
 
 const fmtDate = (d: string | null | undefined) => (d ? format(new Date(d), 'd MMM yyyy') : '');
 
+const severityRank = (c: MedicalCondition): number =>
+  CONDITION_SEVERITIES.findIndex((s) => s.value === c.severity);
+const treatmentCount = (c: MedicalCondition): number =>
+  (c.medications?.length ?? 0) + (c.treatments?.length ?? 0);
+const byText = (a: string | null | undefined, b: string | null | undefined) =>
+  (a ?? '').localeCompare(b ?? '');
+
+// One entry per visible column, so the dropdown and the column headers are the
+// same control rather than two that disagree.
 const SORTS: DataSort<MedicalCondition>[] = [
-  { key: 'name', label: 'Name', compare: (a, b) => a.name.localeCompare(b.name) },
-  {
-    key: 'started',
-    label: 'Started, newest first',
-    compare: (a, b) => (b.started_on ?? '').localeCompare(a.started_on ?? ''),
-  },
-  {
-    key: 'severity',
-    label: 'Severity, worst first',
-    compare: (a, b) =>
-      CONDITION_SEVERITIES.findIndex((s) => s.value === b.severity) -
-      CONDITION_SEVERITIES.findIndex((s) => s.value === a.severity),
-  },
-  {
-    key: 'category',
-    label: 'Category',
-    compare: (a, b) => (a.category ?? '').localeCompare(b.category ?? ''),
-  },
+  { key: 'name', label: 'Condition', compare: (a, b) => byText(a.name, b.name) },
+  { key: 'category', label: 'Category', compare: (a, b) => byText(a.category, b.category) },
+  { key: 'condition_type', label: 'Type', compare: (a, b) => byText(a.condition_type, b.condition_type) },
+  { key: 'severity', label: 'Severity', defaultDir: 'desc', compare: (a, b) => severityRank(a) - severityRank(b) },
+  { key: 'status', label: 'Status', compare: (a, b) => byText(a.status, b.status) },
+  { key: 'started_on', label: 'Started', defaultDir: 'desc', compare: (a, b) => byText(a.started_on, b.started_on) },
+  { key: 'resolved_on', label: 'Resolved', defaultDir: 'desc', compare: (a, b) => byText(a.resolved_on, b.resolved_on) },
+  { key: 'codes', label: 'Codes', defaultDir: 'desc', compare: (a, b) => (a.codes?.length ?? 0) - (b.codes?.length ?? 0) },
+  { key: 'treatments', label: 'Treatments', defaultDir: 'desc', compare: (a, b) => treatmentCount(a) - treatmentCount(b) },
 ];
 
 const CATEGORY_FILTER: DataFilter<MedicalCondition> = {
@@ -68,8 +69,6 @@ const STATUS_FILTER: DataFilter<MedicalCondition> = {
   match: (c, v) => c.status === v,
 };
 
-type SortDir = 'asc' | 'desc';
-type SortCol = 'name' | 'category' | 'condition_type' | 'severity' | 'status' | 'started_on';
 
 export function ConditionsPage() {
   const { profile, careName, canEdit } = useProfile();
@@ -79,7 +78,6 @@ export function ConditionsPage() {
   const [confirmDelete, setConfirmDelete] = useState<MedicalCondition | null>(null);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkEditQueue, setBulkEditQueue] = useState<MedicalCondition[]>([]);
-  const [colSort, setColSort] = useState<{ col: SortCol; dir: SortDir }>({ col: 'name', dir: 'asc' });
 
   const { data, isLoading } = useQuery({
     queryKey: ['conditions', profile.id],
@@ -107,24 +105,6 @@ export function ConditionsPage() {
     },
   });
 
-  const headerSort: DataSort<MedicalCondition> = {
-    key: `col-${colSort.col}-${colSort.dir}`,
-    label: '',
-    compare: (a, b) => {
-      const valA = String(a[colSort.col] ?? '');
-      const valB = String(b[colSort.col] ?? '');
-      let cmp: number;
-      if (colSort.col === 'severity') {
-        cmp =
-          CONDITION_SEVERITIES.findIndex((s) => s.value === a.severity) -
-          CONDITION_SEVERITIES.findIndex((s) => s.value === b.severity);
-      } else {
-        cmp = valA.localeCompare(valB);
-      }
-      return colSort.dir === 'desc' ? -cmp : cmp;
-    },
-  };
-
   const dv = useDataView<MedicalCondition>({
     rows: conditions,
     getId: (c) => c.id,
@@ -140,20 +120,12 @@ export function ConditionsPage() {
       ]
         .filter(Boolean)
         .join(' '),
-    sorts: [...SORTS, headerSort],
+    sorts: SORTS,
     filters: [CATEGORY_FILTER, TYPE_FILTER, STATUS_FILTER],
     defaultPageSize: 25,
   });
 
-  useEffect(() => {
-    dv.setSortKey(headerSort.key);
-  }, [colSort.col, colSort.dir]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const toggleColSort = (col: SortCol) => {
-    setColSort((prev) =>
-      prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' }
-    );
-  };
 
   const bulkActions: ToolbarBulkAction[] = canEdit
     ? [
@@ -234,15 +206,15 @@ export function ConditionsPage() {
             <thead>
               <tr className="text-left text-xs text-muted border-b border-border">
                 {canEdit ? <th className="px-3 py-2 w-8" /> : null}
-                <SortableHeader col="name" label="Condition" current={colSort} onSort={toggleColSort} />
-                <SortableHeader col="category" label="Category" current={colSort} onSort={toggleColSort} />
-                <SortableHeader col="condition_type" label="Type" current={colSort} onSort={toggleColSort} />
-                <SortableHeader col="severity" label="Severity" current={colSort} onSort={toggleColSort} />
-                <SortableHeader col="status" label="Status" current={colSort} onSort={toggleColSort} />
-                <SortableHeader col="started_on" label="Started" current={colSort} onSort={toggleColSort} />
-                <th className="px-3 py-2 hidden md:table-cell">Resolved</th>
-                <th className="px-3 py-2 hidden lg:table-cell">Codes</th>
-                <th className="px-3 py-2 hidden lg:table-cell">Treatments</th>
+                <SortableTh label="Condition" sortKey="name" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Category" sortKey="category" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Type" sortKey="condition_type" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Severity" sortKey="severity" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Status" sortKey="status" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Started" sortKey="started_on" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Resolved" sortKey="resolved_on" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="hidden md:table-cell" />
+                <SortableTh label="Codes" sortKey="codes" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="hidden lg:table-cell" />
+                <SortableTh label="Treatments" sortKey="treatments" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="hidden lg:table-cell" />
                 {canEdit ? <th className="px-3 py-2 text-right">Actions</th> : null}
               </tr>
             </thead>
@@ -386,37 +358,6 @@ export function ConditionsPage() {
         </div>
       </Modal>
     </div>
-  );
-}
-
-function SortableHeader({
-  col,
-  label,
-  current,
-  onSort,
-}: {
-  col: SortCol;
-  label: string;
-  current: { col: SortCol; dir: SortDir };
-  onSort: (col: SortCol) => void;
-}) {
-  const active = current.col === col;
-  return (
-    <th className="px-3 py-2">
-      <button
-        type="button"
-        className={`inline-flex items-center gap-1 hover:text-ink ${active ? 'text-ink font-semibold' : ''}`}
-        onClick={() => onSort(col)}
-        aria-label={`Sort by ${label}`}
-      >
-        {label}
-        {active ? (
-          <span className="text-[10px]">{current.dir === 'asc' ? '▲' : '▼'}</span>
-        ) : (
-          <span className="text-[10px] opacity-0 group-hover:opacity-50">▲</span>
-        )}
-      </button>
-    </th>
   );
 }
 
