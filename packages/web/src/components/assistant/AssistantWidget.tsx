@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMatch, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, ApiError } from '../../api/client';
+import { api, ApiError, AI_REQUEST_TIMEOUT_MS } from '../../api/client';
 import { describeAiError } from '../../lib/aiErrors';
+import { useAiStatus, assistantNotice, AI_WARMING_MESSAGE } from '../../lib/aiStatus';
 import { ASSISTANT_COMMANDS, commandHelpText, expandSlashCommand } from '../../lib/assistantCommands';
 import { browserTimeZone } from '../../lib/datetime';
 import { useAssistantStore } from '../../stores/assistant';
@@ -379,6 +380,32 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
   // quick first message continues it instead of forking a second one.
   const resumeReady = currentQuery.isFetched || currentQuery.isError;
 
+  // Whether a model on this machine is still downloading, so we can say so
+  // plainly rather than letting the first message fail with a raw error.
+  const { data: aiStatus } = useAiStatus(open);
+  const preparing = aiStatus?.state === 'preparing';
+
+  // The one sentence naming which assistant is in use, shown once and then
+  // remembered per provider, so switching provider says it again.
+  const notice = assistantNotice(aiStatus);
+  const [noticeSeenProvider, setNoticeSeenProvider] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('pare-assistant-notice');
+    } catch {
+      return null;
+    }
+  });
+  const showNotice = !!notice && !preparing && !!aiStatus && noticeSeenProvider !== aiStatus.provider;
+  function dismissNotice() {
+    if (!aiStatus) return;
+    setNoticeSeenProvider(aiStatus.provider);
+    try {
+      localStorage.setItem('pare-assistant-notice', aiStatus.provider);
+    } catch {
+      /* private mode: showing it again next time is fine */
+    }
+  }
+
   const { data: profileData } = useQuery({
     queryKey: ['care-profile', profileId],
     queryFn: () => api.get<{ profile: CareProfile }>(`/care-profiles/${profileId}`),
@@ -421,13 +448,17 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
       // that profile, so Pare gets their full record even with none open.
       const body = { content, timezone: browserTimeZone(), current_profile_id: (contextProfileId ?? profileId) ?? undefined };
       try {
-        return await api.post<SendResponse>(`${apiBase}/conversations/${conversation}/messages`, body);
+        return await api.post<SendResponse>(`${apiBase}/conversations/${conversation}/messages`, body, {
+          timeoutMs: AI_REQUEST_TIMEOUT_MS,
+        });
       } catch (err) {
         // A resumed conversation can go stale (different login, deleted
         // record); start a fresh one instead of losing the message.
         if (err instanceof ApiError && err.status === 404 && conversation === convId) {
           const fresh = await startConversation();
-          return api.post<SendResponse>(`${apiBase}/conversations/${fresh}/messages`, body);
+          return api.post<SendResponse>(`${apiBase}/conversations/${fresh}/messages`, body, {
+            timeoutMs: AI_REQUEST_TIMEOUT_MS,
+          });
         }
         throw err;
       }
@@ -575,6 +606,27 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {preparing ? (
+          <div className="rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-muted" role="status">
+            {AI_WARMING_MESSAGE}
+          </div>
+        ) : null}
+        {showNotice ? (
+          <div className="flex items-start gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-muted">
+            <span className="flex-1">{notice}</span>
+            <button
+              type="button"
+              onClick={dismissNotice}
+              aria-label="Dismiss this note"
+              className="p-0.5 rounded text-muted hover:text-ink shrink-0"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="6" y1="6" x2="18" y2="18" />
+                <line x1="18" y1="6" x2="6" y2="18" />
+              </svg>
+            </button>
+          </div>
+        ) : null}
         {messages.length === 0 && !pendingReply ? (
           <p className="text-sm text-muted text-center mt-6 px-4">
             {personName

@@ -20,6 +20,27 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.13.0',
+    date: '2026-08-04',
+    summary: 'Pare now runs on your own machine, privately, with nothing to set up.',
+    groups: [
+      {
+        heading: 'Added',
+        items: [
+          'Pare now runs on your own machine. A private assistant is ready from the first start, with nothing to set up and nothing leaving your machine. The right assistant for your machine is chosen for you: a larger, more capable one where there is power for it, otherwise a smaller one that still reads text and images. Pare says in one line which one is in use, and that stays changeable.',
+          'Pare says when it is still getting ready. On the first start the assistant can take a while to prepare itself. Instead of an error, Pare now says it is still getting ready and that everything else works in the meantime.',
+        ],
+      },
+      {
+        heading: 'Changed',
+        items: [
+          'Pare records what you ask it to, more reliably. The assistant can no longer garble what it is recording, so a dose or a note you ask Pare to log is saved as you meant it, even on the assistant that runs on your machine.',
+          'A long reply from the assistant on your machine is no longer cut off part way through, and a request that never arrives now says so instead of waiting forever.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.12.5',
     date: '2026-07-30',
     summary: 'A care plan that fails to generate now says so where you are looking.',

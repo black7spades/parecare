@@ -101,6 +101,41 @@ export function supportsStructuredOutput(): boolean {
   return getAiConfig().provider !== 'google';
 }
 
+/** Whether Pare runs on this machine (a local server) rather than in the cloud. */
+export function isLocalProvider(): boolean {
+  const p = getAiConfig().provider;
+  return p === 'ollama' || p === 'lmstudio' || p === 'openai-compatible';
+}
+
+/**
+ * Whether the assistant is ready to answer, for the warming state. A cloud
+ * provider is ready as soon as it is configured. The bundled on-machine
+ * assistant is asked directly whether its model has finished downloading:
+ * present means ready, absent or still starting means preparing.
+ */
+export async function localModelState(): Promise<'ready' | 'preparing' | 'unavailable'> {
+  const cfg = getAiConfig();
+  if (cfg.provider !== 'ollama') {
+    return isAiConfigured() ? 'ready' : 'unavailable';
+  }
+  const base = (cfg.baseUrl ?? DEFAULT_BASE_URLS['ollama'] ?? '').replace(/\/$/, '');
+  const root = base.replace(/\/v1$/, '');
+  const want = cfg.model ?? 'parecare';
+  try {
+    const res = await fetch(`${root}/api/tags`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return 'preparing';
+    const data = (await res.json()) as { models?: Array<{ name?: string }> };
+    const names = (data.models ?? []).map((m) => m.name ?? '');
+    const present = names.some(
+      (n) => n === want || n === `${want}:latest` || n.split(':')[0] === want.split(':')[0],
+    );
+    return present ? 'ready' : 'preparing';
+  } catch {
+    // Unreachable usually means the service is still starting on first run.
+    return 'preparing';
+  }
+}
+
 async function completeAnthropic(
   system: string,
   turns: ChatTurn[],
@@ -187,6 +222,15 @@ async function completeOpenAiCompatible(
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
+    // On a local server, a missing model is the download not being finished
+    // yet, not a real fault. Give it a code the app can turn into "Pare is
+    // still getting ready" instead of a raw provider error.
+    if (isLocalProvider() && (res.status === 404 || /not found|no such model|try pulling|do not have/i.test(body))) {
+      throw Object.assign(new Error('The assistant on this machine is still getting ready.'), {
+        status: 503,
+        code: 'AI_MODEL_PREPARING',
+      });
+    }
     throw Object.assign(new Error(`AI provider returned ${res.status}: ${body.slice(0, 200)}`), {
       status: 502,
       code: 'AI_PROVIDER_ERROR',

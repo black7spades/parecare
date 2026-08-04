@@ -3,6 +3,14 @@ import { useSubscriptionStore } from '../stores/subscription';
 
 const BASE = '/api/v1';
 
+/**
+ * A deadline for a Pare request. A reply from a model on this machine can take
+ * a couple of minutes; this is longer than the slowest honest reply but short
+ * enough that a request which is never coming back says so instead of spinning
+ * forever.
+ */
+export const AI_REQUEST_TIMEOUT_MS = 300_000;
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -45,17 +53,40 @@ async function readJson(res: Response, path: string): Promise<ApiBody> {
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+interface RequestOptions {
+  /** Abort the request after this many milliseconds and report a clear timeout. */
+  timeoutMs?: number;
+}
+
+async function request<T>(path: string, options: RequestInit = {}, reqOpts: RequestOptions = {}): Promise<T> {
   const token = useAuthStore.getState().token;
 
-  const res = await fetch(`${BASE}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers ?? {}),
-    },
-  });
+  const controller = reqOpts.timeoutMs ? new AbortController() : undefined;
+  const timer = controller ? window.setTimeout(() => controller.abort(), reqOpts.timeoutMs) : undefined;
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      ...options,
+      signal: controller?.signal ?? options.signal ?? undefined,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.headers ?? {}),
+      },
+    });
+  } catch (err) {
+    if (controller?.signal.aborted) {
+      throw new ApiError(
+        504,
+        'AI_TIMEOUT',
+        'Pare is taking longer than usual to answer. It may still be working; wait a moment and try again.'
+      );
+    }
+    throw err;
+  } finally {
+    if (timer !== undefined) window.clearTimeout(timer);
+  }
 
   const data = await readJson(res, path);
 
@@ -99,11 +130,11 @@ async function blobRequest(path: string): Promise<Blob> {
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>(path),
+  get: <T>(path: string, opts?: RequestOptions) => request<T>(path, {}, opts),
   upload: <T>(path: string, formData: FormData) => uploadRequest<T>(path, formData),
   blob: (path: string) => blobRequest(path),
-  post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'POST', body: body !== undefined ? JSON.stringify(body) : undefined }),
+  post: <T>(path: string, body?: unknown, opts?: RequestOptions) =>
+    request<T>(path, { method: 'POST', body: body !== undefined ? JSON.stringify(body) : undefined }, opts),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PUT', body: body !== undefined ? JSON.stringify(body) : undefined }),
   patch: <T>(path: string, body?: unknown) =>

@@ -25,6 +25,7 @@ import { directoryRouter } from './routes/directory';
 import { remindersRouter } from './routes/reminders';
 import { aiRouter } from './routes/ai';
 import { aiDashboardRouter } from './routes/aiDashboard';
+import { aiStatusRouter } from './routes/aiStatus';
 import { messagesRouter } from './routes/messages';
 import { memoryBookRouter } from './routes/memoryBook';
 import { calendarRouter, icsRouter } from './routes/calendar';
@@ -157,6 +158,9 @@ v1.use('/invitations', invitationsRouter);
 // Pare's dashboard conversation: account-wide, sees a summary of every
 // profile the account can reach, no single profile open.
 v1.use('/ai/dashboard', aiDashboardRouter);
+// Whether Pare is ready or a model on this machine is still downloading.
+// Mounted after /ai/dashboard so that more specific path keeps priority.
+v1.use('/ai', aiStatusRouter);
 v1.use('/care-profiles', careProfilesRouter);
 // Sub-resources verify profile ownership/membership here — the routers
 // themselves only scope queries by the :id param. Viewers are read-only
