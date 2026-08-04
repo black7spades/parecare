@@ -9,8 +9,8 @@ import type { ChatMessage } from '../services/ai';
 import { accessibleProfiles, buildDashboardContext, countAttentionItems, gatherAttentionItems, getDismissedKeys } from '../services/aiDashboardContext';
 import { gatherHealthAlerts } from '../services/healthAlerts';
 import { buildProfileContext } from '../services/aiContext';
-import { extractDashboardActions, splitDashboardActions, executeDashboardActions } from '../services/aiDashboardActions';
-import { executeCrossProfileActions, CLARIFY_MARK } from '../services/aiActions';
+import { extractDashboardActions, collectDashboardActions, splitDashboardActions, executeDashboardActions, type AnyDashboardAction } from '../services/aiDashboardActions';
+import { executeCrossProfileActions, tidyReply, CLARIFY_MARK } from '../services/aiActions';
 import { replyIntendsToAct, repairActionText, dashboardActionReference } from '../services/actionRepair';
 import { getCareAccess } from '../middleware/subscriptionGate';
 import type { AiConversation, CareProfile } from '../types';
@@ -176,7 +176,7 @@ aiDashboardRouter.post(
 
     const messages = conversation.messages as ChatMessage[];
 
-    let result: { reply: string; tokensUsed: number };
+    let result: { reply: string; tokensUsed: number; rawActions?: unknown[] };
     try {
       result = await sendDashboardMessage(req.account!, conversation.id, messages, parsed.data.content, context, profileCount, timeZone);
     } catch (err: unknown) {
@@ -197,18 +197,29 @@ aiDashboardRouter.post(
     // Carry out any actions the assistant proposed. Navigation is passed
     // through for the web app to perform; profile creation happens here;
     // cross-profile logging resolves each named profile and writes to it.
-    const extracted = extractDashboardActions(result.reply);
-    const { cleanedReply } = extracted;
-    let { actions, parseErrors } = extracted;
-    // If the reply meant to record something but emitted no block, ask once
-    // more for just the JSON (weak models often describe the action instead of
-    // emitting it). The open profile's name lets it resolve "log this".
-    if (actions.length === 0 && parseErrors.length === 0 && replyIntendsToAct(result.reply)) {
-      const repaired = await repairActionText(parsed.data.content, dashboardActionReference(openProfileName));
-      if (repaired && repaired.trim().toUpperCase() !== 'NONE') {
-        const re = extractDashboardActions(repaired);
-        actions = re.actions;
-        parseErrors = re.parseErrors;
+    let cleanedReply: string;
+    let actions: AnyDashboardAction[];
+    let parseErrors: string[];
+    if (result.rawActions !== undefined) {
+      // Constrained provider: the actions came back already structured, so
+      // validate them straight and skip the tolerant parsing and repair pass.
+      cleanedReply = tidyReply(result.reply);
+      ({ actions, parseErrors } = collectDashboardActions(result.rawActions));
+    } else {
+      const extracted = extractDashboardActions(result.reply);
+      cleanedReply = extracted.cleanedReply;
+      actions = extracted.actions;
+      parseErrors = extracted.parseErrors;
+      // If the reply meant to record something but emitted no block, ask once
+      // more for just the JSON (weak models often describe the action instead of
+      // emitting it). The open profile's name lets it resolve "log this".
+      if (actions.length === 0 && parseErrors.length === 0 && replyIntendsToAct(result.reply)) {
+        const repaired = await repairActionText(parsed.data.content, dashboardActionReference(openProfileName));
+        if (repaired && repaired.trim().toUpperCase() !== 'NONE') {
+          const re = extractDashboardActions(repaired);
+          actions = re.actions;
+          parseErrors = re.parseErrors;
+        }
       }
     }
     const { single, cross } = splitDashboardActions(actions);

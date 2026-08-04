@@ -7,7 +7,15 @@ import { requireFeature } from '../middleware/subscriptionGate';
 import { sendMessage } from '../services/ai';
 import type { ChatMessage } from '../services/ai';
 import { buildProfileContext } from '../services/aiContext';
-import { extractActions, executeActions, CLARIFY_MARK } from '../services/aiActions';
+import {
+  extractActions,
+  collectActions,
+  tidyReply,
+  actionSchema,
+  executeActions,
+  CLARIFY_MARK,
+  type AssistantAction,
+} from '../services/aiActions';
 import { replyIntendsToAct, repairActionText, PROFILE_ACTION_REFERENCE } from '../services/actionRepair';
 import type { AiConversation, CareProfile } from '../types';
 
@@ -131,7 +139,7 @@ aiRouter.post(
 
     const messages = conversation.messages as ChatMessage[];
 
-    let result: { reply: string; tokensUsed: number };
+    let result: { reply: string; tokensUsed: number; rawActions?: unknown[] };
     try {
       result = await sendMessage(
         req.account!,
@@ -162,18 +170,30 @@ aiRouter.post(
 
     // Carry out any actions the assistant proposed, then show what happened
     // instead of the raw action blocks.
-    const extracted = extractActions(result.reply);
-    const { cleanedReply } = extracted;
-    let { actions, parseErrors } = extracted;
-    // Weak models sometimes describe an action (or fake a confirmation) without
-    // emitting the block. When the reply clearly meant to record something but
-    // produced nothing, ask once more for just the JSON and run that.
-    if (canWrite && actions.length === 0 && parseErrors.length === 0 && replyIntendsToAct(result.reply)) {
-      const repaired = await repairActionText(parsed.data.content, PROFILE_ACTION_REFERENCE);
-      if (repaired && repaired.trim().toUpperCase() !== 'NONE') {
-        const re = extractActions(repaired);
-        actions = re.actions;
-        parseErrors = re.parseErrors;
+    let cleanedReply: string;
+    let actions: AssistantAction[];
+    let parseErrors: string[];
+    if (result.rawActions !== undefined) {
+      // Constrained provider: the actions came back already structured, so
+      // validate them straight and skip both the tolerant text parsing and the
+      // repair pass (which cannot help, and should never fire, on this path).
+      cleanedReply = tidyReply(result.reply);
+      ({ actions, parseErrors } = collectActions(result.rawActions, actionSchema));
+    } else {
+      const extracted = extractActions(result.reply);
+      cleanedReply = extracted.cleanedReply;
+      actions = extracted.actions;
+      parseErrors = extracted.parseErrors;
+      // Weak models sometimes describe an action (or fake a confirmation) without
+      // emitting the block. When the reply clearly meant to record something but
+      // produced nothing, ask once more for just the JSON and run that.
+      if (canWrite && actions.length === 0 && parseErrors.length === 0 && replyIntendsToAct(result.reply)) {
+        const repaired = await repairActionText(parsed.data.content, PROFILE_ACTION_REFERENCE);
+        if (repaired && repaired.trim().toUpperCase() !== 'NONE') {
+          const re = extractActions(repaired);
+          actions = re.actions;
+          parseErrors = re.parseErrors;
+        }
       }
     }
     const outcomes = [...(await executeActions(actions, req.params['id']!, req.account!, access, timeZone)), ...parseErrors];
