@@ -59,10 +59,21 @@ function notConfigured(detail: string): Error {
 
 function pickModel(tier: Tier): string {
   const cfg = getAiConfig();
-  if (tier === 'mediation' && cfg.mediationModel) return cfg.mediationModel;
-  if (cfg.model) return cfg.model;
   const defaults = DEFAULT_MODELS[cfg.provider];
-  if (defaults) return defaults[tier];
+  if (tier === 'mediation') {
+    // The heavy tier prefers an explicit mediation model, then the provider's
+    // best default, and only then the single configured model. Without this
+    // order a configured chat model won over the mediation default, so setting
+    // one model silently collapsed both tiers onto it and the hard jobs quietly
+    // ran on the quick model.
+    if (cfg.mediationModel) return cfg.mediationModel;
+    if (defaults) return defaults.mediation;
+    if (cfg.model) return cfg.model;
+  } else {
+    // The quick tier is the configured model, else the provider's chat default.
+    if (cfg.model) return cfg.model;
+    if (defaults) return defaults.chat;
+  }
   throw notConfigured(`set a model for the '${cfg.provider}' provider (e.g. the model name loaded in Ollama or LM Studio).`);
 }
 
