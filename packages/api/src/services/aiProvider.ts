@@ -18,6 +18,22 @@ export interface ChatTurn {
 export interface CompletionResult {
   text: string;
   tokensUsed: number;
+  /**
+   * The parsed structured object, present only when a schema was supplied and
+   * the provider honoured it. The caller reads its actions straight from here
+   * rather than parsing them back out of the prose.
+   */
+  structured?: unknown;
+}
+
+export interface CompleteOptions {
+  /**
+   * A JSON schema to constrain the reply to ("structured output"). When set,
+   * and the provider supports it, the model cannot emit anything that does not
+   * fit the schema, so an action can never come back malformed. `name` is a
+   * short identifier some providers require for the schema.
+   */
+  schema?: { name: string; schema: Record<string, unknown> };
 }
 
 type Tier = 'chat' | 'mediation';
@@ -64,16 +80,60 @@ export function isAiConfigured(): boolean {
   }
 }
 
-async function completeAnthropic(system: string, turns: ChatTurn[], maxTokens: number, tier: Tier): Promise<CompletionResult> {
+/**
+ * Whether the current provider can be handed a schema and made to obey it.
+ * Anthropic does it through a forced tool; the OpenAI-compatible servers
+ * (including Ollama and LM Studio) do it through the response format. Google's
+ * path is left on today's tolerant text parsing, so it never regresses.
+ */
+export function supportsStructuredOutput(): boolean {
+  return getAiConfig().provider !== 'google';
+}
+
+async function completeAnthropic(
+  system: string,
+  turns: ChatTurn[],
+  maxTokens: number,
+  tier: Tier,
+  opts?: CompleteOptions,
+): Promise<CompletionResult> {
   const cfg = getAiConfig();
   const apiKey = cfg.anthropicApiKey ?? cfg.apiKey;
   if (!apiKey) throw notConfigured('set the Anthropic API key in the settings screen.');
   const client = new Anthropic({ apiKey });
+  const messages = turns.map((t) => ({ role: t.role, content: t.content }));
+
+  // Constrained output on Claude is a forced tool: the schema becomes the
+  // tool's input, and requiring that tool guarantees the reply fits it.
+  if (opts?.schema) {
+    const response = await client.messages.create({
+      model: pickModel(tier),
+      max_tokens: maxTokens,
+      system,
+      messages,
+      tools: [
+        {
+          name: opts.schema.name,
+          description: 'Return your reply to the person and any actions to carry out.',
+          input_schema: opts.schema.schema as Anthropic.Tool.InputSchema,
+        },
+      ],
+      tool_choice: { type: 'tool', name: opts.schema.name },
+    });
+    const toolUse = response.content.find((c) => c.type === 'tool_use');
+    const structured = toolUse && toolUse.type === 'tool_use' ? toolUse.input : undefined;
+    return {
+      text: structured !== undefined ? JSON.stringify(structured) : '',
+      tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
+      structured,
+    };
+  }
+
   const response = await client.messages.create({
     model: pickModel(tier),
     max_tokens: maxTokens,
     system,
-    messages: turns.map((t) => ({ role: t.role, content: t.content })),
+    messages,
   });
   return {
     text: response.content[0]?.type === 'text' ? response.content[0].text : '',
@@ -81,7 +141,13 @@ async function completeAnthropic(system: string, turns: ChatTurn[], maxTokens: n
   };
 }
 
-async function completeOpenAiCompatible(system: string, turns: ChatTurn[], maxTokens: number, tier: Tier): Promise<CompletionResult> {
+async function completeOpenAiCompatible(
+  system: string,
+  turns: ChatTurn[],
+  maxTokens: number,
+  tier: Tier,
+  opts?: CompleteOptions,
+): Promise<CompletionResult> {
   const cfg = getAiConfig();
   if (cfg.provider === 'openai' && !cfg.apiKey) {
     throw notConfigured('set the OpenAI API key in the settings screen.');
@@ -100,6 +166,12 @@ async function completeOpenAiCompatible(system: string, turns: ChatTurn[], maxTo
       model,
       max_tokens: maxTokens,
       messages: [{ role: 'system', content: system }, ...turns],
+      // A JSON schema in response_format makes Ollama and LM Studio mask any
+      // token that would break the schema, and guides OpenAI's own models the
+      // same way. Left off entirely when no schema is asked for.
+      ...(opts?.schema
+        ? { response_format: { type: 'json_schema', json_schema: { name: opts.schema.name, schema: opts.schema.schema, strict: false } } }
+        : {}),
     }),
   });
   if (!res.ok) {
@@ -114,15 +186,32 @@ async function completeOpenAiCompatible(system: string, turns: ChatTurn[], maxTo
     usage?: { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number };
   };
   const text = data.choices?.[0]?.message?.content ?? '';
+  // On the constrained path the content is the JSON object itself; parse it so
+  // the caller reads actions straight from it. A parse failure leaves
+  // structured undefined and the caller falls back to reading the prose.
+  let structured: unknown;
+  if (opts?.schema && text) {
+    try {
+      structured = JSON.parse(text);
+    } catch {
+      structured = undefined;
+    }
+  }
   const reported =
     data.usage?.total_tokens ?? (data.usage?.prompt_tokens ?? 0) + (data.usage?.completion_tokens ?? 0);
   // Some local servers omit usage; estimate so metering stays sane
   const tokensUsed =
     reported || Math.ceil((system.length + turns.reduce((n, t) => n + t.content.length, 0) + text.length) / 4);
-  return { text, tokensUsed };
+  return { text, tokensUsed, structured };
 }
 
-async function completeGoogle(system: string, turns: ChatTurn[], maxTokens: number, tier: Tier): Promise<CompletionResult> {
+async function completeGoogle(
+  system: string,
+  turns: ChatTurn[],
+  maxTokens: number,
+  tier: Tier,
+  _opts?: CompleteOptions,
+): Promise<CompletionResult> {
   const cfg = getAiConfig();
   if (!cfg.apiKey) throw notConfigured('set the Google AI Studio API key in the settings screen.');
   const model = pickModel(tier);
@@ -152,13 +241,19 @@ async function completeGoogle(system: string, turns: ChatTurn[], maxTokens: numb
   return { text, tokensUsed: data.usageMetadata?.totalTokenCount ?? Math.ceil(text.length / 4) };
 }
 
-export async function complete(system: string, turns: ChatTurn[], maxTokens: number, tier: Tier): Promise<CompletionResult> {
+export async function complete(
+  system: string,
+  turns: ChatTurn[],
+  maxTokens: number,
+  tier: Tier,
+  opts?: CompleteOptions,
+): Promise<CompletionResult> {
   switch (getAiConfig().provider) {
     case 'anthropic':
-      return completeAnthropic(system, turns, maxTokens, tier);
+      return completeAnthropic(system, turns, maxTokens, tier, opts);
     case 'google':
-      return completeGoogle(system, turns, maxTokens, tier);
+      return completeGoogle(system, turns, maxTokens, tier, opts);
     default:
-      return completeOpenAiCompatible(system, turns, maxTokens, tier);
+      return completeOpenAiCompatible(system, turns, maxTokens, tier, opts);
   }
 }

@@ -1,10 +1,31 @@
 import { db } from '../config/database';
 import { env } from '../config/env';
 import { getAiConfig } from '../config/settings';
-import { complete, isAiConfigured } from './aiProvider';
+import { complete, isAiConfigured, supportsStructuredOutput } from './aiProvider';
+import { ACTION_RESPONSE_JSON_SCHEMA } from './aiActions';
+import { DASHBOARD_RESPONSE_JSON_SCHEMA } from './aiDashboardActions';
 import { toneGuidance, TONE_CALIBRATION } from './aiTone';
 import { isValidTimeZone, nowInZone, dateInZone } from '../lib/timezone';
 import type { Account, CareProfile, CareCircleMember } from '../types';
+
+/**
+ * The output contract for a provider that can be constrained to a schema. It
+ * replaces the fenced-block format described further down in each prompt with
+ * the { reply, actions } envelope the schema enforces, so the same action
+ * descriptions below serve as a reference for what goes into the array. Placed
+ * first so a small local model reads it before anything else.
+ */
+const CONSTRAINED_PREAMBLE = `## How to reply (read this first)
+
+Reply with a single JSON object with exactly two fields:
+- "reply": your short spoken message to the person, in plain language.
+- "actions": an array of the actions to carry out, or an empty array when there is nothing to record.
+
+This is the only format for your reply. Further down you are told to put actions inside \`\`\`parecare-action\`\`\` code blocks. In this mode you never use code blocks or fences for actions. Instead take each action object those instructions describe, with the same fields and the same rules for when to choose it, and put it straight into the "actions" array. Telling the person in "reply" that something is done does not record it; only an entry in "actions" does.
+
+Leave "actions" empty for a question, a greeting, or anything that is not a change to record. A \`\`\`parecare-suggest-add\`\`\` block, when a provider or contact is missing, still goes inside the "reply" text exactly as described, since it is shown to the person rather than carried out.
+
+`;
 
 function ensureConfigured(): void {
   if (!isAiConfigured()) {
@@ -123,7 +144,8 @@ function buildSystemPrompt(
   member: CareCircleMember | undefined,
   contextBlock: string,
   canWrite: boolean,
-  timeZone: string | null | undefined
+  timeZone: string | null | undefined,
+  constrained: boolean
 ): string {
   const firstName = firstNameOf(profile);
   const dates = promptDates(timeZone);
@@ -313,7 +335,7 @@ The user has view-only access, so you cannot record anything for them. If they a
     ? `${member.role} in ${firstName}'s care circle${member.relationship ? ` (${firstName} is their ${member.relationship})` : ''}`
     : `the owner of ${firstName}'s care profile`;
 
-  return `You are Pare. You are the care assistant inside PareCare. You are currently looking at ${firstName}'s full record, so you can answer detailed questions about their care, medications, history and plans.
+  return `${constrained ? CONSTRAINED_PREAMBLE : ''}You are Pare. You are the care assistant inside PareCare. You are currently looking at ${firstName}'s full record, so you can answer detailed questions about their care, medications, history and plans.
 
 You can also take actions: log a care event, record a medication administration, add or tick off a task, book or move an appointment, record a cost, and record a treatment reading. When you do, you will confirm what you did in plain language.
 
@@ -352,21 +374,51 @@ export async function sendMessage(
   contextBlock: string,
   canWrite: boolean,
   timeZone?: string | null
-): Promise<{ reply: string; tokensUsed: number }> {
+): Promise<{ reply: string; tokensUsed: number; rawActions?: unknown[] }> {
   ensureConfigured();
   await checkTokenBudget(account);
 
-  const systemPrompt = buildSystemPrompt(account, profile, member, contextBlock, canWrite, timeZone);
+  // Constrain the output only when there are actions to constrain (a writer)
+  // and the provider can honour a schema. A viewer's reply is prose only, so
+  // it takes the plain text path unchanged.
+  const constrained = canWrite && supportsStructuredOutput();
+  const systemPrompt = buildSystemPrompt(account, profile, member, contextBlock, canWrite, timeZone, constrained);
   const turns = [
     ...messages.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user' as const, content: newUserMessage },
   ];
 
-  const { text: reply, tokensUsed } = await complete(systemPrompt, turns, 4096, 'chat');
+  const { text, tokensUsed, structured } = await complete(
+    systemPrompt,
+    turns,
+    4096,
+    'chat',
+    constrained ? { schema: { name: 'parecare_reply', schema: ACTION_RESPONSE_JSON_SCHEMA } } : undefined
+  );
 
   await recordTokenUsage(account.id, conversationId, tokensUsed);
 
-  return { reply, tokensUsed };
+  return unpackReply(text, structured, tokensUsed);
+}
+
+/**
+ * Turn a completion into a reply and, on the constrained path, the raw action
+ * list. When a schema was honoured the structured object carries "reply" and
+ * "actions" separately; when it was not (or came back unreadable) the caller
+ * falls back to parsing actions out of the prose, so nothing regresses.
+ */
+function unpackReply(
+  text: string,
+  structured: unknown,
+  tokensUsed: number
+): { reply: string; tokensUsed: number; rawActions?: unknown[] } {
+  if (structured && typeof structured === 'object') {
+    const env = structured as { reply?: unknown; actions?: unknown };
+    const reply = typeof env.reply === 'string' ? env.reply : text;
+    const rawActions = Array.isArray(env.actions) ? env.actions : [];
+    return { reply, tokensUsed, rawActions };
+  }
+  return { reply: text, tokensUsed };
 }
 
 function dashboardActionInstructions(dates: ReturnType<typeof promptDates>): string {
@@ -622,7 +674,8 @@ function buildDashboardSystemPrompt(
   account: Account,
   dashboardContext: string,
   profileCount: number,
-  timeZone: string | null | undefined
+  timeZone: string | null | undefined,
+  constrained: boolean
 ): string {
   const dates = promptDates(timeZone);
   const coldStart =
@@ -640,7 +693,7 @@ After creating the first profile, ask if there is anyone else, or offer to open 
 Keep it conversational. Keep it calm. This person may be in crisis (an ageing parent just fell) or may be planning ahead (a baby on the way). You do not know which. Match their energy, do not impose yours.`
       : '';
 
-  return `You are Pare. You are the care assistant inside PareCare, and you are the reason this app works. Think of yourself as an au pair: you live with this family, you know everyone's schedule and needs, and you are always ready to help. You are not a feature bolted onto the side of an app. You are the app's way of meeting people where they are.
+  return `${constrained ? CONSTRAINED_PREAMBLE : ''}You are Pare. You are the care assistant inside PareCare, and you are the reason this app works. Think of yourself as an au pair: you live with this family, you know everyone's schedule and needs, and you are always ready to help. You are not a feature bolted onto the side of an app. You are the app's way of meeting people where they are.
 
 You are speaking to ${account.display_name} on their Homeboard (the home screen listing everyone in their care), where you can see a summary of everyone in their care. Call this screen the Homeboard, never the dashboard. Current date and time where the user is: ${dates.nowLine}. Write every time you emit in an action as the user's own local wall-clock time with no time zone suffix (for example "${dates.today}T11:00:00"); the app converts it to the correct instant using their zone. Never convert times to UTC yourself.
 
@@ -673,21 +726,28 @@ export async function sendDashboardMessage(
   dashboardContext: string,
   profileCount: number,
   timeZone?: string | null
-): Promise<{ reply: string; tokensUsed: number }> {
+): Promise<{ reply: string; tokensUsed: number; rawActions?: unknown[] }> {
   ensureConfigured();
   await checkTokenBudget(account);
 
-  const systemPrompt = buildDashboardSystemPrompt(account, dashboardContext, profileCount, timeZone);
+  const constrained = supportsStructuredOutput();
+  const systemPrompt = buildDashboardSystemPrompt(account, dashboardContext, profileCount, timeZone, constrained);
   const turns = [
     ...messages.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user' as const, content: newUserMessage },
   ];
 
-  const { text: reply, tokensUsed } = await complete(systemPrompt, turns, 4096, 'chat');
+  const { text, tokensUsed, structured } = await complete(
+    systemPrompt,
+    turns,
+    4096,
+    'chat',
+    constrained ? { schema: { name: 'parecare_reply', schema: DASHBOARD_RESPONSE_JSON_SCHEMA } } : undefined
+  );
 
   await recordTokenUsage(account.id, conversationId, tokensUsed);
 
-  return { reply, tokensUsed };
+  return unpackReply(text, structured, tokensUsed);
 }
 
 export interface MediationInput {

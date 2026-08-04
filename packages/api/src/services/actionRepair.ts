@@ -1,4 +1,5 @@
 import { complete, isAiConfigured } from './aiProvider';
+import { getAiConfig } from '../config/settings';
 
 /**
  * A safety net for weak models. Some models, especially small local ones,
@@ -77,6 +78,13 @@ export async function repairActionText(
   // (used in tests) always runs.
   if (!opts.completion && !isAiConfigured()) return '';
   const completion = opts.completion ?? complete;
+  // This second call is the fallback for models that describe an action in
+  // prose but never emit it. Constrained providers cannot do that, so this
+  // should never fire for them; logging every time it does lets us confirm
+  // that before removing the safety net in a later change.
+  if (!opts.completion) {
+    console.warn(`[actionRepair] second-pass action repair fired for provider="${getAiConfig().provider}"`);
+  }
   const system = [
     'You convert one care instruction into the exact JSON action block that carries it out, and nothing else.',
     'Reply with a single fenced block in exactly this form:',

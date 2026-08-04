@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import { db } from '../config/database';
 import type { Account, CareAccess, CareCircleMember, CareProfile } from '../types';
 import { parseZonedTime, formatInZone, dateInZone } from '../lib/timezone';
@@ -532,6 +533,40 @@ export const actionSchema = z.discriminatedUnion('type', [
 export type AssistantAction = z.infer<typeof actionSchema>;
 
 /**
+ * A plain JSON schema for constrained ("structured output") decoding. Given a
+ * Zod schema, produce the JSON schema a provider can enforce so the model
+ * cannot emit malformed output. Internal references are inlined because some
+ * local grammar builders do not follow "$ref", and the "$schema" key is
+ * dropped because some providers reject unknown top-level keys.
+ */
+export function toJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
+  // The schema is widened at this boundary: zod-to-json-schema's generic
+  // overloads instantiate excessively deep on a union this large, and the
+  // runtime call does not need the precise type.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const json = zodToJsonSchema(schema as any, { $refStrategy: 'none' }) as Record<string, unknown>;
+  delete json['$schema'];
+  return json;
+}
+
+/**
+ * The constrained-output envelope: the assistant's spoken reply plus the
+ * actions it wants carried out, as one object. When a provider supports
+ * structured output (see aiProvider.supportsStructuredOutput), this is the
+ * shape the model is forced to fill, so an action can never come back
+ * malformed: the prose lands in "reply" and every action, already well
+ * formed, lands in "actions". The tolerant text parsing below stays as a
+ * fallback for providers that cannot be constrained.
+ */
+export const actionResponseSchema = z.object({
+  reply: z.string(),
+  actions: z.array(actionSchema),
+});
+export type ActionResponse = z.infer<typeof actionResponseSchema>;
+
+export const ACTION_RESPONSE_JSON_SCHEMA = toJsonSchema(actionResponseSchema);
+
+/**
  * Actions the dashboard assistant can take across more than one care
  * profile at once. Each entry names its target profile, so one sentence
  * ("we took both cats to the vet") can land on every relevant record.
@@ -726,6 +761,19 @@ function takeCandidate<T>(
 }
 
 /**
+ * Tidy a spoken reply for display: drop any confirmation tick the model
+ * invented (the app writes the real ones itself, after an action runs) and
+ * collapse runaway blank lines. Shared by the tolerant text parser and the
+ * constrained-output path, so both show the same clean prose.
+ */
+export function tidyReply(text: string): string {
+  return text
+    .replace(/^[ \t]*[✔✓☑].*(?:\n|$)/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
  * Pull every action the assistant proposed out of a reply and validate it
  * against the given schema. Shared by the profile-level assistant and the
  * dashboard assistant, which understand different action sets.
@@ -806,13 +854,29 @@ export function extractActionBlocks<T>(reply: string, schema: z.ZodType<T, z.Zod
   // A model sometimes fakes the app's own confirmation lines ("✔ Logged ...")
   // in its prose. Those are never the model's to write, and the real ones are
   // appended by the route after execution, so drop any the model invented.
-  cleanedReply = cleanedReply.replace(/^[ \t]*[✔✓☑].*(?:\n|$)/gm, '');
-  cleanedReply = cleanedReply.replace(/\n{3,}/g, '\n\n').trim();
+  cleanedReply = tidyReply(cleanedReply);
   return { cleanedReply, actions, parseErrors };
 }
 
 export function extractActions(reply: string): ExtractedActions {
   return extractActionBlocks(reply, actionSchema);
+}
+
+/**
+ * Validate a list of already-structured action objects, as a provider's
+ * constrained output hands them back, against the schema. Collects each valid
+ * action and a plain-language message for any that does not fit, exactly as
+ * the text parser does, so one bad action never sinks the rest. This is the
+ * constrained-output counterpart to extractActionBlocks.
+ */
+export function collectActions<T>(
+  raw: unknown[],
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+): { actions: T[]; parseErrors: string[] } {
+  const actions: T[] = [];
+  const parseErrors: string[] = [];
+  for (const item of raw) takeCandidate(item, schema, actions, parseErrors);
+  return { actions, parseErrors };
 }
 
 /**

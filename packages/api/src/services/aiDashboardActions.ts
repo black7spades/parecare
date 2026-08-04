@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { accountHasRight } from '../middleware/accountRights';
 import { getEffectiveTier, PLAN_LIMITS, getCareAccess } from '../middleware/subscriptionGate';
-import { extractActionBlocks, crossProfileActionSchema, resolveProfileByName, type CrossProfileAction, type ExtractedActions } from './aiActions';
+import { extractActionBlocks, collectActions, crossProfileActionSchema, resolveProfileByName, toJsonSchema, type CrossProfileAction, type ExtractedActions } from './aiActions';
 import type { Account, CareProfile } from '../types';
 
 /**
@@ -66,6 +66,21 @@ export type DashboardAction = z.infer<typeof dashboardActionSchema>;
 const anyDashboardActionSchema = z.union([dashboardActionSchema, crossProfileActionSchema]);
 export type AnyDashboardAction = DashboardAction | CrossProfileAction;
 
+/**
+ * The constrained-output envelope for the dashboard assistant: the spoken
+ * reply plus the actions it wants carried out. Mirrors the profile assistant's
+ * actionResponseSchema, but over the dashboard's own action set. Used to
+ * constrain providers that support structured output so an action can never
+ * come back malformed.
+ */
+export const dashboardResponseSchema = z.object({
+  reply: z.string(),
+  actions: z.array(anyDashboardActionSchema),
+});
+export type DashboardResponse = z.infer<typeof dashboardResponseSchema>;
+
+export const DASHBOARD_RESPONSE_JSON_SCHEMA = toJsonSchema(dashboardResponseSchema);
+
 /** Actions the web app carries out after the reply arrives. */
 export interface ClientAction {
   action: 'navigate_to_profile' | 'profile_created';
@@ -89,6 +104,15 @@ export interface TaskConfirmation {
 
 export function extractDashboardActions(reply: string): ExtractedActions<AnyDashboardAction> {
   return extractActionBlocks(reply, anyDashboardActionSchema);
+}
+
+/**
+ * Validate a constrained provider's already-structured dashboard actions,
+ * collecting each valid one and a message for any that does not fit. The
+ * constrained-output counterpart to extractDashboardActions.
+ */
+export function collectDashboardActions(raw: unknown[]): { actions: AnyDashboardAction[]; parseErrors: string[] } {
+  return collectActions(raw, anyDashboardActionSchema);
 }
 
 /** Split a mixed batch into dashboard actions and cross-profile actions. */
