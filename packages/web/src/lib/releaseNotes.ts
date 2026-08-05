@@ -20,6 +20,19 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.14.0',
+    date: '2026-08-05',
+    summary: 'See and change the assistant on your machine from System settings.',
+    groups: [
+      {
+        heading: 'Added',
+        items: [
+          'The person running PareCare can now see which on-machine model is in use and what it is called in System settings, switch to another that is already downloaded, or fetch a new one by name or a Hugging Face link, without editing any files.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.13.0',
     date: '2026-08-04',
     summary: 'Pare now runs on your own machine, privately, with nothing to set up.',
