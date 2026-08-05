@@ -120,7 +120,8 @@ documentIngestRouter.post('/', requireAuth, upload.single('file'), async (req, r
     : [];
   const knownAddresses = knownRows.map((r) => (r as { formatted: string | null }).formatted).filter((v): v is string => !!v);
   const system = buildIngestPrompt(personName, today, knownAddresses);
-  const result = await complete(system, [{ role: 'user', content: text.slice(0, 12000) }], 1500, 'chat');
+  // Reading a whole document is a heavy, rare job worth the best model available.
+  const result = await complete(system, [{ role: 'user', content: text.slice(0, 12000) }], 1500, 'mediation');
   const actions = parseProposedActions(result.text);
   // The summary is the model's prose with any fenced blocks removed.
   const summary = result.text.replace(/```[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim();

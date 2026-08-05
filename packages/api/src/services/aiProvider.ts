@@ -59,10 +59,21 @@ function notConfigured(detail: string): Error {
 
 function pickModel(tier: Tier): string {
   const cfg = getAiConfig();
-  if (tier === 'mediation' && cfg.mediationModel) return cfg.mediationModel;
-  if (cfg.model) return cfg.model;
   const defaults = DEFAULT_MODELS[cfg.provider];
-  if (defaults) return defaults[tier];
+  if (tier === 'mediation') {
+    // The heavy tier prefers an explicit mediation model, then the provider's
+    // best default, and only then the single configured model. Without this
+    // order a configured chat model won over the mediation default, so setting
+    // one model silently collapsed both tiers onto it and the hard jobs quietly
+    // ran on the quick model.
+    if (cfg.mediationModel) return cfg.mediationModel;
+    if (defaults) return defaults.mediation;
+    if (cfg.model) return cfg.model;
+  } else {
+    // The quick tier is the configured model, else the provider's chat default.
+    if (cfg.model) return cfg.model;
+    if (defaults) return defaults.chat;
+  }
   throw notConfigured(`set a model for the '${cfg.provider}' provider (e.g. the model name loaded in Ollama or LM Studio).`);
 }
 
@@ -88,6 +99,41 @@ export function isAiConfigured(): boolean {
  */
 export function supportsStructuredOutput(): boolean {
   return getAiConfig().provider !== 'google';
+}
+
+/** Whether Pare runs on this machine (a local server) rather than in the cloud. */
+export function isLocalProvider(): boolean {
+  const p = getAiConfig().provider;
+  return p === 'ollama' || p === 'lmstudio' || p === 'openai-compatible';
+}
+
+/**
+ * Whether the assistant is ready to answer, for the warming state. A cloud
+ * provider is ready as soon as it is configured. The bundled on-machine
+ * assistant is asked directly whether its model has finished downloading:
+ * present means ready, absent or still starting means preparing.
+ */
+export async function localModelState(): Promise<'ready' | 'preparing' | 'unavailable'> {
+  const cfg = getAiConfig();
+  if (cfg.provider !== 'ollama') {
+    return isAiConfigured() ? 'ready' : 'unavailable';
+  }
+  const base = (cfg.baseUrl ?? DEFAULT_BASE_URLS['ollama'] ?? '').replace(/\/$/, '');
+  const root = base.replace(/\/v1$/, '');
+  const want = cfg.model ?? 'parecare';
+  try {
+    const res = await fetch(`${root}/api/tags`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return 'preparing';
+    const data = (await res.json()) as { models?: Array<{ name?: string }> };
+    const names = (data.models ?? []).map((m) => m.name ?? '');
+    const present = names.some(
+      (n) => n === want || n === `${want}:latest` || n.split(':')[0] === want.split(':')[0],
+    );
+    return present ? 'ready' : 'preparing';
+  } catch {
+    // Unreachable usually means the service is still starting on first run.
+    return 'preparing';
+  }
 }
 
 async function completeAnthropic(
@@ -176,6 +222,15 @@ async function completeOpenAiCompatible(
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
+    // On a local server, a missing model is the download not being finished
+    // yet, not a real fault. Give it a code the app can turn into "Pare is
+    // still getting ready" instead of a raw provider error.
+    if (isLocalProvider() && (res.status === 404 || /not found|no such model|try pulling|do not have/i.test(body))) {
+      throw Object.assign(new Error('The assistant on this machine is still getting ready.'), {
+        status: 503,
+        code: 'AI_MODEL_PREPARING',
+      });
+    }
     throw Object.assign(new Error(`AI provider returned ${res.status}: ${body.slice(0, 200)}`), {
       status: 502,
       code: 'AI_PROVIDER_ERROR',

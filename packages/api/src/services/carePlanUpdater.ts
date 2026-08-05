@@ -765,7 +765,8 @@ async function synthesizeNarrative(profileId: string): Promise<Record<NarrativeS
         '"risks":[{"risk":"...","level":"high|medium|low","source":"...","watch_for":"..."}],' +
         '"review_triggers":[{"trigger":"...","action":"..."}]}\n' +
         toneGuidance(profile ?? { kind: 'person', contact_kind: null, owner_relationship: null }, planName);
-      const result = await complete(system, [{ role: 'user', content: JSON.stringify(src) }], 4096, 'chat');
+      // Writing the care plan narrative is a heavy, rare job worth the best model.
+      const result = await complete(system, [{ role: 'user', content: JSON.stringify(src) }], 4096, 'mediation');
       const jsonMatch = result.text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = narrativeSchema.safeParse(JSON.parse(jsonMatch[0]));
@@ -893,7 +894,8 @@ async function proposeDelta(
         current_entries: Object.fromEntries(sections.map((s) => [s, current.sections[s] ?? []])),
         database_entries: Object.fromEntries(sections.map((s) => [s, truth[s] ?? []])),
       });
-      const result = await complete(system, [{ role: 'user', content: user }], 4096, 'chat');
+      // Bringing the versioned care plan up to date is care plan work, not chat.
+      const result = await complete(system, [{ role: 'user', content: user }], 4096, 'mediation');
       const jsonMatch = result.text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = deltaSchema.safeParse(JSON.parse(jsonMatch[0]));

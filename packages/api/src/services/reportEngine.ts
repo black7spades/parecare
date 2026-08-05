@@ -109,11 +109,13 @@ async function generateNarrative(sections: ReportSectionResult[], customPrompt?:
     customPrompt ? `\nAdditional instructions from the report creator: ${customPrompt}` : '',
   ].filter(Boolean).join('\n');
 
+  // A handover narrative for medical staff or auditors is a rare, quality
+  // critical job, so it runs on the best model available rather than the quick one.
   const result = await complete(
     systemPrompt,
     [{ role: 'user', content: `Here is the report data:\n\n${dataContext}\n\nPlease write the narrative summary.` }],
     4096,
-    'chat'
+    'mediation'
   );
 
   return result.text;

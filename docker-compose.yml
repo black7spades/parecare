@@ -23,6 +23,56 @@ services:
     volumes:
       - redis_data:/data
 
+  # Pare's assistant, running on this machine. Its model lives on its own named
+  # volume so it survives a redeploy and is only downloaded once. A graphics
+  # card is used automatically when the host exposes one (install the NVIDIA
+  # container toolkit and add a device reservation); otherwise it runs on the
+  # processor, slower but private. Nothing here leaves the machine.
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+
+  # A one-shot that runs at first start, picks the local model that suits this
+  # machine, downloads it, and gives it the stable name "parecare" so the api
+  # can talk to one name whichever was chosen. It then exits. When a cloud
+  # assistant is configured instead, it downloads nothing and exits at once.
+  ollama-pull:
+    image: ollama/ollama:latest
+    restart: "no"
+    depends_on:
+      ollama:
+        condition: service_started
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      AI_PROVIDER: ${AI_PROVIDER:-ollama}
+      # The two model tags live here and nowhere else, so correcting one is a
+      # one-line change. A graphics card gets the larger model; anything else
+      # gets the smaller one, which still reads text and images.
+      AI_MODEL_GPU: ${AI_MODEL_GPU:-gemma4:12b-it-q4_K_M}
+      AI_MODEL_CPU: ${AI_MODEL_CPU:-gemma4:e4b-it-q4_K_M}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        if [ "$$AI_PROVIDER" != "ollama" ]; then
+          echo "A cloud assistant is configured, so no local model is needed."
+          exit 0
+        fi
+        echo "Waiting for the on-machine assistant to start..."
+        until ollama list >/dev/null 2>&1; do sleep 2; done
+        if nvidia-smi -L >/dev/null 2>&1; then
+          MODEL="$$AI_MODEL_GPU"
+          echo "A graphics card was found. Setting up the larger assistant: $$MODEL"
+        else
+          MODEL="$$AI_MODEL_CPU"
+          echo "No graphics card found. Setting up the smaller assistant: $$MODEL"
+        fi
+        ollama pull "$$MODEL"
+        ollama cp "$$MODEL" parecare
+        echo "Pare is ready on this machine."
+
   api:
     build: ./packages/api
     restart: unless-stopped
@@ -30,6 +80,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_started
+      ollama:
         condition: service_started
     environment:
       NODE_ENV: production
@@ -43,10 +95,15 @@ services:
       FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET:-}
       APP_URL: ${APP_URL:-http://localhost}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      AI_PROVIDER: ${AI_PROVIDER:-anthropic}
+      # By default Pare runs on this machine through the bundled ollama service,
+      # so nothing leaves here and no key is needed. Set AI_PROVIDER=anthropic
+      # with a key to use Claude instead (faster, but records are sent away).
+      AI_PROVIDER: ${AI_PROVIDER:-ollama}
       AI_API_KEY: ${AI_API_KEY:-}
-      AI_BASE_URL: ${AI_BASE_URL:-}
-      AI_MODEL: ${AI_MODEL:-}
+      AI_BASE_URL: ${AI_BASE_URL:-http://ollama:11434/v1}
+      # "parecare" is the stable name the puller gives whichever local model it
+      # chose for this machine, so the app talks to one name either way.
+      AI_MODEL: ${AI_MODEL:-parecare}
       AI_MEDIATION_MODEL: ${AI_MEDIATION_MODEL:-}
       STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
       STORAGE_LOCAL_PATH: /app/uploads
@@ -107,3 +164,4 @@ volumes:
   redis_data:
   uploads_data:
   backups_data:
+  ollama_data:

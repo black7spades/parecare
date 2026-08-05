@@ -11,6 +11,7 @@ import { Input } from '../../components/ui/Input';
 import { Avatar } from '../../components/ui/Avatar';
 import { POA_TYPES, conditionStatusLabel } from '../../lib/care';
 import { AttentionPanel } from '../../components/AttentionPanel';
+import { useAiStatus, AI_WARMING_MESSAGE } from '../../lib/aiStatus';
 import { BulkLinkProviderPicker, BulkLinkAddressPicker, BulkLinkOwnerPicker, BulkLinkCarerPicker } from './homeboard/BulkLinkPickers';
 
 interface SummaryJourney {
@@ -114,6 +115,11 @@ export function Dashboard() {
     queryFn: () => api.get<{ profiles: ProfileSummary[] }>('/care-profiles/summary'),
   });
   const profiles = data?.profiles ?? [];
+
+  // A model on this machine may still be downloading on first run; say so
+  // plainly here rather than leaving Pare looking broken.
+  const { data: aiStatus } = useAiStatus();
+  const preparing = aiStatus?.state === 'preparing';
 
   const pinMutation = useMutation({
     mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
@@ -226,6 +232,12 @@ export function Dashboard() {
           </Link>
         ) : null}
       </div>
+
+      {preparing ? (
+        <div className="rounded-lg border border-border bg-surface-2 px-4 py-3 text-sm text-muted" role="status">
+          {AI_WARMING_MESSAGE}
+        </div>
+      ) : null}
 
       {isLoading ? (
         <p className="text-sm text-muted">Loading…</p>
