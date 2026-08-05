@@ -725,8 +725,14 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
           onBlur={() => setTyping(false)}
           rows={2}
           className="flex-1 resize-none rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          // enterKeyHint asks the phone keyboard to show a Send key.
+          enterKeyHint="send"
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
+            // Do not treat Enter as "send" while the keyboard is still
+            // composing. Voice typing and predictive text on Android finalise a
+            // word through composition and fire an Enter mid-way; stealing it
+            // here dropped the dictated text and sent a half-finished message.
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               send();
             }

@@ -20,6 +20,31 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.15.0',
+    date: '2026-08-05',
+    summary: 'Bigger text when you need it, a match for your device comfort settings, and voice typing to Pare works again.',
+    groups: [
+      {
+        heading: 'Added',
+        items: [
+          'Make the text bigger. A text size control sits next to the light and dark switch in the sidebar, with three steps starting from the size your device already uses, so PareCare can be larger than the rest of your phone when you need it.',
+        ],
+      },
+      {
+        heading: 'Changed',
+        items: [
+          'PareCare now follows the comfort settings on your device. When it asks for less motion, movement stops. When it asks for more contrast, edges and quiet text firm up. Nothing to turn on.',
+        ],
+      },
+      {
+        heading: 'Fixed',
+        items: [
+          'Voice typing works again when talking to Pare and writing messages. Dictating a note no longer cuts off part way through or sends before you have finished, so the words you speak are the words that are saved.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.14.0',
     date: '2026-08-05',
     summary: 'See and change the assistant on your machine from System settings.',

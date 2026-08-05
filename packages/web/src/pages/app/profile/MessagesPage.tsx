@@ -163,8 +163,11 @@ export function MessagesPage() {
             value={draft}
             onChange={(e) => { setDraft(e.target.value); if (toneBlock) setToneBlock(null); }}
             rows={2}
+            enterKeyHint="send"
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              // Ignore Enter while the keyboard is composing, so voice typing
+              // and predictive text are not cut off mid-word.
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 send();
               }

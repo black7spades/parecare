@@ -6,6 +6,7 @@ import { useSubscriptionStore } from '../../stores/subscription';
 import { UpgradePrompt } from '../UpgradePrompt';
 import { AssistantWidget } from '../assistant/AssistantWidget';
 import { ThemeToggle } from '../ThemeToggle';
+import { TextSizeToggle } from '../TextSizeToggle';
 import { NotificationsBell } from './NotificationsBell';
 import { AvatarMenu } from './AvatarMenu';
 import { Clock } from './Clock';
@@ -482,8 +483,11 @@ function SidebarFooter() {
   const navigate = useNavigate();
   return (
     <div className="pt-4 mt-4 border-t border-border px-3 space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <ThemeToggle />
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
+          <TextSizeToggle />
+        </div>
         <button
           type="button"
           onClick={() => { clearAuth(); navigate('/login'); }}

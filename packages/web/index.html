@@ -5,12 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PareCare</title>
     <script>
-      // Apply the saved theme before the app loads to avoid a light flash
+      // Apply the saved theme and text size before the app loads, so neither
+      // flashes the wrong value on the first paint.
       (function () {
         try {
           var t = localStorage.getItem('parecare-theme');
           var dark = t === 'dark' || (t !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
           if (dark) document.documentElement.classList.add('dark');
+          var size = localStorage.getItem('parecare-text-size');
+          if (size === 'large' || size === 'larger') document.documentElement.setAttribute('data-text-size', size);
         } catch (e) {}
       })();
     </script>

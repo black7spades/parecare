@@ -5,6 +5,26 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.15.0] - 2026-08-05
+
+### Added
+
+- **Make the text bigger.** A text size control sits next to the light and dark
+  switch in the sidebar. Three steps, starting from the size your device already
+  uses, so PareCare can be larger than the rest of your phone when you need it.
+
+### Changed
+
+- **PareCare now follows the comfort settings on your device.** When your device
+  asks for less motion, movement stops. When it asks for more contrast, edges and
+  quiet text firm up. Nothing to turn on; it matches what you have already set.
+
+### Fixed
+
+- **Voice typing works again when talking to Pare and writing messages.**
+  Dictating a note no longer cuts off part way through or sends before you have
+  finished, so the words you speak are the words that are saved.
+
 ## [0.14.0] - 2026-08-05
 
 ### Added
