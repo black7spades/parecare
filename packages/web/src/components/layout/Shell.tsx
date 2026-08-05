@@ -7,8 +7,6 @@ import { UpgradePrompt } from '../UpgradePrompt';
 import { AssistantWidget } from '../assistant/AssistantWidget';
 import { ProfileSwitcher } from './ProfileSwitcher';
 import { useAssistantStore } from '../../stores/assistant';
-import { ThemeToggle } from '../ThemeToggle';
-import { TextSizeToggle } from '../TextSizeToggle';
 import { NotificationsBell } from './NotificationsBell';
 import { AvatarMenu } from './AvatarMenu';
 import { Clock } from './Clock';
@@ -21,7 +19,7 @@ import { SortableNavGroup, type NavItemDef } from './SortableNavGroup';
 import { navHeadingClass, navLinkClass } from './navStyles';
 import { VersionBadge } from './VersionBadge';
 import { RouteFallback } from './RouteFallback';
-import { AssetIcon, CheckIcon, ChartIcon, MapPinIcon, PawIcon, SignOutIcon, StethoscopeIcon, StoreIcon, UsersIcon } from '../ui/icons';
+import { AssetIcon, CheckIcon, ChartIcon, MapPinIcon, PawIcon, StethoscopeIcon, StoreIcon, UsersIcon } from '../ui/icons';
 
 interface PinnedProfile {
   id: string;
@@ -514,25 +512,11 @@ function PinnedProfilesNav({ pinned }: { pinned: PinnedProfile[] }) {
  * menu) so the two account-wide controls sit together.
  */
 function SidebarFooter() {
-  const clearAuth = useAuthStore((s) => s.clearAuth);
-  const navigate = useNavigate();
+  // Just the version. The theme and text size controls and Sign out have moved
+  // to the account menu under the profile picture, and What's new is a quiet
+  // notification on the version rather than a permanent link.
   return (
-    <div className="pt-4 mt-4 border-t border-border px-3 space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <div className="flex items-center gap-3">
-          <ThemeToggle />
-          <TextSizeToggle />
-        </div>
-        <button
-          type="button"
-          onClick={() => { clearAuth(); navigate('/login'); }}
-          className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-ink transition-colors"
-          title="Sign out of PareCare"
-        >
-          <SignOutIcon size={13} />
-          Sign out
-        </button>
-      </div>
+    <div className="pt-4 mt-4 border-t border-border px-3">
       <VersionBadge />
     </div>
   );
