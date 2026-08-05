@@ -20,8 +20,9 @@ import type { CardDefinition } from './types';
 export const PROFILE_CARDS: CardDefinition[] = [
   { key: 'profile', label: 'Contact details', Component: ProfileContactCard },
   { key: 'conditions', label: 'Conditions', Component: ConditionsCard },
-  { key: 'neurotypes', label: 'Neurotypes', Component: NeurotypesCard },
-  { key: 'substance-use', label: 'Substance use', Component: SubstanceUseCard },
+  // A pet has no neurotypes or substance use; only people do.
+  { key: 'neurotypes', label: 'Neurotypes', Component: NeurotypesCard, shows: (ctx) => ctx.profile.kind !== 'pet' },
+  { key: 'substance-use', label: 'Substance use', Component: SubstanceUseCard, shows: (ctx) => ctx.profile.kind !== 'pet' },
   {
     key: 'poa',
     label: 'Power of attorney',

@@ -87,6 +87,10 @@ export interface CareProfile {
   last_name: string | null;
   suffix: string | null;
   date_of_birth: string | Date | null;
+  /** An expected arrival's due date, before a birth date is known. */
+  due_date: string | Date | null;
+  /** Set when a death has been recorded; care has ended. */
+  died_on: string | Date | null;
   current_phase: CarePhase;
   preferred_name: string | null;
   pronouns: string | null;

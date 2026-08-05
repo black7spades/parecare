@@ -5,6 +5,19 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.17.0] - 2026-08-05
+
+### Changed
+
+- **Each person is shown only the sections that fit them.** A pet no longer has
+  Neurotypes or Substance use in its sidebar or on its overview, and an expected
+  arrival or an infant is not offered Substance use. PareCare works this out from
+  who the person is, with nothing to turn off.
+- **The command bar has been taken out.** The keyboard jump-to-anything bar added
+  recently overlapped the person switcher and the assistant without clearly
+  helping, so it is gone. The person switcher at the top of the screen and Pare's
+  own button cover the same ground more simply.
+
 ## [0.16.0] - 2026-08-05
 
 ### Added
