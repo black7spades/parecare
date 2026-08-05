@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
-import { settingsApi, type SettingField, type SettingGroup, type SettingsResponse } from '../../api/settings';
+import { settingsApi, type SettingField, type SettingGroup, type SettingsResponse, type AiModelInfo, type InstalledModel } from '../../api/settings';
 
 const GROUP_TITLES: Record<string, { title: string; blurb: string }> = {
   ai: { title: 'AI assistant', blurb: 'Provider, model and keys for Ask PareCare and dispute mediation.' },
@@ -210,6 +210,7 @@ export function AdminSettings() {
               />
             ) : null}
             {group.group === 'oauth' ? <OAuthRedirectHelp /> : null}
+            {group.group === 'ai' ? <AiModelManager /> : null}
 
             <div className="grid gap-4 sm:grid-cols-2">
               {group.fields.map((field) => (
@@ -323,6 +324,175 @@ function FieldRow({
         />
       )}
       <HelpText field={field} />
+    </div>
+  );
+}
+
+function modelDetail(m: InstalledModel | null): string {
+  if (!m) return '';
+  const bits = [m.parameterSize, m.quantization].filter(Boolean);
+  return bits.join(', ');
+}
+
+function formatBytes(n: number | null): string {
+  if (!n || n <= 0) return '';
+  const gb = n / 1_000_000_000;
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  return `${Math.round(n / 1_000_000)} MB`;
+}
+
+/**
+ * Shows which assistant is running and its model, and, when Pare runs on this
+ * machine, lets a super admin switch to a downloaded model or fetch a new one
+ * by name or Hugging Face link. No compose or environment editing.
+ */
+function AiModelManager() {
+  const queryClient = useQueryClient();
+  const [ref, setRef] = useState('');
+  const [note, setNote] = useState('');
+
+  const { data: info } = useQuery({
+    queryKey: ['ai-model'],
+    queryFn: settingsApi.aiModel,
+    // Follow a download and the warming state live; stop once nothing is moving.
+    refetchInterval: (query) => {
+      const d = query.state.data as AiModelInfo | undefined;
+      const busy = (d?.pull && !d.pull.done) || d?.state === 'preparing';
+      return busy ? 1500 : false;
+    },
+  });
+
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ['ai-model'] });
+    void queryClient.invalidateQueries({ queryKey: ['settings'] });
+    void queryClient.invalidateQueries({ queryKey: ['ai-status'] });
+  };
+
+  const useModel = useMutation({
+    mutationFn: (name: string) => settingsApi.update({ 'ai.model': name }),
+    onSuccess: () => {
+      setNote('');
+      refresh();
+    },
+    onError: (e) => setNote(e instanceof Error ? e.message : 'Could not switch model'),
+  });
+
+  const pull = useMutation({
+    mutationFn: (model: string) => settingsApi.pullModel(model),
+    onSuccess: () => {
+      setNote('');
+      setRef('');
+      void queryClient.invalidateQueries({ queryKey: ['ai-model'] });
+    },
+    onError: (e) => setNote(e instanceof Error ? e.message : 'Could not start the download'),
+  });
+
+  if (!info) return null;
+
+  const stateWord =
+    info.state === 'ready' ? 'ready' : info.state === 'preparing' ? 'still getting ready' : 'not available';
+  const p = info.pull;
+  const pulling = !!p.model && !p.done;
+  const pct = p.total > 0 ? Math.min(100, Math.round((p.completed / p.total) * 100)) : null;
+
+  return (
+    <div className="rounded-md border border-border bg-surface p-3 space-y-3">
+      {info.local ? (
+        <>
+          <div>
+            <p className="text-sm font-medium text-ink">Running on this machine</p>
+            <p className="text-sm text-muted">
+              {info.active}
+              {modelDetail(info.activeDetails) ? ` — ${modelDetail(info.activeDetails)}` : ''}, {stateWord}. Nothing
+              leaves this machine.
+            </p>
+          </div>
+
+          {info.installed.length > 0 ? (
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted">Downloaded models</p>
+              {info.installed.map((m) => {
+                const active = m.name === info.active || m.name === `${info.active}:latest`;
+                return (
+                  <div key={m.name} className="flex items-center gap-2 text-sm">
+                    <span className="flex-1 truncate text-ink">
+                      {m.name}
+                      {modelDetail(m) ? <span className="text-muted"> · {modelDetail(m)}</span> : null}
+                      {formatBytes(m.size) ? <span className="text-muted"> · {formatBytes(m.size)}</span> : null}
+                    </span>
+                    {active ? (
+                      <span className="badge text-xs bg-primary-50 text-primary shrink-0">In use</span>
+                    ) : (
+                      <Button size="xs" variant="ghost" onClick={() => useModel.mutate(m.name)} loading={useModel.isPending}>
+                        Use
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
+          <div className="space-y-1.5">
+            <label htmlFor="ai-model-ref" className="text-xs font-medium text-muted">
+              Download another model
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex-1 min-w-[16rem]">
+                <Input
+                  id="ai-model-ref"
+                  placeholder="gemma4:12b-it-q4_K_M or a Hugging Face link"
+                  value={ref}
+                  onChange={(e) => setRef(e.target.value)}
+                  disabled={pulling}
+                />
+              </div>
+              <Button
+                variant="secondary"
+                onClick={() => pull.mutate(ref.trim())}
+                loading={pull.isPending || pulling}
+                disabled={!ref.trim() || pulling}
+              >
+                Download
+              </Button>
+            </div>
+            <p className="text-xs text-muted">
+              Paste a model name, or a link from{' '}
+              <a href="https://huggingface.co/models?library=gguf" target="_blank" rel="noreferrer" className="text-primary hover:underline whitespace-nowrap">
+                Hugging Face ↗
+              </a>
+              . The larger the model, the slower it runs.
+            </p>
+          </div>
+
+          {pulling ? (
+            <div className="space-y-1" role="status">
+              <div className="flex items-center justify-between text-xs text-muted">
+                <span className="truncate">Downloading {p.model} · {p.status}</span>
+                {pct !== null ? <span className="shrink-0">{pct}%</span> : null}
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
+                <div className="h-full bg-primary transition-all" style={{ width: pct !== null ? `${pct}%` : '100%' }} />
+              </div>
+            </div>
+          ) : null}
+          {p.done && p.error ? <p className="text-sm text-red-600">Download failed: {p.error}</p> : null}
+          {p.done && !p.error && p.model && p.finishedAt ? (
+            <p className="text-sm text-muted">Downloaded {p.model}. Choose Use above to switch Pare to it.</p>
+          ) : null}
+        </>
+      ) : (
+        <div>
+          <p className="text-sm font-medium text-ink">Running in the cloud</p>
+          <p className="text-sm text-muted">
+            PareCare is using {info.provider}
+            {info.active ? ` with the model ${info.active}` : ' with the provider default'}, {stateWord}. Records are
+            sent to the provider to be read. Change the provider, model or key in the fields below, or set the provider
+            to run Pare on this machine instead.
+          </p>
+        </div>
+      )}
+      {note ? <p className="text-sm text-red-600">{note}</p> : null}
     </div>
   );
 }

@@ -108,6 +108,17 @@ export function isLocalProvider(): boolean {
 }
 
 /**
+ * The native (non-OpenAI) root of the local Ollama server, derived from the
+ * configured base URL by dropping the trailing /v1. Ollama's own endpoints for
+ * listing and downloading models live under here, not under /v1.
+ */
+export function ollamaRoot(): string {
+  const cfg = getAiConfig();
+  const base = (cfg.baseUrl ?? DEFAULT_BASE_URLS['ollama'] ?? '').replace(/\/$/, '');
+  return base.replace(/\/v1$/, '');
+}
+
+/**
  * Whether the assistant is ready to answer, for the warming state. A cloud
  * provider is ready as soon as it is configured. The bundled on-machine
  * assistant is asked directly whether its model has finished downloading:
@@ -118,8 +129,7 @@ export async function localModelState(): Promise<'ready' | 'preparing' | 'unavai
   if (cfg.provider !== 'ollama') {
     return isAiConfigured() ? 'ready' : 'unavailable';
   }
-  const base = (cfg.baseUrl ?? DEFAULT_BASE_URLS['ollama'] ?? '').replace(/\/$/, '');
-  const root = base.replace(/\/v1$/, '');
+  const root = ollamaRoot();
   const want = cfg.model ?? 'parecare';
   try {
     const res = await fetch(`${root}/api/tags`, { signal: AbortSignal.timeout(3000) });

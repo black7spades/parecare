@@ -5,6 +5,15 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.14.0] - 2026-08-05
+
+### Added
+
+- **Choose and download the on-machine assistant from settings.** In System
+  settings the person running PareCare now sees which model is in use and what
+  it is called, switches to another that is already downloaded, or fetches a new
+  one by name or a Hugging Face link, without editing any files.
+
 ## [0.13.0] - 2026-08-04
 
 ### Added
