@@ -5,8 +5,7 @@ import { useAuthStore, type AccountRole } from '../../stores/auth';
 import { useSubscriptionStore } from '../../stores/subscription';
 import { UpgradePrompt } from '../UpgradePrompt';
 import { AssistantWidget } from '../assistant/AssistantWidget';
-import { CommandBar } from '../CommandBar';
-import { CommandBarTrigger } from '../CommandBarTrigger';
+import { ProfileSwitcher } from './ProfileSwitcher';
 import { useAssistantStore } from '../../stores/assistant';
 import { ThemeToggle } from '../ThemeToggle';
 import { TextSizeToggle } from '../TextSizeToggle';
@@ -14,7 +13,7 @@ import { NotificationsBell } from './NotificationsBell';
 import { AvatarMenu } from './AvatarMenu';
 import { Clock } from './Clock';
 import { Avatar } from '../ui/Avatar';
-import { PROFILE_NAV, profileNavItem, type ProfileNavItem } from '../../pages/app/profile/tabs';
+import { PROFILE_NAV, profileNavItem, type ProfileNavItem, type NavContext } from '../../pages/app/profile/tabs';
 import { api } from '../../api/client';
 import { browserTimeZone } from '../../lib/datetime';
 import { NavSortControl, type SortOption } from './NavSortControl';
@@ -224,6 +223,22 @@ function ProfileSidebarNav({ profileId }: { profileId: string }) {
   });
   const pinnedKeys = (data?.pins ?? []).map((p) => p.item_key);
 
+  // The person's kind and life stage decide which sections belong at all: a pet
+  // has no neurotypes, an unborn baby no substance use. Read from the profile
+  // the open page already fetched, so this costs nothing extra.
+  const { data: profileData } = useQuery({
+    queryKey: ['care-profile', profileId],
+    queryFn: () =>
+      api.get<{ profile: { kind: 'person' | 'pet' }; situation: { life_stage: string | null } | null }>(
+        `/care-profiles/${profileId}`,
+      ),
+  });
+  const navCtx: NavContext = {
+    kind: profileData?.profile.kind ?? 'person',
+    lifeStage: profileData?.situation?.life_stage ?? null,
+  };
+  const belongs = (item: ProfileNavItem) => item.shows?.(navCtx) ?? true;
+
   const savePins = useMutation({
     mutationFn: (item_keys: string[]) => api.put(`/care-profiles/${profileId}/nav-pins`, { item_keys }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['nav-pins', profileId] }),
@@ -253,7 +268,8 @@ function ProfileSidebarNav({ profileId }: { profileId: string }) {
 
   const pinnedItems = pinnedKeys
     .map((key) => profileNavItem(key))
-    .filter((i): i is ProfileNavItem => !!i);
+    .filter((i): i is ProfileNavItem => !!i)
+    .filter(belongs);
 
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(readCollapsedGroups);
   const persistCollapsed = (next: Set<string>) => {
@@ -326,7 +342,7 @@ function ProfileSidebarNav({ profileId }: { profileId: string }) {
             )}
             {!isCollapsed
               ? group.items
-                  .filter((item) => !pinnedKeys.includes(item.key))
+                  .filter((item) => !pinnedKeys.includes(item.key) && belongs(item))
                   .map((item) => (
                     <ProfileNavRow
                       key={item.key}
@@ -632,13 +648,8 @@ export function Shell() {
             PareCare
           </NavLink>
         </div>
-        {/* Phone: the old switcher slot becomes a full-width way in. */}
-        <div className="flex md:hidden min-w-0 flex-1 px-2">
-          <CommandBarTrigger variant="phone" />
-        </div>
-        {/* Wide screens: a labelled trigger in the centre, opened with Cmd/Ctrl+K. */}
         <div className="hidden md:flex absolute left-1/2 -translate-x-1/2 w-full max-w-xs px-4 justify-center">
-          <CommandBarTrigger variant="desktop" />
+          <ProfileSwitcher activeProfileId={profileId} />
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
           <TierBadge />
@@ -694,7 +705,6 @@ export function Shell() {
       </div>
 
       <AssistantWidget />
-      <CommandBar />
       <UpgradePrompt />
     </div>
   );

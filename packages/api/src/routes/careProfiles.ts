@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
+import { buildSituation } from '../services/situation';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { getStorageConfig } from '../config/settings';
@@ -755,6 +756,7 @@ careProfilesRouter.get('/:id', requireAuth, async (req, res) => {
     phase_history: phaseHistory,
     can_edit_profile: canEditProfile,
     can_manage_editors: canManageEditors,
+    situation: await buildSituation(profile),
   });
 });
 

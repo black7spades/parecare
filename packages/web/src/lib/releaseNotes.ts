@@ -20,6 +20,20 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.17.0',
+    date: '2026-08-05',
+    summary: 'Each person is shown only the sections that fit them.',
+    groups: [
+      {
+        heading: 'Changed',
+        items: [
+          'Each person is shown only the sections that fit them. A pet no longer has Neurotypes or Substance use in its sidebar or on its overview, and an expected arrival or an infant is not offered Substance use. PareCare works this out from who the person is, with nothing to turn off.',
+          'The command bar has been taken out. The keyboard jump-to-anything bar added recently overlapped the person switcher and the assistant without clearly helping, so it is gone. The person switcher at the top of the screen and Pare’s own button cover the same ground more simply.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.16.0',
     date: '2026-08-05',
     summary: 'Find or do anything from one place, with a keystroke or a tap.',
