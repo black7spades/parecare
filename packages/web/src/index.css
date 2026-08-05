@@ -46,6 +46,32 @@
     --c-btn-danger-text: 255 255 255;
   }
 
+  /* Text size: the one comfort a person chooses. Scaling the root font size
+     scales the whole rem-based interface with it; the default follows the
+     device's own size. Set before paint by the inline script in index.html. */
+  :root { --text-scale: 1; }
+  :root[data-text-size='large'] { --text-scale: 1.1; }
+  :root[data-text-size='larger'] { --text-scale: 1.18; }
+  html { font-size: calc(100% * var(--text-scale)); }
+
+  /* Inferred, never asked for: when the device asks for less motion, every
+     transition and animation collapses to nothing. */
+  @media (prefers-reduced-motion: reduce) {
+    *, ::before, ::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* Inferred: when the device asks for more contrast, borders and muted text
+     firm up. No new palette, only stronger values of the same variables. */
+  @media (prefers-contrast: more) {
+    :root { --c-muted: 71 82 96; --c-border: 166 156 146; }
+    .dark { --c-muted: 196 191 186; --c-border: 108 98 90; }
+  }
+
   body {
     @apply bg-surface text-ink antialiased;
   }

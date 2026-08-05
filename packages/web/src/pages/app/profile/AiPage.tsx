@@ -219,8 +219,11 @@ export function AiPage() {
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   rows={2}
+                  enterKeyHint="send"
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
+                    // Ignore Enter while the keyboard is composing, so voice
+                    // typing and predictive text are not cut off mid-word.
+                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault();
                       submitDraft(draft);
                     }
