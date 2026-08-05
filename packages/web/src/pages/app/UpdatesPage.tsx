@@ -1,12 +1,20 @@
+import { useEffect } from 'react';
 import { format } from 'date-fns';
 import { RELEASES } from '../../lib/releaseNotes';
 import { APP_VERSION, REPO_URL, commitUrl, versionLabel } from '../../lib/version';
+import { useUpdates } from '../../stores/updates';
 
 /**
  * What's new: the on-site record of updates, drawn from the release notes and
- * tied back to the git build. Linked from the sidebar version badge.
+ * tied back to the git build. Opening it clears the sidebar's update
+ * notification, since the person has now seen this build's changes.
  */
 export function UpdatesPage() {
+  const markSeen = useUpdates((s) => s.markSeen);
+  useEffect(() => {
+    markSeen();
+  }, [markSeen]);
+
   return (
     <div className="max-w-2xl space-y-6">
       <div>

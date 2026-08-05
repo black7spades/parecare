@@ -20,6 +20,19 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.17.1',
+    date: '2026-08-05',
+    summary: 'A tidier sidebar and account menu.',
+    groups: [
+      {
+        heading: 'Changed',
+        items: [
+          'The foot of the sidebar now shows just the version, with What’s new appearing there only when there is something new to read rather than sitting as a permanent link. The light and dark switch, the text size control and Sign out have moved into the menu under your profile picture.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.17.0',
     date: '2026-08-05',
     summary: 'Each person is shown only the sections that fit them.',

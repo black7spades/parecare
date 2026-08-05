@@ -2,11 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth';
 import { Avatar } from '../ui/Avatar';
+import { ThemeToggle } from '../ThemeToggle';
+import { TextSizeToggle } from '../TextSizeToggle';
+import { SignOutIcon } from '../ui/icons';
 
-/** Top-right account menu: profile, settings, billing, system tools. Sign out
- * lives in the sidebar footer, beside the theme picker. */
+/** Top-right account menu: profile, settings and system tools, the theme and
+ * text size controls, and Sign out at the very bottom. */
 export function AvatarMenu() {
   const { account } = useAuthStore();
+  const clearAuth = useAuthStore((s) => s.clearAuth);
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(false);
@@ -72,6 +76,23 @@ export function AvatarMenu() {
               System
             </button>
           ) : null}
+          {/* Theme and text size sit here, near the profile picture. Clicking a
+              toggle changes it in place without closing the menu. */}
+          <div className="mt-1 flex items-center justify-between gap-2 border-t border-border px-4 py-2 pt-2.5">
+            <ThemeToggle />
+            <TextSizeToggle />
+          </div>
+          <div className="mt-1 border-t border-border pt-1">
+            <button
+              type="button"
+              role="menuitem"
+              className={`${item} flex items-center gap-2`}
+              onClick={() => { setOpen(false); clearAuth(); navigate('/login'); }}
+            >
+              <SignOutIcon size={14} />
+              Sign out
+            </button>
+          </div>
         </div>
       ) : null}
     </div>
