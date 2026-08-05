@@ -26,7 +26,6 @@ import { ProvidersPage } from './pages/app/profile/ProvidersPage';
 import { TreatmentsPage } from './pages/app/profile/TreatmentsPage';
 import { SubstanceUsePage } from './pages/app/profile/SubstanceUsePage';
 import { ActivityPage } from './pages/app/profile/ActivityPage';
-import { AiPage } from './pages/app/profile/AiPage';
 import { DirectoryProvidersPage } from './pages/app/DirectoryProvidersPage';
 import { DirectorySuppliersPage } from './pages/app/DirectorySuppliersPage';
 import { DirectoryAssetsPage } from './pages/app/DirectoryAssetsPage';
@@ -158,7 +157,8 @@ export const router = createBrowserRouter([
           { path: 'logs', element: <ActivityPage /> },
           // Legacy path from before Logs replaced Activity in the nav
           { path: 'activity', element: <ActivityPage /> },
-          { path: 'ai', element: <AiPage /> },
+          // Ask PareCare retired as a page; the assistant is on every screen.
+          { path: 'ai', element: <Navigate to=".." replace /> },
         ],
       },
       { path: 'account/subscription', element: <SubscriptionPage /> },
