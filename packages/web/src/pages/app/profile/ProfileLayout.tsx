@@ -19,6 +19,7 @@ import {
   type HealthStatus,
   type PhaseHistoryEntry,
 } from '../../../lib/care';
+import type { Situation } from '../../../lib/situation';
 import { useAuthStore } from '../../../stores/auth';
 
 export interface ProfileContext {
@@ -34,6 +35,8 @@ export interface ProfileContext {
   relationship: string | null;
   careName: string;
   phaseHistory: PhaseHistoryEntry[];
+  /** The person's composed situation, when it has loaded. */
+  situation: Situation | null;
 }
 
 export function useProfile(): ProfileContext {
@@ -47,6 +50,7 @@ interface ProfileResponse {
   phase_history?: PhaseHistoryEntry[];
   can_edit_profile?: boolean;
   can_manage_editors?: boolean;
+  situation?: Situation | null;
 }
 
 type AlertLevel = 'red' | 'yellow' | 'green' | null;
@@ -116,6 +120,7 @@ export function ProfileLayout() {
     relationship,
     careName,
     phaseHistory: data.phase_history ?? [],
+    situation: data.situation ?? null,
   };
 
   const canDismissAlert =

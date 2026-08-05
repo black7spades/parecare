@@ -5,6 +5,17 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.18.0] - 2026-08-05
+
+### Changed
+
+- **The overview leads with what matters for each person.** Without anyone
+  arranging anything, the current health card rises to the top when someone is
+  unwell, and the power of attorney comes forward once care has ended. Arrange
+  the cards yourself and your own arrangement is kept exactly as you left it; the
+  two never fight. The overview cards also match the sidebar now, so an expected
+  arrival or an infant is not shown Substance use.
+
 ## [0.17.1] - 2026-08-05
 
 ### Changed
