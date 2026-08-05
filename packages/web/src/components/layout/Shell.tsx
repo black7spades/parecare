@@ -5,6 +5,9 @@ import { useAuthStore, type AccountRole } from '../../stores/auth';
 import { useSubscriptionStore } from '../../stores/subscription';
 import { UpgradePrompt } from '../UpgradePrompt';
 import { AssistantWidget } from '../assistant/AssistantWidget';
+import { CommandBar } from '../CommandBar';
+import { CommandBarTrigger } from '../CommandBarTrigger';
+import { useAssistantStore } from '../../stores/assistant';
 import { ThemeToggle } from '../ThemeToggle';
 import { TextSizeToggle } from '../TextSizeToggle';
 import { NotificationsBell } from './NotificationsBell';
@@ -19,7 +22,6 @@ import { SortableNavGroup, type NavItemDef } from './SortableNavGroup';
 import { navHeadingClass, navLinkClass } from './navStyles';
 import { VersionBadge } from './VersionBadge';
 import { RouteFallback } from './RouteFallback';
-import { ProfileSwitcher } from './ProfileSwitcher';
 import { AssetIcon, CheckIcon, ChartIcon, MapPinIcon, PawIcon, SignOutIcon, StethoscopeIcon, StoreIcon, UsersIcon } from '../ui/icons';
 
 interface PinnedProfile {
@@ -125,6 +127,23 @@ function ProfileNavRow({
   showPip?: boolean;
 }) {
   const Icon = item.icon;
+  const setAssistantOpen = useAssistantStore((s) => s.setOpen);
+  // "Ask PareCare" is no longer a page of its own: it opens the assistant,
+  // already scoped to the person whose profile is open. One way to ask Pare.
+  if (item.key === 'ai') {
+    return (
+      <div className="group relative">
+        <button type="button" onClick={() => setAssistantOpen(true)} className={`${navLinkClass({ isActive: false })} w-full text-left`}>
+          <span className="flex items-center gap-1.5 truncate">
+            <span aria-hidden className="shrink-0 text-muted">
+              <Icon size={16} />
+            </span>
+            <span className="truncate">{item.label}</span>
+          </span>
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="group relative">
       <NavLink
@@ -613,8 +632,13 @@ export function Shell() {
             PareCare
           </NavLink>
         </div>
+        {/* Phone: the old switcher slot becomes a full-width way in. */}
+        <div className="flex md:hidden min-w-0 flex-1 px-2">
+          <CommandBarTrigger variant="phone" />
+        </div>
+        {/* Wide screens: a labelled trigger in the centre, opened with Cmd/Ctrl+K. */}
         <div className="hidden md:flex absolute left-1/2 -translate-x-1/2 w-full max-w-xs px-4 justify-center">
-          <ProfileSwitcher activeProfileId={profileId} />
+          <CommandBarTrigger variant="desktop" />
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
           <TierBadge />
@@ -670,6 +694,7 @@ export function Shell() {
       </div>
 
       <AssistantWidget />
+      <CommandBar />
       <UpgradePrompt />
     </div>
   );

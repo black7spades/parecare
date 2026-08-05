@@ -20,6 +20,25 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.16.0',
+    date: '2026-08-05',
+    summary: 'Find or do anything from one place, with a keystroke or a tap.',
+    groups: [
+      {
+        heading: 'Added',
+        items: [
+          'Find or do anything from one place. A command bar opens from the bar at the top of any screen, or with a keystroke on a computer. Type a few letters to jump straight to a person, a section, a record, or an action like recording a dose or booking an appointment, without hunting through menus. Open it before typing and it shows what needs attention first.',
+        ],
+      },
+      {
+        heading: 'Changed',
+        items: [
+          'There is now one way to ask Pare, not two. The separate Ask PareCare page has folded into the assistant that sits on every screen and already knows whose profile is open, so asking is the same wherever you are.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.15.0',
     date: '2026-08-05',
     summary: 'Bigger text when you need it, a match for your device comfort settings, and voice typing to Pare works again.',

@@ -5,6 +5,23 @@ this file from the sidebar ("What's new"), and its version badge links to the
 exact commit each build came from, so the record of updates stays traceable to
 source. Versions follow [semantic versioning](https://semver.org).
 
+## [0.16.0] - 2026-08-05
+
+### Added
+
+- **Find or do anything from one place.** A command bar opens from the bar at the
+  top of any screen, or with a keystroke on a computer. Type a few letters to
+  jump straight to a person, a section, a record, or an action like recording a
+  dose or booking an appointment, without hunting through menus. Open it before
+  typing and it shows what needs attention first, so the first thing it offers is
+  what to do next.
+
+### Changed
+
+- **There is now one way to ask Pare, not two.** The separate Ask PareCare page
+  has folded into the assistant that sits on every screen and already knows whose
+  profile is open, so asking is the same wherever you are.
+
 ## [0.15.0] - 2026-08-05
 
 ### Added
