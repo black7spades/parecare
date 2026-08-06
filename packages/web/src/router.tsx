@@ -30,6 +30,7 @@ import { DirectoryProvidersPage } from './pages/app/DirectoryProvidersPage';
 import { DirectorySuppliersPage } from './pages/app/DirectorySuppliersPage';
 import { DirectoryAssetsPage } from './pages/app/DirectoryAssetsPage';
 import { UpdatesPage } from './pages/app/UpdatesPage';
+import { WhatsNewPage } from './pages/app/WhatsNewPage';
 import { DirectoryAddressesPage } from './pages/app/DirectoryAddressesPage';
 import { DirectoryPeoplePage, DirectoryPetsPage } from './pages/app/DirectoryProfilesPage';
 import { InvitePage } from './pages/InvitePage';
@@ -124,7 +125,18 @@ export const router = createBrowserRouter([
       { path: 'app/directory/assets', element: <DirectoryAssetsPage /> },
       { path: 'app/directory/addresses', element: <DirectoryAddressesPage /> },
       { path: 'app/reports', element: <ReportGeneratorPage /> },
-      { path: 'app/updates', element: <UpdatesPage /> },
+      { path: 'app/whats-new', element: <WhatsNewPage /> },
+      // The developer release notes are only of interest to whoever runs the
+      // system, so they are kept to super admins; everyone else has What's new
+      // above, which is their own care circle's activity.
+      {
+        path: 'app/updates',
+        element: (
+          <SuperAdminGuard>
+            <UpdatesPage />
+          </SuperAdminGuard>
+        ),
+      },
       {
         path: 'app/:profileId',
         element: <ProfileLayout />,

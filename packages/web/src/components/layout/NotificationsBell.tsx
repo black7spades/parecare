@@ -163,6 +163,16 @@ export function NotificationsBell() {
                 type="button"
                 onClick={() => {
                   setOpen(false);
+                  navigate('/app/whats-new');
+                }}
+                className="text-xs text-muted hover:text-ink"
+              >
+                See all
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
                   navigate('/account/notifications');
                 }}
                 className="text-xs text-muted hover:text-ink"

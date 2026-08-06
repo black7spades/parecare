@@ -19,7 +19,7 @@ import { SortableNavGroup, type NavItemDef } from './SortableNavGroup';
 import { navHeadingClass, navLinkClass } from './navStyles';
 import { VersionBadge } from './VersionBadge';
 import { RouteFallback } from './RouteFallback';
-import { AssetIcon, CheckIcon, ChartIcon, MapPinIcon, PawIcon, StethoscopeIcon, StoreIcon, UsersIcon } from '../ui/icons';
+import { ActivityIcon, AssetIcon, CheckIcon, ChartIcon, MapPinIcon, PawIcon, StethoscopeIcon, StoreIcon, UsersIcon } from '../ui/icons';
 
 interface PinnedProfile {
   id: string;
@@ -43,13 +43,14 @@ const DIRECTORY_NAV: NavItemDef[] = [
 ];
 
 const TOOLS_NAV: NavItemDef[] = [
+  { key: 'whats-new', label: "What's new", to: '/app/whats-new', icon: <ActivityIcon size={16} /> },
   { key: 'reports', label: 'Reports', to: '/app/reports', icon: <ChartIcon size={16} /> },
 ];
 
 // First-segment names under /app that are top-level sections, not a care
 // profile id. On these the sidebar keeps the main nav instead of switching to
 // a profile's sub-nav.
-const RESERVED_APP_SECTIONS = new Set(['profiles', 'directory', 'reports']);
+const RESERVED_APP_SECTIONS = new Set(['profiles', 'directory', 'reports', 'whats-new']);
 
 type PinArrangement = 'recent' | 'az' | 'za' | 'custom';
 

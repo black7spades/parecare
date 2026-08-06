@@ -1,10 +1,33 @@
 # Changelog
 
-All notable changes to PareCare are recorded here. The running app shows this
-record on its What's new screen, opened from the version number in the sidebar,
-which links on to the exact commit each build came from, so the record of
-updates stays traceable to source. Versions follow
+All notable changes to PareCare are recorded here. Whoever runs the system
+reads this record on the release notes screen, opened from the version number
+in the sidebar, which links on to the exact commit each build came from, so the
+record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
+
+## [0.20.0] - 2026-08-06
+
+### Added
+
+- **What's new gathers everything happening across the people in your care.** A
+  new screen brings every change across your care circles into one place, what
+  needs attention first, then the rest by recency, so nothing gets lost between
+  profiles. Reach it from the sidebar or the bell.
+- **Alerts you set up yourself.** Under Notifications, build exactly the alerts
+  you want and choose where each one goes. Watch a medication running low within
+  a chosen number of days, a dose not recorded, an appointment coming up, a task
+  due, a new message or document, a health change, or a medication record. Each
+  arrives the moment it happens or bundled into a daily, weekly, fortnightly or
+  monthly digest, sent to email or any destination you have set up. Several
+  digest alerts to the same place come as one message, so a fortnightly email
+  can carry supply, appointments and a medication record together, and a
+  low-supply alert brings a reorder link where there is one.
+
+### Changed
+
+- **What's new now means your own care circle.** The developer release notes
+  behind the version number are kept to whoever runs the system.
 
 ## [0.19.0] - 2026-08-06
 

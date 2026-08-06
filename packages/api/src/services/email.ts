@@ -127,6 +127,46 @@ export async function sendNotificationEmail(
 }
 
 /**
+ * A composed alert email: one or more titled sections, each a short list of
+ * lines with a deep link and an optional second action such as a reorder link.
+ * This is what a watch sends: an immediate alert is one section, a digest
+ * bundles several (supply, appointments, a medication record) into one email.
+ */
+export interface AlertSection {
+  title: string;
+  lines: Array<{ text: string; url: string; actionText?: string; actionUrl?: string }>;
+}
+
+export async function sendAlertEmail(toEmail: string, subject: string, sections: AlertSection[]): Promise<void> {
+  const cfg = getEmailConfig();
+  if (!cfg.smtpHost) throw new Error('Email is not configured. Set the SMTP details in the admin settings.');
+
+  const text = sections
+    .map((s) => [
+      s.title,
+      ...s.lines.map((l) => `  - ${l.text}\n    ${l.url}${l.actionText && l.actionUrl ? `\n    ${l.actionText}: ${l.actionUrl}` : ''}`),
+    ].join('\n'))
+    .join('\n\n');
+
+  const html = sections
+    .map((s) => `
+      <h3 style="margin:16px 0 6px;font-size:15px">${s.title}</h3>
+      <ul style="margin:0;padding-left:18px">
+        ${s.lines
+          .map(
+            (l) => `<li style="margin:0 0 6px">${l.text} <a href="${l.url}">Open</a>${
+              l.actionText && l.actionUrl ? ` · <a href="${l.actionUrl}">${l.actionText}</a>` : ''
+            }</li>`
+          )
+          .join('')}
+      </ul>`)
+    .join('');
+
+  const transport = getTransport();
+  await transport.sendMail({ from: cfg.from, to: toEmail, subject, text, html });
+}
+
+/**
  * The link back in, for somebody who cannot get to their records.
  *
  * Short, because a person who has forgotten a password is already annoyed,
