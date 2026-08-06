@@ -8,6 +8,8 @@ import { Modal } from '../../../components/ui/Modal';
 import { AttentionPanel } from '../../../components/AttentionPanel';
 import { CardLayout } from '../../../components/cards/CardLayout';
 import { PROFILE_CARDS, PROFILE_CARD_KEYS } from '../../../components/cards/registry';
+import { orderBySituation } from '../../../components/cards/ordering';
+import type { Situation } from '../../../lib/situation';
 import { useProfile } from './ProfileLayout';
 import { useAuthStore } from '../../../stores/auth';
 
@@ -31,17 +33,29 @@ import { useAuthStore } from '../../../stores/auth';
 const orderKeyFor = (accountId: string, profileId: string) => `parecare-overview-order:${accountId}:${profileId}`;
 const collapsedKeyFor = (accountId: string, profileId: string) => `parecare-overview-collapsed:${accountId}:${profileId}`;
 
-function loadCardOrder(storageKey: string): string[] {
+/** The arrangement this person has saved, or null when they have not arranged. */
+function readSavedOrder(storageKey: string): string[] | null {
   try {
     const raw = localStorage.getItem(storageKey);
-    if (raw) {
-      const parsed = JSON.parse(raw) as string[];
-      const valid = parsed.filter((k) => PROFILE_CARD_KEYS.includes(k));
-      const missing = PROFILE_CARD_KEYS.filter((k) => !valid.includes(k));
-      return [...valid, ...missing];
-    }
-  } catch { /* ignore */ }
-  return [...PROFILE_CARD_KEYS];
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as string[];
+    const valid = parsed.filter((k) => PROFILE_CARD_KEYS.includes(k));
+    const missing = PROFILE_CARD_KEYS.filter((k) => !valid.includes(k));
+    return [...valid, ...missing];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The order to show the cards in. A saved arrangement is the person's own and
+ * wins; otherwise the default is re-ranked by their situation, so the right
+ * things lead without anyone arranging them. The first move snapshots whatever
+ * is on screen into a saved order, so the adaptive default and a saved
+ * arrangement never fight.
+ */
+function cardOrderFor(storageKey: string, situation: Situation | null): string[] {
+  return readSavedOrder(storageKey) ?? orderBySituation(PROFILE_CARD_KEYS, situation);
 }
 
 function loadCollapsed(storageKey: string): Set<string> {
@@ -53,7 +67,7 @@ function loadCollapsed(storageKey: string): Set<string> {
 }
 
 export function OverviewPage() {
-  const { profile, isOwner, canEdit, access } = useProfile();
+  const { profile, isOwner, canEdit, access, situation } = useProfile();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const accountId = useAuthStore((s) => s.account?.id) ?? 'anon';
@@ -61,15 +75,20 @@ export function OverviewPage() {
   const collapsedKey = collapsedKeyFor(accountId, profile.id);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [editView, setEditView] = useState(false);
-  const [cardOrder, setCardOrder] = useState<string[]>(() => loadCardOrder(orderKey));
+  const [cardOrder, setCardOrder] = useState<string[]>(() => cardOrderFor(orderKey, situation));
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(collapsedKey));
 
   // Moving from one person to another keeps this component mounted, so the
-  // arrangement has to be re-read or the previous person's stays on screen.
+  // arrangement has to be re-read or the previous person's stays on screen. The
+  // situation signature is here too, so an unarranged overview re-ranks when the
+  // person's acuity or end-of-life status changes, while a saved order does not.
+  const situationSig = `${situation?.acuity ?? ''}|${situation?.ended ?? ''}`;
   useEffect(() => {
-    setCardOrder(loadCardOrder(orderKey));
+    setCardOrder(cardOrderFor(orderKey, situation));
     setCollapsed(loadCollapsed(collapsedKey));
-  }, [orderKey, collapsedKey]);
+    // situation is read through situationSig to avoid re-running on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderKey, collapsedKey, situationSig]);
 
   const [confirmText, setConfirmText] = useState('');
   const [deleteError, setDeleteError] = useState('');
@@ -100,7 +119,7 @@ export function OverviewPage() {
     setDeleteError('');
   };
 
-  const cardContext = { profileId: profile.id, profile, access, isOwner, canEdit, careName };
+  const cardContext = { profileId: profile.id, profile, access, isOwner, canEdit, careName, situation };
   // Only the cards this person actually has count towards folding everything
   // away, or the control points the wrong way on a pet and for a visitor.
   const presentKeys = PROFILE_CARDS.filter((c) => c.shows?.(cardContext) ?? true).map((c) => c.key);

@@ -22,7 +22,13 @@ export const PROFILE_CARDS: CardDefinition[] = [
   { key: 'conditions', label: 'Conditions', Component: ConditionsCard },
   // A pet has no neurotypes or substance use; only people do.
   { key: 'neurotypes', label: 'Neurotypes', Component: NeurotypesCard, shows: (ctx) => ctx.profile.kind !== 'pet' },
-  { key: 'substance-use', label: 'Substance use', Component: SubstanceUseCard, shows: (ctx) => ctx.profile.kind !== 'pet' },
+  // Not for a pet, nor for an unborn baby or an infant.
+  {
+    key: 'substance-use',
+    label: 'Substance use',
+    Component: SubstanceUseCard,
+    shows: (ctx) => ctx.profile.kind !== 'pet' && ctx.situation?.life_stage !== 'expecting' && ctx.situation?.life_stage !== 'infant',
+  },
   {
     key: 'poa',
     label: 'Power of attorney',

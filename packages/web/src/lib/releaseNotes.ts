@@ -20,6 +20,19 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.18.0',
+    date: '2026-08-05',
+    summary: 'The overview leads with what matters for each person.',
+    groups: [
+      {
+        heading: 'Changed',
+        items: [
+          'The overview leads with what matters for each person, without anyone arranging anything: the current health card rises to the top when someone is unwell, and the power of attorney comes forward once care has ended. Arrange the cards yourself and your own arrangement is kept exactly as you left it, so the two never fight. The overview cards also match the sidebar now, so an expected arrival or an infant is not shown Substance use.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.17.1',
     date: '2026-08-05',
     summary: 'A tidier sidebar and account menu.',
