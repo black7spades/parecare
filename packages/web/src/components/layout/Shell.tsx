@@ -11,6 +11,7 @@ import { ProfileSwitcher } from './ProfileSwitcher';
 import { useAssistantStore } from '../../stores/assistant';
 import { NotificationsBell } from './NotificationsBell';
 import { AvatarMenu } from './AvatarMenu';
+import { PareStatus } from './PareStatus';
 import { Clock } from './Clock';
 import { Avatar } from '../ui/Avatar';
 import { PROFILE_NAV, profileNavItem, type ProfileNavItem, type NavContext } from '../../pages/app/profile/tabs';
@@ -641,6 +642,7 @@ export function Shell() {
         <div className="flex items-center gap-2 sm:gap-3">
           <TierBadge />
           <Clock />
+          <PareStatus />
           <NotificationsBell />
           <AvatarMenu />
         </div>

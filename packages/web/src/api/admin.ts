@@ -110,6 +110,32 @@ export interface AdminChatList {
   per_page: number;
 }
 
+export interface AiMetrics {
+  connectivity: {
+    provider: string;
+    model: string | null;
+    local: boolean;
+    state: 'preparing' | 'ready' | 'unavailable';
+    health: 'green' | 'amber' | 'red';
+  };
+  performance: {
+    calls: number;
+    avg_ms: number | null;
+    p95_ms: number | null;
+    error_rate: number;
+    in_flight: number;
+    last_at: string | null;
+    uptime_seconds: number;
+  };
+  usage: {
+    conversations: number;
+    messages: number;
+    tokens: number;
+    conversations_today: number;
+  };
+  top_users: Array<{ name: string; conversations: number; messages: number; tokens: number }>;
+}
+
 export const adminApi = {
   stats: () => api.get<AdminStats>('/admin/stats'),
   listAccounts: (params: AdminListParams = {}) => {
@@ -179,6 +205,7 @@ export const adminApi = {
     return api.get<AdminChatList>(`/admin/chats${query ? `?${query}` : ''}`);
   },
   getChat: (id: string) => api.get<{ conversation: AdminChatDetail }>(`/admin/chats/${id}`),
+  aiMetrics: () => api.get<AiMetrics>('/admin/ai/metrics'),
   applyRightsTemplate: (id: string, accountIds: string[]) =>
     api.post<{ applied: string[]; skipped: Array<{ account_id: string; reason: string }>; template: { name: string } }>(
       `/admin/rights-templates/${id}/apply`,

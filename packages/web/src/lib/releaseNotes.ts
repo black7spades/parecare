@@ -20,6 +20,20 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.25.0',
+    date: '2026-08-06',
+    summary: 'A Pare status light in the top corner, and a monitor for whoever runs the system.',
+    groups: [
+      {
+        heading: 'Added',
+        items: [
+          'A Pare status light. A small traffic light in the top corner shows at a glance how Pare is doing: green when it is online and working well, amber when it is online but under load or still getting ready, and red when it is offline and may need attention.',
+          'A Pare monitor for whoever runs the system. The Pare screen now opens with how Pare is running, its response time, how busy it is, how long it has been up, and how much it is being used and by whom, with every conversation in a sortable table. Empty chats are left out.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.24.0',
     date: '2026-08-06',
     summary: 'Profile and Settings are one screen, and Pare greets you by name.',

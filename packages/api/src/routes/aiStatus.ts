@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { getAiConfig } from '../config/settings';
 import { localModelState, isLocalProvider } from '../services/aiProvider';
+import { health, type Health } from '../services/aiMetrics';
 
 export const aiStatusRouter = Router();
 
@@ -16,22 +17,19 @@ interface AiStatusBody {
   state: 'preparing' | 'ready' | 'unavailable';
   provider: string;
   local: boolean;
+  /** The traffic light: green working well, amber under load or getting ready, red offline. */
+  health: Health;
 }
 
-let cache: { at: number; body: AiStatusBody } | null = null;
+// The reachability half is cached; the health half is recomputed each time from
+// the live in-memory metrics, so the traffic light reacts to load without a lag.
+let cache: { at: number; state: AiStatusBody['state']; provider: string; local: boolean } | null = null;
 const TTL_MS = 8000;
 
 aiStatusRouter.get('/status', requireAuth, async (_req, res) => {
-  if (cache && Date.now() - cache.at < TTL_MS) {
-    res.json(cache.body);
-    return;
+  if (!cache || Date.now() - cache.at >= TTL_MS) {
+    const cfg = getAiConfig();
+    cache = { at: Date.now(), state: await localModelState(), provider: cfg.provider, local: isLocalProvider() };
   }
-  const cfg = getAiConfig();
-  const body: AiStatusBody = {
-    state: await localModelState(),
-    provider: cfg.provider,
-    local: isLocalProvider(),
-  };
-  cache = { at: Date.now(), body };
-  res.json(body);
+  res.json({ state: cache.state, provider: cache.provider, local: cache.local, health: health(cache.state) });
 });

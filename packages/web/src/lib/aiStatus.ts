@@ -11,6 +11,8 @@ export interface AiStatus {
   state: 'preparing' | 'ready' | 'unavailable';
   provider: string;
   local: boolean;
+  /** The traffic light: green working well, amber under load or getting ready, red offline. */
+  health: 'green' | 'amber' | 'red';
 }
 
 export function useAiStatus(enabled = true) {
@@ -18,8 +20,9 @@ export function useAiStatus(enabled = true) {
     queryKey: ['ai-status'],
     queryFn: () => api.get<AiStatus>('/ai/status'),
     enabled,
-    // Poll while a model is still downloading; stop once it is ready.
-    refetchInterval: (query) => (query.state.data?.state === 'preparing' ? 5000 : false),
+    // Poll fast while a model is still downloading; otherwise keep a slow
+    // heartbeat so the status light reflects load without hammering the server.
+    refetchInterval: (query) => (query.state.data?.state === 'preparing' ? 5000 : 30000),
     staleTime: 5000,
   });
 }
