@@ -3,6 +3,7 @@ import { env } from '../config/env';
 import { sendNotificationEmail } from './email';
 import { sendPush, type PushSubscription } from './webpush';
 import { gatherNotifications, notificationPath, notificationText, type NotificationItem } from './notifications';
+import { deliverWatchesForAccount } from './watchNotifier';
 import type { Account } from '../types';
 
 /**
@@ -128,6 +129,110 @@ export async function sendToChannel(
   }
 }
 
+/**
+ * One already-rendered line for a channel: a sentence, where it lives, and an
+ * optional second action such as a reorder link. Used by watches, which render
+ * their own text rather than going through the derived feed.
+ */
+export interface DeliveryLine {
+  text: string;
+  url: string;
+  urgent?: boolean;
+  action_label?: string;
+  action_url?: string;
+}
+
+/** Absolute form of a possibly in-app link, left alone if already absolute. */
+const absolute = (url: string): string => (/^https?:\/\//i.test(url) ? url : `${env.APP_URL}${url}`);
+
+/** Flatten a line to one string, folding in its action link for text channels. */
+function lineToText(l: DeliveryLine): string {
+  const main = `${l.text} ${absolute(l.url)}`;
+  return l.action_label && l.action_url ? `${main} — ${l.action_label}: ${absolute(l.action_url)}` : main;
+}
+
+/**
+ * Deliver already-rendered lines over one channel, for watches. The email case
+ * is handled richer by the caller; this covers push and the text destinations
+ * so every channel a watch can target behaves consistently. Throws on a hard
+ * failure.
+ */
+export async function sendLinesToChannel(
+  channel: NotificationChannel,
+  account: Pick<Account, 'email' | 'display_name'>,
+  heading: string,
+  lines: DeliveryLine[]
+): Promise<void> {
+  switch (channel.kind) {
+    case 'email': {
+      const to = (channel.config['address'] as string) || account.email;
+      await sendNotificationEmail(
+        to,
+        heading,
+        lines.map((l) => ({
+          text: l.action_label && l.action_url ? `${l.text} (${l.action_label}: ${absolute(l.action_url)})` : l.text,
+          url: absolute(l.url),
+        }))
+      );
+      return;
+    }
+    case 'webpush': {
+      const subscription = channel.config['subscription'] as PushSubscription | undefined;
+      if (!subscription) throw new Error('This device subscription is incomplete.');
+      for (const l of lines) {
+        const alive = await sendPush(subscription, {
+          title: l.urgent ? 'PareCare: urgent' : 'PareCare',
+          body: l.text,
+          url: absolute(l.url),
+        });
+        if (!alive) {
+          await db('notification_channels').where({ id: channel.id }).update({ enabled: false, updated_at: db.fn.now() });
+          throw new Error('This device is no longer subscribed to push.');
+        }
+      }
+      return;
+    }
+    case 'discord': {
+      const url = channel.config['webhook_url'] as string | undefined;
+      if (!url) throw new Error('The Discord webhook URL is missing.');
+      const content = [`**${heading}**`, ...lines.map((l) => `- ${lineToText(l)}`)].join('\n').slice(0, 1900);
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) });
+      if (!res.ok) throw new Error(`Discord rejected the message (${res.status}).`);
+      return;
+    }
+    case 'telegram': {
+      const token = channel.config['bot_token'] as string | undefined;
+      const chatId = channel.config['chat_id'] as string | undefined;
+      if (!token || !chatId) throw new Error('The Telegram bot token or chat id is missing.');
+      const text = [heading, ...lines.map((l) => `- ${lineToText(l)}`)].join('\n').slice(0, 4000);
+      const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text }),
+      });
+      if (!res.ok) throw new Error(`Telegram rejected the message (${res.status}).`);
+      return;
+    }
+    case 'webhook': {
+      const url = channel.config['url'] as string | undefined;
+      if (!url) throw new Error('The webhook URL is missing.');
+      const secret = channel.config['secret'] as string | undefined;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(secret ? { 'X-PareCare-Secret': secret } : {}) },
+        body: JSON.stringify({
+          source: 'parecare',
+          event: 'watch',
+          heading,
+          items: lines.map((l) => ({ text: l.text, url: absolute(l.url), urgent: !!l.urgent, action_url: l.action_url ? absolute(l.action_url) : null })),
+        }),
+      });
+      if (!res.ok) throw new Error(`The webhook endpoint rejected the message (${res.status}).`);
+      return;
+    }
+  }
+}
+
 /** Record what a channel has been sent, so it is never sent again. */
 async function markDelivered(channelId: string, items: NotificationItem[]): Promise<void> {
   if (items.length === 0) return;
@@ -201,8 +306,12 @@ async function tick(): Promise<void> {
     }
     const accounts = (await db<Account>('accounts').whereIn('id', [...byAccount.keys()]).whereNull('disabled_at')) as Account[];
     for (const account of accounts) {
-      await deliverForAccount(account, byAccount.get(account.id) ?? []).catch((err) =>
+      const accountChannels = byAccount.get(account.id) ?? [];
+      await deliverForAccount(account, accountChannels).catch((err) =>
         console.warn(`Notification delivery failed for account ${account.id}:`, (err as Error).message)
+      );
+      await deliverWatchesForAccount(account, accountChannels).catch((err) =>
+        console.warn(`Watch delivery failed for account ${account.id}:`, (err as Error).message)
       );
     }
   } finally {

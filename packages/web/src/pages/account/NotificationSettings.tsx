@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/Button';
 import { CrossIcon } from '../../components/ui/icons';
 import { Modal } from '../../components/ui/Modal';
 import { useUpdates } from '../../stores/updates';
+import { useAuthStore } from '../../stores/auth';
 
 /**
  * Where and how notifications reach you. Three layers:
@@ -77,6 +78,7 @@ export function NotificationSettings() {
         </p>
       </div>
       <KindPreferences preferences={data.preferences} onSaved={invalidate} />
+      <AlertsCard channels={data.channels} />
       <ChannelsCard channels={data.channels} vapidKey={data.vapid_public_key} onChanged={invalidate} />
       <ApiKeysCard />
     </div>
@@ -88,6 +90,9 @@ function KindPreferences({ preferences, onSaved }: { preferences: Preferences; o
   const [error, setError] = useState('');
   const notifyUpdates = useUpdates((s) => s.notify);
   const setNotifyUpdates = useUpdates((s) => s.setNotify);
+  // The developer release notes are a super-admin concern; only they get the
+  // switch for that quiet mark.
+  const isSuperAdmin = useAuthStore((s) => s.account?.role) === 'super_admin';
   const mutation = useMutation({
     mutationFn: (patch: Partial<Preferences>) => api.put('/notifications/preferences', patch),
     onSuccess: () => {
@@ -120,22 +125,352 @@ function KindPreferences({ preferences, onSaved }: { preferences: Preferences; o
           </span>
         </label>
       ))}
-      <label className="flex items-start gap-2 text-sm text-ink">
-        <input
-          type="checkbox"
-          className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
-          checked={notifyUpdates}
-          onChange={(e) => setNotifyUpdates(e.target.checked)}
-        />
-        <span>
-          Updates to PareCare
-          <span className="block text-xs text-muted">
-            When there is a new version, a quiet mark appears by the version number with a short note of what changed. This setting is kept on this device.
+      {isSuperAdmin ? (
+        <label className="flex items-start gap-2 text-sm text-ink">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+            checked={notifyUpdates}
+            onChange={(e) => setNotifyUpdates(e.target.checked)}
+          />
+          <span>
+            Updates to PareCare
+            <span className="block text-xs text-muted">
+              When there is a new version, a quiet mark appears by the version number with a short note of what changed. This setting is kept on this device.
+            </span>
           </span>
-        </span>
-      </label>
+        </label>
+      ) : null}
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
     </div>
+  );
+}
+
+// ---------- Alerts (watches): the triggers a person sets up ----------
+
+interface WatchMetricMeta {
+  metric: string;
+  label: string;
+  description: string;
+  category: 'medications' | 'appointments' | 'tasks' | 'care' | 'activity';
+  uses_medication: boolean;
+  uses_threshold_days: boolean;
+  threshold_label: string | null;
+  threshold_default: number | null;
+  uses_critical_only: boolean;
+  critical_label: string | null;
+  digest_only: boolean;
+  requires_profile: boolean;
+}
+
+interface WatchProfile {
+  id: string;
+  name: string;
+}
+
+interface Watch {
+  id: string;
+  metric: string;
+  care_profile_id: string | null;
+  medication_id: string | null;
+  threshold_days: number | null;
+  critical_only: boolean;
+  channel_id: string | null;
+  cadence: string;
+  label: string | null;
+  enabled: boolean;
+  metric_label: string;
+  display_label: string;
+  profile_name: string | null;
+  medication_name: string | null;
+  channel_label: string | null;
+}
+
+interface WatchesResponse {
+  watches: Watch[];
+  metrics: WatchMetricMeta[];
+  profiles: WatchProfile[];
+}
+
+const CADENCE_OPTIONS = [
+  { value: 'immediate', label: 'As it happens' },
+  { value: 'daily', label: 'Daily digest' },
+  { value: 'weekly', label: 'Weekly digest' },
+  { value: 'fortnightly', label: 'Fortnightly digest' },
+  { value: 'monthly', label: 'Monthly digest' },
+] as const;
+
+const cadenceLabel = (v: string) => CADENCE_OPTIONS.find((c) => c.value === v)?.label ?? v;
+
+const CATEGORY_ORDER: { key: WatchMetricMeta['category']; label: string }[] = [
+  { key: 'medications', label: 'Medications' },
+  { key: 'appointments', label: 'Appointments' },
+  { key: 'tasks', label: 'Tasks' },
+  { key: 'care', label: 'Care plan' },
+  { key: 'activity', label: 'Activity' },
+];
+
+/** The alerts a person builds for themselves: what, for whom, where, and when. */
+function AlertsCard({ channels }: { channels: Channel[] }) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState<Watch | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState('');
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['notification-watches'],
+    queryFn: () => api.get<WatchesResponse>('/notifications/watches'),
+  });
+  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['notification-watches'] });
+
+  const toggle = useMutation({
+    mutationFn: (w: Watch) => api.patch(`/notifications/watches/${w.id}`, { enabled: !w.enabled }),
+    onSuccess: invalidate,
+    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.delete(`/notifications/watches/${id}`),
+    onSuccess: invalidate,
+    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to remove'),
+  });
+
+  const watches = data?.watches ?? [];
+  const metrics = data?.metrics ?? [];
+  const profiles = data?.profiles ?? [];
+
+  return (
+    <div className="card space-y-4">
+      <div>
+        <h3>Your alerts</h3>
+        <p className="text-sm text-muted">
+          Set up exactly what you want to hear about and where it goes: a medication running low, an appointment coming
+          up, a message posted, a medication record. Each one arrives the moment it happens or bundled into a digest.
+        </p>
+      </div>
+
+      {isLoading ? (
+        <p className="text-sm text-muted">Loading…</p>
+      ) : watches.length > 0 ? (
+        <ul className="divide-y divide-border">
+          {watches.map((w) => (
+            <li key={w.id} className="py-3 flex flex-wrap items-center gap-2">
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-ink">
+                  {w.display_label}
+                  {!w.enabled ? <span className="badge bg-surface-2 text-muted text-xs ml-2">Paused</span> : null}
+                </span>
+                <span className="block text-xs text-muted">
+                  {cadenceLabel(w.cadence)}
+                  {w.channel_label ? ` · to ${w.channel_label}` : ''}
+                </span>
+              </span>
+              <span className="ml-auto flex items-center gap-1">
+                <Button size="xs" variant="ghost" onClick={() => setEditing(w)}>Edit</Button>
+                <Button size="xs" variant="ghost" onClick={() => toggle.mutate(w)}>{w.enabled ? 'Pause' : 'Resume'}</Button>
+                <Button size="xs" variant="ghost-danger" onClick={() => remove.mutate(w.id)}>Remove</Button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted">No alerts yet. Add one to be told about a specific thing, your way.</p>
+      )}
+
+      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+
+      <div>
+        <Button type="button" variant="secondary" size="sm" onClick={() => setAdding(true)}>Add an alert</Button>
+      </div>
+
+      {adding ? (
+        <AlertModal
+          channels={channels}
+          metrics={metrics}
+          profiles={profiles}
+          onClose={() => setAdding(false)}
+          onSaved={() => { setAdding(false); invalidate(); }}
+        />
+      ) : null}
+      {editing ? (
+        <AlertModal
+          channels={channels}
+          metrics={metrics}
+          profiles={profiles}
+          existing={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); invalidate(); }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function AlertModal({
+  channels,
+  metrics,
+  profiles,
+  existing,
+  onClose,
+  onSaved,
+}: {
+  channels: Channel[];
+  metrics: WatchMetricMeta[];
+  profiles: WatchProfile[];
+  existing?: Watch;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [metric, setMetric] = useState(existing?.metric ?? metrics[0]?.metric ?? '');
+  const [profileId, setProfileId] = useState(existing?.care_profile_id ?? '');
+  const [medicationId, setMedicationId] = useState(existing?.medication_id ?? '');
+  const meta = metrics.find((m) => m.metric === metric);
+  const [thresholdDays, setThresholdDays] = useState<string>(
+    existing?.threshold_days != null
+      ? String(existing.threshold_days)
+      : meta?.threshold_default != null
+        ? String(meta.threshold_default)
+        : ''
+  );
+  const [criticalOnly, setCriticalOnly] = useState(existing?.critical_only ?? false);
+  const [channelId, setChannelId] = useState(existing?.channel_id ?? channels[0]?.id ?? '');
+  const [cadence, setCadence] = useState<string>(existing?.cadence ?? (metrics[0]?.digest_only ? 'weekly' : 'immediate'));
+  const [label, setLabel] = useState(existing?.label ?? '');
+  const [error, setError] = useState('');
+
+  // Medications for the chosen person, when the metric is about one.
+  const { data: medData } = useQuery({
+    queryKey: ['meds-for-watch', profileId],
+    queryFn: () => api.get<{ medications: { id: string; name: string; active: boolean }[] }>(`/care-profiles/${profileId}/medications`),
+    enabled: !!profileId && !!meta?.uses_medication,
+  });
+  const medications = (medData?.medications ?? []).filter((m) => m.active !== false);
+
+  const onMetricChange = (next: string) => {
+    setMetric(next);
+    const m = metrics.find((x) => x.metric === next);
+    setThresholdDays(m?.threshold_default != null ? String(m.threshold_default) : '');
+    setCriticalOnly(false);
+    setMedicationId('');
+    if (m?.digest_only && cadence === 'immediate') setCadence('weekly');
+  };
+
+  const cadenceOptions = CADENCE_OPTIONS.filter((c) => !(meta?.digest_only && c.value === 'immediate'));
+
+  const save = useMutation({
+    mutationFn: () => {
+      const body = {
+        metric,
+        care_profile_id: profileId || null,
+        medication_id: meta?.uses_medication && medicationId ? medicationId : null,
+        threshold_days: meta?.uses_threshold_days && thresholdDays.trim() ? Number(thresholdDays) : null,
+        critical_only: meta?.uses_critical_only ? criticalOnly : false,
+        channel_id: channelId || null,
+        cadence,
+        label: label.trim() || null,
+      };
+      return existing
+        ? api.patch(`/notifications/watches/${existing.id}`, body)
+        : api.post('/notifications/watches', body);
+    },
+    onSuccess: onSaved,
+    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
+  });
+
+  const canSave = !!metric && !!channelId && (!meta?.requires_profile || !!profileId);
+
+  return (
+    <Modal open onClose={onClose} title={existing ? 'Edit alert' : 'Add an alert'}>
+      <div className="space-y-4">
+        <div>
+          <label htmlFor="watch-metric" className="block text-sm font-medium text-ink mb-1">Tell me about</label>
+          <select id="watch-metric" className={`${selectClass} w-full`} value={metric} onChange={(e) => onMetricChange(e.target.value)}>
+            {CATEGORY_ORDER.map((cat) => {
+              const inCat = metrics.filter((m) => m.category === cat.key);
+              if (inCat.length === 0) return null;
+              return (
+                <optgroup key={cat.key} label={cat.label}>
+                  {inCat.map((m) => <option key={m.metric} value={m.metric}>{m.label}</option>)}
+                </optgroup>
+              );
+            })}
+          </select>
+          {meta ? <p className="mt-1 text-xs text-muted">{meta.description}</p> : null}
+        </div>
+
+        <div>
+          <label htmlFor="watch-profile" className="block text-sm font-medium text-ink mb-1">Who</label>
+          <select
+            id="watch-profile"
+            className={`${selectClass} w-full`}
+            value={profileId}
+            onChange={(e) => { setProfileId(e.target.value); setMedicationId(''); }}
+          >
+            <option value="">{meta?.requires_profile ? 'Choose a person' : 'Anyone in your care'}</option>
+            {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+
+        {meta?.uses_medication ? (
+          <div>
+            <label htmlFor="watch-med" className="block text-sm font-medium text-ink mb-1">Which medication</label>
+            <select id="watch-med" className={`${selectClass} w-full`} value={medicationId} onChange={(e) => setMedicationId(e.target.value)} disabled={!profileId}>
+              <option value="">{profileId ? 'Any medication' : 'Choose a person first'}</option>
+              {medications.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </div>
+        ) : null}
+
+        {meta?.uses_threshold_days ? (
+          <Input
+            label={meta.threshold_label ?? 'Within this many days'}
+            type="number"
+            min={1}
+            value={thresholdDays}
+            onChange={(e) => setThresholdDays(e.target.value)}
+          />
+        ) : null}
+
+        {meta?.uses_critical_only ? (
+          <label className="flex items-center gap-2 text-sm text-ink">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+              checked={criticalOnly}
+              onChange={(e) => setCriticalOnly(e.target.checked)}
+            />
+            {meta.critical_label ?? 'Only the important ones'}
+          </label>
+        ) : null}
+
+        <div>
+          <label htmlFor="watch-channel" className="block text-sm font-medium text-ink mb-1">Send it to</label>
+          {channels.length > 0 ? (
+            <select id="watch-channel" className={`${selectClass} w-full`} value={channelId} onChange={(e) => setChannelId(e.target.value)}>
+              {channels.map((c) => <option key={c.id} value={c.id}>{KIND_LABELS[c.kind]}: {c.label}</option>)}
+            </select>
+          ) : (
+            <p className="text-sm text-muted">Add a destination below first, such as your email, and it will appear here.</p>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="watch-cadence" className="block text-sm font-medium text-ink mb-1">When</label>
+          <select id="watch-cadence" className={`${selectClass} w-full`} value={cadence} onChange={(e) => setCadence(e.target.value)}>
+            {cadenceOptions.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+        </div>
+
+        <Input label="Name it" hint="Optional. A name for this alert in your list." value={label} onChange={(e) => setLabel(e.target.value)} />
+
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="button" loading={save.isPending} disabled={!canSave} onClick={() => save.mutate()}>
+            {existing ? 'Save' : 'Add alert'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
