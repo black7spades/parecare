@@ -20,6 +20,31 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.19.0',
+    date: '2026-08-06',
+    summary: 'You decide whether to hear about updates, and a new version always says so.',
+    groups: [
+      {
+        heading: 'Added',
+        items: [
+          'Turn update notices off. A new switch under Notifications, in what you are notified about, controls the quiet mark that appears when PareCare has a new version. It stays on by default and is kept on this device.',
+        ],
+      },
+      {
+        heading: 'Changed',
+        items: [
+          'The version number in the sidebar now opens What\'s new, so you can read what has changed at any time, not only when there is a new mark waiting.',
+        ],
+      },
+      {
+        heading: 'Fixed',
+        items: [
+          'After an update, the quiet What\'s new mark now appears as it should, instead of staying hidden for people who came straight to the newest version.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.18.0',
     date: '2026-08-05',
     summary: 'The overview leads with what matters for each person.',

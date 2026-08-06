@@ -6,6 +6,7 @@ import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { CrossIcon } from '../../components/ui/icons';
 import { Modal } from '../../components/ui/Modal';
+import { useUpdates } from '../../stores/updates';
 
 /**
  * Where and how notifications reach you. Three layers:
@@ -85,6 +86,8 @@ export function NotificationSettings() {
 /** Which kinds of notification this account wants at all. */
 function KindPreferences({ preferences, onSaved }: { preferences: Preferences; onSaved: () => void }) {
   const [error, setError] = useState('');
+  const notifyUpdates = useUpdates((s) => s.notify);
+  const setNotifyUpdates = useUpdates((s) => s.setNotify);
   const mutation = useMutation({
     mutationFn: (patch: Partial<Preferences>) => api.put('/notifications/preferences', patch),
     onSuccess: () => {
@@ -117,6 +120,20 @@ function KindPreferences({ preferences, onSaved }: { preferences: Preferences; o
           </span>
         </label>
       ))}
+      <label className="flex items-start gap-2 text-sm text-ink">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+          checked={notifyUpdates}
+          onChange={(e) => setNotifyUpdates(e.target.checked)}
+        />
+        <span>
+          Updates to PareCare
+          <span className="block text-xs text-muted">
+            When there is a new version, a quiet mark appears by the version number with a short note of what changed. This setting is kept on this device.
+          </span>
+        </span>
+      </label>
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
     </div>
   );

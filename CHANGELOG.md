@@ -1,9 +1,29 @@
 # Changelog
 
-All notable changes to PareCare are recorded here. The running app links to
-this file from the sidebar ("What's new"), and its version badge links to the
-exact commit each build came from, so the record of updates stays traceable to
-source. Versions follow [semantic versioning](https://semver.org).
+All notable changes to PareCare are recorded here. The running app shows this
+record on its What's new screen, opened from the version number in the sidebar,
+which links on to the exact commit each build came from, so the record of
+updates stays traceable to source. Versions follow
+[semantic versioning](https://semver.org).
+
+## [0.19.0] - 2026-08-06
+
+### Added
+
+- **Turn update notices off.** A new switch under Notifications, in what you are
+  notified about, controls the quiet mark that appears when PareCare has a new
+  version. It stays on by default and is kept on this device.
+
+### Changed
+
+- **The version number opens What's new.** Tap the version in the sidebar to
+  read what has changed at any time, not only when there is a new mark waiting.
+
+### Fixed
+
+- **A new version now always announces itself.** After an update, the quiet
+  What's new mark appears as it should, instead of staying hidden for people who
+  came straight to the newest version.
 
 ## [0.18.0] - 2026-08-05
 
