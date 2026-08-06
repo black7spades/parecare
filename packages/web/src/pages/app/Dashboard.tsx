@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -7,9 +7,8 @@ import { useAuthStore } from '../../stores/auth';
 import { useAssistantStore } from '../../stores/assistant';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
-import { Input } from '../../components/ui/Input';
 import { Avatar } from '../../components/ui/Avatar';
-import { POA_TYPES, conditionStatusLabel } from '../../lib/care';
+import { POA_TYPES, PET_SPECIES, conditionStatusLabel } from '../../lib/care';
 import { AttentionPanel } from '../../components/AttentionPanel';
 import { useAiStatus, AI_WARMING_MESSAGE } from '../../lib/aiStatus';
 import { BulkLinkProviderPicker, BulkLinkAddressPicker, BulkLinkOwnerPicker, BulkLinkCarerPicker } from './homeboard/BulkLinkPickers';
@@ -102,7 +101,7 @@ export function Dashboard() {
   const [bulkAddressOpen, setBulkAddressOpen] = useState(false);
   const [bulkOwnerOpen, setBulkOwnerOpen] = useState(false);
   const [bulkCarerOpen, setBulkCarerOpen] = useState(false);
-  const [editQueue, setEditQueue] = useState<ProfileSummary[]>([]);
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Only platform staff may permanently delete profiles; everyone can act on
@@ -159,8 +158,6 @@ export function Dashboard() {
       setSelectedProfileIds(new Set());
     },
   });
-
-  const advanceEditQueue = () => setEditQueue((q) => q.slice(1));
 
   // Every distinct journey name across the people shown, for the filter.
   const journeyNames = useMemo(
@@ -304,7 +301,7 @@ export function Dashboard() {
           {selectedProfileIds.size > 0 ? (
             <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 bg-primary-50 dark:bg-primary-900/20 border border-primary/30 rounded-lg text-sm">
               <span className="font-medium text-ink mr-1">{selectedProfileIds.size} selected</span>
-              <Button size="sm" variant="secondary" onClick={() => setEditQueue(selectedProfiles)}>
+              <Button size="sm" variant="secondary" onClick={() => setBulkEditOpen(true)}>
                 Edit
               </Button>
               <Button size="sm" variant="secondary" onClick={() => setConfirmArchive(true)}>
@@ -452,13 +449,14 @@ export function Dashboard() {
             }}
           />
 
-          {editQueue.length > 0 ? (
-            <ProfileQuickEditModal
-              profile={editQueue[0]}
-              remaining={editQueue.length}
-              onClose={() => setEditQueue([])}
-              onSaved={advanceEditQueue}
-              onSkip={advanceEditQueue}
+          {bulkEditOpen ? (
+            <BulkEditModal
+              profiles={selectedProfiles}
+              onClose={() => setBulkEditOpen(false)}
+              onDone={() => {
+                setBulkEditOpen(false);
+                setSelectedProfileIds(new Set());
+              }}
             />
           ) : null}
 
@@ -591,7 +589,7 @@ function ProfileCard({
   const hasActiveHealth = p.health_statuses.length > 0;
 
   return (
-    <div className={`card relative hover:border-primary transition-colors ${alertLevel ? ALERT_BORDER[alertLevel] : ''} ${selected ? 'ring-2 ring-primary/40' : ''}`}>
+    <div className={`card relative min-w-0 overflow-hidden hover:border-primary transition-colors ${alertLevel ? ALERT_BORDER[alertLevel] : ''} ${selected ? 'ring-2 ring-primary/40' : ''}`}>
       <div className="absolute top-3 right-3 flex items-center gap-2">
         {selectable ? (
           <input
@@ -636,9 +634,9 @@ function ProfileCard({
               </p>
             ) : null}
             {!collapsed ? (
-              <span className="mt-1 flex flex-wrap gap-1">
+              <span className="mt-1 flex flex-wrap gap-1 min-w-0">
                 {p.kind === 'pet' && (p.species || p.breed) ? (
-                  <span className="badge bg-surface-2 text-muted text-xs">
+                  <span className="badge max-w-full break-words bg-surface-2 text-muted text-xs">
                     {[p.species, p.breed].filter(Boolean).join(' · ')}
                   </span>
                 ) : null}
@@ -646,7 +644,7 @@ function ProfileCard({
                   ? p.health_statuses.map((hs) => (
                       <span
                         key={hs.id}
-                        className={`badge text-xs ${
+                        className={`badge max-w-full break-words text-xs ${
                           hs.is_contagious || hs.isolation_required
                             ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                             : hs.status === 'active'
@@ -662,21 +660,21 @@ function ProfileCard({
                     ))
                   : p.journeys.length > 0
                     ? p.journeys.map((j) => (
-                        <span key={j.id} className="badge bg-surface-2 text-muted text-xs">
+                        <span key={j.id} className="badge max-w-full break-words bg-surface-2 text-muted text-xs">
                           {j.name}
                           {j.phase_name ? ` · ${j.phase_name}` : ''}
                         </span>
                       ))
                     : p.kind !== 'pet' || (!p.species && !p.breed) ? (
-                        <span className="badge bg-surface-2 text-muted text-xs">No journey underway</span>
+                        <span className="badge max-w-full break-words bg-surface-2 text-muted text-xs">No journey underway</span>
                       ) : null}
               </span>
             ) : hasActiveHealth ? (
-              <span className="mt-1 flex flex-wrap gap-1">
+              <span className="mt-1 flex flex-wrap gap-1 min-w-0">
                 {p.health_statuses.map((hs) => (
                   <span
                     key={hs.id}
-                    className={`badge text-xs ${
+                    className={`badge max-w-full break-words text-xs ${
                       hs.is_contagious || hs.isolation_required
                         ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                         : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
@@ -903,93 +901,171 @@ function ProfileTable({
   );
 }
 
-/**
- * A compact editor used by the homeboard's bulk Edit action to step through
- * the selection. It keeps to the field that makes sense across several
- * profiles at once, the relationship; names are per-person and are edited on
- * the profile itself.
- */
-function ProfileQuickEditModal({
-  profile,
-  remaining,
-  onClose,
-  onSaved,
-  onSkip,
+/** One bulk-edit field: a checkbox that turns the change on, and its input. */
+function BulkFieldRow({
+  on,
+  onToggle,
+  label,
+  children,
 }: {
-  profile: ProfileSummary;
-  remaining: number;
+  on: boolean;
+  onToggle: () => void;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-md border border-border p-3">
+      <label className="flex items-center gap-2 text-sm font-medium text-ink">
+        <input
+          type="checkbox"
+          className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+          checked={on}
+          onChange={onToggle}
+        />
+        Change {label.toLowerCase()}
+      </label>
+      {on ? <div className="mt-2">{children}</div> : null}
+    </div>
+  );
+}
+
+/**
+ * Bulk edit: set the information the selected records share once, and apply it
+ * to all of them at once. Only the fields ticked are changed; everything left
+ * unticked is kept as it is, so a bulk edit never quietly wipes what it did not
+ * touch. Names and dates of birth are personal, so they are edited on each
+ * profile, not here. Pet-only facts appear when every record chosen is a pet.
+ */
+function BulkEditModal({
+  profiles,
+  onClose,
+  onDone,
+}: {
+  profiles: ProfileSummary[];
   onClose: () => void;
-  onSaved: () => void;
-  onSkip: () => void;
+  onDone: () => void;
 }) {
   const queryClient = useQueryClient();
-  const { data } = useQuery({
-    queryKey: ['care-profile', profile.id],
-    queryFn: () => api.get<{ profile: CareProfileDetail; relationship: string | null }>(`/care-profiles/${profile.id}`),
+  const allPets = profiles.length > 0 && profiles.every((p) => p.kind === 'pet');
+  const somePets = profiles.some((p) => p.kind === 'pet');
+  const [apply, setApply] = useState<Set<string>>(new Set());
+  const [vals, setVals] = useState<Record<string, string>>({
+    owner_relationship: '', pronouns: '', primary_language: '', died_on: '',
+    species: '', breed: '', desexed: 'no', notes: '',
   });
-  // Names are per-person and not something anyone sets in bulk, so the quick
-  // edit stays to the fields that make sense across a selection.
-  const [relationship, setRelationship] = useState('');
   const [error, setError] = useState('');
+  const [result, setResult] = useState('');
 
-  useEffect(() => {
-    if (!data) return;
-    setRelationship(data.relationship ?? data.profile.owner_relationship ?? '');
-    setError('');
-  }, [data]);
+  const toggle = (key: string) =>
+    setApply((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const set = (key: string, v: string) => setVals((prev) => ({ ...prev, [key]: v }));
+
+  const buildPatch = (): Record<string, unknown> => {
+    const patch: Record<string, unknown> = {};
+    if (apply.has('owner_relationship')) patch['owner_relationship'] = vals['owner_relationship']!.trim() || null;
+    if (apply.has('pronouns')) patch['pronouns'] = vals['pronouns']!.trim() || null;
+    if (apply.has('primary_language')) patch['primary_language'] = vals['primary_language']!.trim() || null;
+    if (apply.has('died_on')) patch['died_on'] = vals['died_on'] || null;
+    if (allPets) {
+      if (apply.has('species')) patch['species'] = vals['species'] || null;
+      if (apply.has('breed')) patch['breed'] = vals['breed']!.trim() || null;
+      if (apply.has('desexed')) patch['desexed'] = vals['desexed'] === 'yes';
+      if (apply.has('notes')) patch['notes'] = vals['notes']!.trim() || null;
+    }
+    return patch;
+  };
 
   const save = useMutation({
-    mutationFn: () => api.patch(`/care-profiles/${profile.id}`, { owner_relationship: relationship.trim() || null }),
-    onSuccess: () => {
+    mutationFn: async () => {
+      const patch = buildPatch();
+      const results = await Promise.allSettled(profiles.map((p) => api.patch(`/care-profiles/${p.id}`, patch)));
+      return results.filter((r) => r.status === 'rejected').length;
+    },
+    onSuccess: (failed) => {
       void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
-      void queryClient.invalidateQueries({ queryKey: ['care-profile', profile.id] });
-      onSaved();
+      for (const p of profiles) void queryClient.invalidateQueries({ queryKey: ['care-profile', p.id] });
+      if (failed > 0) {
+        setResult(`Saved to ${profiles.length - failed} of ${profiles.length}. The rest could not be changed, perhaps a record you cannot edit.`);
+      } else {
+        onDone();
+      }
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not save.'),
   });
 
+  const patchSize = Object.keys(buildPatch()).length;
+  const inputCls = 'block w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
+  const count = `${profiles.length} ${profiles.length === 1 ? 'profile' : 'profiles'}`;
+
   return (
-    <Modal open onClose={onClose} title={`Edit ${profile.full_name}`}>
-      <div className="space-y-4">
-        {remaining > 1 ? (
-          <p className="text-xs text-muted">{remaining} profiles to review. Save or skip each in turn.</p>
-        ) : null}
-        {!data ? (
-          <p className="text-sm text-muted">Loading…</p>
-        ) : (
-          <>
-            <Input
-              label="Relationship to you"
-              value={relationship}
-              onChange={(e) => setRelationship(e.target.value)}
-              placeholder="e.g. Mother, Resident"
-              hint="To change a name, open the profile and edit it there."
-            />
-            {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          </>
-        )}
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          {remaining > 1 ? (
-            <Button variant="ghost" onClick={onSkip}>Skip</Button>
-          ) : null}
-          <Button loading={save.isPending} onClick={() => save.mutate()}>
-            Save
-          </Button>
+    <Modal open onClose={onClose} title={`Edit ${count}`}>
+      {result ? (
+        <div className="space-y-4">
+          <p className="text-sm text-ink">{result}</p>
+          <div className="flex justify-end"><Button onClick={onDone}>Done</Button></div>
         </div>
-      </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-sm text-muted">
+            Set what these records share once and it applies to all of them. Only the fields ticked are changed; the rest
+            are left as they are. Names and dates of birth are personal, so they stay on each profile.
+          </p>
+
+          <BulkFieldRow on={apply.has('owner_relationship')} onToggle={() => toggle('owner_relationship')} label="Relationship to you">
+            <input className={inputCls} value={vals['owner_relationship']} onChange={(e) => set('owner_relationship', e.target.value)} placeholder="e.g. Mother, Resident" />
+          </BulkFieldRow>
+          <BulkFieldRow on={apply.has('pronouns')} onToggle={() => toggle('pronouns')} label="Pronouns">
+            <input className={inputCls} value={vals['pronouns']} onChange={(e) => set('pronouns', e.target.value)} placeholder="e.g. she/her" />
+          </BulkFieldRow>
+          <BulkFieldRow on={apply.has('primary_language')} onToggle={() => toggle('primary_language')} label="Main language">
+            <input className={inputCls} value={vals['primary_language']} onChange={(e) => set('primary_language', e.target.value)} placeholder="e.g. English" />
+          </BulkFieldRow>
+          <BulkFieldRow on={apply.has('died_on')} onToggle={() => toggle('died_on')} label="Date of death">
+            <input type="date" className={inputCls} value={vals['died_on']} onChange={(e) => set('died_on', e.target.value)} />
+            <p className="mt-1 text-xs text-muted">Leave the date empty to clear it. Recording it gives a power of attorney in the care circle access to the secrets kept for them.</p>
+          </BulkFieldRow>
+
+          {allPets ? (
+            <>
+              <BulkFieldRow on={apply.has('species')} onToggle={() => toggle('species')} label="Species">
+                <select className={inputCls} value={vals['species']} onChange={(e) => set('species', e.target.value)}>
+                  <option value="">Choose one…</option>
+                  {PET_SPECIES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </BulkFieldRow>
+              <BulkFieldRow on={apply.has('breed')} onToggle={() => toggle('breed')} label="Breed">
+                <input className={inputCls} value={vals['breed']} onChange={(e) => set('breed', e.target.value)} placeholder="e.g. Ragdoll" />
+              </BulkFieldRow>
+              <BulkFieldRow on={apply.has('desexed')} onToggle={() => toggle('desexed')} label="Desexed">
+                <select className={inputCls} value={vals['desexed']} onChange={(e) => set('desexed', e.target.value)}>
+                  <option value="no">No</option>
+                  <option value="yes">Yes</option>
+                </select>
+              </BulkFieldRow>
+              <BulkFieldRow on={apply.has('notes')} onToggle={() => toggle('notes')} label="Notes">
+                <textarea rows={3} className={inputCls} value={vals['notes']} onChange={(e) => set('notes', e.target.value)} />
+              </BulkFieldRow>
+            </>
+          ) : somePets ? (
+            <p className="text-xs text-muted">Species, breed and other pet details appear here when every record chosen is a pet.</p>
+          ) : null}
+
+          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button loading={save.isPending} disabled={patchSize === 0} onClick={() => save.mutate()}>
+              Apply to {count}
+            </Button>
+          </div>
+        </div>
+      )}
     </Modal>
   );
-}
-
-interface CareProfileDetail {
-  title: string | null;
-  first_name: string | null;
-  middle_name: string | null;
-  last_name: string | null;
-  suffix: string | null;
-  preferred_name: string | null;
-  owner_relationship: string | null;
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
