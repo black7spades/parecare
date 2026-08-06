@@ -132,12 +132,14 @@ export function ActivityPage() {
       ) : (
         <ul className="space-y-3 mt-4">
           {dv.view.map((e) => (
-            <li key={e.id} className="flex items-start gap-3 border-b border-border last:border-0 pb-3 last:pb-0">
+            <li key={e.id} data-record={e.id} className="flex items-start gap-3 border-b border-border last:border-0 pb-3 last:pb-0">
               <span className={`badge text-xs capitalize shrink-0 ${ACTION_STYLES[e.action]}`}>{e.action}</span>
               <div className="flex-1">
                 <p className="text-sm text-ink">
                   <span className="font-medium">{e.actor_name ?? 'A former member'}</span> {e.action} a{' '}
                   {entityLabel(e.entity_type)}
+                  {e.source === 'pare' ? <span className="text-muted"> via Pare</span> : null}
+                  {e.source === 'assistant' ? <span className="text-muted"> via an assistant</span> : null}
                   {e.summary ? <span className="text-muted">: "{e.summary}"</span> : null}
                 </p>
                 <p className="text-xs text-muted">{format(new Date(e.created_at), 'EEE d MMM yyyy, HH:mm')}</p>

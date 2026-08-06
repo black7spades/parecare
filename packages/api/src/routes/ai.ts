@@ -196,7 +196,7 @@ aiRouter.post(
         }
       }
     }
-    const outcomes = [...(await executeActions(actions, req.params['id']!, req.account!, access, timeZone)), ...parseErrors];
+    const outcomes = [...(await executeActions(actions, req.params['id']!, req.account!, access, timeZone, { source: 'pare' })), ...parseErrors];
     // A tick means something changed. A line the assistant marked as a
     // question back is shown as it is, so asking never looks like doing.
     const finalReply = [cleanedReply, ...outcomes.map((o) => (o.includes(CLARIFY_MARK) ? o : `✔ ${o}`))]

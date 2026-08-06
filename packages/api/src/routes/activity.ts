@@ -21,6 +21,7 @@ activityRouter.get('/', requireAuth, async (req, res) => {
         'audit_log.entity_type',
         'audit_log.summary',
         'audit_log.created_at',
+        'audit_log.source',
         'accounts.display_name as actor_name'
       ),
     db('audit_log').where({ care_profile_id: req.params['id'] }).count<{ count: string }>('id as count').first(),
