@@ -5,7 +5,7 @@ import { Input } from '../../components/ui/Input';
 import { settingsApi, type SettingField, type SettingGroup, type SettingsResponse, type AiModelInfo, type InstalledModel } from '../../api/settings';
 
 const GROUP_TITLES: Record<string, { title: string; blurb: string }> = {
-  ai: { title: 'AI assistant', blurb: 'Provider, model and keys for Ask PareCare and dispute mediation.' },
+  ai: { title: 'Pare, your AI assistant', blurb: 'The provider, model and keys behind Pare, the assistant throughout PareCare, and the message mediation it runs.' },
   health: { title: 'Health spend', blurb: 'The currency prices are shown in, and whether a price is required on every medication and treatment.' },
   email: { title: 'Email (SMTP)', blurb: 'The outgoing mail server used for invites and reminders.' },
   scheduler: { title: 'Scheduler', blurb: 'How often the reminder scheduler checks for due tasks.' },

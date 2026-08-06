@@ -26,14 +26,3 @@ export function useAiStatus(enabled = true) {
 
 /** The plain sentence to show while a model is still getting ready. */
 export const AI_WARMING_MESSAGE = 'Pare is still getting ready. Everything else works in the meantime.';
-
-/**
- * The one plain sentence naming which assistant is in use, or null when there
- * is nothing worth saying (the usual cloud or already-known case).
- */
-export function assistantNotice(status: AiStatus | undefined): string | null {
-  if (!status) return null;
-  if (status.local) return 'PareCare is using the assistant on this machine. It is slower, and nothing leaves here.';
-  if (status.provider === 'anthropic') return 'PareCare is using Claude. It is faster, and records are sent to Anthropic to be read.';
-  return null;
-}

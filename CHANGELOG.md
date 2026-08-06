@@ -6,6 +6,23 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.24.0] - 2026-08-06
+
+### Changed
+
+- **Profile and Settings are one screen now.** Your details, your photo and how
+  you sign in all live under Settings, laid out in numbered sections with the
+  most-used first. The separate Profile screen is gone, and its link goes
+  straight to Settings.
+- **Pare greets you by name.** Opening Pare starts with a friendly hello and an
+  offer to help, and a nudge to type /help to see everything it can do, in place
+  of the technical note that used to sit there and meant little to anyone.
+
+### Removed
+
+- **The Relationships feature has been removed.** It was little used and did not
+  earn its place.
+
 ## [0.23.0] - 2026-08-06
 
 ### Added

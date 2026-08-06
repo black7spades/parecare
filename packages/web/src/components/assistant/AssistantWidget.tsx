@@ -3,7 +3,7 @@ import { useMatch, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, AI_REQUEST_TIMEOUT_MS } from '../../api/client';
 import { describeAiError } from '../../lib/aiErrors';
-import { useAiStatus, assistantNotice, AI_WARMING_MESSAGE } from '../../lib/aiStatus';
+import { useAiStatus, AI_WARMING_MESSAGE } from '../../lib/aiStatus';
 import { ASSISTANT_COMMANDS, commandHelpText, expandSlashCommand } from '../../lib/assistantCommands';
 import { browserTimeZone } from '../../lib/datetime';
 import { useAssistantStore } from '../../stores/assistant';
@@ -229,6 +229,17 @@ export function AssistantWidget() {
   return <AssistantPanel profileId={routeProfileId} />;
 }
 
+/** A friendly opening line, picked at random so Pare does not greet the same way twice. */
+const PARE_GREETINGS = [
+  'Good to see you.',
+  'How are things?',
+  'I hope your day is going gently.',
+  "I'm glad you're here.",
+  'Ready when you are.',
+  "Let's take care of it together.",
+  'Take your time.',
+];
+
 /**
  * One Pare, one conversation. It follows the user everywhere: the same
  * thread on the Homeboard and inside any profile, so a chat never goes
@@ -385,26 +396,10 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
   const { data: aiStatus } = useAiStatus(open);
   const preparing = aiStatus?.state === 'preparing';
 
-  // The one sentence naming which assistant is in use, shown once and then
-  // remembered per provider, so switching provider says it again.
-  const notice = assistantNotice(aiStatus);
-  const [noticeSeenProvider, setNoticeSeenProvider] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem('pare-assistant-notice');
-    } catch {
-      return null;
-    }
-  });
-  const showNotice = !!notice && !preparing && !!aiStatus && noticeSeenProvider !== aiStatus.provider;
-  function dismissNotice() {
-    if (!aiStatus) return;
-    setNoticeSeenProvider(aiStatus.provider);
-    try {
-      localStorage.setItem('pare-assistant-notice', aiStatus.provider);
-    } catch {
-      /* private mode: showing it again next time is fine */
-    }
-  }
+  // A warm, named opening for an empty conversation, in place of the technical
+  // notice that used to sit here and meant nothing to anyone.
+  const firstName = (useAuthStore((s) => s.account?.display_name) ?? '').split(' ')[0];
+  const [greeting] = useState(() => PARE_GREETINGS[Math.floor(Math.random() * PARE_GREETINGS.length)]);
 
   const { data: profileData } = useQuery({
     queryKey: ['care-profile', profileId],
@@ -611,28 +606,26 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
             {AI_WARMING_MESSAGE}
           </div>
         ) : null}
-        {showNotice ? (
-          <div className="flex items-start gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-muted">
-            <span className="flex-1">{notice}</span>
-            <button
-              type="button"
-              onClick={dismissNotice}
-              aria-label="Dismiss this note"
-              className="p-0.5 rounded text-muted hover:text-ink shrink-0"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <line x1="6" y1="6" x2="18" y2="18" />
-                <line x1="18" y1="6" x2="6" y2="18" />
-              </svg>
-            </button>
-          </div>
-        ) : null}
         {messages.length === 0 && !pendingReply ? (
-          <p className="text-sm text-muted text-center mt-6 px-4">
-            {personName
-              ? `Ask anything about ${personName}, tell me what happened so I can log it, or ask me to do or change something anywhere in your care.`
-              : 'Ask what needs attention, tell me what happened so I can log it for anyone, or ask me to take you anywhere in the app.'}
-          </p>
+          <div className="text-sm text-center mt-6 px-4 space-y-1.5">
+            <p className="text-ink">
+              Hi {firstName || 'there'}. {greeting}
+            </p>
+            <p className="text-muted">
+              What can I help you with{personName ? ` about ${personName}` : ''}?
+            </p>
+            <p className="text-muted">
+              Type{' '}
+              <button
+                type="button"
+                onClick={() => setShowHelp(true)}
+                className="font-mono text-primary hover:underline"
+              >
+                /help
+              </button>{' '}
+              to see everything I can do.
+            </p>
+          </div>
         ) : null}
         {messages.map((m, i) => {
           if (m.role === 'user') {
