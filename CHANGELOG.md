@@ -6,6 +6,14 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.23.0] - 2026-08-06
+
+### Added
+
+- **The activity log shows when Pare made a change.** Every entry now says
+  whether a person made it by hand, Pare did, or an outside assistant did, so
+  the record tells you how something changed, not only who and when.
+
 ## [0.22.0] - 2026-08-06
 
 ### Added

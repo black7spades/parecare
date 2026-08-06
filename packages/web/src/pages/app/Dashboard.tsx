@@ -589,7 +589,7 @@ function ProfileCard({
   const hasActiveHealth = p.health_statuses.length > 0;
 
   return (
-    <div className={`card relative min-w-0 overflow-hidden hover:border-primary transition-colors ${alertLevel ? ALERT_BORDER[alertLevel] : ''} ${selected ? 'ring-2 ring-primary/40' : ''}`}>
+    <div data-record={p.id} data-record-kind={p.kind} className={`card relative min-w-0 overflow-hidden hover:border-primary transition-colors ${alertLevel ? ALERT_BORDER[alertLevel] : ''} ${selected ? 'ring-2 ring-primary/40' : ''}`}>
       <div className="absolute top-3 right-3 flex items-center gap-2">
         {selectable ? (
           <input
@@ -833,7 +833,7 @@ function ProfileTable({
             const alertLevel = profileAlertLevel(p.health_statuses);
             const rowBg = alertLevel ? ALERT_ROW_BG[alertLevel] : '';
             return (
-              <tr key={p.id} className={`border-b border-border last:border-0 align-top ${rowBg} ${selectedIds?.has(p.id) ? 'bg-primary-50/50 dark:bg-primary-900/10' : ''}`}>
+              <tr key={p.id} data-record={p.id} data-record-kind={p.kind} className={`border-b border-border last:border-0 align-top ${rowBg} ${selectedIds?.has(p.id) ? 'bg-primary-50/50 dark:bg-primary-900/10' : ''}`}>
                 {selectable ? (
                   <td className="px-3 py-2">
                     <input
@@ -855,13 +855,13 @@ function ProfileTable({
                     {p.pinned ? '★' : '☆'}
                   </button>
                 </td>
-                <td className="px-3 py-2">
+                <td data-field="name" className="px-3 py-2">
                   <Link to={`/app/${p.id}`} className="font-medium text-primary hover:underline">
                     {p.full_name}
                   </Link>
                 </td>
-                <td className="px-3 py-2 text-muted">{p.relationship ?? ''}</td>
-                <td className="px-3 py-2">
+                <td data-field="relationship" className="px-3 py-2 text-muted">{p.relationship ?? ''}</td>
+                <td data-field="health" className="px-3 py-2">
                   {p.health_statuses.length > 0 ? (
                     <div className="flex flex-wrap gap-1">
                       {p.health_statuses.map((hs) => (
@@ -883,11 +883,11 @@ function ProfileTable({
                     <span className="text-muted">OK</span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-muted">{j?.phase_name ?? ''}</td>
-                <td className="px-3 py-2 text-muted whitespace-nowrap">
+                <td data-field="phase" className="px-3 py-2 text-muted">{j?.phase_name ?? ''}</td>
+                <td data-field="next" className="px-3 py-2 text-muted whitespace-nowrap">
                   {p.next_event ? `${p.next_event.title} · ${format(new Date(p.next_event.next_due_at), 'd MMM, HH:mm')}` : ''}
                 </td>
-                <td className="px-3 py-2 text-muted">
+                <td data-field="updated" className="px-3 py-2 text-muted">
                   {p.last_activity
                     ? `${p.last_activity.summary || `${p.last_activity.action} ${p.last_activity.entity_type}`} · ${formatDistanceToNow(new Date(p.last_activity.created_at), { addSuffix: true })}`
                     : ''}

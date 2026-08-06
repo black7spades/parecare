@@ -304,6 +304,8 @@ export interface ActivityEntry {
   summary: string | null;
   created_at: string;
   actor_name: string | null;
+  /** How the change was made: a person's own hands, Pare, or an outside assistant. */
+  source?: 'person' | 'pare' | 'assistant' | null;
 }
 
 const ENTITY_LABELS: Record<string, string> = {

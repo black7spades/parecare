@@ -20,6 +20,19 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.23.0',
+    date: '2026-08-06',
+    summary: 'The activity log now shows how a change was made, not only who and when.',
+    groups: [
+      {
+        heading: 'Added',
+        items: [
+          'The activity log shows when Pare made a change. Every entry now says whether a person made it by hand, Pare did, or an outside assistant did, so the record tells you how something changed, not only who and when.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.22.0',
     date: '2026-08-06',
     summary: 'Edit several people or pets at once, and people cards that stay within the screen.',

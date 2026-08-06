@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { db } from '../config/database';
+import { auditContext, currentAuditSource, currentUndoBatch, type AuditSource } from './auditContext';
 import type { Account, CareAccess, CareCircleMember, CareProfile } from '../types';
 import { parseZonedTime, formatInZone, dateInZone } from '../lib/timezone';
 import { matchProfileNames, type NameCandidate } from '../lib/nameMatch';
@@ -909,9 +910,31 @@ function parseFutureWhen(value: string | null | undefined, timeZone: string | nu
  */
 export const CLARIFY_MARK = '❓';
 
-async function audit(profileId: string, accountId: string, entityType: string, summary: string): Promise<void> {
+/**
+ * Record one change in the audit trail. Attribution (person, Pare, or an
+ * outside assistant) and the undo batch ride along from the request context, so
+ * the executors below never have to carry them. When a create action passes the
+ * id of the row it inserted, that id is stored too, which is what lets the
+ * change be undone later.
+ */
+async function audit(
+  profileId: string,
+  accountId: string,
+  entityType: string,
+  summary: string,
+  entityId?: string | null
+): Promise<void> {
   await db('audit_log')
-    .insert({ care_profile_id: profileId, actor_account_id: accountId, action: 'created', entity_type: entityType, summary: summary.slice(0, 255) })
+    .insert({
+      care_profile_id: profileId,
+      actor_account_id: accountId,
+      action: 'created',
+      entity_type: entityType,
+      summary: summary.slice(0, 255),
+      source: currentAuditSource(),
+      undo_batch: currentUndoBatch(),
+      entity_id: entityId ?? null,
+    })
     .catch(() => {});
 }
 
@@ -1076,15 +1099,17 @@ async function executeOne(
   switch (action.type) {
     case 'log_event': {
       const occurredAt = parseWhen(action.occurred_at, timeZone);
-      await db('care_log_entries').insert({
-        care_profile_id: profileId,
-        author_member_id: access.member?.id ?? null,
-        entry_type: action.entry_type,
-        title: action.title ?? null,
-        body: action.body,
-        occurred_at: occurredAt,
-      });
-      await audit(profileId, account.id, 'log', action.title ?? action.body);
+      const [logRow] = await db('care_log_entries')
+        .insert({
+          care_profile_id: profileId,
+          author_member_id: access.member?.id ?? null,
+          entry_type: action.entry_type,
+          title: action.title ?? null,
+          body: action.body,
+          occurred_at: occurredAt,
+        })
+        .returning('id');
+      await audit(profileId, account.id, 'log', action.title ?? action.body, logRow?.id);
       return `Logged a ${action.entry_type.replace(/_/g, ' ')} entry${action.title ? `: ${action.title}` : ''} at ${formatInZone(occurredAt, timeZone)}.`;
     }
     case 'record_medication': {
@@ -1111,14 +1136,16 @@ async function executeOne(
       if (!due) {
         return `Could not add the task "${action.title}": the due time was unclear.`;
       }
-      await db('reminders').insert({
-        care_profile_id: profileId,
-        title: action.title,
-        body: action.body ?? null,
-        reminder_type: action.repeat,
-        next_due_at: due,
-      });
-      await audit(profileId, account.id, 'reminders', action.title);
+      const [taskRow] = await db('reminders')
+        .insert({
+          care_profile_id: profileId,
+          title: action.title,
+          body: action.body ?? null,
+          reminder_type: action.repeat,
+          next_due_at: due,
+        })
+        .returning('id');
+      await audit(profileId, account.id, 'reminders', action.title, taskRow?.id);
       return `Added the task "${action.title}" due ${formatInZone(due, timeZone)}.`;
     }
     case 'add_medication': {
@@ -1230,12 +1257,14 @@ async function executeOne(
       return `Updated ${med.name}'s supply: ${parts.join(' and ')} on hand.`;
     }
     case 'add_allergy': {
-      await db('allergies').insert({
-        care_profile_id: profileId,
-        substance: action.substance.trim(),
-        reaction: action.reaction ?? null,
-      });
-      await audit(profileId, account.id, 'allergies', `added allergy ${action.substance}`);
+      const [allergyRow] = await db('allergies')
+        .insert({
+          care_profile_id: profileId,
+          substance: action.substance.trim(),
+          reaction: action.reaction ?? null,
+        })
+        .returning('id');
+      await audit(profileId, account.id, 'allergies', `added allergy ${action.substance}`, allergyRow?.id);
       return `Recorded an allergy to ${action.substance}${action.reaction ? ` (${action.reaction})` : ''}.`;
     }
     case 'remove_allergy': {
@@ -1252,17 +1281,19 @@ async function executeOne(
       // The shared catalogue keeps one entry per condition across the
       // instance, same as adding it by hand.
       const catalogueId = await resolveConditionCatalogueId(name, account.id).catch(() => null);
-      await db('medical_conditions').insert({
-        care_profile_id: profileId,
-        condition_catalogue_id: catalogueId,
-        name,
-        category: action.category ?? null,
-        severity: action.severity ?? null,
-        status: action.status ?? 'active',
-        started_on: action.started_on ?? null,
-        notes: action.notes ?? null,
-      });
-      await audit(profileId, account.id, 'conditions', `added condition ${name}`);
+      const [conditionRow] = await db('medical_conditions')
+        .insert({
+          care_profile_id: profileId,
+          condition_catalogue_id: catalogueId,
+          name,
+          category: action.category ?? null,
+          severity: action.severity ?? null,
+          status: action.status ?? 'active',
+          started_on: action.started_on ?? null,
+          notes: action.notes ?? null,
+        })
+        .returning('id');
+      await audit(profileId, account.id, 'conditions', `added condition ${name}`, conditionRow?.id);
       return `Added the condition ${name}${action.category ? ` (${action.category.replace(/_/g, ' ')})` : ''}.`;
     }
     case 'remove_condition': {
@@ -1465,24 +1496,28 @@ async function executeOne(
         if (!condition) return `No condition called "${action.condition_name}" was on the record, so the treatment was not added.`;
         conditionId = condition.id;
       }
-      await db('treatments').insert({
-        care_profile_id: profileId,
-        medical_condition_id: conditionId,
-        name: action.name.trim(),
-        category: action.category,
-        current_status: 'active',
-      });
-      await audit(profileId, account.id, 'treatments', `added treatment ${action.name}`);
+      const [treatmentRow] = await db('treatments')
+        .insert({
+          care_profile_id: profileId,
+          medical_condition_id: conditionId,
+          name: action.name.trim(),
+          category: action.category,
+          current_status: 'active',
+        })
+        .returning('id');
+      await audit(profileId, account.id, 'treatments', `added treatment ${action.name}`, treatmentRow?.id);
       return `Added the treatment ${action.name}${action.condition_name ? ` for ${action.condition_name}` : ''}.`;
     }
     case 'raise_question': {
-      await db('open_questions').insert({
-        care_profile_id: profileId,
-        title: action.title.trim(),
-        body: action.body ?? null,
-        status: 'open',
-      });
-      await audit(profileId, account.id, 'questions', `raised ${action.title}`);
+      const [questionRow] = await db('open_questions')
+        .insert({
+          care_profile_id: profileId,
+          title: action.title.trim(),
+          body: action.body ?? null,
+          status: 'open',
+        })
+        .returning('id');
+      await audit(profileId, account.id, 'questions', `raised ${action.title}`, questionRow?.id);
       return `Raised the question "${action.title}" for the care circle.`;
     }
     case 'set_care_phase': {
@@ -1829,26 +1864,34 @@ export async function executeActions(
   profileId: string,
   account: Account,
   access: CareAccess,
-  timeZone?: string | null
+  timeZone?: string | null,
+  // How the change was made and, for a reversible batch, the token to group its
+  // audit rows under. Defaults to a person making the change directly.
+  attribution?: { source?: AuditSource; undoBatch?: string | null }
 ): Promise<string[]> {
   if (actions.length === 0) return [];
   if (access.level === 'viewer') {
     return ['No changes were made: you have view-only access to this care profile.'];
   }
-  const results: string[] = [];
-  // One set for the whole turn, so several "Escitalopram" doses across
-  // separate actions still spread across its strengths.
-  const usedMedIds = new Set<string>();
-  for (const action of actions) {
-    try {
-      const outcome = await executeOne(action, profileId, account, access, timeZone, usedMedIds);
-      results.push(...(Array.isArray(outcome) ? outcome : [outcome]));
-    } catch (err) {
-      console.warn('Assistant action failed:', (err as Error).message);
-      results.push('One of the requested changes could not be saved. Please try it directly in the app.');
+  return auditContext.run(
+    { source: attribution?.source ?? 'person', undoBatch: attribution?.undoBatch ?? null },
+    async () => {
+      const results: string[] = [];
+      // One set for the whole turn, so several "Escitalopram" doses across
+      // separate actions still spread across its strengths.
+      const usedMedIds = new Set<string>();
+      for (const action of actions) {
+        try {
+          const outcome = await executeOne(action, profileId, account, access, timeZone, usedMedIds);
+          results.push(...(Array.isArray(outcome) ? outcome : [outcome]));
+        } catch (err) {
+          console.warn('Assistant action failed:', (err as Error).message);
+          results.push('One of the requested changes could not be saved. Please try it directly in the app.');
+        }
+      }
+      return results;
     }
-  }
-  return results;
+  );
 }
 
 interface ResolvedProfile {
