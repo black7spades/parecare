@@ -37,7 +37,6 @@ import { InvitePage } from './pages/InvitePage';
 import { SubscriptionPage } from './pages/account/Subscription';
 import { AccountSettings } from './pages/account/Settings';
 import { NotificationSettings } from './pages/account/NotificationSettings';
-import { Profile } from './pages/account/Profile';
 import { SystemLayout } from './pages/admin/SystemLayout';
 
 /**
@@ -176,7 +175,7 @@ export const router = createBrowserRouter([
       { path: 'account/subscription', element: <SubscriptionPage /> },
       { path: 'account/settings', element: <AccountSettings /> },
       { path: 'account/notifications', element: <NotificationSettings /> },
-      { path: 'account/profile', element: <Profile /> },
+      { path: 'account/profile', element: <Navigate to="/account/settings" replace /> },
       {
         path: 'system',
         element: (

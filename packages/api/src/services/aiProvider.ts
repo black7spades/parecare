@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getAiConfig } from '../config/settings';
+import { beginCall } from './aiMetrics';
 
 /**
  * Provider-agnostic chat completion. Three wire protocols cover every
@@ -368,12 +369,25 @@ export async function complete(
   tier: Tier,
   opts?: CompleteOptions,
 ): Promise<CompletionResult> {
-  switch (getAiConfig().provider) {
-    case 'anthropic':
-      return completeAnthropic(system, turns, maxTokens, tier, opts);
-    case 'google':
-      return completeGoogle(system, turns, maxTokens, tier, opts);
-    default:
-      return completeOpenAiCompatible(system, turns, maxTokens, tier, opts);
+  // Time every model call in one place, so the traffic light and the
+  // monitoring panel see all of Pare's work.
+  const done = beginCall();
+  try {
+    let result: CompletionResult;
+    switch (getAiConfig().provider) {
+      case 'anthropic':
+        result = await completeAnthropic(system, turns, maxTokens, tier, opts);
+        break;
+      case 'google':
+        result = await completeGoogle(system, turns, maxTokens, tier, opts);
+        break;
+      default:
+        result = await completeOpenAiCompatible(system, turns, maxTokens, tier, opts);
+    }
+    done(true);
+    return result;
+  } catch (err) {
+    done(false);
+    throw err;
   }
 }

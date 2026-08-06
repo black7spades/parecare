@@ -59,9 +59,6 @@ export function AvatarMenu() {
             <div className="text-sm font-medium text-ink truncate">{account.display_name}</div>
             <div className="text-xs text-muted truncate">{account.email}</div>
           </div>
-          <button type="button" role="menuitem" className={item} onClick={() => go('/account/profile')}>
-            Profile
-          </button>
           <button type="button" role="menuitem" className={item} onClick={() => go('/account/settings')}>
             Settings
           </button>

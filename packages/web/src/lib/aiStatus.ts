@@ -11,6 +11,8 @@ export interface AiStatus {
   state: 'preparing' | 'ready' | 'unavailable';
   provider: string;
   local: boolean;
+  /** The traffic light: green working well, amber under load or getting ready, red offline. */
+  health: 'green' | 'amber' | 'red';
 }
 
 export function useAiStatus(enabled = true) {
@@ -18,22 +20,12 @@ export function useAiStatus(enabled = true) {
     queryKey: ['ai-status'],
     queryFn: () => api.get<AiStatus>('/ai/status'),
     enabled,
-    // Poll while a model is still downloading; stop once it is ready.
-    refetchInterval: (query) => (query.state.data?.state === 'preparing' ? 5000 : false),
+    // Poll fast while a model is still downloading; otherwise keep a slow
+    // heartbeat so the status light reflects load without hammering the server.
+    refetchInterval: (query) => (query.state.data?.state === 'preparing' ? 5000 : 30000),
     staleTime: 5000,
   });
 }
 
 /** The plain sentence to show while a model is still getting ready. */
 export const AI_WARMING_MESSAGE = 'Pare is still getting ready. Everything else works in the meantime.';
-
-/**
- * The one plain sentence naming which assistant is in use, or null when there
- * is nothing worth saying (the usual cloud or already-known case).
- */
-export function assistantNotice(status: AiStatus | undefined): string | null {
-  if (!status) return null;
-  if (status.local) return 'PareCare is using the assistant on this machine. It is slower, and nothing leaves here.';
-  if (status.provider === 'anthropic') return 'PareCare is using Claude. It is faster, and records are sent to Anthropic to be read.';
-  return null;
-}

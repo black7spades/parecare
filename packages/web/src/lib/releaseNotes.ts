@@ -20,6 +20,53 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.25.1',
+    date: '2026-08-06',
+    summary: 'System settings read as a numbered checklist.',
+    groups: [
+      {
+        heading: 'Changed',
+        items: [
+          'System settings read as a numbered checklist. For whoever runs the system, the settings are now in numbered sections, most important first, with plainer headings and less jargon.',
+        ],
+      },
+    ],
+  },
+  {
+    version: '0.25.0',
+    date: '2026-08-06',
+    summary: 'A Pare status light in the top corner, and a monitor for whoever runs the system.',
+    groups: [
+      {
+        heading: 'Added',
+        items: [
+          'A Pare status light. A small traffic light in the top corner shows at a glance how Pare is doing: green when it is online and working well, amber when it is online but under load or still getting ready, and red when it is offline and may need attention.',
+          'A Pare monitor for whoever runs the system. The Pare screen now opens with how Pare is running, its response time, how busy it is, how long it has been up, and how much it is being used and by whom, with every conversation in a sortable table. Empty chats are left out.',
+        ],
+      },
+    ],
+  },
+  {
+    version: '0.24.0',
+    date: '2026-08-06',
+    summary: 'Profile and Settings are one screen, and Pare greets you by name.',
+    groups: [
+      {
+        heading: 'Changed',
+        items: [
+          'Profile and Settings are one screen now. Your details, your photo and how you sign in all live under Settings, laid out in numbered sections with the most-used first. The separate Profile screen is gone, and its link goes straight to Settings.',
+          'Pare greets you by name. Opening Pare starts with a friendly hello and an offer to help, and a nudge to type /help to see everything it can do, in place of the technical note that used to sit there and meant little to anyone.',
+        ],
+      },
+      {
+        heading: 'Removed',
+        items: [
+          'The Relationships feature has been removed. It was little used and did not earn its place.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.23.0',
     date: '2026-08-06',
     summary: 'The activity log now shows how a change was made, not only who and when.',

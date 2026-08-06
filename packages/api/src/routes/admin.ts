@@ -5,7 +5,9 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { requireRole, roleAtLeast } from '../middleware/requireRole';
 import { archiveOldAdministrations } from '../services/marArchive';
-import { updateSettings, isMessageToneGuardEnabled } from '../config/settings';
+import { updateSettings, isMessageToneGuardEnabled, getAiConfig } from '../config/settings';
+import { localModelState, isLocalProvider } from '../services/aiProvider';
+import { snapshot as aiMetricsSnapshot, health as aiHealth } from '../services/aiMetrics';
 import { createAccount, composeDisplayName, AccountError } from '../services/accounts';
 import { createInvitation, revokeInvitation, resendInvitation, inviteUrl, effectiveStatus, InviteError } from '../services/invitations';
 import type { Account, AccountRole, Invitation, RightsTemplate } from '../types';
@@ -659,6 +661,63 @@ const chatListSchema = z.object({
     .optional(),
   page: z.coerce.number().int().min(1).default(1),
   per_page: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+/**
+ * The Pare monitor: connectivity and the traffic light, live response times and
+ * load from memory, and how much Pare is being used and by whom, scoped the same
+ * way as the chat log. Super admins see the whole platform; an admin sees their
+ * own care.
+ */
+adminRouter.get('/ai/metrics', async (req, res) => {
+  const actor = req.account!;
+  const scoped = () => scopeChatsToCare(db('ai_conversations'), actor);
+
+  const [totals, todayRow, topUsers] = await Promise.all([
+    scoped()
+      .select(
+        db.raw('count(*)::int as conversations'),
+        db.raw('coalesce(sum(jsonb_array_length(messages)), 0)::int as messages'),
+        db.raw('coalesce(sum(tokens_used), 0)::bigint as tokens')
+      )
+      .first(),
+    scoped().whereRaw('created_at::date = current_date').count('* as count').first(),
+    scopeChatsToCare(db('ai_conversations').join('accounts', 'ai_conversations.account_id', 'accounts.id'), actor)
+      .groupBy('ai_conversations.account_id', 'accounts.display_name')
+      .select(
+        'accounts.display_name as name',
+        db.raw('count(*)::int as conversations'),
+        db.raw('coalesce(sum(jsonb_array_length(ai_conversations.messages)), 0)::int as messages'),
+        db.raw('coalesce(sum(ai_conversations.tokens_used), 0)::bigint as tokens')
+      )
+      .orderBy('messages', 'desc')
+      .limit(8),
+  ]);
+
+  const cfg = getAiConfig();
+  const state = await localModelState();
+  res.json({
+    connectivity: {
+      provider: cfg.provider,
+      model: cfg.model ?? null,
+      local: isLocalProvider(),
+      state,
+      health: aiHealth(state),
+    },
+    performance: aiMetricsSnapshot(),
+    usage: {
+      conversations: Number((totals as { conversations?: number } | undefined)?.conversations ?? 0),
+      messages: Number((totals as { messages?: number } | undefined)?.messages ?? 0),
+      tokens: Number((totals as { tokens?: string } | undefined)?.tokens ?? 0),
+      conversations_today: Number((todayRow as { count?: string } | undefined)?.count ?? 0),
+    },
+    top_users: (topUsers as Array<{ name: string; conversations: number; messages: number; tokens: string }>).map((u) => ({
+      name: u.name,
+      conversations: Number(u.conversations),
+      messages: Number(u.messages),
+      tokens: Number(u.tokens),
+    })),
+  });
 });
 
 adminRouter.get('/chats', async (req, res) => {
