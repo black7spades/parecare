@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { Button } from './ui/Button';
@@ -54,9 +54,20 @@ function ActionCard({ action, onChange, onRemove }: { action: ProposedAction; on
   );
 }
 
-export function IngestModal({ profileId, onClose }: { profileId: string; onClose: () => void }) {
+export function IngestModal({
+  profileId,
+  onClose,
+  initialFile,
+  title,
+}: {
+  profileId: string;
+  onClose: () => void;
+  /** A file already chosen (a photo taken from the capture sheet); reading starts on its own. */
+  initialFile?: File;
+  title?: string;
+}) {
   const queryClient = useQueryClient();
-  const [file, setFile] = useState<File | null>(null);
+  const [file, setFile] = useState<File | null>(initialFile ?? null);
   const [result, setResult] = useState<IngestResult | null>(null);
   const [actions, setActions] = useState<ProposedAction[]>([]);
   const [outcomes, setOutcomes] = useState<string[] | null>(null);
@@ -72,6 +83,17 @@ export function IngestModal({ profileId, onClose }: { profileId: string; onClose
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not read the file.'),
   });
 
+  // A photo handed in from the capture sheet reads itself, so the person is not
+  // asked to choose a file they have already taken.
+  const started = useRef(false);
+  useEffect(() => {
+    if (initialFile && !started.current) {
+      started.current = true;
+      uploadMutation.mutate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFile]);
+
   const applyMutation = useMutation({
     mutationFn: () => api.post<{ outcomes: string[] }>(`/care-profiles/${profileId}/ingest/apply`, { actions }),
     onSuccess: (r) => {
@@ -84,25 +106,40 @@ export function IngestModal({ profileId, onClose }: { profileId: string; onClose
   });
 
   return (
-    <Modal open onClose={onClose} title="Upload and file with Pare" wide>
+    <Modal open onClose={onClose} title={title ?? 'Upload and file with Pare'} wide>
       <div className="space-y-4">
         {!result ? (
-          <>
-            <p className="text-sm text-muted">
-              Upload a document, an invoice, a care plan or a business card. Pare reads it and proposes what to file into this
-              person's record. You can edit every detail before anything is saved.
-            </p>
-            <input
-              type="file"
-              className="block w-full text-sm text-muted file:mr-3 file:rounded-md file:border file:border-border file:bg-card file:px-3 file:py-1.5 file:text-sm"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
-            {error ? <p className="text-sm text-red-600">{error}</p> : null}
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={onClose}>Cancel</Button>
-              <Button loading={uploadMutation.isPending} disabled={!file} onClick={() => uploadMutation.mutate()}>Read the document</Button>
-            </div>
-          </>
+          initialFile ? (
+            <>
+              <p className="text-sm text-muted">
+                Reading the photo and working out what to file. Check and edit everything before it is saved.
+              </p>
+              {uploadMutation.isPending ? <p className="text-sm text-muted">Reading…</p> : null}
+              {error ? <p className="text-sm text-red-600">{error}</p> : null}
+              {error ? (
+                <div className="flex justify-end">
+                  <Button variant="ghost" onClick={onClose}>Close</Button>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-muted">
+                Upload a document, an invoice, a care plan or a business card. Pare reads it and proposes what to file into this
+                person's record. Edit every detail before anything is saved.
+              </p>
+              <input
+                type="file"
+                className="block w-full text-sm text-muted file:mr-3 file:rounded-md file:border file:border-border file:bg-card file:px-3 file:py-1.5 file:text-sm"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+              {error ? <p className="text-sm text-red-600">{error}</p> : null}
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={onClose}>Cancel</Button>
+                <Button loading={uploadMutation.isPending} disabled={!file} onClick={() => uploadMutation.mutate()}>Read the document</Button>
+              </div>
+            </>
+          )
         ) : outcomes ? (
           <>
             <p className="text-sm font-medium text-ink">Filed.</p>

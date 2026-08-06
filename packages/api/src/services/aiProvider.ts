@@ -10,10 +10,36 @@ import { getAiConfig } from '../config/settings';
  *  - google: the Gemini API
  */
 
+/**
+ * A turn's content. Plain text stays a string, so nothing that already speaks
+ * to the model has to change. A turn can also carry parts: text alongside an
+ * image (a photographed receipt, a scanned letter), read natively by a
+ * vision-capable model. Audio is carried the same way for a model that hears.
+ */
+export type ChatPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; media_type: string; data: string }
+  | { type: 'audio'; media_type: string; data: string };
+
 export interface ChatTurn {
   role: 'user' | 'assistant';
-  content: string;
+  content: string | ChatPart[];
 }
+
+/** A turn's content as parts, wrapping a bare string as one text part. */
+function asParts(content: string | ChatPart[]): ChatPart[] {
+  return typeof content === 'string' ? [{ type: 'text', text: content }] : content;
+}
+
+/** How much text a turn carries, for the token estimate when usage is absent. */
+function textLength(content: string | ChatPart[]): number {
+  return typeof content === 'string'
+    ? content.length
+    : content.reduce((n, p) => n + (p.type === 'text' ? p.text.length : 0), 0);
+}
+
+/** A data URI for an image or audio part, as the OpenAI vision format expects. */
+const dataUri = (p: { media_type: string; data: string }): string => `data:${p.media_type};base64,${p.data}`;
 
 export interface CompletionResult {
   text: string;
@@ -157,7 +183,16 @@ async function completeAnthropic(
   const apiKey = cfg.anthropicApiKey ?? cfg.apiKey;
   if (!apiKey) throw notConfigured('set the Anthropic API key in the settings screen.');
   const client = new Anthropic({ apiKey });
-  const messages = turns.map((t) => ({ role: t.role, content: t.content }));
+  const toAnthropicBlock = (p: ChatPart): unknown => {
+    if (p.type === 'image') return { type: 'image', source: { type: 'base64', media_type: p.media_type, data: p.data } };
+    // Claude has no audio input; keep the turn valid with a short note.
+    if (p.type === 'audio') return { type: 'text', text: '[a voice note was attached]' };
+    return { type: 'text', text: p.text };
+  };
+  const messages: Anthropic.MessageParam[] = turns.map((t) => ({
+    role: t.role,
+    content: (typeof t.content === 'string' ? t.content : t.content.map(toAnthropicBlock)) as Anthropic.MessageParam['content'],
+  }));
 
   // Constrained output on Claude is a forced tool: the schema becomes the
   // tool's input, and requiring that tool guarantees the reply fits it.
@@ -221,7 +256,22 @@ async function completeOpenAiCompatible(
     body: JSON.stringify({
       model,
       max_tokens: maxTokens,
-      messages: [{ role: 'system', content: system }, ...turns],
+      messages: [
+        { role: 'system', content: system },
+        ...turns.map((t) => ({
+          role: t.role,
+          content:
+            typeof t.content === 'string'
+              ? t.content
+              : t.content.map((p) => {
+                  if (p.type === 'image') return { type: 'image_url', image_url: { url: dataUri(p) } };
+                  if (p.type === 'audio') {
+                    return { type: 'input_audio', input_audio: { data: p.data, format: p.media_type.split('/')[1] || 'wav' } };
+                  }
+                  return { type: 'text', text: p.text };
+                }),
+        })),
+      ],
       // A JSON schema in response_format makes Ollama and LM Studio mask any
       // token that would break the schema, and guides OpenAI's own models the
       // same way. Left off entirely when no schema is asked for.
@@ -266,7 +316,7 @@ async function completeOpenAiCompatible(
     data.usage?.total_tokens ?? (data.usage?.prompt_tokens ?? 0) + (data.usage?.completion_tokens ?? 0);
   // Some local servers omit usage; estimate so metering stays sane
   const tokensUsed =
-    reported || Math.ceil((system.length + turns.reduce((n, t) => n + t.content.length, 0) + text.length) / 4);
+    reported || Math.ceil((system.length + turns.reduce((n, t) => n + textLength(t.content), 0) + text.length) / 4);
   return { text, tokensUsed, structured };
 }
 
@@ -287,7 +337,12 @@ async function completeGoogle(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
-      contents: turns.map((t) => ({ role: t.role === 'assistant' ? 'model' : 'user', parts: [{ text: t.content }] })),
+      contents: turns.map((t) => ({
+        role: t.role === 'assistant' ? 'model' : 'user',
+        parts: asParts(t.content).map((p) =>
+          p.type === 'text' ? { text: p.text } : { inlineData: { mimeType: p.media_type, data: p.data } }
+        ),
+      })),
       generationConfig: { maxOutputTokens: maxTokens },
     }),
   });

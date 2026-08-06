@@ -184,6 +184,8 @@ export interface CareLogEntry {
   body: string;
   sentiment: number | null;
   sentiment_source: string | null;
+  /** Device key for a note captured offline, so a retried send lands once. */
+  client_key: string | null;
   occurred_at: string | Date;
   created_at: string | Date;
 }

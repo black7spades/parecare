@@ -24,6 +24,9 @@ const entrySchema = z.object({
   // A person's own 1-to-6 rating (1 angry to 6 overjoyed). When given it is a
   // manual reading and the assistant never overwrites it; null clears it.
   sentiment: z.number().int().min(1).max(6).nullable().optional(),
+  // A device-made key for a note captured offline and sent on reconnect, so it
+  // lands exactly once however many times the send is retried.
+  client_key: z.string().min(1).max(64).optional(),
 });
 
 careLogRouter.get('/', requireAuth, async (req, res) => {
@@ -65,15 +68,47 @@ careLogRouter.post('/', requireAuth, async (req, res) => {
     return;
   }
 
-  const { sentiment, ...fields } = parsed.data;
+  const { sentiment, client_key, ...fields } = parsed.data;
   const manualSentiment = typeof sentiment === 'number';
-  const [entry] = await db<CareLogEntry>('care_log_entries')
-    .insert({
-      care_profile_id: req.params['id'],
-      ...fields,
-      ...(manualSentiment ? { sentiment, sentiment_source: 'manual' } : {}),
-    })
-    .returning('*');
+  const profileId = String(req.params['id']);
+
+  // A note sent from the offline queue carries a device key. If it has already
+  // landed (a retried send), return the entry that exists rather than making a
+  // second one, so the note arrives exactly once.
+  if (client_key) {
+    const existing = await db<CareLogEntry>('care_log_entries')
+      .where({ care_profile_id: profileId, client_key })
+      .first();
+    if (existing) {
+      res.status(200).json({ entry: existing, duplicate: true });
+      return;
+    }
+  }
+
+  let entry: CareLogEntry;
+  try {
+    [entry] = await db<CareLogEntry>('care_log_entries')
+      .insert({
+        care_profile_id: profileId,
+        ...fields,
+        ...(client_key ? { client_key } : {}),
+        ...(manualSentiment ? { sentiment, sentiment_source: 'manual' } : {}),
+      })
+      .returning('*');
+  } catch (err) {
+    // Two retries of the same queued note can race past the check above; the
+    // unique key then rejects the second. Return the one that won, not an error.
+    if (client_key) {
+      const existing = await db<CareLogEntry>('care_log_entries')
+        .where({ care_profile_id: profileId, client_key })
+        .first();
+      if (existing) {
+        res.status(200).json({ entry: existing, duplicate: true });
+        return;
+      }
+    }
+    throw err;
+  }
 
   // With no rating given, read the tone of the note in the background so the
   // entry saves immediately and never waits on the model. A hand-set rating is

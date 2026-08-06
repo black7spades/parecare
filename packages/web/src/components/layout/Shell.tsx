@@ -5,6 +5,8 @@ import { useAuthStore, type AccountRole } from '../../stores/auth';
 import { useSubscriptionStore } from '../../stores/subscription';
 import { UpgradePrompt } from '../UpgradePrompt';
 import { AssistantWidget } from '../assistant/AssistantWidget';
+import { CaptureSheet } from '../CaptureSheet';
+import { InstallPrompt } from '../InstallPrompt';
 import { ProfileSwitcher } from './ProfileSwitcher';
 import { useAssistantStore } from '../../stores/assistant';
 import { NotificationsBell } from './NotificationsBell';
@@ -690,6 +692,8 @@ export function Shell() {
       </div>
 
       <AssistantWidget />
+      <CaptureSheet />
+      <InstallPrompt />
       <UpgradePrompt />
     </div>
   );
