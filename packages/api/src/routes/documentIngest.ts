@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { uploadFile } from '../services/storage';
-import { complete, isAiConfigured } from '../services/aiProvider';
+import { complete, isAiConfigured, type ChatTurn } from '../services/aiProvider';
 import { dateInZone } from '../lib/timezone';
 import { extractText, buildIngestPrompt } from '../services/documentIngest';
 import { executeActions, actionSchema, type AssistantAction } from '../services/aiActions';
@@ -91,21 +91,40 @@ documentIngestRouter.post('/', requireAuth, upload.single('file'), async (req, r
     })
     .returning('id');
 
+  const docId = (doc as { id: string }).id;
+  const isImage = req.file.mimetype.startsWith('image/');
   const text = extractText(req.file.buffer, req.file.mimetype, req.file.originalname);
-  if (!text || text.length < 20) {
+  const haveText = !!text && text.length >= 20;
+
+  if (!isAiConfigured()) {
     res.json({
-      document_id: (doc as { id: string }).id,
-      text_found: false,
-      summary: 'The file was saved, but no readable text could be pulled from it. A scanned image or photo needs a vision-capable assistant, which is not set up yet. You can still file its details by hand.',
+      document_id: docId,
+      text_found: haveText,
+      summary: 'The file was saved, but the assistant is not configured, so nothing could be filed automatically. Set up the AI provider in System settings to file uploads.',
       actions: [],
     });
     return;
   }
-  if (!isAiConfigured()) {
+
+  // A photo or scan goes to the model as an image, read natively; a text-based
+  // file goes as its extracted text. Anything else that yielded no text is kept
+  // and left for the person to file by hand.
+  let userTurn: ChatTurn;
+  if (haveText) {
+    userTurn = { role: 'user', content: text.slice(0, 12000) };
+  } else if (isImage) {
+    userTurn = {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'The document is the attached image. Read it and file what you find.' },
+        { type: 'image', media_type: req.file.mimetype, data: req.file.buffer.toString('base64') },
+      ],
+    };
+  } else {
     res.json({
-      document_id: (doc as { id: string }).id,
-      text_found: true,
-      summary: 'The file was saved and its text was read, but the assistant is not configured, so nothing could be filed automatically. Set up the AI provider in System settings to file uploads.',
+      document_id: docId,
+      text_found: false,
+      summary: 'The file was saved, but no readable text could be pulled from it. You can still file its details by hand.',
       actions: [],
     });
     return;
@@ -120,18 +139,32 @@ documentIngestRouter.post('/', requireAuth, upload.single('file'), async (req, r
     : [];
   const knownAddresses = knownRows.map((r) => (r as { formatted: string | null }).formatted).filter((v): v is string => !!v);
   const system = buildIngestPrompt(personName, today, knownAddresses);
-  // Reading a whole document is a heavy, rare job worth the best model available.
-  const result = await complete(system, [{ role: 'user', content: text.slice(0, 12000) }], 1500, 'mediation');
-  const actions = parseProposedActions(result.text);
-  // The summary is the model's prose with any fenced blocks removed.
-  const summary = result.text.replace(/```[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim();
 
-  res.json({
-    document_id: (doc as { id: string }).id,
-    text_found: true,
-    summary: summary || 'Read the document.',
-    actions,
-  });
+  try {
+    // Reading a whole document is a heavy, rare job worth the best model available.
+    const result = await complete(system, [userTurn], 1500, 'mediation');
+    const actions = parseProposedActions(result.text);
+    // The summary is the model's prose with any fenced blocks removed.
+    const summary = result.text.replace(/```[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim();
+    res.json({
+      document_id: docId,
+      text_found: haveText,
+      summary: summary || (isImage ? 'Read the photo.' : 'Read the document.'),
+      actions,
+    });
+  } catch (err) {
+    // The file is already saved, so a model that is still warming up or cannot
+    // read this kind of file never costs the capture. Say which, plainly.
+    const preparing = (err as { code?: string }).code === 'AI_MODEL_PREPARING';
+    res.json({
+      document_id: docId,
+      text_found: haveText,
+      summary: preparing
+        ? 'The file was saved. The assistant on this machine is still getting ready, so it could not be read yet. Try again in a moment, or file its details by hand.'
+        : 'The file was saved, but the assistant could not read it automatically. You can still file its details by hand.',
+      actions: [],
+    });
+  }
 });
 
 const applySchema = z.object({ actions: z.array(z.unknown()).min(1).max(50) });

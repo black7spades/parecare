@@ -4,10 +4,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import { initTheme } from './lib/theme';
 import { initComfort } from './lib/comfort';
+import { initPwa } from './lib/pwa';
+import { initCaptureQueue } from './lib/captureQueue';
 import './index.css';
 
 initTheme();
 initComfort();
+initPwa();
+initCaptureQueue();
 
 const queryClient = new QueryClient({
   defaultOptions: {

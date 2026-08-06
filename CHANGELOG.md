@@ -6,6 +6,27 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.21.0] - 2026-08-06
+
+### Added
+
+- **Install PareCare on your phone.** Add it to the home screen and open it like
+  any other app, in thumb reach in a corridor or a waiting room.
+- **Capture anywhere.** One button on the phone opens a quick note or a photo
+  against the person you are looking at. Write a note, with the phone's own
+  microphone typing it for anyone who would rather speak, or take a photo of a
+  letter, a prescription or a receipt for Pare to read and propose what to file,
+  to check before anything is saved.
+- **Notes save even with no signal.** A note written with no connection is kept
+  on the phone and sent the moment the connection returns, and it arrives once
+  however patchy the signal. A short buzz and a line confirm every save.
+
+### Changed
+
+- **Photos and scans are read now.** A photographed or scanned document goes
+  straight to Pare to read, the same as an uploaded file, instead of asking for
+  its details to be typed in by hand.
+
 ## [0.20.0] - 2026-08-06
 
 ### Added
