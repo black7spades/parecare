@@ -6,6 +6,14 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.25.1] - 2026-08-06
+
+### Changed
+
+- **System settings read as a numbered checklist.** For whoever runs the system,
+  the settings are now in numbered sections, most important first, with plainer
+  headings and less jargon.
+
 ## [0.25.0] - 2026-08-06
 
 ### Added

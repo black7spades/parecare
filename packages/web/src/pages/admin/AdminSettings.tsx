@@ -6,19 +6,23 @@ import { settingsApi, type SettingField, type SettingGroup, type SettingsRespons
 
 const GROUP_TITLES: Record<string, { title: string; blurb: string }> = {
   ai: { title: 'Pare, your AI assistant', blurb: 'The provider, model and keys behind Pare, the assistant throughout PareCare, and the message mediation it runs.' },
-  health: { title: 'Health spend', blurb: 'The currency prices are shown in, and whether a price is required on every medication and treatment.' },
-  email: { title: 'Email (SMTP)', blurb: 'The outgoing mail server used for invites and reminders.' },
-  scheduler: { title: 'Scheduler', blurb: 'How often the reminder scheduler checks for due tasks.' },
-  oauth: { title: 'Social sign-in', blurb: 'Google and Facebook sign-in. Buttons appear once both fields in a pair are set.' },
+  email: { title: 'Email server', blurb: 'The outgoing mail server used for invites and reminders.' },
   storage: { title: 'File storage', blurb: 'Where uploaded documents and photos are kept.' },
-  stripe: { title: 'Stripe billing', blurb: 'Only used when the platform runs in SaaS mode.' },
+  oauth: { title: 'Social sign-in', blurb: 'Google and Facebook sign-in. Buttons appear once both fields in a pair are set.' },
+  scheduler: { title: 'Reminder timing', blurb: 'How often PareCare checks for tasks that have come due.' },
+  health: { title: 'Health spend', blurb: 'The currency prices are shown in, and whether a price is required on every medication and treatment.' },
+  stripe: { title: 'Stripe billing', blurb: 'Only used when the platform runs as a paid service.' },
 };
+
+// The sections are shown in this order, most important to whoever runs the
+// system first, and numbered so the screen reads as an ordered checklist.
+const GROUP_ORDER = ['ai', 'email', 'storage', 'oauth', 'scheduler', 'health', 'stripe'];
 
 const SELECT_CLASS =
   'block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
 function SourceTag({ source }: { source: SettingField['source'] }) {
-  const label = source === 'db' ? 'Saved' : source === 'env' ? 'From .env' : 'Default';
+  const label = source === 'db' ? 'Saved' : source === 'env' ? 'From the environment' : 'Default';
   const style =
     source === 'db' ? 'bg-primary-50 text-primary' : source === 'env' ? 'bg-surface-2 text-muted' : 'bg-surface-2 text-muted';
   return <span className={`badge text-xs ${style}`}>{label}</span>;
@@ -181,21 +185,31 @@ export function AdminSettings() {
       <div>
         <h1 className="text-xl font-semibold text-ink">System settings</h1>
         <p className="text-sm text-muted">
-          Edit configuration without touching .env or restarting. Changes apply immediately. Blank a field to fall
-          back to the .env value. Secrets are stored encrypted and never shown again.
+          Change how PareCare runs without editing files or restarting. Changes apply straight away. Blank a field to
+          fall back to its built-in default or the value set in the server environment. Secrets are stored encrypted and
+          never shown again.
         </p>
       </div>
 
       {saveError ? <p className="text-sm text-red-600">{saveError}</p> : null}
 
-      {data.groups.map((group) => {
+      {[...data.groups]
+        .sort((a, b) => {
+          const ia = GROUP_ORDER.indexOf(a.group);
+          const ib = GROUP_ORDER.indexOf(b.group);
+          return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+        })
+        .map((group, i) => {
         const meta = GROUP_TITLES[group.group] ?? { title: group.group, blurb: '' };
         const dirty = group.fields.some((f) => f.key in pending);
         return (
           <div key={group.group} className="card space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-base font-semibold text-ink">{meta.title}</h2>
+                <h2 className="text-base font-semibold text-ink">
+                  <span className="text-muted mr-2">{i + 1}.</span>
+                  {meta.title}
+                </h2>
                 {meta.blurb ? <p className="text-sm text-muted">{meta.blurb}</p> : null}
               </div>
               {savedGroup === group.group ? <span className="text-sm text-primary shrink-0">Saved ✓</span> : null}

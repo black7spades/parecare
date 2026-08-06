@@ -20,6 +20,19 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.25.1',
+    date: '2026-08-06',
+    summary: 'System settings read as a numbered checklist.',
+    groups: [
+      {
+        heading: 'Changed',
+        items: [
+          'System settings read as a numbered checklist. For whoever runs the system, the settings are now in numbered sections, most important first, with plainer headings and less jargon.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.25.0',
     date: '2026-08-06',
     summary: 'A Pare status light in the top corner, and a monitor for whoever runs the system.',
