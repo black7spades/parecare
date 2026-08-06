@@ -20,6 +20,25 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.22.0',
+    date: '2026-08-06',
+    summary: 'Edit several people or pets at once, and people cards that stay within the screen.',
+    groups: [
+      {
+        heading: 'Added',
+        items: [
+          'Edit several people or pets at once. Select more than one on the homeboard and set what they share in one go: relationship, pronouns, main language, and for pets their species, breed and more. Only the fields ticked change; the rest are left exactly as they are.',
+        ],
+      },
+      {
+        heading: 'Fixed',
+        items: [
+          'People cards stay within the screen. A long condition name, journey or note now wraps inside the card instead of stretching it sideways off the display.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.21.0',
     date: '2026-08-06',
     summary: 'Put PareCare on your phone, and capture a note or a photo in thumb reach, even with no signal.',

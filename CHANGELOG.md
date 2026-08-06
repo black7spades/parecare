@@ -6,6 +6,21 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.22.0] - 2026-08-06
+
+### Added
+
+- **Edit several people or pets at once.** Select more than one on the
+  homeboard and set what they share in one go: relationship, pronouns, main
+  language, and for pets their species, breed and more. Only the fields ticked
+  change; the rest are left exactly as they are.
+
+### Fixed
+
+- **People cards stay within the screen.** A long condition name, journey or
+  note now wraps inside the card instead of stretching it sideways off the
+  display.
+
 ## [0.21.0] - 2026-08-06
 
 ### Added
