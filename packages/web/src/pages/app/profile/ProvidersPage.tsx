@@ -5,6 +5,7 @@ import { AddressFields, addressFrom, addressPayload, emptyAddress, type AddressV
 import { DataToolbar } from '../../../components/data/DataToolbar';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { Button } from '../../../components/ui/Button';
+import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { PencilIcon, CrossIcon, LinkIcon } from '../../../components/ui/icons';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
@@ -86,7 +87,7 @@ export function ProvidersPage() {
             <h2 className="text-base font-semibold text-ink">Care providers</h2>
             <PagePurpose kind="entry" />
           </div>
-          <p className="text-sm text-muted">Doctors, facilities and services involved in care, with contact details in one place.</p>
+          <EditableSubheader copyKey="profile.providers.subheader" />
         </div>
         {canEdit ? (
           <div className="flex gap-2">

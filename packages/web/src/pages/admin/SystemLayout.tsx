@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { RouteFallback } from '../../components/layout/RouteFallback';
 import { useAuthStore } from '../../stores/auth';
+import { EditableSubheader } from '../../components/ui/EditableSubheader';
 
 /** Shared shell for the admin/system tools: Users (admin+) and Settings (super admin). */
 export function SystemLayout() {
@@ -17,7 +18,7 @@ export function SystemLayout() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-ink">System</h1>
-        <p className="text-sm text-muted">Administer accounts and server configuration.</p>
+        <EditableSubheader copyKey="system.subheader" />
       </div>
       <nav className="flex gap-1 border-b border-border">
         <NavLink to="/system/users" className={tabClass}>
@@ -39,6 +40,9 @@ export function SystemLayout() {
           <>
             <NavLink to="/system/database" className={tabClass}>
               Data tools
+            </NavLink>
+            <NavLink to="/system/site-copy" className={tabClass}>
+              Site copy
             </NavLink>
             <NavLink to="/system/settings" className={tabClass}>
               Settings

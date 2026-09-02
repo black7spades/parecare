@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
 import { PagePurpose } from '../../../components/PagePurpose';
@@ -87,9 +88,7 @@ export function EmergencySheetPage() {
     <div>
       <div className="mb-4 flex items-center justify-between print:hidden">
         <div className="flex items-center gap-2">
-          <p className="text-sm text-muted">
-            A one-page summary for paramedics, hospital staff, or anyone stepping in. Keep a printed copy on the fridge.
-          </p>
+          <EditableSubheader copyKey="profile.emergency.subheader" />
           <PagePurpose kind="output" />
         </div>
         <Button onClick={() => window.print()}>Print</Button>

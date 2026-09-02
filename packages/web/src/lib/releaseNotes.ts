@@ -20,6 +20,19 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.27.0',
+    date: '2026-09-02',
+    summary: 'Editable subheader copy across the whole app.',
+    groups: [
+      {
+        heading: 'Added',
+        items: [
+          'Editable subheader copy. Super admins now edit the description text below every page heading, either inline on the page itself or from a centralised Site copy screen under System. Changes appear for everyone straight away. Profile pages support a name placeholder that fills in the person being cared for.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.26.0',
     date: '2026-09-02',
     summary: 'Dismiss a notification, Pare answers again, and a clear message when Pare cannot read a file.',

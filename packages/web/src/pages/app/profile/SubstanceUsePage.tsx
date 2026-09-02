@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Modal } from '../../../components/ui/Modal';
 import { Input, Textarea } from '../../../components/ui/Input';
@@ -88,9 +89,7 @@ export function SubstanceUsePage() {
             <h2 className="text-base font-semibold text-ink">Substance use</h2>
             <PagePurpose kind="entry" />
           </div>
-          <p className="text-sm text-muted">
-            Substances {careName} takes, legal or illegal, and how each is used. One row per substance.
-          </p>
+          <EditableSubheader copyKey="profile.substance-use.subheader" vars={{ name: careName }} />
         </div>
         {canEdit ? (
           <Button size="sm" onClick={() => setAdding(true)}>

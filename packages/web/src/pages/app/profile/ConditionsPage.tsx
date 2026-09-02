@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Modal } from '../../../components/ui/Modal';
 import { useDataView, type DataFilter, type DataSort } from '../../../components/data/useDataView';
@@ -161,10 +162,7 @@ export function ConditionsPage() {
             <h2 className="text-base font-semibold text-ink">Conditions</h2>
             <PagePurpose kind="entry" />
           </div>
-          <p className="text-sm text-muted">
-            Everything {careName} lives with: illnesses, injuries, recovery, disabilities, and long-term
-            conditions, each with their category, severity, diagnosis codes, treatments, and symptoms.
-          </p>
+          <EditableSubheader copyKey="profile.conditions.subheader" vars={{ name: careName }} />
         </div>
         {canEdit ? <Button size="sm" onClick={() => setAdding(true)}>Add condition</Button> : null}
       </div>

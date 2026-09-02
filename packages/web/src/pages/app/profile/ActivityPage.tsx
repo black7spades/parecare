@@ -4,6 +4,7 @@ import { api } from '../../../api/client';
 import { entityLabel, type ActivityEntry } from '../../../lib/care';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar } from '../../../components/data/DataToolbar';
+import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { useProfile } from './ProfileLayout';
 
 const ACTION_STYLES: Record<ActivityEntry['action'], string> = {
@@ -94,10 +95,7 @@ export function ActivityPage() {
   return (
     <div className="card max-w-3xl">
       <h2 className="text-base font-semibold text-ink mb-1">Logs</h2>
-      <p className="text-sm text-muted mb-4">
-        Every change made to {careName}'s records: who did what, and when.
-        Nobody can edit or remove this list.
-      </p>
+      <EditableSubheader copyKey="profile.activity.subheader" vars={{ name: careName }} className="mb-4" />
 
       <DataToolbar
         search={dv.search}

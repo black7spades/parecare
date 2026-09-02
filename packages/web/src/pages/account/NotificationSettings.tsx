@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../api/client';
 import { Input } from '../../components/ui/Input';
+import { EditableSubheader } from '../../components/ui/EditableSubheader';
 import { Button } from '../../components/ui/Button';
 import { CrossIcon } from '../../components/ui/icons';
 import { Modal } from '../../components/ui/Modal';
@@ -72,10 +73,7 @@ export function NotificationSettings() {
     <div className="max-w-2xl space-y-6">
       <div>
         <h1>Notifications</h1>
-        <p className="text-sm text-muted">
-          What you are told about, and where. The bell in the header always shows everything you have switched on;
-          channels deliver it beyond the app.
-        </p>
+        <EditableSubheader copyKey="account.notifications.subheader" />
       </div>
       <KindPreferences preferences={data.preferences} onSaved={invalidate} />
       <AlertsCard channels={data.channels} />
