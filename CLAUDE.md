@@ -145,6 +145,22 @@ never wait to be asked for it.
 
 ## UI copy
 
+### Voice
+
+**Short, plain, done.** Say what is on the page, then stop. No explaining
+how things connect, no describing the plumbing, no second sentences that
+teach the screen before the screen teaches itself. A subheader is a label,
+not documentation. "Manage all user accounts." not "Create accounts, invite
+carers to the people they look after, and manage roles and tiers."
+
+- Prefer four to ten words over a full sentence.
+- Trust the reader. If the page makes the purpose obvious, the copy
+  confirms it; it does not elaborate.
+- Drop articles and verbs when the meaning survives without them.
+- Never write two sentences where one will do.
+
+### Rules
+
 - **Never use parentheses in headings.** Name a thing one way and spell it
   out (e.g. "Medication Administration Record", not "Administration record
   (MAR)").
