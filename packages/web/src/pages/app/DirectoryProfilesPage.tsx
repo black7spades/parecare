@@ -7,6 +7,7 @@ import { useDataView, type DataSort, type DataFilter } from '../../components/da
 import { Avatar } from '../../components/ui/Avatar';
 import { Button } from '../../components/ui/Button';
 import { ImportExport } from '../../components/ImportExport';
+import { EditableSubheader } from '../../components/ui/EditableSubheader';
 import { ageFrom, phaseLabel, CARE_PHASES, type ProfileKind } from '../../lib/care';
 import { format } from 'date-fns';
 
@@ -120,11 +121,7 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
       <div className="flex items-center justify-between gap-3 mb-4">
         <div className="min-w-0">
           <h2 className="text-base font-semibold text-ink">{label} directory</h2>
-          <p className="text-sm text-muted">
-            {isPeople
-              ? 'All people across your care profiles.'
-              : 'All pets across your care profiles.'}
-          </p>
+          <EditableSubheader copyKey={isPeople ? 'directory.profiles.people.subheader' : 'directory.profiles.pets.subheader'} />
         </div>
         <div className="flex gap-2 shrink-0">
           <ImportExport

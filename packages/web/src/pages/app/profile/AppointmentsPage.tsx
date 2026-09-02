@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
@@ -187,10 +188,7 @@ export function AppointmentsPage() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-base font-semibold text-ink">Appointments</h2>
-          <p className="text-sm text-muted">
-            Everything booked for {careName}. Each appointment shows on the Calendar and in the upcoming
-            events on the Overview.
-          </p>
+          <EditableSubheader copyKey="profile.appointments.subheader" vars={{ name: careName }} />
         </div>
         {canEdit ? <Button size="sm" onClick={() => setAdding(true)}>Add appointment</Button> : null}
       </div>

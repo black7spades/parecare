@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate, useLocation, useMatch } from 'react-route
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore, type AccountRole } from '../../stores/auth';
 import { useSubscriptionStore } from '../../stores/subscription';
+import { useSiteCopyStore } from '../../stores/siteCopy';
 import { UpgradePrompt } from '../UpgradePrompt';
 import { AssistantWidget } from '../assistant/AssistantWidget';
 import { CaptureSheet } from '../CaptureSheet';
@@ -550,6 +551,10 @@ export function Shell() {
   const profileMatch = useMatch('/app/:profileId/*');
   const matchedFirst = profileMatch?.params.profileId;
   const profileId = matchedFirst && !RESERVED_APP_SECTIONS.has(matchedFirst) ? matchedFirst : null;
+
+  // Load site copy overrides once on mount
+  const loadSiteCopy = useSiteCopyStore((s) => s.load);
+  useEffect(() => { void loadSiteCopy(); }, [loadSiteCopy]);
 
   // Refresh account info so role/tier/avatar changes apply without re-login
   useEffect(() => {

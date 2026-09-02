@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { useDataView, type DataSort } from '../../../components/data/useDataView';
 import { DataToolbar } from '../../../components/data/DataToolbar';
@@ -369,9 +370,7 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
             <h2 className="text-base font-semibold text-ink">Achievements</h2>
-            <p className="text-sm text-muted">
-              Every completed checklist item, across every journey. Select one to see its whole story.
-            </p>
+            <EditableSubheader copyKey="profile.memory-book.achievements.subheader" />
           </div>
           <Button size="sm" variant="secondary" onClick={exportCsv} disabled={dv.filtered.length === 0}>
             Export as CSV

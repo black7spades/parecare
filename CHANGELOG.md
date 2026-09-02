@@ -6,6 +6,16 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.27.0] - 2026-09-02
+
+### Added
+
+- **Editable subheader copy.** Super admins now edit the description text
+  below every page heading, either inline on the page itself or from a
+  centralised Site copy screen under System. Changes appear for everyone
+  straight away. Profile pages support a {name} placeholder that fills in
+  the person being cared for.
+
 ## [0.26.0] - 2026-09-02
 
 ### Added

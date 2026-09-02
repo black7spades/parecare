@@ -1,3 +1,4 @@
+import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { useProfile } from './ProfileLayout';
 import { MedicationMar } from './MedicationMar';
 
@@ -13,9 +14,7 @@ export function MarPage() {
     <div className="space-y-4">
       <div>
         <h2 className="text-base font-semibold text-ink">Medication record</h2>
-        <p className="text-sm text-muted">
-          Log each dose against {careName} and review the history. Doses colour instantly as you record them.
-        </p>
+        <EditableSubheader copyKey="profile.mar.subheader" vars={{ name: careName }} />
       </div>
       <MedicationMar profileId={profile.id} personName={profile.full_name} canAdminister={canEdit} />
     </div>

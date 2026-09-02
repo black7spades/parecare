@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
+import { EditableSubheader } from '../../components/ui/EditableSubheader';
 import { settingsApi, type SettingField, type SettingGroup, type SettingsResponse, type AiModelInfo, type InstalledModel } from '../../api/settings';
 
 const GROUP_TITLES: Record<string, { title: string; blurb: string }> = {
@@ -184,11 +185,7 @@ export function AdminSettings() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-ink">System settings</h1>
-        <p className="text-sm text-muted">
-          Change how PareCare runs without editing files or restarting. Changes apply straight away. Blank a field to
-          fall back to its built-in default or the value set in the server environment. Secrets are stored encrypted and
-          never shown again.
-        </p>
+        <EditableSubheader copyKey="system.settings.subheader" />
       </div>
 
       {saveError ? <p className="text-sm text-red-600">{saveError}</p> : null}

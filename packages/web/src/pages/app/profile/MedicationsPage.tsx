@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { PagePurpose } from '../../../components/PagePurpose';
 import { Button } from '../../../components/ui/Button';
+import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { Modal } from '../../../components/ui/Modal';
 import { CartIcon, CheckIcon, PackageIcon, PencilIcon, PillIcon, TrashIcon } from '../../../components/ui/icons';
 import { useProfile } from './ProfileLayout';
@@ -279,9 +280,7 @@ export function MedicationsPage() {
             </button>
             <span className="ml-2"><PagePurpose kind="entry" /></span>
           </h2>
-          <p className="mt-1 text-sm text-muted">
-            {careName}'s current regimen. Add, edit and organise medications here; log and review doses in the record below.
-          </p>
+          <EditableSubheader copyKey="profile.medications.subheader" vars={{ name: careName }} className="mt-1" />
         </div>
         {listOpen ? (
           <div className="flex flex-wrap gap-2 self-start sm:self-auto">

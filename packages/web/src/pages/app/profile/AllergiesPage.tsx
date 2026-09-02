@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Modal } from '../../../components/ui/Modal';
 import { AllergyModal } from '../../../components/AllergyModal';
@@ -58,9 +59,7 @@ export function AllergiesPage() {
             <h2 className="text-base font-semibold text-ink">Allergies</h2>
             <PagePurpose kind="entry" />
           </div>
-          <p className="text-sm text-muted">
-            What {careName} must not be given, and what happens if they are. One row per substance.
-          </p>
+          <EditableSubheader copyKey="profile.allergies.subheader" vars={{ name: careName }} />
         </div>
         {canEdit ? (
           <Button size="sm" onClick={() => setAdding(true)}>

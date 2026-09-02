@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { AddressFields, addressFrom, addressPayload, emptyAddress, type AddressValue } from '../../components/AddressFields';
 import { ImportExport } from '../../components/ImportExport';
+import { EditableSubheader } from '../../components/ui/EditableSubheader';
 import { DataToolbar } from '../../components/data/DataToolbar';
 import { SortableTh } from '../../components/data/SortableTh';
 import { useDataView, type DataSort } from '../../components/data/useDataView';
@@ -75,7 +76,7 @@ export function DirectorySuppliersPage() {
       <div className="flex items-center justify-between gap-3 mb-4">
         <div className="min-w-0">
           <h2 className="text-base font-semibold text-ink">Supplier directory</h2>
-          <p className="text-sm text-muted">The pharmacies and shops your medications are reordered from. Edit details here and they update on every medication that names them.</p>
+          <EditableSubheader copyKey="directory.suppliers.subheader" />
         </div>
         <div className="flex gap-2 shrink-0">
           <ImportExport

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { useAuthStore } from '../../stores/auth';
 import { Button } from '../../components/ui/Button';
+import { EditableSubheader } from '../../components/ui/EditableSubheader';
 import { DataToolbar } from '../../components/data/DataToolbar';
 import { useDataView, type DataSort, type DataFilter } from '../../components/data/useDataView';
 
@@ -511,7 +512,7 @@ export function ReportGeneratorPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-ink">Report generator</h2>
-          <p className="text-sm text-muted">Build custom reports from any data in the system</p>
+          <EditableSubheader copyKey="reports.generator.subheader" />
         </div>
       </div>
 

@@ -55,6 +55,7 @@ const AdminJourneys = lazy(() => import('./pages/admin/AdminJourneys').then((m) 
 const AdminChats = lazy(() => import('./pages/admin/AdminChats').then((m) => ({ default: m.AdminChats })));
 const AdminSettings = lazy(() => import('./pages/admin/AdminSettings').then((m) => ({ default: m.AdminSettings })));
 const AdminDatabase = lazy(() => import('./pages/admin/AdminDatabase').then((m) => ({ default: m.AdminDatabase })));
+const AdminSiteCopy = lazy(() => import('./pages/admin/AdminSiteCopy').then((m) => ({ default: m.AdminSiteCopy })));
 const AdminBackups = lazy(() => import('./pages/admin/AdminBackups').then((m) => ({ default: m.AdminBackups })));
 const ReportsPage = lazy(() => import('./pages/admin/ReportsPage').then((m) => ({ default: m.ReportsPage })));
 const ReportGeneratorPage = lazy(() => import('./pages/app/ReportGeneratorPage').then((m) => ({ default: m.ReportGeneratorPage })));
@@ -200,6 +201,14 @@ export const router = createBrowserRouter([
           // Backups follow the ordinary rule: an administrator can reach
           // them, so one person being away is never the end of it.
           { path: 'backups', element: <AdminBackups /> },
+          {
+            path: 'site-copy',
+            element: (
+              <SuperAdminGuard>
+                <AdminSiteCopy />
+              </SuperAdminGuard>
+            ),
+          },
           {
             path: 'settings',
             element: (

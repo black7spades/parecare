@@ -3,6 +3,7 @@ import { useAuthStore, type AccountRole } from '../../stores/auth';
 import { adminApi, type AdminAccount, type AdminCareProfile, type AdminGroup, type AdminInvitation, type AdminListParams, type AdminStats, type RightsTemplate } from '../../api/admin';
 import { Button } from '../../components/ui/Button';
 import { PencilIcon, TrashIcon } from '../../components/ui/icons';
+import { EditableSubheader } from '../../components/ui/EditableSubheader';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
 import { DataToolbar } from '../../components/data/DataToolbar';
@@ -116,7 +117,7 @@ export function AdminUsers() {
       <div className="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-ink">User administration</h1>
-          <p className="text-sm text-muted">Create accounts, invite carers to the people they look after, and manage roles and tiers.</p>
+          <EditableSubheader copyKey="system.users.subheader" />
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => setCreating(true)}>Create user</Button>
@@ -1128,7 +1129,7 @@ function InvitationsSection() {
   return (
     <div className="mt-8">
       <h2 className="text-base font-semibold text-ink mb-1">Invitations</h2>
-      <p className="text-sm text-muted mb-3">Every invitation sent from anywhere in the system, with its link while it is pending.</p>
+      <EditableSubheader copyKey="system.users.invitations.subheader" className="mb-3" />
       {error ? <p className="text-sm text-red-600 mb-2">{error}</p> : null}
       <div className="card overflow-x-auto p-0">
         <table className="w-full text-sm">
@@ -1354,10 +1355,7 @@ function TemplatesSection({ templates, onChanged }: { templates: RightsTemplate[
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <h2 className="text-base font-semibold text-ink mb-1">Rights templates</h2>
-          <p className="text-sm text-muted">
-            Named bundles of account rights. Select people in the table above and apply a template to set them all at
-            once.
-          </p>
+          <EditableSubheader copyKey="system.users.templates.subheader" />
         </div>
         <Button variant="secondary" onClick={() => setCreating(true)}>
           New template

@@ -6,6 +6,7 @@ import { PencilIcon, TrashIcon } from '../../components/ui/icons';
 import { Input, Textarea } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
 import { useAuthStore } from '../../stores/auth';
+import { EditableSubheader } from '../../components/ui/EditableSubheader';
 import { useDataView, type DataSort, type DataFilter } from '../../components/data/useDataView';
 import { DataToolbar } from '../../components/data/DataToolbar';
 import {
@@ -79,10 +80,7 @@ function LifeStagesManager() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-base font-semibold text-ink">Life stages</h2>
-          <p className="text-sm text-muted">
-            The stages that organise the journey library and drive suggestions. They never restrict which journeys a
-            person can be on.
-          </p>
+          <EditableSubheader copyKey="system.journeys.stages.subheader" />
         </div>
         <Button size="sm" onClick={() => setEditing({})}>
           Add a life stage
@@ -277,10 +275,7 @@ function TemplateLibrary() {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h2 className="text-base font-semibold text-ink">Journey library</h2>
-          <p className="text-sm text-muted">
-            The journeys people can be enrolled in. Build new ones from scratch, clone and adapt, or cherry-pick
-            phases from across the library. People's journeys are copies; library edits change no one's record.
-          </p>
+          <EditableSubheader copyKey="system.journeys.library.subheader" />
         </div>
         <Button size="sm" onClick={() => setEditorId('new')}>
           New journey

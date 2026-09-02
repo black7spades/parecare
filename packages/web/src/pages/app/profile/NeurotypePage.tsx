@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { PencilIcon, TrashIcon, NoteIcon, CrossIcon } from '../../../components/ui/icons';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
@@ -48,9 +49,7 @@ export function NeurotypePage() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-ink">Neurotypes</h1>
-          <p className="text-sm text-muted mt-1">
-            Neurodivergent profiles such as autism, ADHD, dyslexia and others. These are lifelong from birth.
-          </p>
+          <EditableSubheader copyKey="profile.neurotype.subheader" className="mt-1" />
         </div>
         {canEdit ? (
           <Button onClick={() => setAddOpen(true)}>Add neurotype</Button>

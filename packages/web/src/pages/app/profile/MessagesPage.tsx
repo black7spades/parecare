@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { Textarea } from '../../../components/ui/Input';
 import { ToneBlockNotice, extractToneBlock, type ToneBlock } from '../../../components/ToneBlockNotice';
 import { useAuthStore } from '../../../stores/auth';
@@ -73,9 +74,7 @@ export function MessagesPage() {
   return (
     <div className="card flex flex-col" style={{ minHeight: '28rem' }}>
       <h2 className="text-base font-semibold text-ink mb-1">Messages</h2>
-      <p className="text-sm text-muted mb-2">
-        A shared space for everyone in {careName}'s circle.
-      </p>
+      <EditableSubheader copyKey="profile.messages.subheader" vars={{ name: careName }} className="mb-2" />
 
       {isAdmin && guardData ? (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-xs">

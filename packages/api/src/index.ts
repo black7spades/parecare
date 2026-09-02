@@ -69,6 +69,7 @@ import { reportsRouter } from './routes/reports';
 import { ensureSuperAdmin, runMigrations } from './services/bootstrap';
 import { loadSettings, seedSettingsFromEnv, subscribeSettingsInvalidation } from './config/settings';
 import { settingsRouter } from './routes/settings';
+import { siteCopyRouter } from './routes/siteCopy';
 
 // Backstop for promise rejections outside request handling (e.g. redis,
 // timers). Log instead of taking the whole API down.
@@ -118,6 +119,7 @@ v1.use('/auth', oauthRouter);
 // Super-admin runtime settings. Must be registered before the admin router so
 // its requireRole('admin') guard doesn't shadow the super-admin-only routes.
 v1.use('/admin/settings', settingsRouter);
+v1.use('/admin/site-copy', siteCopyRouter);
 // Super-admin database tools: registered before the admin router for the
 // same reason as settings.
 v1.use('/admin/database', adminDatabaseRouter);

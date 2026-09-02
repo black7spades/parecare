@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {  } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import {  } from '../../../components/ui/icons';
 import {  } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
@@ -198,10 +199,7 @@ export function PlanPage() {
             <h2 className="text-base font-semibold text-ink">Care plan</h2>
             <PagePurpose kind="output" />
           </div>
-          <p className="text-sm text-muted">
-            The assembled, versioned plan for {careName}. Nothing is recorded here: facts are entered on
-            their own pages and each change flows in as a tracked update.
-          </p>
+          <EditableSubheader copyKey="profile.plan.subheader" vars={{ name: careName }} />
         </div>
         <Link to="../emergency">
           <Button type="button" variant="secondary" size="sm">

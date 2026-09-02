@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { PencilIcon, CrossIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
@@ -91,9 +92,7 @@ export function CirclePage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <div>
           <h2 className="text-base font-semibold text-ink">Care circle</h2>
-          <p className="text-sm text-muted">
-            The family members, friends and organisations involved in {careName}'s care.
-          </p>
+          <EditableSubheader copyKey="profile.circle.subheader" vars={{ name: careName }} />
         </div>
         {canManageEditors ? (
           <Button className="self-start sm:self-auto" onClick={() => setInviteOpen(true)}>

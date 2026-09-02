@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
+import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
@@ -123,9 +124,7 @@ export function QuestionsPage() {
           }}
         >
           <h2 className="text-base font-semibold text-ink">Raise a question</h2>
-          <p className="text-sm text-muted -mt-2">
-            Open questions the family needs to settle: "Should mum still be driving?", "Who takes February visits?"
-          </p>
+          <EditableSubheader copyKey="profile.questions.subheader" className="-mt-2" />
           <Input label="Question" value={title} onChange={(e) => { setTitle(e.target.value); if (toneBlock) setToneBlock(null); }} required />
           <Textarea label="Context (optional)" value={body} onChange={(e) => { setBody(e.target.value); if (toneBlock) setToneBlock(null); }} rows={2} />
           {toneBlock ? <ToneBlockNotice careName={careName} block={toneBlock} onDismiss={() => setToneBlock(null)} /> : null}

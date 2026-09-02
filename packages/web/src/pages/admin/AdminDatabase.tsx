@@ -3,6 +3,7 @@ import { Button } from '../../components/ui/Button';
 import { PencilIcon, TrashIcon } from '../../components/ui/icons';
 import { Input, Textarea } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
+import { EditableSubheader } from '../../components/ui/EditableSubheader';
 import { ImportExport } from '../../components/ImportExport';
 import {
   adminDatabaseApi,
@@ -355,10 +356,7 @@ export function AdminDatabase() {
     <div>
       <div className="mb-4">
         <h1 className="text-xl font-semibold text-ink">Data tools</h1>
-        <p className="text-sm text-muted">
-          Tidy the data behind the app: fix a misspelt name in a shared catalogue or correct a care record. Only
-          the lists and records already managed in the main navigation are shown here.
-        </p>
+        <EditableSubheader copyKey="system.database.subheader" />
       </div>
 
       <div
