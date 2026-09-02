@@ -65,8 +65,10 @@ export interface CompleteOptions {
 
 type Tier = 'chat' | 'mediation';
 
+// Bare aliases, never dated snapshots: an alias always resolves to the current
+// build of that model, so a retired snapshot can never quietly break Pare.
 const DEFAULT_MODELS: Record<string, Record<Tier, string>> = {
-  anthropic: { chat: 'claude-haiku-4-5-20251001', mediation: 'claude-sonnet-5' },
+  anthropic: { chat: 'claude-haiku-4-5', mediation: 'claude-sonnet-5' },
   openai: { chat: 'gpt-4o-mini', mediation: 'gpt-4o' },
   google: { chat: 'gemini-2.0-flash', mediation: 'gemini-2.0-flash' },
 };

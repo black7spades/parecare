@@ -8,7 +8,7 @@ export function describeAiError(err: unknown): string {
     // fault; say it is still getting ready, in the same words as elsewhere.
     if (err.code === 'AI_MODEL_PREPARING') return AI_WARMING_MESSAGE;
     if (err.code === 'AI_NOT_CONFIGURED' || /api key/i.test(err.message)) {
-      return 'The AI assistant is not configured on this server. Ask the admin to set AI_PROVIDER (Anthropic, OpenAI, Gemini, Ollama, or LM Studio).';
+      return 'Pare is not set up on this server yet. A system administrator can switch it on in System settings.';
     }
     return err.message;
   }

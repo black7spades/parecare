@@ -100,7 +100,8 @@ documentIngestRouter.post('/', requireAuth, upload.single('file'), async (req, r
     res.json({
       document_id: docId,
       text_found: haveText,
-      summary: 'The file was saved, but the assistant is not configured, so nothing could be filed automatically. Set up the AI provider in System settings to file uploads.',
+      summary: 'Your file is saved. Pare is not set up yet, so it could not read it for you. A system administrator can switch Pare on in System settings, then this file can be read again.',
+      needs_attention: true,
       actions: [],
     });
     return;
@@ -153,15 +154,32 @@ documentIngestRouter.post('/', requireAuth, upload.single('file'), async (req, r
       actions,
     });
   } catch (err) {
-    // The file is already saved, so a model that is still warming up or cannot
-    // read this kind of file never costs the capture. Say which, plainly.
-    const preparing = (err as { code?: string }).code === 'AI_MODEL_PREPARING';
+    // The file is already saved, so nothing about Pare's state ever costs the
+    // capture. Say plainly which of three things happened, so a real fault with
+    // Pare is never hidden as if the file itself were the problem.
+    const code = (err as { code?: string }).code;
+    const status = (err as { status?: number }).status;
+    const preparing = code === 'AI_MODEL_PREPARING';
+    // A configuration or provider fault (a missing or wrong key, an unreachable
+    // provider, a model that is not available) is Pare's problem, not the file's.
+    // Point to where it is fixed instead of blaming the upload. Any error that
+    // carries an HTTP status came back from the provider (including the Anthropic
+    // SDK, whose errors set status but no code), so it counts as a Pare fault.
+    const pareFault =
+      code === 'AI_NOT_CONFIGURED' || code === 'AI_PROVIDER_ERROR' || (typeof status === 'number' && !preparing);
+    let summary: string;
+    if (preparing) {
+      summary = 'Your file is saved. Pare on this machine is still getting ready, so it could not read it yet. Try again in a moment, or file its details by hand.';
+    } else if (pareFault) {
+      summary = 'Your file is saved, but Pare could not read it just now. A system administrator can check Pare in System settings, then try reading this file again.';
+    } else {
+      summary = 'Your file is saved, but Pare could not read it automatically. You can still file its details by hand.';
+    }
     res.json({
       document_id: docId,
       text_found: haveText,
-      summary: preparing
-        ? 'The file was saved. The assistant on this machine is still getting ready, so it could not be read yet. Try again in a moment, or file its details by hand.'
-        : 'The file was saved, but the assistant could not read it automatically. You can still file its details by hand.',
+      summary,
+      needs_attention: preparing || pareFault,
       actions: [],
     });
   }

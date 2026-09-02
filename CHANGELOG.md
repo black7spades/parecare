@@ -6,6 +6,25 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.26.0] - 2026-09-02
+
+### Added
+
+- **Dismiss a notification.** Every new notification now has a dismiss control,
+  and the count on the bell drops the moment you dismiss one, without leaving the
+  panel or opening the page it points to. Opening or clearing notifications
+  updates the count straight away too.
+
+### Fixed
+
+- **Pare answers again.** Pare's built-in choice of model was tied to a dated
+  version that can be retired out from under it. It now always uses the current
+  one, so chatting with Pare and having it read documents keep working.
+- **A clear message when Pare cannot read a file.** Uploading a document while
+  Pare is not set up, still getting ready, or having trouble now says so plainly
+  and points to where it is put right, instead of looking as though the file
+  itself could not be read. Your file is saved either way.
+
 ## [0.25.1] - 2026-08-06
 
 ### Changed

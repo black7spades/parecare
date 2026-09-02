@@ -100,14 +100,55 @@ export function NotificationsBell() {
   const items = data?.items ?? [];
   const unread = data?.unread ?? 0;
 
+  type Feed = { items: NotificationItem[]; unread: number };
+
+  // Update the badge the instant a notification is opened, dismissed, or all are
+  // cleared, rather than waiting for the next fetch: the count is corrected from
+  // the server on settle, but it must never look like nothing happened.
+  const patchFeed = (patch: (feed: Feed) => Feed) => {
+    const prev = queryClient.getQueryData<Feed>(['notifications']);
+    if (prev) queryClient.setQueryData<Feed>(['notifications'], patch(prev));
+    return prev;
+  };
+
   const markRead = useMutation({
     mutationFn: (keys: string[]) => api.post('/notifications/read', { keys }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+    onMutate: async (keys: string[]) => {
+      await queryClient.cancelQueries({ queryKey: ['notifications'] });
+      const keySet = new Set(keys);
+      const prev = patchFeed((feed) => {
+        const newlyRead = feed.items.filter((it) => keySet.has(it.key) && !it.read).length;
+        return {
+          items: feed.items.map((it) => (keySet.has(it.key) ? { ...it, read: true } : it)),
+          unread: Math.max(0, feed.unread - newlyRead),
+        };
+      });
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(['notifications'], ctx.prev);
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ['notifications'] }),
   });
   const markAllRead = useMutation({
     mutationFn: () => api.post('/notifications/read-all', {}),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['notifications'] });
+      const prev = patchFeed((feed) => ({ items: feed.items.map((it) => ({ ...it, read: true })), unread: 0 }));
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(['notifications'], ctx.prev);
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ['notifications'] }),
   });
+
+  // Dismiss a single notification: mark it read in place and let the badge drop,
+  // without leaving the panel or opening the page it points to.
+  const dismiss = (item: NotificationItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!item.read) markRead.mutate([item.key]);
+  };
 
   // Close when clicking anywhere outside the panel.
   useEffect(() => {
@@ -186,13 +227,11 @@ export function NotificationsBell() {
           ) : (
             <ul className="divide-y divide-border">
               {items.map((item) => (
-                <li key={item.key}>
+                <li key={item.key} className={`flex items-stretch ${item.read ? 'opacity-60' : ''}`}>
                   <button
                     type="button"
                     onClick={() => openItem(item)}
-                    className={`w-full text-left px-4 py-3 hover:bg-surface-2 transition-colors flex gap-2 ${
-                      item.read ? 'opacity-60' : ''
-                    }`}
+                    className="flex-1 min-w-0 text-left px-4 py-3 hover:bg-surface-2 transition-colors flex gap-2"
                   >
                     {!item.read ? (
                       <span aria-hidden className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" />
@@ -213,6 +252,20 @@ export function NotificationsBell() {
                       </span>
                     </span>
                   </button>
+                  {!item.read ? (
+                    <button
+                      type="button"
+                      onClick={(e) => dismiss(item, e)}
+                      aria-label="Dismiss this notification"
+                      title="Dismiss"
+                      className="shrink-0 px-2 text-muted hover:text-ink hover:bg-surface-2 transition-colors"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                      </svg>
+                    </button>
+                  ) : null}
                 </li>
               ))}
             </ul>
