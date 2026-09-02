@@ -10,6 +10,8 @@ interface IngestResult {
   document_id: string;
   text_found: boolean;
   summary: string;
+  /** True when Pare itself needs attention (not set up, still getting ready, or a provider fault), so the message is shown as a problem rather than a neutral note. */
+  needs_attention?: boolean;
   actions: ProposedAction[];
   parse_errors?: string[];
 }
@@ -152,8 +154,8 @@ export function IngestModal({
           </>
         ) : (
           <>
-            <p className="text-sm text-ink">{result.summary}</p>
-            {actions.length > 0 ? (
+            <p className={`text-sm ${result.needs_attention ? 'text-red-600' : 'text-ink'}`}>{result.summary}</p>
+            {result.needs_attention ? null : actions.length > 0 ? (
               <>
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted">Pare will file (check and edit before saving)</p>
                 <div className="space-y-3 max-h-[26rem] overflow-y-auto">
