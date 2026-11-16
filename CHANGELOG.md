@@ -10,14 +10,15 @@ record of updates stays traceable to source. Versions follow
 
 ### Added
 
-- **Use PareCare from Claude, ChatGPT and other assistants.** Connect the
-  assistant you already chat with, then say things like "Mum took her evening
-  tablets at 7, file it in PareCare" and it is saved to the right person with
-  the same checks as Pare. Connecting is one copied address and a click on
-  Allow. Choose whether it may add records or only look, see everything
-  connected in one list, and disconnect any of it with one click. Changes to a
-  medication list are read back for you to agree first, every change is marked
-  as made by an assistant, and most new records can be undone for 30 minutes.
+- **Use PareCare from Claude, ChatGPT, Gemini, Open WebUI and other
+  assistants.** Connect the assistant you already chat with, then say things
+  like "Mum took her evening tablets at 7, file it in PareCare" and it is
+  saved to the right person with the same checks as Pare. Connecting is one
+  copied address and a click on Allow. Choose whether it may add records or
+  only look, see everything connected in one list, and disconnect any of it
+  with one click. Changes to a medication list are read back for you to agree
+  first, every change is marked as made by an assistant, and most new records
+  can be undone for 30 minutes.
 - **Clinics and the people who work there.** File a doctor at their clinic and
   they share its address, so Health Hub Morayfield is typed once, not once per
   doctor. Pick where someone works as you add them, or open the clinic and add

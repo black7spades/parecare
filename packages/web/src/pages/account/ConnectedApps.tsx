@@ -26,11 +26,13 @@ interface Connection {
   signed_in: boolean;
 }
 
-type AppTab = 'claude' | 'chatgpt' | 'other';
+type AppTab = 'claude' | 'chatgpt' | 'gemini' | 'openwebui' | 'other';
 
 const TABS: { key: AppTab; label: string }[] = [
   { key: 'claude', label: 'Claude' },
   { key: 'chatgpt', label: 'ChatGPT' },
+  { key: 'gemini', label: 'Gemini' },
+  { key: 'openwebui', label: 'Open WebUI' },
   { key: 'other', label: 'Other apps' },
 ];
 
@@ -87,7 +89,7 @@ function ConnectAssistantCard() {
         </div>
       </div>
 
-      <div className="inline-flex items-center gap-1 rounded-md bg-surface-2 p-0.5" role="tablist" aria-label="Which app">
+      <div className="inline-flex flex-wrap items-center gap-1 rounded-md bg-surface-2 p-0.5" role="tablist" aria-label="Which app">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -111,6 +113,33 @@ function ConnectAssistantCard() {
           <li>Name it PareCare and paste the address above.</li>
           <li>Click Connect. PareCare opens: check it is you, then click Allow.</li>
         </ol>
+      ) : tab === 'gemini' ? (
+        <div className="space-y-2 text-sm text-ink">
+          <ol className="list-decimal pl-5 space-y-1">
+            <li>In the Gemini app, open Settings, then Connected apps.</li>
+            <li>Choose Add a custom app, name it PareCare and paste the address above.</li>
+            <li>PareCare opens: check it is you, then click Allow.</li>
+          </ol>
+          <p className="text-xs text-muted">
+            Google is still rolling custom apps out, so some accounts and countries do not have the option yet. Open WebUI
+            with a Gemini model works everywhere in the meantime.
+          </p>
+        </div>
+      ) : tab === 'openwebui' ? (
+        <div className="space-y-2 text-sm text-ink">
+          <ol className="list-decimal pl-5 space-y-1">
+            <li>In Open WebUI, open Admin Settings, then Integrations, and add an external tool connection.</li>
+            <li>Set the type to MCP, Streamable HTTP. It starts on OpenAPI, which will not connect.</li>
+            <li>Paste the address above and name it PareCare.</li>
+            <li>For sign-in, choose OAuth 2.1 and click Register Client, then Save. PareCare opens: click Allow.</li>
+            <li>In a chat, switch PareCare on from the + button, then ask away.</li>
+          </ol>
+          <p className="text-xs text-muted">
+            To have PareCare on in every chat without switching it on, choose Bearer for sign-in instead and paste an app
+            password made below. Everyone who uses that Open WebUI then reaches PareCare as you, so only do this if it is
+            yours alone.
+          </p>
+        </div>
       ) : tab === 'chatgpt' ? (
         <ol className="list-decimal pl-5 space-y-1 text-sm text-ink">
           <li>In ChatGPT, open Settings, then Apps and connectors.</li>
