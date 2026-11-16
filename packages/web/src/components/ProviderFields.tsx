@@ -162,7 +162,7 @@ export function WorksAtField({
         role="combobox"
         aria-expanded={open && options.length > 0}
         autoComplete="off"
-        placeholder="Clinic or practice, e.g. Health Hub Morayfield"
+        placeholder="e.g. Health Hub Morayfield"
         className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
         value={text}
         onChange={(e) => {
@@ -202,7 +202,7 @@ export function WorksAtField({
           ))}
         </ul>
       ) : null}
-      <p className="mt-1 text-xs text-muted">Leave empty if they do not work at a clinic or practice.</p>
+      <p className="mt-1 text-xs text-muted">Leave empty if they work on their own.</p>
     </div>
   );
 }
@@ -259,7 +259,7 @@ export function PracticeAddress({
 // ── People who work here ───────────────────────────────────────────────
 
 /** Kinds of provider that are places people work at. */
-const PLACE_TYPES = new Set(['practice', 'care_facility', 'pharmacy', 'vet', 'allied_health', 'Hospital', 'Pathology', 'Radiology']);
+const PLACE_TYPES = new Set(['practice', 'clinic', 'care_facility', 'pharmacy', 'vet', 'allied_health', 'Hospital', 'Medical centre', 'Health centre', 'Pathology', 'Radiology']);
 
 export const isPlace = (p: Pick<Provider, 'provider_type' | 'member_count'>): boolean =>
   PLACE_TYPES.has(p.provider_type) || (p.member_count ?? 0) > 0;

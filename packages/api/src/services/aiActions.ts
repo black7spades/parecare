@@ -191,7 +191,7 @@ const logConditionSchema = z.object({
   // The condition by name, matched within this person's conditions.
   condition: z.string().min(1).max(255),
   entry_type: z
-    .enum(['note', 'symptom_change', 'treatment', 'appointment_outcome', 'test_result', 'other'])
+    .enum(['note', 'symptom_change', 'treatment', 'appointment_outcome', 'test_result', 'scan_result', 'other'])
     .optional()
     .nullable(),
   title: z.string().max(255).optional().nullable(),

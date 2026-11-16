@@ -13,7 +13,8 @@ export const BUILT_IN_PROVIDER_TYPES = [
   { value: 'psychologist', label: 'Psychologist' },
   { value: 'vet', label: 'Vet' },
   { value: 'pharmacy', label: 'Pharmacy' },
-  { value: 'practice', label: 'Clinic or practice' },
+  { value: 'practice', label: 'Practice' },
+  { value: 'clinic', label: 'Clinic' },
   { value: 'care_facility', label: 'Care facility' },
   { value: 'allied_health', label: 'Allied health' },
   { value: 'legal', label: 'Legal' },
@@ -22,8 +23,28 @@ export const BUILT_IN_PROVIDER_TYPES = [
   { value: 'other', label: 'Other' },
 ] as const;
 
-/** The type a clinic, medical centre or practice is filed under. */
+/** The type a place is filed under when its name does not say what it is. */
 export const PRACTICE_TYPE = 'practice';
+
+/** Kinds of provider that are places people work at. */
+export const PLACE_TYPES = ['practice', 'clinic', 'pharmacy', 'care_facility', 'Hospital', 'Medical centre', 'Health centre', 'Pathology', 'Radiology'];
+
+/**
+ * What kind of place a name describes, so a newly filed place gets a fitting
+ * type without anyone being asked: "Brain Clinic" is a clinic, "Caboolture
+ * Hospital" a hospital, "Health Hub Morayfield" a practice.
+ */
+export function placeTypeFromName(name: string): string {
+  const n = name.toLowerCase();
+  if (/\bclinic\b/.test(n)) return 'clinic';
+  if (/\bhospital\b/.test(n)) return 'Hospital';
+  if (/\b(pharmacy|chemist)\b/.test(n)) return 'pharmacy';
+  if (/\bmedical cent(re|er)\b/.test(n)) return 'Medical centre';
+  if (/\bhealth cent(re|er)\b/.test(n)) return 'Health centre';
+  if (/\b(pathology|path lab)\b/.test(n)) return 'Pathology';
+  if (/\b(radiology|imaging|x-ray)\b/.test(n)) return 'Radiology';
+  return PRACTICE_TYPE;
+}
 
 /**
  * Common kinds of provider offered from the first day, so most people never
@@ -43,7 +64,9 @@ export const SEEDED_PROVIDER_TYPES = [
   'Geriatrician',
   'Gynaecologist',
   'Haematologist',
+  'Health centre',
   'Hospital',
+  'Medical centre',
   'Nephrologist',
   'Neurologist',
   'Neurosurgeon',
@@ -75,7 +98,7 @@ export const isBuiltInProviderType = (value: string): boolean => BUILT_IN_VALUES
 
 /**
  * Turn whatever was said or typed into the stored type: a built-in code when
- * it names one ("GP", "gp", "Clinic or practice", "care facility"), otherwise
+ * it names one ("GP", "gp", "Clinic", "care facility"), otherwise
  * the typed words with a capital first letter ("neurologist" becomes
  * "Neurologist"). Empty input falls back to "other".
  */
@@ -87,10 +110,10 @@ export function normaliseProviderType(input: string | null | undefined): string 
   for (const t of BUILT_IN_PROVIDER_TYPES) {
     if (t.value === asCode || t.label.toLowerCase() === lower) return t.value;
   }
-  // A few everyday ways of naming a practice.
-  if (['clinic', 'practice', 'medical practice', 'medical centre', 'medical center', 'surgery', 'health centre', 'health center', 'health hub'].includes(lower)) {
-    return PRACTICE_TYPE;
-  }
+  // Everyday ways of naming one kind of place.
+  if (['medical practice', 'surgery', 'health hub', 'gp practice'].includes(lower)) return PRACTICE_TYPE;
+  if (['medical center'].includes(lower)) return 'Medical centre';
+  if (['health center'].includes(lower)) return 'Health centre';
   // Keep the person's own spelling of a known shared type.
   const seeded = SEEDED_PROVIDER_TYPES.find((s) => s.toLowerCase() === lower);
   if (seeded) return seeded;

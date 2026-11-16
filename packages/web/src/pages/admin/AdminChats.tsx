@@ -114,6 +114,9 @@ const CHAT_SORTS: DataSort<AdminChatSummary>[] = [
   { key: 'tokens', label: 'Tokens', compare: (a, b) => a.tokens_used - b.tokens_used, defaultDir: 'desc' },
 ];
 
+// The most conversations loaded at once; the server allows the same.
+const CHAT_PAGE_SIZE = 1000;
+
 export function AdminChats() {
   const me = useAuthStore((s) => s.account);
   const isSuperAdmin = me?.role === 'super_admin';
@@ -121,10 +124,11 @@ export function AdminChats() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['admin-chats'],
-    queryFn: () => adminApi.listChats({ per_page: 1000 }),
+    queryFn: () => adminApi.listChats({ per_page: CHAT_PAGE_SIZE }),
   });
   // A conversation nobody said anything in is noise, so empty chats are left out.
   const chats = (data?.chats ?? []).filter((c) => c.message_count > 0);
+  const moreThanShown = (data?.total ?? 0) > (data?.chats.length ?? 0);
 
   const dv = useDataView<AdminChatSummary>({
     rows: chats,
@@ -148,7 +152,17 @@ export function AdminChats() {
 
       <div>
         <h3 className="mb-2">Conversations</h3>
-        {error ? <p className="text-sm text-red-600 mb-2">Could not load the chat log.</p> : null}
+        {error ? (
+          <p className="text-sm text-red-600 mb-2">
+            The conversations could not be loaded just now. Refresh the page to try again. If it keeps happening, check that
+            Pare shows as running above.
+          </p>
+        ) : null}
+        {moreThanShown ? (
+          <p className="text-xs text-muted mb-2">
+            Showing the {CHAT_PAGE_SIZE.toLocaleString()} most recent conversations of {data!.total.toLocaleString()}.
+          </p>
+        ) : null}
         <div className="grid gap-4 lg:grid-cols-[1fr_22rem] items-start">
           <div className="card p-0 overflow-hidden">
             <div className="p-3 border-b border-border">

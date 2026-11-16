@@ -803,6 +803,7 @@ const CONDITION_LOG_TYPES = [
   'treatment',
   'appointment_outcome',
   'test_result',
+  'scan_result',
   'other',
 ] as const;
 
