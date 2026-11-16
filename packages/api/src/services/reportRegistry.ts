@@ -1,5 +1,6 @@
 import { Knex } from 'knex';
 import { summarizeSpend, toNum, type SpendCategory } from './healthSpend';
+import { BUILT_IN_PROVIDER_TYPES } from '../lib/providerTypes';
 
 export interface ReportField {
   key: string;
@@ -976,32 +977,27 @@ registerSection({
 registerSection({
   meta: {
     key: 'providers',
-    label: 'Providers',
-    description: 'Healthcare providers, specialists, pharmacies, and service providers linked to profiles',
+    label: 'Professionals and organisations',
+    description: 'The professionals and organisations linked to each person: doctors, specialists, lawyers, clinics, pharmacies, government departments',
     category: 'admin',
     fields: [
-      { key: 'name', label: 'Provider name', type: 'text' },
+      { key: 'name', label: 'Name', type: 'text' },
+      { key: 'kind', label: 'Kind', type: 'text' },
       { key: 'provider_type', label: 'Type', type: 'text' },
-      { key: 'organisation', label: 'Organisation', type: 'text' },
+      { key: 'organisation', label: 'Based at', type: 'text' },
       { key: 'phone', label: 'Phone', type: 'text' },
       { key: 'email', label: 'Email', type: 'text' },
       { key: 'address', label: 'Address', type: 'text' },
     ],
     filters: [
       {
-        key: 'provider_type', label: 'Type', type: 'multi-select', options: [
-          { value: 'gp', label: 'GP' },
-          { value: 'specialist', label: 'Specialist' },
-          { value: 'psychologist', label: 'Psychologist' },
-          { value: 'vet', label: 'Vet' },
-          { value: 'pharmacy', label: 'Pharmacy' },
-          { value: 'care_facility', label: 'Care facility' },
-          { value: 'allied_health', label: 'Allied health' },
-          { value: 'legal', label: 'Legal' },
-          { value: 'financial', label: 'Financial' },
-          { value: 'social_worker', label: 'Social worker' },
-          { value: 'other', label: 'Other' },
+        key: 'kind', label: 'Kind', type: 'multi-select', options: [
+          { value: 'person', label: 'Professional' },
+          { value: 'organisation', label: 'Organisation' },
         ],
+      },
+      {
+        key: 'provider_type', label: 'Type', type: 'multi-select', options: BUILT_IN_PROVIDER_TYPES.map((t) => ({ value: t.value, label: t.label })),
       },
     ],
     supportsDateRange: false,
@@ -1015,12 +1011,16 @@ registerSection({
     if (Array.isArray(filters['provider_type']) && filters['provider_type'].length) {
       query = query.whereIn('p.provider_type', filters['provider_type'] as string[]);
     }
+    if (Array.isArray(filters['kind']) && filters['kind'].length) {
+      query = query.whereIn('p.kind', filters['kind'] as string[]);
+    }
     const rows = await query.select('p.*', 'cpp.care_profile_id', 'cp.full_name as _profile_name');
     return rows.map((r) => ({
       _profile_id: r.care_profile_id,
       _profile_name: r._profile_name,
       name: r.name,
-      provider_type: r.provider_type,
+      kind: r.kind === 'organisation' ? 'Organisation' : 'Professional',
+      provider_type: BUILT_IN_PROVIDER_TYPES.find((t) => t.value === r.provider_type)?.label ?? r.provider_type,
       organisation: r.organisation,
       phone: r.phone,
       email: r.email,

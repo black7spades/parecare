@@ -159,7 +159,7 @@ export function ContactDetails({
           <option value="profile">Another person in PareCare</option>
           <option value="user">Someone already using PareCare</option>
           <option value="contact">A new contact</option>
-          {providers.length > 0 ? <option value="provider">A provider, such as their care home</option> : null}
+          {providers.length > 0 ? <option value="provider">One of their contacts, such as their care home</option> : null}
         </select>
       </div>
 
@@ -183,10 +183,10 @@ export function ContactDetails({
       {value.kind === 'provider' ? (
         <div>
           <label htmlFor="contact-provider" className="block text-sm font-medium text-ink mb-1">
-            Provider
+            Contact
           </label>
           <select id="contact-provider" className={inputClass} value={value.provider_id} onChange={(e) => set({ provider_id: e.target.value })}>
-            <option value="">Choose a provider</option>
+            <option value="">Choose one</option>
             {providers.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}

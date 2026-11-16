@@ -8,9 +8,11 @@ import {
   practiceColumns,
   practiceMembers,
   removePracticeMember,
+  inferKind,
   storeProviderType,
   syncPracticeMembers,
 } from '../services/providerPractices';
+import { fitTypeToKind, normaliseProviderType, type ProviderKind } from '../lib/providerTypes';
 import type { Provider, CareProfileProvider } from '../types';
 import { similarName } from '../lib/providerNames';
 
@@ -41,6 +43,11 @@ export const providerPracticeFields = {
   uses_practice_address: z.boolean().optional(),
 };
 
+/** Whether a record is an organisation or a professional. */
+export const providerKindField = {
+  kind: z.enum(['organisation', 'person']).optional(),
+};
+
 /** The other names a provider goes by: one field, several names. */
 export const providerOtherNames = {
   also_known_as: z.array(z.string().trim().min(1).max(255)).max(30).optional(),
@@ -54,6 +61,7 @@ const providerSchema = z.object({
   ...providerAddressFields,
   ...providerPracticeFields,
   ...providerOtherNames,
+  ...providerKindField,
   booking_link: z.string().url().optional().nullable(),
   directions_link: z.string().url().optional().nullable(),
 });
@@ -78,7 +86,7 @@ const ADDRESS_PARTS = ['address_line1', 'address_line2', 'address_suburb', 'addr
 
 /** Provider columns returned to the client, including the segmented address. */
 const PROVIDER_COLS = [
-  'p.id', 'p.account_id', 'p.provider_type', 'p.name', 'p.organisation',
+  'p.id', 'p.account_id', 'p.kind', 'p.provider_type', 'p.name', 'p.organisation',
   'p.phone', 'p.email', 'p.address',
   'p.address_line1', 'p.address_line2', 'p.address_suburb', 'p.address_state', 'p.address_postcode', 'p.address_country',
   'p.booking_link', 'p.directions_link', 'p.practice_id', 'p.uses_practice_address', 'p.also_known_as',
@@ -109,10 +117,40 @@ export async function providerWriteColumns(
   selfId?: string
 ): Promise<{ columns: Record<string, unknown>; note: string | null }> {
   const { own, practice } = splitPracticeInput(data);
-  if (typeof own['provider_type'] === 'string') own['provider_type'] = await storeProviderType(own['provider_type'] as string, accountId);
+  // A new record says, or is worked out to be, an organisation or a
+  // professional; an edit keeps what it was unless told otherwise.
+  let kind = own['kind'] as ProviderKind | undefined;
+  if (!kind && selfId) {
+    const self = await db('providers').where({ id: selfId }).select('kind').first();
+    kind = (self?.kind as ProviderKind | undefined) ?? 'person';
+  } else if (!kind) {
+    kind = await inferKind(own['provider_type'] as string | undefined, own['name'] as string | undefined);
+    own['kind'] = kind;
+  }
+  // Somewhere others are based stays an organisation.
+  let kindNote: string | null = null;
+  if (own['kind'] === 'person' && selfId) {
+    const based = await db('providers').where({ practice_id: selfId }).count<{ n: string }[]>('id as n');
+    if (Number(based[0]?.n ?? 0) > 0) {
+      delete own['kind'];
+      kind = 'organisation';
+      kindNote = 'Others are based here, so it stays an organisation. Move them somewhere else first.';
+    }
+  }
+  // Moved to the other list: bring its type along, so a doctor filed as a
+  // practice reads Doctor once moved to Professionals.
+  if (own['kind'] && selfId && typeof own['provider_type'] !== 'string') {
+    const self = await db('providers').where({ id: selfId }).select('provider_type').first();
+    if (self && fitTypeToKind(self.provider_type, kind, (own['name'] as string | undefined) ?? '') !== self.provider_type) own['provider_type'] = self.provider_type;
+  }
+  if (typeof own['provider_type'] === 'string') {
+    const name = (own['name'] as string | undefined) ?? (selfId ? (await db('providers').where({ id: selfId }).select('name').first())?.name : '') ?? '';
+    const fitted = fitTypeToKind(normaliseProviderType(own['provider_type'] as string), kind, name);
+    own['provider_type'] = await storeProviderType(fitted, accountId, kind);
+  }
   const composed = withComposedAddress(own);
   const { columns, note } = await practiceColumns(accountId, practice, composed, selfId);
-  return { columns: { ...composed, ...columns }, note };
+  return { columns: { ...composed, ...columns }, note: [kindNote, note].filter(Boolean).join(' ') || null };
 }
 
 const linkSchema = z.object({
@@ -329,10 +367,12 @@ providerSearchRouter.get('/', requireAuth, async (req, res) => {
   const q = (req.query.q as string || '').trim();
   const profileId = req.query.profile_id as string | undefined;
 
+  const kind = req.query['kind'] === 'organisation' || req.query['kind'] === 'person' ? (req.query['kind'] as Provider['kind']) : null;
   let query = db<Provider>('providers')
     .where({ account_id: req.account!.id })
     .orderBy('name', 'asc')
     .limit(50);
+  if (kind) query = query.where({ kind });
 
   if (q) {
     query = query.where((qb) => {
@@ -347,7 +387,7 @@ providerSearchRouter.get('/', requireAuth, async (req, res) => {
   // "Health Hub Morayfield" before anyone files it twice.
   if (q && q.split(/\s+/).length >= 2) {
     const seen = new Set(providers.map((p) => p.id));
-    const others = await db<Provider>('providers').where({ account_id: req.account!.id }).limit(2000);
+    const others = await db<Provider>('providers').where({ account_id: req.account!.id, ...(kind ? { kind } : {}) }).limit(2000);
     const close = others.filter(
       (p) => !seen.has(p.id) && [p.name, ...((p as unknown as { also_known_as?: string[] }).also_known_as ?? [])].some((n) => similarName(n, q))
     );

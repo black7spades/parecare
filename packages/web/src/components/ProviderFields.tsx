@@ -6,11 +6,12 @@ import { CatalogueCombo } from './CatalogueCombo';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import {
-  PICKABLE_PROVIDER_TYPES,
+  pickableTypesFor,
   providerTypeLabel,
   providerTypeValue,
   type PracticeMember,
   type Provider,
+  type ProviderKind,
 } from '../lib/care';
 
 /**
@@ -27,30 +28,45 @@ import {
 
 // ── Type ───────────────────────────────────────────────────────────────
 
+const TYPE_HINTS: Record<ProviderKind | 'any', { endpoint: string; aria: string; placeholder: string }> = {
+  person: { endpoint: '/option-catalogue?category=provider_type', aria: 'Type of professional', placeholder: 'e.g. GP, Neurologist, Caseworker' },
+  organisation: {
+    endpoint: '/option-catalogue?category=organisation_type',
+    aria: 'Type of organisation',
+    placeholder: 'e.g. Health hub, Hospital, Government department',
+  },
+  any: { endpoint: '/option-catalogue?category=provider_type', aria: 'Type', placeholder: 'e.g. Clinic, GP, Neurologist' },
+};
+
 export function ProviderTypeField({
   id,
   value,
   onChange,
+  kind = 'person',
 }: {
   id: string;
   value: string;
   onChange: (value: string) => void;
+  /** Which list of types to offer: kinds of professional, kinds of organisation, or both. */
+  kind?: ProviderKind | 'any';
 }) {
+  const hint = TYPE_HINTS[kind];
   return (
     <div>
       <label htmlFor={id} className="block text-sm font-medium text-ink mb-1">Type</label>
       <CatalogueCombo
+        key={kind}
         id={id}
-        endpoint="/option-catalogue?category=provider_type"
-        ariaLabel="Type of provider"
-        placeholder="e.g. GP, Neurologist, Dentist"
-        extraItems={PICKABLE_PROVIDER_TYPES.map((t) => t.label)}
+        endpoint={hint.endpoint}
+        ariaLabel={hint.aria}
+        placeholder={hint.placeholder}
+        extraItems={pickableTypesFor(kind).map((t) => t.label)}
         keepValue
         initial={value ? providerTypeLabel(value) : ''}
         widthClass="w-full"
         onPick={(name) => onChange(providerTypeValue(name))}
       />
-      <p className="mt-1 text-xs text-muted">Pick one, or type any kind of provider and it is added to the list.</p>
+      <p className="mt-1 text-xs text-muted">Pick one, or type any other kind and it is added to the list.</p>
     </div>
   );
 }
@@ -93,12 +109,15 @@ export function WorksAtField({
   value,
   onChange,
   excludeId,
+  kind = 'person',
 }: {
   id: string;
   value: WorksAtValue;
   onChange: (value: WorksAtValue) => void;
   /** The provider being edited, never offered as their own practice. */
   excludeId?: string;
+  /** A professional is based at an organisation; an organisation is part of a bigger one. */
+  kind?: ProviderKind;
 }) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -107,14 +126,14 @@ export function WorksAtField({
 
   const { data } = useQuery({
     queryKey: ['practice-search', text.trim()],
-    queryFn: () => api.get<{ providers: SearchRow[] }>(`/providers/search?q=${encodeURIComponent(text.trim())}`),
+    queryFn: () => api.get<{ providers: SearchRow[] }>(`/providers/search?kind=organisation&q=${encodeURIComponent(text.trim())}`),
     enabled: open,
   });
   const matches = (data?.providers ?? []).filter((p) => p.id !== excludeId).slice(0, 8);
   const exact = matches.some((p) => p.name.trim().toLowerCase() === text.trim().toLowerCase());
   const options: Array<{ key: string; label: string; detail: string | null; row: SearchRow | null }> = [
     ...matches.map((p) => ({ key: p.id, label: p.name, detail: p.address, row: p })),
-    ...(text.trim() && !exact ? [{ key: 'new', label: `File "${text.trim()}" as a new place`, detail: null, row: null }] : []),
+    ...(text.trim() && !exact ? [{ key: 'new', label: `File "${text.trim()}" as a new organisation`, detail: null, row: null }] : []),
   ];
 
   // Editing a saved provider: look the practice up once, to learn its address.
@@ -122,7 +141,7 @@ export function WorksAtField({
     if (!value.practiceId || value.practiceHasAddress !== null) return;
     let cancelled = false;
     void api
-      .get<{ providers: SearchRow[] }>(`/providers/search?q=${encodeURIComponent(value.practiceName.trim())}`)
+      .get<{ providers: SearchRow[] }>(`/providers/search?kind=organisation&q=${encodeURIComponent(value.practiceName.trim())}`)
       .then((res) => {
         if (cancelled) return;
         const hit = res.providers.find((p) => p.id === value.practiceId);
@@ -155,7 +174,7 @@ export function WorksAtField({
 
   return (
     <div ref={boxRef} className="relative">
-      <label htmlFor={id} className="block text-sm font-medium text-ink mb-1">Based at</label>
+      <label htmlFor={id} className="block text-sm font-medium text-ink mb-1">{kind === 'organisation' ? 'Part of' : 'Based at'}</label>
       <input
         id={id}
         type="text"
@@ -202,7 +221,11 @@ export function WorksAtField({
           ))}
         </ul>
       ) : null}
-      <p className="mt-1 text-xs text-muted">Leave empty if not based anywhere else. A clinic inside a health hub is based at the hub.</p>
+      <p className="mt-1 text-xs text-muted">
+        {kind === 'organisation'
+          ? 'The bigger organisation this is inside, if any. A clinic inside a health hub is part of the hub.'
+          : 'The organisation they work at or for, if any.'}
+      </p>
     </div>
   );
 }
@@ -258,11 +281,8 @@ export function PracticeAddress({
 
 // ── People who work here ───────────────────────────────────────────────
 
-/** Kinds of provider that are places people work at. */
-const PLACE_TYPES = new Set(['Health hub', 'practice', 'clinic', 'care_facility', 'pharmacy', 'vet', 'allied_health', 'Hospital', 'Medical centre', 'Health centre', 'Pathology', 'Radiology']);
-
-export const isPlace = (p: Pick<Provider, 'provider_type' | 'member_count'>): boolean =>
-  PLACE_TYPES.has(p.provider_type) || (p.member_count ?? 0) > 0;
+/** Whether others can be based here: every organisation, and anything already holding someone. */
+export const isPlace = (p: Pick<Provider, 'kind' | 'member_count'>): boolean => p.kind === 'organisation' || (p.member_count ?? 0) > 0;
 
 export function PracticeMembers({
   basePath,
@@ -324,13 +344,14 @@ export function PracticeMembers({
       {isLoading ? (
         <p className="text-xs text-muted">Loading…</p>
       ) : members.length === 0 ? (
-        <p className="text-xs text-muted">Nothing is based here yet. Add the clinics, practices, doctors and staff here.</p>
+        <p className="text-xs text-muted">Nothing is based here yet. Add the professionals who work here, and any smaller organisations inside it, like a clinic in a health hub.</p>
       ) : (
         <ul className="divide-y divide-border">
           {members.map((m) => (
             <li key={m.id} className="flex items-center gap-2 py-1.5 text-sm">
               <span className="text-ink">{m.name}</span>
               <span className="text-xs text-muted">{providerTypeLabel(m.provider_type)}</span>
+              {m.kind === 'organisation' ? <span className="badge bg-surface-2 text-muted text-xs">Organisation</span> : null}
               {canEdit ? (
                 <Button
                   type="button"
@@ -358,7 +379,7 @@ export function PracticeMembers({
               }
             }}
           />
-          <ProviderTypeField key={typeKey} id={`${basePath}-member-type`} value={type} onChange={setType} />
+          <ProviderTypeField key={typeKey} id={`${basePath}-member-type`} value={type} onChange={setType} kind="any" />
           <div className="flex justify-end">
             <Button type="button" variant="secondary" size="sm" disabled={!name.trim()} loading={add.isPending} onClick={() => add.mutate()}>
               Add to {practiceName}

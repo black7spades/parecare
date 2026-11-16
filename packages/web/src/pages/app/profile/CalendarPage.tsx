@@ -476,9 +476,9 @@ function AddAppointmentModal({
             </select>
           </label>
           <label className="block">
-            <span className="block text-sm font-medium text-ink mb-1">Provider</span>
+            <span className="block text-sm font-medium text-ink mb-1">With</span>
             <select className={inputClass} value={providerId} onChange={(e) => handleProviderChange(e.target.value)}>
-              <option value="">No provider linked</option>
+              <option value="">Nobody linked</option>
               {providers.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}

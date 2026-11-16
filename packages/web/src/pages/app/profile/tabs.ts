@@ -105,7 +105,7 @@ export const PROFILE_NAV: ProfileNavGroup[] = [
       { key: 'mar', to: 'mar', label: 'Medication record', icon: ClipboardCheckIcon },
       { key: 'tasks', to: 'tasks', label: 'Tasks', icon: CheckSquareIcon },
       { key: 'documents', to: 'documents', label: 'Documents', icon: FileIcon },
-      { key: 'providers', to: 'providers', label: 'Providers', icon: StethoscopeIcon },
+      { key: 'providers', to: 'providers', label: 'Contacts', icon: StethoscopeIcon },
       { key: 'emergency', to: 'emergency', label: 'Emergency sheet', icon: EmergencyIcon },
     ],
   },

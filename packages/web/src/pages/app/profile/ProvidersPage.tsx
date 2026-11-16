@@ -23,22 +23,34 @@ import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
 import { PagePurpose } from '../../../components/PagePurpose';
 import {
+  KIND_WORDS,
   POA_TYPES,
   providerTypeFilterOptions,
   providerTypeLabel,
   type Provider,
+  type ProviderKind,
 } from '../../../lib/care';
 import { useProfile } from './ProfileLayout';
 
-const SORTS: DataSort<Provider>[] = [
+const kindOf = (p: { kind?: ProviderKind }): ProviderKind => p.kind ?? 'person';
+const basedAtLabel = (kind: ProviderKind) => (kind === 'organisation' ? 'Part of' : 'Based at');
+
+const sortsFor = (kind: ProviderKind): DataSort<Provider>[] => [
   { key: 'name', label: 'Name', compare: (a, b) => a.name.localeCompare(b.name) },
   { key: 'type', label: 'Type', compare: (a, b) => providerTypeLabel(a.provider_type).localeCompare(providerTypeLabel(b.provider_type)) },
-  { key: 'works_at', label: 'Based at', compare: (a, b) => (a.organisation ?? '').localeCompare(b.organisation ?? '') },
+  { key: 'works_at', label: basedAtLabel(kind), compare: (a, b) => (a.organisation ?? '').localeCompare(b.organisation ?? '') },
 ];
 
 
+/**
+ * The professionals and organisations involved with someone: their doctors
+ * and caseworkers on one tab, the clinics and departments on the other.
+ */
 export function ProvidersPage() {
-  const { profile, canEdit } = useProfile();
+  const { profile, careName, canEdit } = useProfile();
+  const [kind, setKind] = useState<ProviderKind>('person');
+  const words = KIND_WORDS[kind];
+  const SORTS = sortsFor(kind);
   const queryClient = useQueryClient();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<Provider | null>(null);
@@ -50,7 +62,12 @@ export function ProvidersPage() {
     queryKey: ['providers', profile.id],
     queryFn: () => api.get<{ providers: Provider[] }>(`/care-profiles/${profile.id}/providers`),
   });
-  const providers = data?.providers ?? [];
+  const everything = data?.providers ?? [];
+  const providers = everything.filter((p) => kindOf(p) === kind);
+  const counts = {
+    person: everything.filter((p) => kindOf(p) === 'person').length,
+    organisation: everything.filter((p) => kindOf(p) === 'organisation').length,
+  };
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['providers', profile.id] });
 
   // The type filter offers custom types actually in use, not just built-ins.
@@ -58,7 +75,7 @@ export function ProvidersPage() {
     {
       key: 'type',
       label: 'Type',
-      options: providerTypeFilterOptions(providers),
+      options: providerTypeFilterOptions(providers, kind),
       match: (row, value) => row.provider_type === value,
     },
   ];
@@ -94,10 +111,10 @@ export function ProvidersPage() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-base font-semibold text-ink">Care providers</h2>
+            <h2 className="text-base font-semibold text-ink">Contacts</h2>
             <PagePurpose kind="entry" />
           </div>
-          <EditableSubheader copyKey="profile.providers.subheader" />
+          <EditableSubheader copyKey="profile.providers.subheader" vars={{ name: careName }} />
         </div>
         {canEdit ? (
           <div className="flex gap-2">
@@ -110,10 +127,28 @@ export function ProvidersPage() {
                 setEditorOpen(true);
               }}
             >
-              Add provider
+              Add {words.one}
             </Button>
           </div>
         ) : null}
+      </div>
+
+      <div className="flex gap-2 mb-4" role="tablist" aria-label="Professionals and organisations">
+        {(['person', 'organisation'] as const).map((k) => (
+          <Button
+            key={k}
+            size="sm"
+            variant={kind === k ? 'secondary' : 'ghost'}
+            role="tab"
+            aria-selected={kind === k}
+            onClick={() => {
+              setKind(k);
+              dv.clearSelection();
+            }}
+          >
+            {KIND_WORDS[k].many} {counts[k] > 0 ? `(${counts[k]})` : ''}
+          </Button>
+        ))}
       </div>
 
       {providers.length > 0 ? (
@@ -121,7 +156,7 @@ export function ProvidersPage() {
           <DataToolbar
             search={dv.search}
             onSearch={dv.setSearch}
-            searchPlaceholder="Search providers…"
+            searchPlaceholder={`Search ${words.many.toLowerCase()}…`}
             sorts={SORTS}
             sortKey={dv.sortKey}
             onSort={dv.setSortKey}
@@ -151,12 +186,21 @@ export function ProvidersPage() {
       {isLoading ? (
         <p className="text-sm text-muted">Loading…</p>
       ) : providers.length === 0 ? (
-        <div className="card text-center py-10">
-          <p className="text-sm text-muted">No providers recorded yet.</p>
+        <div className="card text-center py-10 space-y-3">
+          <p className="text-sm text-ink">
+            {kind === 'organisation'
+              ? `No organisations recorded for ${careName} yet: their clinic, hospital, pharmacy or any government department they deal with.`
+              : `No professionals recorded for ${careName} yet: their GP, specialists, lawyer or caseworker.`}
+          </p>
+          {canEdit ? (
+            <div>
+              <Button variant="secondary" onClick={() => { setEditing(null); setEditorOpen(true); }}>Add {words.one}</Button>
+            </div>
+          ) : null}
         </div>
       ) : dv.view.length === 0 ? (
         <div className="card text-center py-10">
-          <p className="text-sm text-muted">No providers match your search.</p>
+          <p className="text-sm text-muted">No {words.many.toLowerCase()} match your search.</p>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
@@ -176,7 +220,7 @@ export function ProvidersPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <h3 className="text-sm font-semibold text-ink">{p.name}</h3>
-                      {p.organisation ? <p className="text-xs text-muted">Based at {p.organisation}</p> : null}
+                      {p.organisation ? <p className="text-xs text-muted">{basedAtLabel(kind)} {p.organisation}</p> : null}
                       {p.member_count ? (
                         <p className="text-xs text-muted">
                           {p.member_count} based here
@@ -246,6 +290,7 @@ export function ProvidersPage() {
       )}
 
       <ProviderEditor
+        kind={kind}
         profileId={profile.id}
         open={editorOpen}
         provider={editing}
@@ -266,6 +311,7 @@ export function ProvidersPage() {
       />
 
       <ProviderPicker
+        kind={kind}
         profileId={profile.id}
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
@@ -275,9 +321,9 @@ export function ProvidersPage() {
         }}
       />
 
-      <Modal open={removing !== null} onClose={() => setRemoving(null)} title="Remove provider">
+      <Modal open={removing !== null} onClose={() => setRemoving(null)} title={`Remove ${words.one}`}>
         <p className="text-sm text-muted mb-4">
-          Remove <span className="font-medium text-ink">{removing?.name}</span> from this profile? The provider stays in your account directory for other profiles.
+          Remove <span className="font-medium text-ink">{removing?.name}</span> from this profile? It stays in your directory for other profiles.
         </p>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setRemoving(null)}>
@@ -293,11 +339,13 @@ export function ProvidersPage() {
 }
 
 function ProviderPicker({
+  kind,
   profileId,
   open,
   onClose,
   onLinked,
 }: {
+  kind: ProviderKind;
   profileId: string;
   open: boolean;
   onClose: () => void;
@@ -306,8 +354,8 @@ function ProviderPicker({
   const [search, setSearch] = useState('');
 
   const { data, isLoading } = useQuery({
-    queryKey: ['provider-search', profileId],
-    queryFn: () => api.get<{ providers: (Provider & { linked: boolean })[] }>(`/providers/search?profile_id=${profileId}`),
+    queryKey: ['provider-search', profileId, kind],
+    queryFn: () => api.get<{ providers: (Provider & { linked: boolean })[] }>(`/providers/search?kind=${kind}&profile_id=${profileId}`),
     enabled: open,
   });
   const allProviders = data?.providers ?? [];
@@ -322,10 +370,10 @@ function ProviderPicker({
 
   if (!open) return null;
   return (
-    <Modal open onClose={onClose} title="Link an existing provider">
-      <p className="text-sm text-muted mb-3">Pick a provider already in your account to link to this profile.</p>
+    <Modal open onClose={onClose} title={`Link an existing ${KIND_WORDS[kind].one}`}>
+      <p className="text-sm text-muted mb-3">Pick one already in your directory to link to this profile.</p>
       <Input
-        placeholder="Filter providers…"
+        placeholder={`Filter ${KIND_WORDS[kind].many.toLowerCase()}…`}
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         autoFocus
@@ -335,7 +383,7 @@ function ProviderPicker({
           <p className="text-sm text-muted py-4 text-center">Loading…</p>
         ) : filtered.length === 0 ? (
           <p className="text-sm text-muted py-4 text-center">
-            {allProviders.length === 0 ? 'No providers in your account yet.' : 'No providers match your filter.'}
+            {allProviders.length === 0 ? `No ${KIND_WORDS[kind].many.toLowerCase()} in your directory yet.` : 'Nothing matches your filter.'}
           </p>
         ) : (
           filtered.map((p) => (
@@ -364,6 +412,7 @@ function ProviderPicker({
 }
 
 function ProviderEditor({
+  kind: listKind,
   profileId,
   open,
   provider,
@@ -371,6 +420,7 @@ function ProviderEditor({
   onClose,
   onSaved,
 }: {
+  kind: ProviderKind;
   profileId: string;
   open: boolean;
   provider: Provider | null;
@@ -379,7 +429,9 @@ function ProviderEditor({
   onSaved: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [type, setType] = useState('gp');
+  const kind = provider ? kindOf(provider) : listKind;
+  const defaultType = kind === 'organisation' ? '' : 'gp';
+  const [type, setType] = useState(defaultType);
   const [name, setName] = useState('');
   const [worksAt, setWorksAt] = useState<WorksAtValue>(worksAtFrom(null));
   const [sharesAddress, setSharesAddress] = useState(true);
@@ -394,7 +446,7 @@ function ProviderEditor({
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setType(provider?.provider_type ?? 'gp');
+    setType(provider?.provider_type ?? defaultType);
     setName(provider?.name ?? '');
     setWorksAt(worksAtFrom(provider));
     setOtherNames(provider?.also_known_as ?? []);
@@ -412,7 +464,8 @@ function ProviderEditor({
   const mutation = useMutation({
     mutationFn: () => {
       const body = {
-        provider_type: type,
+        kind,
+        provider_type: type || 'other',
         name: name.trim(),
         phone: phone.trim() || null,
         email: email.trim() || null,
@@ -429,12 +482,12 @@ function ProviderEditor({
         : api.post(`/care-profiles/${profileId}/providers`, body);
     },
     onSuccess: onSaved,
-    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save provider'),
+    onError: (err) => setError(err instanceof Error ? err.message : 'That could not be saved. Try again.'),
   });
 
   if (!open) return null;
   return (
-    <Modal open onClose={onClose} title={provider ? `Edit ${provider.name}` : 'Add provider'}>
+    <Modal open onClose={onClose} title={provider ? `Edit ${provider.name}` : `Add ${KIND_WORDS[kind].one}`}>
       <form
         className="space-y-4"
         onSubmit={(e) => {
@@ -442,10 +495,16 @@ function ProviderEditor({
           if (name.trim()) mutation.mutate();
         }}
       >
-        <ProviderTypeField key={`type-${provider?.id ?? 'new'}`} id="provider-type" value={type} onChange={setType} />
-        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
+        <ProviderTypeField key={`type-${provider?.id ?? 'new'}`} id="provider-type" value={type} onChange={setType} kind={kind} />
+        <Input
+          label="Name"
+          placeholder={kind === 'organisation' ? 'e.g. Health Hub Morayfield' : 'e.g. Dr Carly Examplename'}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+        />
         <OtherNamesField value={otherNames} onChange={setOtherNames} />
-        <WorksAtField id="provider-works-at" value={worksAt} onChange={setWorksAt} excludeId={provider?.id} />
+        <WorksAtField id="provider-works-at" value={worksAt} onChange={setWorksAt} excludeId={provider?.id} kind={kind} />
         <div className="grid grid-cols-2 gap-2">
           <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
           <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -514,7 +573,7 @@ function ProviderEditor({
           </Button>
         </div>
       </form>
-      {provider && (isPlace(provider) || isPlace({ provider_type: type })) ? (
+      {provider && isPlace({ kind, member_count: provider.member_count }) ? (
         <div className="mt-4">
           <PracticeMembers
             basePath={`/care-profiles/${profileId}/providers/${provider.id}`}
@@ -524,8 +583,8 @@ function ProviderEditor({
           />
         </div>
       ) : null}
-      {!provider && isPlace({ provider_type: type }) ? (
-        <p className="mt-3 text-xs text-muted">Once this is saved, open it again to add the people who work here.</p>
+      {!provider && kind === 'organisation' ? (
+        <p className="mt-3 text-xs text-muted">Once this is saved, open it again to add who is based here.</p>
       ) : null}
     </Modal>
   );

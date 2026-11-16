@@ -20,6 +20,14 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.31.0',
+    date: '2026-11-16',
+    summary: 'Organisations and Professionals, in place of Providers.',
+    groups: [
+      { heading: 'Changed', items: ['Organisations and Professionals, in place of Providers. The directory now keeps two lists. Organisations holds clinics, health hubs, hospitals, pharmacies, government departments, agencies, law firms and every other body. Professionals holds the people: doctors, specialists, lawyers, caseworkers. Everything already filed was sorted into the right list, and a name with a title, like Dr Karen Sank, is always a professional.', 'Each form asks the right question. A professional is Based at an organisation. An organisation is Part of a bigger one, such as a clinic inside a health hub. The Type list offers kinds of organisation on one form and kinds of professional on the other, with Government department, Law firm, Case manager and Support coordinator among the new ones.', 'Filed in the wrong list? Tick it and choose Move to Professionals or Move to Organisations. Everything linked to it stays linked.', 'Contacts on each person\'s page. The Providers tab is now Contacts, with their professionals on one tab and their organisations on the other. Appointments now say who they are With.', 'Pare and your assistants know the difference. Saying "add the Department of Justice" files an organisation, and "add Dr Carly Examplename to Health Hub Morayfield" files a professional there.'] },
+    ],
+  },
+  {
     version: '0.30.0',
     date: '2026-11-16',
     summary: 'Merge duplicate records, other names for providers, and a better address finder.',

@@ -131,7 +131,7 @@ function ConfirmCard({ c, done, pending, onConfirm }: { c: TaskConfirmation; don
 function SuggestAddChip({ s, onSend }: { s: SuggestAdd; onSend: (msg: string) => void }) {
   const msg =
     s.kind === 'provider'
-      ? `Add ${s.name} as a ${s.label} provider for ${s.profile_name}`
+      ? `Add ${s.name}, ${s.label}, to ${s.profile_name}'s contacts`
       : `Add ${s.name} as a ${s.label} to ${s.profile_name}'s care circle`;
   return (
     <button

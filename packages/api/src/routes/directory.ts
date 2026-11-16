@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { roleAtLeast } from '../middleware/requireRole';
-import { providerAddressFields, providerOtherNames, providerPracticeFields, providerWriteColumns, withComposedAddress } from './providers';
+import { providerAddressFields, providerKindField, providerOtherNames, providerPracticeFields, providerWriteColumns, withComposedAddress } from './providers';
+import { kindFor, type ProviderKind } from '../lib/providerTypes';
 import { dismissDuplicate, likelyDuplicates, mergeProviders, undoMerge } from '../services/providerMerge';
 import {
   addPracticeMember,
@@ -163,12 +164,14 @@ const providerSchema = z.object({
   ...providerAddressFields,
   ...providerPracticeFields,
   ...providerOtherNames,
+  ...providerKindField,
   booking_link: z.string().url().optional().nullable(),
   directions_link: z.string().url().optional().nullable(),
 });
 
 /**
- * List providers for the directory.
+ * List providers for the directory. `?kind=organisation` or `?kind=person`
+ * lists only organisations or only professionals.
  *   super_admin  => every provider in the system
  *   admin        => providers belonging to their account
  *   user/viewer  => providers linked to profiles they can access (read-only)
@@ -191,12 +194,14 @@ directoryRouter.get('/providers', requireAuth, async (req, res) => {
       // Who works here, so a practice shows its people and a person shows
       // their practice: the same link read from both ends.
       db.raw(`(
-        SELECT json_agg(json_build_object('id', m.id, 'name', m.name, 'provider_type', m.provider_type) ORDER BY m.name)
+        SELECT json_agg(json_build_object('id', m.id, 'name', m.name, 'provider_type', m.provider_type, 'kind', m.kind) ORDER BY m.name)
         FROM providers m
         WHERE m.practice_id = p.id
       ) AS members`),
     )
     .orderBy('p.name', 'asc');
+  const kind = req.query['kind'];
+  if (kind === 'organisation' || kind === 'person') query = query.where('p.kind', kind);
 
   if (roleAtLeast(account.role, 'super_admin')) {
     // See everything
@@ -1220,8 +1225,9 @@ const providerPort: PortDescriptor<AnyRow, PortRecord> = {
   resource: 'providers',
   columns: [
     { key: 'name', header: 'Name', aliases: ['provider', 'full name'], toCell: (r) => cell(r['name']) },
+    { key: 'kind', header: 'Kind', aliases: ['record kind'], toCell: (r) => (r['kind'] === 'organisation' ? 'Organisation' : 'Professional') },
     { key: 'provider_type', header: 'Type', aliases: ['provider type', 'role'], toCell: (r) => cell(r['provider_type']) },
-    { key: 'organisation', header: 'Works at', aliases: ['organisation', 'organization', 'org', 'clinic', 'practice'], toCell: (r) => cell(r['organisation']) },
+    { key: 'organisation', header: 'Based at', aliases: ['works at', 'part of', 'organisation', 'organization', 'org', 'clinic', 'practice'], toCell: (r) => cell(r['organisation']) },
     { key: 'phone', header: 'Phone', toCell: (r) => cell(r['phone']) },
     { key: 'email', header: 'Email', toCell: (r) => cell(r['email']) },
     { key: 'address_line1', header: 'Address line 1', aliases: ['address', 'street'], toCell: (r) => cell(r['address_line1']) },
@@ -1238,9 +1244,16 @@ const providerPort: PortDescriptor<AnyRow, PortRecord> = {
     const name = (raw['name'] ?? '').trim();
     if (!name) return { ok: false as const, error: `Row ${n}: a provider name is required.` };
     const otherNames = (raw['also_known_as'] ?? '').split(';').map((s) => s.trim()).filter(Boolean);
+    const kindCell = (raw['kind'] ?? '').trim().toLowerCase();
+    const kind: ProviderKind = /^org/.test(kindCell)
+      ? 'organisation'
+      : /^(prof|person|people)/.test(kindCell)
+        ? 'person'
+        : kindFor(raw['provider_type'], name);
     return {
       ok: true as const,
       value: withComposedAddress({
+        kind,
         provider_type: portBlank(raw['provider_type']) ?? 'other',
         name,
         organisation: portBlank(raw['organisation']),
@@ -1491,6 +1504,8 @@ function mountPort(
   opts: {
     table: string;
     kind?: ProfileKind;
+    /** Organisations only, or professionals only, out of the providers table. */
+    providerKind?: ProviderKind;
     canWrite: (role: AccountRole) => boolean;
     afterImport?: (ids: string[]) => Promise<void>;
   }
@@ -1500,6 +1515,7 @@ function mountPort(
     const format = portReadFormat(req.query['format']);
     const rows = await exportRows(opts.table, account, (q) => {
       if (opts.kind) q.where({ kind: opts.kind, archived: false });
+      if (opts.providerKind) q.where({ kind: opts.providerKind });
       q.orderBy(opts.kind ? 'full_name' : (descriptor.columns[0]!.key), 'asc');
     });
     const { body, contentType, filename } = exportRecords(descriptor, rows as AnyRow[], format);
@@ -1532,7 +1548,7 @@ function mountPort(
       res.status(400).json({ error: 'No valid rows found to import.', code: 'IMPORT_EMPTY', imported: 0, skipped: total, errors });
       return;
     }
-    const rows = records.map((r) => ({ ...r, account_id: account.id }));
+    const rows = records.map((r) => ({ ...r, ...(opts.providerKind ? { kind: opts.providerKind } : {}), account_id: account.id }));
     const inserted = await db(opts.table).insert(rows).returning('id');
     if (opts.afterImport) await opts.afterImport(inserted.map((r) => (r as { id: string }).id));
     res.status(201).json({ imported: inserted.length, skipped: errors.length, errors });
@@ -1542,22 +1558,21 @@ function mountPort(
 const adminWrite = (role: AccountRole) => roleAtLeast(role, 'admin');
 const anyWrite = () => true;
 
-mountPort('providers', providerPort, {
-  table: 'providers',
-  canWrite: adminWrite,
-  // Imported rows get the same treatment as typed ones: their type joins the
-  // shared list, and whoever names a practice is filed at it.
-  afterImport: async (ids) => {
-    const rows = await db('providers').whereIn('id', ids);
-    for (const r of rows) {
-      const provider_type = await storeProviderType(r.provider_type, r.account_id);
-      const { columns } = r.organisation
-        ? await practiceColumns(r.account_id, { organisation: r.organisation }, r, r.id)
-        : { columns: {} };
-      await db('providers').where({ id: r.id }).update({ provider_type, ...columns });
-    }
-  },
-});
+// Imported rows get the same treatment as typed ones: their type joins the
+// shared list for their kind, and whatever names where it is based is filed there.
+const afterProviderImport = async (ids: string[]) => {
+  const rows = await db('providers').whereIn('id', ids);
+  for (const r of rows) {
+    const provider_type = await storeProviderType(r.provider_type, r.account_id, r.kind);
+    const { columns } = r.organisation
+      ? await practiceColumns(r.account_id, { organisation: r.organisation }, r, r.id)
+      : { columns: {} };
+    await db('providers').where({ id: r.id }).update({ provider_type, ...columns });
+  }
+};
+mountPort('providers', providerPort, { table: 'providers', canWrite: adminWrite, afterImport: afterProviderImport });
+mountPort('organisations', providerPort, { table: 'providers', providerKind: 'organisation', canWrite: adminWrite, afterImport: afterProviderImport });
+mountPort('professionals', providerPort, { table: 'providers', providerKind: 'person', canWrite: adminWrite, afterImport: afterProviderImport });
 mountPort('suppliers', supplierPort, { table: 'suppliers', canWrite: anyWrite });
 mountPort('assets', assetPort, { table: 'assets', canWrite: anyWrite });
 mountPort('addresses', addressPort, { table: 'addresses', canWrite: adminWrite });

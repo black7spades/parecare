@@ -10,7 +10,8 @@ export const SITE_COPY_DEFAULTS: Record<string, string> = {
   'system.journeys.library.subheader': "The journeys people can be enrolled in. Build new ones from scratch, clone and adapt, or cherry-pick phases from across the library. People's journeys are copies; library edits change no one's record.",
 
   // Directory pages
-  'directory.providers.subheader': 'All providers across your care profiles. Edit details here and they update everywhere.',
+  'directory.organisations.subheader': 'Clinics, health hubs, hospitals, pharmacies, government departments and every other organisation involved. Edit one here and it updates everywhere, including for everyone based there.',
+  'directory.professionals.subheader': 'Doctors, specialists, lawyers, caseworkers and everyone else you deal with, and where each is based. Edit one here and it updates everywhere.',
   'directory.suppliers.subheader': 'The pharmacies and shops your medications are reordered from. Edit details here and they update on every medication that names them.',
   'directory.addresses.subheader': 'Every address in the system. Edit one here and it updates for everyone it is linked to.',
   'directory.assets.subheader': 'The equipment kept for the people and pets in your care: a wheelchair, a hoist, a bed, a monitor. Link each to whoever it belongs to.',
@@ -31,7 +32,7 @@ export const SITE_COPY_DEFAULTS: Record<string, string> = {
   'profile.appointments.subheader': 'Everything booked for {name}. Each appointment shows on the Calendar and in the upcoming events on the Overview.',
   'profile.conditions.subheader': 'Everything {name} lives with: illnesses, injuries, recovery, disabilities, and long-term conditions, each with their category, severity, diagnosis codes, treatments, and symptoms.',
   'profile.allergies.subheader': 'What {name} must not be given, and what happens if they are. One row per substance.',
-  'profile.providers.subheader': 'Doctors, facilities and services involved in care, with contact details in one place.',
+  'profile.providers.subheader': 'The professionals and organisations involved with {name}, with contact details in one place.',
   'profile.care-needs.subheader': "Day-to-day needs, the advance care directive, and who to call for {name}. Changes save straight away and flow into the care plan.",
   'profile.plan.subheader': "The assembled, versioned plan for {name}. Nothing is recorded here: facts are entered on their own pages and each change flows in as a tracked update.",
   'profile.messages.subheader': "A shared space for everyone in {name}'s circle.",

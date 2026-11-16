@@ -307,8 +307,14 @@ const setCarePhaseSchema = z.object({
   phase: z.enum(CARE_PHASES),
 });
 
+// An organisation (a clinic, a health hub, a government department) or a
+// professional (a doctor, a lawyer, a caseworker). Worked out from the name
+// and type when left out.
+const providerKindField = z.enum(['organisation', 'person']);
+
 const addProviderSchema = z.object({
   type: z.literal('add_provider'),
+  kind: providerKindField.optional(),
   provider_type: providerTypeField,
   name: z.string().min(1).max(255),
   // The clinic or practice they work at. It is found in the directory, or
@@ -339,6 +345,7 @@ const addAssetSchema = z.object({
 const updateProviderSchema = z.object({
   type: z.literal('update_provider'),
   name: z.string().min(1).max(255),
+  kind: providerKindField.optional(),
   provider_type: providerTypeField.optional(),
   organisation: z.string().max(255).optional().nullable(),
   phone: z.string().max(50).optional().nullable(),
@@ -1540,6 +1547,7 @@ async function executeOne(
     }
     case 'add_provider': {
       const { columns, note } = await providerWriteColumns(account.id, {
+        ...(action.kind ? { kind: action.kind } : {}),
         provider_type: action.provider_type,
         name: action.name.trim(),
         phone: action.phone ?? null,
@@ -1557,7 +1565,8 @@ async function executeOne(
       });
       await audit(profileId, account.id, 'providers', `added provider ${action.name}`);
       const at = columns['organisation'] ? ` at ${columns['organisation']}` : '';
-      return `Added ${action.name}${at} to the providers list.${note ? ` ${note}` : ''}`;
+      const filedAs = columns['kind'] === 'organisation' ? 'organisations' : 'professionals';
+      return `Added ${action.name}${at} to their ${filedAs}.${note ? ` ${note}` : ''}`;
     }
     case 'add_to_practice': {
       const profile = await db('care_profiles').where({ id: profileId }).select('account_id').first();
@@ -1601,6 +1610,7 @@ async function executeOne(
         .first();
       if (!provider) return `Could not find a provider called "${action.name}" on this profile.`;
       const updates: Record<string, unknown> = {};
+      if (action.kind) updates.kind = action.kind;
       if (action.provider_type) updates.provider_type = action.provider_type;
       if (action.organisation !== undefined) updates.organisation = action.organisation ?? '';
       if (action.phone !== undefined) updates.phone = action.phone;

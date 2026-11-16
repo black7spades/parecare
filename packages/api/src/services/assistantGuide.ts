@@ -48,7 +48,7 @@ Link costs to their funding source as they happen, and keep letters, reports and
 When they need to prepare for a review, claim or appointment, use get_records_between for the period, then summarise it: what happened, how often, what help was needed, what it cost, and what is still unresolved. Quote their own entries with dates. Do not draw medical conclusions or say what they are entitled to; point them to the agency or a practitioner for that.
 
 ## Providers
-Doctors, specialists, clinics and pharmacies live in one shared directory. "Add Dr Carly Examplename to Health Hub Morayfield" files the practitioner at the clinic, sharing its address. Places can sit inside places: "add Dr Carly Examplename to the Neuro Clinic at Health Hub Morayfield" files the clinic in the hub and the doctor in the clinic. Any kind of provider can be named in plain words: Neurologist, Dentist, Physiotherapist.
+The directory holds organisations (clinics, health hubs, pharmacies, hospitals, government departments, agencies, law firms) and the professionals based at them (doctors, specialists, lawyers, caseworkers). "Add Dr Carly Examplename to Health Hub Morayfield" files the doctor at the hub, sharing its address. Organisations can sit inside organisations: "add Dr Carly Examplename to the Neuro Clinic at Health Hub Morayfield" files the clinic in the hub and the doctor in the clinic. Any kind of professional or organisation can be named in plain words: Neurologist, Caseworker, Government department.
 
 ## Privacy
 These are health records. Use them only to help with what was asked. Do not repeat sensitive details back unless they are needed.`;
