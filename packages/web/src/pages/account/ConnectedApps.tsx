@@ -58,6 +58,7 @@ export function ConnectedApps() {
         <EditableSubheader copyKey="account.connected.subheader" />
       </div>
       <ConnectAssistantCard />
+      <RecordingGuideCard />
       <ConnectionsCard />
     </div>
   );
@@ -123,7 +124,8 @@ function ConnectAssistantCard() {
           </ol>
           <p className="text-xs text-muted">
             For now Google only offers custom apps in the US, on personal accounts with Keep Activity switched on, even on
-            paid plans. Anywhere else, use Open WebUI with a Gemini model, or ask Pare, which can run on Gemini too.
+            paid plans. Anywhere else, add PareCare&apos;s skill file from below so Gemini keeps your notes the PareCare way,
+            then use Open WebUI with a Gemini model, or Pare, which can run on Gemini too, to file them.
           </p>
         </div>
       ) : tab === 'openwebui' ? (
@@ -167,6 +169,71 @@ function ConnectAssistantCard() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The same recording guide every connected assistant already receives, to
+ * paste wherever an assistant takes standing instructions, or to download
+ * as a skill file. Works with any assistant, whoever makes it.
+ */
+function RecordingGuideCard() {
+  const [copied, copy] = useCopy();
+  const [showing, setShowing] = useState(false);
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['assistant-guide'],
+    queryFn: () => api.get<{ instructions: string; skill: string }>('/assistant-guide'),
+  });
+
+  const download = () => {
+    if (!data) return;
+    const url = URL.createObjectURL(new Blob([data.skill], { type: 'text/markdown' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'SKILL.md';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="card space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold text-ink">Teach your assistant to keep good records</h3>
+        <p className="text-sm text-muted">
+          Connected assistants are given PareCare&apos;s recording guide: how to log a day, an appointment or a cost so it
+          is clear later and holds up for a claim or a review. It works the same whichever assistant you use.
+        </p>
+      </div>
+      <ul className="list-disc pl-5 space-y-1 text-sm text-ink">
+        <li>Say &quot;check in&quot;, &quot;I just saw the neurologist&quot; or &quot;summarise my last three months for my review&quot;, and it follows the guide.</li>
+        <li>
+          For it to apply in every chat, paste the guide where your assistant keeps standing instructions: ChatGPT custom
+          instructions, a Claude project, or a model&apos;s system prompt in Open WebUI.
+        </li>
+        <li>
+          Gemini and Claude take the skill file instead. In Gemini, add it as a skill as it is. Claude wants it inside a folder
+          called parecare-records.
+        </li>
+      </ul>
+      {isError ? (
+        <p className="text-sm text-red-600">The guide could not be loaded just now. Refresh the page to try again.</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" variant="secondary" disabled={isLoading} onClick={() => data && copy('guide', data.instructions)}>
+            {copied === 'guide' ? 'Copied' : 'Copy instructions'}
+          </Button>
+          <Button type="button" size="sm" variant="secondary" disabled={isLoading} onClick={download}>
+            Download skill file
+          </Button>
+          <Button type="button" size="sm" variant="ghost" disabled={isLoading} onClick={() => setShowing((v) => !v)}>
+            {showing ? 'Hide the guide' : 'Show the guide'}
+          </Button>
+        </div>
+      )}
+      {showing && data ? (
+        <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded border border-border bg-surface-2 p-3 text-xs text-ink">{data.instructions}</pre>
+      ) : null}
     </div>
   );
 }

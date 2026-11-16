@@ -22,13 +22,14 @@ export const RELEASES: Release[] = [
   {
     version: '0.28.0',
     date: '2026-11-16',
-    summary: 'Use PareCare from the assistant you already chat with, file doctors at their clinic once, and add any kind of provider.',
+    summary: 'Use PareCare from the assistant you already chat with, keep records that hold up for claims, file doctors at their clinic once, and add any kind of provider.',
     groups: [
       {
         heading: 'Added',
         items: [
           'Use PareCare from Claude, ChatGPT, Gemini, Open WebUI and other assistants. Connect the assistant you already chat with, then say things like "Mum took her evening tablets at 7, file it in PareCare" and it is saved to the right person with the same checks as Pare. Connecting is one copied address and a click on Allow. Choose whether it may add records or only look, see everything connected in one list, and disconnect any of it with one click. Changes to a medication list are read back for you to agree first, every change is marked as made by an assistant, and most new records can be undone for 30 minutes.',
           'Clinics and the people who work there. File a doctor at their clinic and they share its address, so Health Hub Morayfield is typed once, not once per doctor. Pick where someone works as you add them, or open the clinic and add the people who work there. Move or rename the clinic and everyone there follows. Or just tell Pare: "add Dr Carly Examplename to Health Hub Morayfield". Your existing providers have been grouped under the organisation each one named.',
+          'A recording guide that works with any assistant. Whatever you talk to, it is taught how to log a day, an appointment or a cost so the record is clear later and holds up for a claim or a review. Ask it to summarise any period, such as the last three months before a plan review, and it pulls together your log, symptoms, appointments and costs with their dates. Add it to Gemini or Claude as a skill, or copy it into ChatGPT custom instructions or Open WebUI, from Connected apps.',
           'Any kind of provider. Type Neurologist, Dentist, Physiotherapist or whatever kind of provider someone sees, and it joins the list for next time. Common specialties are already there, so there is no need to pick Other.',
         ],
       },

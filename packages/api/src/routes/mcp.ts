@@ -16,6 +16,8 @@ import {
 import { buildProfileContext } from '../services/aiContext';
 import { addPracticeMember } from '../services/providerPractices';
 import { BUILT_IN_PROVIDER_TYPES } from '../lib/providerTypes';
+import { formatInZone, dateInZone } from '../lib/timezone';
+import { GUIDE_PROMPTS, RECORDING_GUIDE, recordingInstructions, recordingSkill } from '../services/assistantGuide';
 import { batchIsReversible, undoActionBatch } from './actions';
 import type { Account, CareAccess, CareProfile } from '../types';
 
@@ -249,7 +251,136 @@ function actionTools(): ToolDef[] {
   return tools;
 }
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** A time zone Postgres and Intl both accept, or UTC. */
+function safeZone(tz: string | null): string {
+  if (!tz) return 'UTC';
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: tz });
+    return tz;
+  } catch {
+    return 'UTC';
+  }
+}
+
+/**
+ * Everything recorded for one person over a period, in date order within
+ * each kind, for preparing a claim, a funding review or an appointment.
+ */
+async function recordsBetween(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
+  const target = await resolvePerson(args['person'], ctx.account);
+  if (!target.ok) return target.message.replace('Nothing was saved: ', '');
+  const zone = safeZone(ctx.timeZone);
+  const today = dateInZone(new Date(), zone);
+  const from = typeof args['from'] === 'string' && DATE_RE.test(args['from']) ? args['from'] : null;
+  const to = typeof args['to'] === 'string' && DATE_RE.test(args['to']) ? args['to'] : today;
+  if (!from) return 'Give a start date as YYYY-MM-DD, for example 2026-08-01.';
+  if (from > to) return 'The start date is after the end date. Swap them and try again.';
+  const LIMIT = 400;
+  const localDate = (col: string) => db.raw(`(${col} AT TIME ZONE ?)::date`, [zone]);
+  const within = (q: import('knex').Knex.QueryBuilder, col: string) =>
+    q.whereBetween(localDate(col) as unknown as string, [from, to]);
+  const pid = target.profileId;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  type Row = Record<string, any>;
+  const [log, tracking, readings, appointments]: Row[][] = await Promise.all([
+    within(db('care_log_entries').where({ care_profile_id: pid }), 'occurred_at')
+      .select('occurred_at', 'entry_type', 'title', 'body')
+      .orderBy('occurred_at', 'asc')
+      .limit(LIMIT),
+    within(
+      db('condition_log_entries as l').join('medical_conditions as c', 'c.id', 'l.medical_condition_id').where('c.care_profile_id', pid),
+      'l.occurred_at'
+    )
+      .select('l.occurred_at', 'c.name as condition', 'l.title', 'l.body')
+      .orderBy('l.occurred_at', 'asc')
+      .limit(LIMIT),
+    within(
+      db('condition_symptom_readings as r')
+        .join('condition_symptoms as s', 's.id', 'r.symptom_id')
+        .join('medical_conditions as c', 'c.id', 's.condition_id')
+        .where('c.care_profile_id', pid),
+      'r.recorded_at'
+    )
+      .select('r.recorded_at', 's.name as symptom', 'r.severity', 'c.name as condition')
+      .orderBy('r.recorded_at', 'asc')
+      .limit(LIMIT),
+    within(db('appointments as a').leftJoin('providers as p', 'p.id', 'a.provider_id').where('a.care_profile_id', pid), 'a.starts_at')
+      .select('a.starts_at', 'a.title', 'a.appointment_type', 'a.status', 'a.location', 'a.notes', 'p.name as provider')
+      .orderBy('a.starts_at', 'asc')
+      .limit(LIMIT),
+  ]);
+
+  // The spend ledger is owner and admin only, as everywhere else.
+  const seesCosts = target.access.level === 'owner' || target.access.level === 'admin';
+  const costs: Row[] = seesCosts
+    ? await db('health_spend_entries')
+        .where({ care_profile_id: pid })
+        .whereBetween('spent_on', [from, to])
+        .select(db.raw("to_char(spent_on, 'YYYY-MM-DD') as spent_on"), 'amount', 'description', 'funding_source', 'claimable_amount', 'claim_status', 'status')
+        .orderBy('spent_on', 'asc')
+        .limit(LIMIT)
+    : [];
+
+  const when = (d: Date | string) => formatInZone(new Date(d), zone);
+  const day = (d: Date | string) => (typeof d === 'string' ? d.slice(0, 10) : dateInZone(d, zone));
+  const words = (v: unknown) => String(v ?? '').replace(/_/g, ' ');
+  const section = (title: string, rows: string[]) =>
+    `## ${title}: ${rows.length}${rows.length === LIMIT ? ' or more, the earliest shown' : ''}\n${rows.length ? rows.join('\n') : 'None recorded.'}`;
+
+  const parts = [
+    `# ${target.name}, ${from} to ${to}`,
+    section('Care log', log.map((r) => `- ${when(r.occurred_at)}, ${words(r.entry_type)}${r.title ? `, ${r.title}` : ''}: ${r.body}`)),
+    section('Condition tracking', tracking.map((r) => `- ${when(r.occurred_at)}, ${r.condition}${r.title ? `, ${r.title}` : ''}: ${r.body}`)),
+    section('Symptom readings, severity out of 10', readings.map((r) => `- ${when(r.recorded_at)}, ${r.symptom} (${r.condition}): ${r.severity}`)),
+    section(
+      'Appointments',
+      appointments.map(
+        (r) =>
+          `- ${when(r.starts_at)}, ${r.title}${r.provider ? ` with ${r.provider}` : ''}${r.location ? ` at ${r.location}` : ''}, ${words(r.appointment_type)}, ${words(r.status)}${r.notes ? `. Notes: ${r.notes}` : ''}`
+      )
+    ),
+    seesCosts
+      ? section(
+          'Costs',
+          costs.map(
+            (r) =>
+              `- ${day(r.spent_on)}, ${r.amount}${r.status === 'estimated' ? ' (estimated)' : ''}${r.description ? `, ${r.description}` : ''}${r.funding_source ? `, paid by ${words(r.funding_source)}` : ''}${r.claimable_amount != null ? `, claimable ${r.claimable_amount}` : ''}, claim ${words(r.claim_status)}`
+          )
+        )
+      : '## Costs\nOnly the person who owns this record can see its costs.',
+  ];
+  return parts.join('\n\n');
+}
+
 const READ_TOOLS: ToolDef[] = [
+  {
+    name: 'get_recording_guide',
+    title: 'How to keep good records',
+    description: 'How to record daily check-ins, appointments, costs and notes that hold up for a claim or review. Read this before logging anything, if you have not already.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    write: false,
+    run: async () => RECORDING_GUIDE,
+  },
+  {
+    name: 'get_records_between',
+    title: 'Records for a period',
+    description: 'Everything recorded for one person between two dates: care log, condition tracking, symptom readings, appointments and costs with their claim status. Use it to prepare for a claim, a funding review or an appointment.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        person: PERSON_PROP,
+        from: { type: 'string', description: 'Start date, YYYY-MM-DD.' },
+        to: { type: 'string', description: 'End date, YYYY-MM-DD. Defaults to today.' },
+      },
+      required: ['person', 'from'],
+      additionalProperties: false,
+    },
+    write: false,
+    run: recordsBetween,
+  },
   {
     name: 'list_people',
     title: 'List people in their care',
@@ -432,9 +563,11 @@ async function handle(msg: RpcMessage, ctx: ToolContext): Promise<object | null>
       const asked = String(msg.params?.['protocolVersion'] ?? '');
       return rpcResult(msg.id, {
         protocolVersion: SUPPORTED_VERSIONS.includes(asked) ? asked : LATEST_VERSION,
-        capabilities: { tools: { listChanged: false } },
+        capabilities: { tools: { listChanged: false }, prompts: { listChanged: false } },
         serverInfo: { name: 'parecare', title: 'PareCare', version: '1.0.0' },
-        instructions: INSTRUCTIONS,
+        // The connector notes, then the shared recording guide, so any
+        // assistant that reads start-up instructions keeps records well.
+        instructions: `${INSTRUCTIONS}\n\n${RECORDING_GUIDE}`,
       });
     }
     case 'ping':
@@ -467,7 +600,19 @@ async function handle(msg: RpcMessage, ctx: ToolContext): Promise<object | null>
     case 'resources/list':
       return rpcResult(msg.id, { resources: [] });
     case 'prompts/list':
-      return rpcResult(msg.id, { prompts: [] });
+      return rpcResult(msg.id, {
+        prompts: GUIDE_PROMPTS.map((p) => ({ name: p.name, title: p.title, description: p.description, arguments: p.arguments })),
+      });
+    case 'prompts/get': {
+      const prompt = GUIDE_PROMPTS.find((p) => p.name === String(msg.params?.['name'] ?? ''));
+      if (!prompt) return rpcError(msg.id, -32602, 'There is no prompt by that name.');
+      const raw = (msg.params?.['arguments'] ?? {}) as Record<string, unknown>;
+      const args = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, String(v ?? '')]));
+      return rpcResult(msg.id, {
+        description: prompt.description,
+        messages: [{ role: 'user', content: { type: 'text', text: prompt.render(args) } }],
+      });
+    }
     default:
       return isNotification ? null : rpcError(msg.id, -32601, `Method not found: ${msg.method}`);
   }
@@ -478,7 +623,9 @@ mcpRouter.post('/', mcpAuth, async (req, res) => {
   const ctx: ToolContext = {
     account,
     canWrite: req.connectionAccess !== 'read',
-    timeZone: (req.headers['x-time-zone'] as string) || account.timezone || null,
+    // The person's own zone, else the server's: the same zone the action
+    // engine falls back to, so a time saved and a time read back agree.
+    timeZone: (req.headers['x-time-zone'] as string) || account.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || null,
   };
   const body = req.body as RpcMessage | RpcMessage[];
   if (Array.isArray(body)) {
@@ -510,4 +657,16 @@ mcpRouter.get('/', (_req, res) => {
 mcpRouter.delete('/', (_req, res) => {
   res.setHeader('Allow', 'POST');
   res.status(405).json({ error: 'There is no session to end.' });
+});
+
+/**
+ * The recording guide for people to give their assistant by hand: plain
+ * standing instructions for a custom instructions box, or a skill file for
+ * assistants that load skills. Same text the connector itself serves.
+ */
+export const assistantGuideRouter = Router();
+
+assistantGuideRouter.get('/', requireAuth, (_req, res) => {
+  const address = `${env.APP_URL}/api/v1/mcp`;
+  res.json({ instructions: recordingInstructions(address), skill: recordingSkill(address) });
 });
