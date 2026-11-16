@@ -14,6 +14,8 @@ import {
   removePracticeMember,
   storeProviderType,
   syncPracticeMembers,
+  inheritContact,
+  SHARED_CONTACT_FIELDS,
 } from '../services/providerPractices';
 import { addressColumns, ADDRESS_PART_KEYS, RESIDENCE_KIND, syncProfileResidence, syncResidenceForAddress, wifiColumns, withReadableWifi } from '../services/addresses';
 import { decryptSecret } from '../services/secretsCrypto';
@@ -1566,8 +1568,11 @@ const afterProviderImport = async (ids: string[]) => {
     const provider_type = await storeProviderType(r.provider_type, r.account_id, r.kind);
     const { columns } = r.organisation
       ? await practiceColumns(r.account_id, { organisation: r.organisation }, r, r.id)
-      : { columns: {} };
-    await db('providers').where({ id: r.id }).update({ provider_type, ...columns });
+      : { columns: {} as Record<string, unknown> };
+    const practiceRow = columns['practice_id'] ? await db('providers').where({ id: columns['practice_id'] as string }).first() : null;
+    // Details left empty in the file come from where they are based.
+    const empties = Object.fromEntries(SHARED_CONTACT_FIELDS.filter((f) => !r[f]).map((f) => [f, null]));
+    await db('providers').where({ id: r.id }).update({ provider_type, ...columns, ...inheritContact(practiceRow, empties, { ...r, inherited_fields: [] }) });
   }
 };
 mountPort('providers', providerPort, { table: 'providers', canWrite: adminWrite, afterImport: afterProviderImport });

@@ -472,6 +472,8 @@ export interface Provider {
   also_known_as?: string[];
   /** An organisation, or a professional. */
   kind?: ProviderKind;
+  /** Contact details taken from where they are based, kept in step with it. */
+  inherited_fields?: string[];
   poa_type: string | null;
   poa_activated: boolean;
   linked?: boolean;

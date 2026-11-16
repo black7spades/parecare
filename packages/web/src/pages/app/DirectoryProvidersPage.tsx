@@ -7,6 +7,9 @@ import {
   PracticeAddress,
   PracticeMembers,
   ProviderTypeField,
+  SharedContactNote,
+  ownValue,
+  sharedPlaceholder,
   WorksAtField,
   isPlace,
   practicePayload,
@@ -705,11 +708,11 @@ function DirectoryProviderEditor({
     setWorksAt(worksAtFrom(provider));
     setOtherNames(provider?.also_known_as ?? []);
     setSharesAddress(provider ? !!provider.uses_practice_address || !provider.organisation : true);
-    setPhone(provider?.phone ?? '');
-    setEmail(provider?.email ?? '');
+    setPhone(ownValue(provider, 'phone'));
+    setEmail(ownValue(provider, 'email'));
     setAddress(provider ? addressFrom(provider) : emptyAddress);
-    setBookingLink(provider?.booking_link ?? '');
-    setDirectionsLink(provider?.directions_link ?? '');
+    setBookingLink(ownValue(provider, 'booking_link'));
+    setDirectionsLink(ownValue(provider, 'directions_link'));
     setError('');
   }, [provider, open]);
 
@@ -756,8 +759,8 @@ function DirectoryProviderEditor({
         <OtherNamesField value={otherNames} onChange={setOtherNames} />
         <WorksAtField id="dir-provider-works-at" value={worksAt} onChange={setWorksAt} excludeId={provider?.id} kind={kind} />
         <div className="grid grid-cols-2 gap-2">
-          <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
-          <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <Input label="Phone" placeholder={sharedPlaceholder(worksAt, 'phone')} value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <Input label="Email" type="email" placeholder={sharedPlaceholder(worksAt, 'email')} value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
         <PracticeAddress
           worksAt={worksAt}
@@ -767,9 +770,10 @@ function DirectoryProviderEditor({
           onAddress={setAddress}
         />
         <div className="grid grid-cols-2 gap-2">
-          <Input label="Booking link" type="url" placeholder="https://…" value={bookingLink} onChange={(e) => setBookingLink(e.target.value)} />
-          <Input label="Directions" type="url" placeholder="https://…" value={directionsLink} onChange={(e) => setDirectionsLink(e.target.value)} />
+          <Input label="Booking link" type="url" placeholder={sharedPlaceholder(worksAt, 'booking_link', 'https://…')} value={bookingLink} onChange={(e) => setBookingLink(e.target.value)} />
+          <Input label="Directions" type="url" placeholder={sharedPlaceholder(worksAt, 'directions_link', 'https://…')} value={directionsLink} onChange={(e) => setDirectionsLink(e.target.value)} />
         </div>
+        <SharedContactNote worksAt={worksAt} />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>

@@ -35,6 +35,55 @@ export function whereNamed(q: Knex.QueryBuilder, name: string, table = 'provider
 
 const PARTS = ['address_line1', 'address_line2', 'address_suburb', 'address_state', 'address_postcode', 'address_country'] as const;
 
+/**
+ * Contact details everyone based at an organisation uses unless they have
+ * their own, kept in step as the organisation's change. The address is
+ * shared the same way, through uses_practice_address.
+ */
+export const SHARED_CONTACT_FIELDS = ['phone', 'email', 'booking_link', 'directions_link'] as const;
+
+const text = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
+/**
+ * The contact columns for a write to a record based at `practice`: a detail
+ * left empty, or the same as the organisation's, is taken from the
+ * organisation and kept in step with it; a detail of their own is theirs.
+ * A detail the write does not mention is left alone, unless it was already
+ * shared or is missing, in which case it follows the (new) organisation.
+ * With no organisation, every detail is their own again.
+ */
+export function inheritContact(
+  practice: Record<string, unknown> | null | undefined,
+  data: Record<string, unknown>,
+  self: Record<string, unknown> | null | undefined
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!practice) {
+    if (self && ((self['inherited_fields'] as string[] | null) ?? []).length > 0) out['inherited_fields'] = [];
+    return out;
+  }
+  const inherited = new Set<string>(self ? ((self['inherited_fields'] as string[] | null) ?? []) : []);
+  for (const f of SHARED_CONTACT_FIELDS) {
+    const theirs = (practice[f] as string | null | undefined) ?? null;
+    if (f in data) {
+      const given = text(data[f]);
+      if (!given || given === text(theirs)) {
+        out[f] = theirs;
+        inherited.add(f);
+      } else {
+        out[f] = given;
+        inherited.delete(f);
+      }
+    } else if (!self || inherited.has(f) || !text(self[f])) {
+      // Not mentioned: follow the organisation if it was shared or missing.
+      out[f] = theirs;
+      inherited.add(f);
+    }
+  }
+  out['inherited_fields'] = [...inherited];
+  return out;
+}
+
 type ProviderRow = Record<string, unknown> & {
   id: string;
   account_id: string;
@@ -231,6 +280,9 @@ export async function syncPracticeMembers(practiceId: string, seen: Set<string> 
   if (!practice) return;
   await db('providers').where({ practice_id: practiceId }).update({ organisation: practice.name });
   await db('providers').where({ practice_id: practiceId, uses_practice_address: true }).update(addressCopy(practice));
+  for (const f of SHARED_CONTACT_FIELDS) {
+    await db('providers').where({ practice_id: practiceId }).whereRaw('? = ANY(inherited_fields)', [f]).update({ [f]: practice[f] ?? null });
+  }
   const children: Array<{ id: string }> = await db('providers').where({ practice_id: practiceId }).select('id');
   for (const child of children) await syncPracticeMembers(child.id, seen);
 }
@@ -293,12 +345,11 @@ export async function addPracticeMember(
       kind,
       provider_type: type,
       name,
-      phone: details.phone ?? null,
-      email: details.email ?? null,
       practice_id: practice.id,
       organisation: practice.name,
       uses_practice_address: true,
       ...addressCopy(practice),
+      ...inheritContact(practice, { phone: details.phone ?? null, email: details.email ?? null }, null),
     })
     .returning('id');
   return {
@@ -319,8 +370,11 @@ async function attachToPractice(
   const update: Record<string, unknown> = { practice_id: practice.id, organisation: practice.name };
   const ownAddress = PARTS.some((k) => String(existing[k] ?? '').trim() !== '');
   if (!ownAddress || existing['uses_practice_address']) Object.assign(update, { uses_practice_address: true, ...addressCopy(practice) });
-  if (details.phone && !existing['phone']) update['phone'] = details.phone;
-  if (details.email && !existing['email']) update['email'] = details.email;
+  // Their own details stay theirs; whatever they lack comes from the organisation.
+  const given: Record<string, unknown> = {};
+  if (details.phone && !text(existing['phone'])) given['phone'] = details.phone;
+  if (details.email && !text(existing['email'])) given['email'] = details.email;
+  Object.assign(update, inheritContact(practice, given, existing));
   if (details.provider_type) {
     update['provider_type'] = await storeProviderType(details.provider_type, existing.account_id, (existing['kind'] as ProviderKind) ?? 'person');
   }
