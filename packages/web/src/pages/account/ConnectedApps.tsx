@@ -116,13 +116,14 @@ function ConnectAssistantCard() {
       ) : tab === 'gemini' ? (
         <div className="space-y-2 text-sm text-ink">
           <ol className="list-decimal pl-5 space-y-1">
-            <li>In the Gemini app, open Settings, then Connected apps.</li>
-            <li>Choose Add a custom app, name it PareCare and paste the address above.</li>
+            <li>On a computer, go to gemini.google.com and open Settings, then Connected Apps.</li>
+            <li>Under Custom apps, choose Add a custom app, paste the address above and click Next.</li>
             <li>PareCare opens: check it is you, then click Allow.</li>
+            <li>In any chat, type @ and pick PareCare so Gemini uses it. Gemini asks you to confirm before it saves anything.</li>
           </ol>
           <p className="text-xs text-muted">
-            Google is still rolling custom apps out, so some accounts and countries do not have the option yet. Open WebUI
-            with a Gemini model works everywhere in the meantime.
+            For now Google only offers custom apps in the US, on personal accounts with Keep Activity switched on, even on
+            paid plans. Anywhere else, use Open WebUI with a Gemini model, or ask Pare, which can run on Gemini too.
           </p>
         </div>
       ) : tab === 'openwebui' ? (
