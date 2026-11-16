@@ -124,7 +124,8 @@ function ConnectAssistantCard() {
           </ol>
           <p className="text-xs text-muted">
             For now Google only offers custom apps in the US, on personal accounts with Keep Activity switched on, even on
-            paid plans. Anywhere else, use Open WebUI with a Gemini model, or ask Pare, which can run on Gemini too.
+            paid plans. Anywhere else, add PareCare&apos;s skill file from below so Gemini keeps your notes the PareCare way,
+            then use Open WebUI with a Gemini model, or Pare, which can run on Gemini too, to file them.
           </p>
         </div>
       ) : tab === 'openwebui' ? (
@@ -207,10 +208,13 @@ function RecordingGuideCard() {
       <ul className="list-disc pl-5 space-y-1 text-sm text-ink">
         <li>Say &quot;check in&quot;, &quot;I just saw the neurologist&quot; or &quot;summarise my last three months for my review&quot;, and it follows the guide.</li>
         <li>
-          For it to apply in every chat, paste the guide where your assistant keeps standing instructions: a Gemini Gem, ChatGPT
-          custom instructions, a Claude project, or a model&apos;s system prompt in Open WebUI.
+          For it to apply in every chat, paste the guide where your assistant keeps standing instructions: ChatGPT custom
+          instructions, a Claude project, or a model&apos;s system prompt in Open WebUI.
         </li>
-        <li>Assistants that use skills, such as Claude, take the skill file instead. Put it in a folder called parecare-records.</li>
+        <li>
+          Gemini and Claude take the skill file instead. In Gemini, add it as a skill as it is. Claude wants it inside a folder
+          called parecare-records.
+        </li>
       </ul>
       {isError ? (
         <p className="text-sm text-red-600">The guide could not be loaded just now. Refresh the page to try again.</p>

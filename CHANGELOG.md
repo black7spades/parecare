@@ -30,9 +30,9 @@ record of updates stays traceable to source. Versions follow
   it is taught how to log a day, an appointment or a cost so the record is
   clear later and holds up for a claim or a review. Ask it to summarise any
   period, such as the last three months before a plan review, and it pulls
-  together your log, symptoms, appointments and costs with their dates. Copy
-  the guide into a Gemini Gem, ChatGPT custom instructions, a Claude project
-  or Open WebUI, or download it as a skill file, from Connected apps.
+  together your log, symptoms, appointments and costs with their dates. Add it
+  to Gemini or Claude as a skill, or copy it into ChatGPT custom instructions
+  or Open WebUI, from Connected apps.
 - **Any kind of provider.** Type Neurologist, Dentist, Physiotherapist or
   whatever kind of provider someone sees, and it joins the list for next time.
   Common specialties are already there, so there is no need to pick Other.
