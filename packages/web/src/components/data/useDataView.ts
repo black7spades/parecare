@@ -23,6 +23,8 @@ export interface DataSort<T> {
 export interface DataFilter<T> {
   key: string;
   label: string;
+  /** What the "no filter" choice says, when "Any <label>" reads badly. */
+  anyLabel?: string;
   options: { value: string; label: string }[];
   match: (row: T, value: string) => boolean;
 }

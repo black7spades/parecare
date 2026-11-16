@@ -16,7 +16,8 @@ import { linkAddressToProfile, syncProfileResidence, RESIDENCE_KIND } from './ad
 import { APPOINTMENT_TYPES, APPOINTMENT_STATUSES, syncAppointmentSpend } from '../routes/appointments';
 import { OBSERVATION_STATUSES } from '../routes/treatments';
 import { FUNDING_SOURCES, CLAIM_STATUSES } from './healthSpend';
-import { addPracticeMember, syncPracticeMembers } from './providerPractices';
+import { addPracticeMember, syncPracticeMembers, whereNamed } from './providerPractices';
+import type { Knex } from 'knex';
 import { providerWriteColumns } from '../routes/providers';
 
 /**
@@ -1050,7 +1051,7 @@ async function resolveProviderForAppointment(
   if (!profile) return { providerId: null, note: '' };
   const provider = await db('providers')
     .where({ account_id: profile.account_id })
-    .whereRaw('lower(name) = lower(?)', [name.trim()])
+    .where((w) => whereNamed(w as unknown as Knex.QueryBuilder, name.trim()))
     .select('id', 'name')
     .first();
   if (provider) return { providerId: provider.id, note: '' };
@@ -1595,7 +1596,7 @@ async function executeOne(
       const provider = await db('care_profile_providers as cpp')
         .join('providers as p', 'cpp.provider_id', 'p.id')
         .where({ 'cpp.care_profile_id': profileId })
-        .whereRaw('lower(p.name) = lower(?)', [action.name.trim()])
+        .where((w) => whereNamed(w as unknown as Knex.QueryBuilder, action.name.trim(), 'p'))
         .select('p.id')
         .first();
       if (!provider) return `Could not find a provider called "${action.name}" on this profile.`;
@@ -1619,7 +1620,7 @@ async function executeOne(
       if (!profile) return `Could not find this profile.`;
       const provider = await db('providers')
         .where({ account_id: profile.account_id })
-        .whereRaw('lower(name) = lower(?)', [action.name.trim()])
+        .where((w) => whereNamed(w as unknown as Knex.QueryBuilder, action.name.trim()))
         .select('id', 'name')
         .first();
       if (!provider) return `Could not find a provider called "${action.name}" in the directory. Add them first, then link.`;

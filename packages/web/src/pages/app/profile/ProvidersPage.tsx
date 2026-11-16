@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { addressFrom, addressPayload, emptyAddress, type AddressValue } from '../../../components/AddressFields';
 import {
+  OtherNamesField,
   PracticeAddress,
   PracticeMembers,
   ProviderTypeField,
@@ -382,6 +383,7 @@ function ProviderEditor({
   const [name, setName] = useState('');
   const [worksAt, setWorksAt] = useState<WorksAtValue>(worksAtFrom(null));
   const [sharesAddress, setSharesAddress] = useState(true);
+  const [otherNames, setOtherNames] = useState<string[]>([]);
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState<AddressValue>(emptyAddress);
@@ -395,6 +397,7 @@ function ProviderEditor({
     setType(provider?.provider_type ?? 'gp');
     setName(provider?.name ?? '');
     setWorksAt(worksAtFrom(provider));
+    setOtherNames(provider?.also_known_as ?? []);
     setSharesAddress(provider ? !!provider.uses_practice_address || !provider.organisation : true);
     setPhone(provider?.phone ?? '');
     setEmail(provider?.email ?? '');
@@ -415,6 +418,7 @@ function ProviderEditor({
         email: email.trim() || null,
         ...addressPayload(address),
         ...practicePayload(worksAt, sharesAddress),
+        also_known_as: otherNames,
         booking_link: bookingLink.trim() || null,
         directions_link: directionsLink.trim() || null,
         poa_type: poaType || null,
@@ -440,6 +444,7 @@ function ProviderEditor({
       >
         <ProviderTypeField key={`type-${provider?.id ?? 'new'}`} id="provider-type" value={type} onChange={setType} />
         <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
+        <OtherNamesField value={otherNames} onChange={setOtherNames} />
         <WorksAtField id="provider-works-at" value={worksAt} onChange={setWorksAt} excludeId={provider?.id} />
         <div className="grid grid-cols-2 gap-2">
           <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { addressFrom, addressPayload, emptyAddress, type AddressValue } from '../../components/AddressFields';
 import {
+  OtherNamesField,
   PracticeAddress,
   PracticeMembers,
   ProviderTypeField,
@@ -31,6 +32,11 @@ import {
 interface LinkedProfile {
   profile_id: string;
   profile_name: string;
+}
+
+interface DuplicatePair {
+  first: { id: string; name: string; provider_type: string; address: string | null };
+  second: { id: string; name: string; provider_type: string; address: string | null };
 }
 
 interface DirectoryProvider extends Provider {
@@ -77,6 +83,7 @@ export function DirectoryProvidersPage() {
     {
       key: 'works_at',
       label: 'Based at',
+      anyLabel: 'Anywhere',
       options: [...new Set(providers.map((p) => p.organisation).filter((o): o is string => !!o))]
         .sort((a, b) => a.localeCompare(b))
         .map((o) => ({ value: o, label: o })),
@@ -87,7 +94,7 @@ export function DirectoryProvidersPage() {
   const dv = useDataView<DirectoryProvider>({
     rows: providers,
     getId: (p) => p.id,
-    searchText: (p) => [p.name, p.organisation, p.phone, p.email, p.address, providerTypeLabel(p.provider_type)].filter(Boolean).join(' '),
+    searchText: (p) => [p.name, ...(p.also_known_as ?? []), p.organisation, p.phone, p.email, p.address, providerTypeLabel(p.provider_type)].filter(Boolean).join(' '),
     sorts: SORTS,
     filters,
   });
@@ -98,6 +105,37 @@ export function DirectoryProvidersPage() {
       setDeleting(null);
       invalidate();
     },
+  });
+
+  // Two records for the same place: the ones spotted for the person, the pair
+  // being merged, and the last merge, which can be undone for a while.
+  const [merging, setMerging] = useState<[DirectoryProvider, DirectoryProvider] | null>(null);
+  const [lastMerge, setLastMerge] = useState<{ id: string; message: string } | null>(null);
+  const [mergeNote, setMergeNote] = useState('');
+  const { data: dupData } = useQuery({
+    queryKey: ['directory-provider-duplicates'],
+    queryFn: () => api.get<{ pairs: DuplicatePair[] }>('/directory/providers/duplicates'),
+    enabled: canEdit,
+  });
+  const pairs = dupData?.pairs ?? [];
+  const refreshAll = () => {
+    invalidate();
+    void queryClient.invalidateQueries({ queryKey: ['directory-provider-duplicates'] });
+  };
+  const byId = (id: string) => providers.find((p) => p.id === id);
+  const dismissPair = useMutation({
+    mutationFn: (pair: DuplicatePair) =>
+      api.post('/directory/providers/duplicates/dismiss', { first_id: pair.first.id, second_id: pair.second.id }),
+    onSuccess: refreshAll,
+  });
+  const undoMerge = useMutation({
+    mutationFn: (id: string) => api.post<{ message: string }>(`/directory/providers/merges/${id}/undo`),
+    onSuccess: (res) => {
+      setLastMerge(null);
+      setMergeNote(res.message);
+      refreshAll();
+    },
+    onError: (err) => setMergeNote(err instanceof Error ? err.message : 'That merge could not be undone.'),
   });
 
   const bulkDeleteMutation = useMutation({
@@ -134,6 +172,52 @@ export function DirectoryProvidersPage() {
         </div>
       </div>
 
+      {lastMerge ? (
+        <div className="card mb-4 flex flex-wrap items-center gap-3">
+          <p className="text-sm text-ink flex-1 min-w-0">{lastMerge.message}</p>
+          <Button size="sm" variant="secondary" loading={undoMerge.isPending} onClick={() => undoMerge.mutate(lastMerge.id)}>
+            Undo
+          </Button>
+        </div>
+      ) : mergeNote ? (
+        <p className="text-sm text-ink mb-4">{mergeNote}</p>
+      ) : null}
+
+      {canEdit && pairs.length > 0 ? (
+        <div className="card mb-4 space-y-2">
+          <div>
+            <h3 className="text-sm font-semibold text-ink">These look like the same provider</h3>
+            <p className="text-xs text-muted">Merge them so everything is in one record, or dismiss a pair that is not the same.</p>
+          </div>
+          <ul className="divide-y divide-border">
+            {pairs.map((pair) => (
+              <li key={`${pair.first.id}-${pair.second.id}`} className="py-2 flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-ink flex-1 min-w-0">
+                  {pair.first.name} <span className="text-muted">and</span> {pair.second.name}
+                </span>
+                <Button size="xs" variant="ghost" loading={dismissPair.isPending && dismissPair.variables === pair} onClick={() => dismissPair.mutate(pair)}>
+                  Dismiss
+                </Button>
+                <Button
+                  size="xs"
+                  variant="secondary"
+                  onClick={() => {
+                    const a = byId(pair.first.id);
+                    const b = byId(pair.second.id);
+                    if (a && b) {
+                      setMergeNote('');
+                      setMerging([a, b]);
+                    }
+                  }}
+                >
+                  Merge
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {providers.length > 0 ? (
         <div className="mb-4">
           <DataToolbar
@@ -151,6 +235,18 @@ export function DirectoryProvidersPage() {
               canEdit
                 ? [
                     { key: 'link', label: 'Link selected', onRun: () => setBulkLinkingIds(dv.selectedRows) },
+                    {
+                      key: 'merge',
+                      label: 'Merge selected',
+                      onRun: () => {
+                        if (dv.selectedRows.length === 2) {
+                          setMergeNote('');
+                          setMerging([dv.selectedRows[0]!, dv.selectedRows[1]!]);
+                        } else {
+                          setMergeNote('Tick exactly two records to merge them.');
+                        }
+                      },
+                    },
                     { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setBulkEditQueue(q); setEditing(q[0] ?? null); setEditorOpen(true); } },
                     { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => bulkDeleteMutation.mutate(dv.selectedRows.map((p) => p.id)) },
                   ]
@@ -279,6 +375,17 @@ export function DirectoryProvidersPage() {
         }}
       />
 
+      <MergeDialog
+        pair={merging}
+        onClose={() => setMerging(null)}
+        onMerged={(merge) => {
+          setMerging(null);
+          setLastMerge(merge);
+          dv.clearSelection();
+          refreshAll();
+        }}
+      />
+
       <BulkLinkDialog
         provider={bulkLinking}
         onClose={() => setBulkLinking(null)}
@@ -309,6 +416,90 @@ export function DirectoryProvidersPage() {
         </div>
       </Modal>
     </div>
+  );
+}
+
+/**
+ * Which record to keep by default: the plainer name (the extra word in
+ * "Health Hub Doctors Morayfield" is usually noise), then the one with an
+ * address, then the one more is linked to. Easy to swap in the dialog.
+ */
+function keepScore(p: DirectoryProvider, other: DirectoryProvider): number {
+  const words = (n: string) => n.trim().split(/\s+/).length;
+  const plainer = words(p.name) < words(other.name) ? 6 : 0;
+  const filled = [p.phone, p.email, p.booking_link, p.directions_link].filter(Boolean).length;
+  return plainer + (p.address ? 4 : 0) + filled + (p.linked_profiles?.length ?? 0) + (p.members?.length ?? 0);
+}
+
+function MergeDialog({
+  pair,
+  onClose,
+  onMerged,
+}: {
+  pair: [DirectoryProvider, DirectoryProvider] | null;
+  onClose: () => void;
+  onMerged: (merge: { id: string; message: string }) => void;
+}) {
+  const [keepId, setKeepId] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!pair) return;
+    const [a, b] = pair;
+    setKeepId(keepScore(b, a) > keepScore(a, b) ? b.id : a.id);
+    setError('');
+  }, [pair]);
+
+  const merge = useMutation({
+    mutationFn: () => {
+      const remove = pair!.find((p) => p.id !== keepId)!;
+      return api.post<{ merge_id: string; message: string }>('/directory/providers/merge', { keep_id: keepId, remove_id: remove.id });
+    },
+    onSuccess: (res) => onMerged({ id: res.merge_id, message: res.message }),
+    onError: (err) => setError(err instanceof Error ? err.message : 'They could not be merged. Try again.'),
+  });
+
+  if (!pair) return null;
+  const other = pair.find((p) => p.id !== keepId);
+  return (
+    <Modal open onClose={onClose} title="Merge two records">
+      <div className="space-y-4">
+        <p className="text-sm text-ink">Choose the record to keep. Everything linked to the other one moves across to it.</p>
+        <fieldset className="space-y-2">
+          <legend className="sr-only">Record to keep</legend>
+          {pair.map((p) => (
+            <label key={p.id} className="flex items-start gap-2 rounded-md border border-border p-3 text-sm text-ink cursor-pointer">
+              <input
+                type="radio"
+                name="merge-keep"
+                className="mt-0.5 h-4 w-4 text-primary focus:ring-primary"
+                checked={keepId === p.id}
+                onChange={() => setKeepId(p.id)}
+              />
+              <span className="min-w-0">
+                <span className="block font-medium">{p.name}</span>
+                <span className="block text-xs text-muted">{providerTypeLabel(p.provider_type)}</span>
+                <span className="block text-xs text-muted">{p.address || 'No address'}</span>
+                <span className="block text-xs text-muted">
+                  Linked to {p.linked_profiles?.length ?? 0}, with {p.members?.length ?? 0} based here
+                </span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        {other ? (
+          <p className="text-xs text-muted">
+            {other.name} is kept as another name, so Pare and your assistants still find it by that name. Details it has that
+            the kept record is missing, like a phone number or address, are copied across. Undo is available for 30 minutes.
+          </p>
+        ) : null}
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button loading={merge.isPending} disabled={!keepId} onClick={() => merge.mutate()}>Merge</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -425,6 +616,7 @@ function DirectoryProviderEditor({
   const [name, setName] = useState('');
   const [worksAt, setWorksAt] = useState<WorksAtValue>(worksAtFrom(null));
   const [sharesAddress, setSharesAddress] = useState(true);
+  const [otherNames, setOtherNames] = useState<string[]>([]);
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState<AddressValue>(emptyAddress);
@@ -436,6 +628,7 @@ function DirectoryProviderEditor({
     setType(provider?.provider_type ?? 'gp');
     setName(provider?.name ?? '');
     setWorksAt(worksAtFrom(provider));
+    setOtherNames(provider?.also_known_as ?? []);
     setSharesAddress(provider ? !!provider.uses_practice_address || !provider.organisation : true);
     setPhone(provider?.phone ?? '');
     setEmail(provider?.email ?? '');
@@ -454,6 +647,7 @@ function DirectoryProviderEditor({
         email: email.trim() || null,
         ...addressPayload(address),
         ...practicePayload(worksAt, sharesAddress),
+        also_known_as: otherNames,
         booking_link: bookingLink.trim() || null,
         directions_link: directionsLink.trim() || null,
       };
@@ -477,6 +671,7 @@ function DirectoryProviderEditor({
       >
         <ProviderTypeField key={`type-${provider?.id ?? 'new'}`} id="dir-provider-type" value={type} onChange={setType} />
         <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
+        <OtherNamesField value={otherNames} onChange={setOtherNames} />
         <WorksAtField id="dir-provider-works-at" value={worksAt} onChange={setWorksAt} excludeId={provider?.id} />
         <div className="grid grid-cols-2 gap-2">
           <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />

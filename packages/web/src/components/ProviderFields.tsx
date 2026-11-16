@@ -114,7 +114,7 @@ export function WorksAtField({
   const exact = matches.some((p) => p.name.trim().toLowerCase() === text.trim().toLowerCase());
   const options: Array<{ key: string; label: string; detail: string | null; row: SearchRow | null }> = [
     ...matches.map((p) => ({ key: p.id, label: p.name, detail: p.address, row: p })),
-    ...(text.trim() && !exact ? [{ key: 'new', label: `File "${text.trim()}" as a new practice`, detail: null, row: null }] : []),
+    ...(text.trim() && !exact ? [{ key: 'new', label: `File "${text.trim()}" as a new place`, detail: null, row: null }] : []),
   ];
 
   // Editing a saved provider: look the practice up once, to learn its address.
@@ -368,6 +368,59 @@ export function PracticeMembers({
       ) : null}
       {message ? <p className="text-xs text-muted">{message}</p> : null}
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
+    </div>
+  );
+}
+
+// ── Other names ────────────────────────────────────────────────────────
+
+/**
+ * The other names a provider goes by. Merging a duplicate adds its name
+ * here, so it is still found by it; remove one that is wrong, or add a name
+ * people use, such as "the Hub".
+ */
+export function OtherNamesField({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const [draft, setDraft] = useState('');
+  const add = () => {
+    const name = draft.trim();
+    if (name && !value.some((v) => v.toLowerCase() === name.toLowerCase())) onChange([...value, name]);
+    setDraft('');
+  };
+  return (
+    <div>
+      <span className="block text-sm font-medium text-ink mb-1">Also known as</span>
+      <div className="flex flex-wrap items-center gap-2">
+        {value.map((v) => (
+          <span key={v} className="badge bg-surface-2 text-ink text-xs flex items-center gap-1">
+            {v}
+            <button
+              type="button"
+              aria-label={`Remove ${v}`}
+              title={`Remove ${v}`}
+              className="text-muted hover:text-red-600"
+              onClick={() => onChange(value.filter((x) => x !== v))}
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+        <input
+          type="text"
+          aria-label="Add another name"
+          placeholder="Add another name"
+          className="w-48 rounded-md border border-border bg-card px-2.5 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={add}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+      </div>
+      <p className="mt-1 text-xs text-muted">Pare and your assistants find it by any of these names too.</p>
     </div>
   );
 }
