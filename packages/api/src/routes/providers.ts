@@ -12,6 +12,7 @@ import {
   syncPracticeMembers,
 } from '../services/providerPractices';
 import type { Provider, CareProfileProvider } from '../types';
+import { similarName } from '../lib/providerNames';
 
 export const providersRouter = Router({ mergeParams: true });
 
@@ -40,6 +41,11 @@ export const providerPracticeFields = {
   uses_practice_address: z.boolean().optional(),
 };
 
+/** The other names a provider goes by: one field, several names. */
+export const providerOtherNames = {
+  also_known_as: z.array(z.string().trim().min(1).max(255)).max(30).optional(),
+};
+
 const providerSchema = z.object({
   provider_type: z.string().min(1).max(100),
   name: z.string().min(1).max(255),
@@ -47,6 +53,7 @@ const providerSchema = z.object({
   email: z.string().email().optional().nullable(),
   ...providerAddressFields,
   ...providerPracticeFields,
+  ...providerOtherNames,
   booking_link: z.string().url().optional().nullable(),
   directions_link: z.string().url().optional().nullable(),
 });
@@ -74,7 +81,7 @@ const PROVIDER_COLS = [
   'p.id', 'p.account_id', 'p.provider_type', 'p.name', 'p.organisation',
   'p.phone', 'p.email', 'p.address',
   'p.address_line1', 'p.address_line2', 'p.address_suburb', 'p.address_state', 'p.address_postcode', 'p.address_country',
-  'p.booking_link', 'p.directions_link', 'p.practice_id', 'p.uses_practice_address',
+  'p.booking_link', 'p.directions_link', 'p.practice_id', 'p.uses_practice_address', 'p.also_known_as',
   'p.created_at', 'cpp.poa_type', 'cpp.poa_activated', 'cpp.primary_contact_member_id',
   db.raw('(SELECT count(*)::int FROM providers m WHERE m.practice_id = p.id) AS member_count'),
 ] as const;
@@ -330,11 +337,22 @@ providerSearchRouter.get('/', requireAuth, async (req, res) => {
   if (q) {
     query = query.where((qb) => {
       qb.whereRaw('name ilike ?', [`%${q}%`])
-        .orWhereRaw('organisation ilike ?', [`%${q}%`]);
+        .orWhereRaw('organisation ilike ?', [`%${q}%`])
+        .orWhereRaw("array_to_string(also_known_as, ' ') ilike ?", [`%${q}%`]);
     });
   }
 
-  const providers = await query;
+  let providers = await query;
+  // Also offer close names, so "Health Hub Doctors Morayfield" turns up
+  // "Health Hub Morayfield" before anyone files it twice.
+  if (q && q.split(/\s+/).length >= 2) {
+    const seen = new Set(providers.map((p) => p.id));
+    const others = await db<Provider>('providers').where({ account_id: req.account!.id }).limit(2000);
+    const close = others.filter(
+      (p) => !seen.has(p.id) && [p.name, ...((p as unknown as { also_known_as?: string[] }).also_known_as ?? [])].some((n) => similarName(n, q))
+    );
+    providers = [...close, ...providers].slice(0, 50);
+  }
 
   if (profileId) {
     const linked = await db('care_profile_providers')

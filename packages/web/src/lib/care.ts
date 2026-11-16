@@ -441,6 +441,8 @@ export interface Provider {
   uses_practice_address?: boolean;
   /** How many people are filed as working here. */
   member_count?: number;
+  /** Other names it goes by, such as a merged duplicate's name. */
+  also_known_as?: string[];
   poa_type: string | null;
   poa_activated: boolean;
   linked?: boolean;

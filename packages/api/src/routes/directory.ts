@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { roleAtLeast } from '../middleware/requireRole';
-import { providerAddressFields, providerPracticeFields, providerWriteColumns, withComposedAddress } from './providers';
+import { providerAddressFields, providerOtherNames, providerPracticeFields, providerWriteColumns, withComposedAddress } from './providers';
+import { dismissDuplicate, likelyDuplicates, mergeProviders, undoMerge } from '../services/providerMerge';
 import {
   addPracticeMember,
   attachMemberById,
@@ -161,6 +162,7 @@ const providerSchema = z.object({
   email: z.string().email().optional().nullable(),
   ...providerAddressFields,
   ...providerPracticeFields,
+  ...providerOtherNames,
   booking_link: z.string().url().optional().nullable(),
   directions_link: z.string().url().optional().nullable(),
 });
@@ -275,6 +277,74 @@ async function editableProvider(account: { id: string; role: AccountRole }, id: 
   if (!roleAtLeast(account.role, 'super_admin')) query = query.where({ account_id: account.id });
   return query.first();
 }
+
+// -- Duplicates: spot them, merge them, undo a merge -----------------------
+
+directoryRouter.get('/providers/duplicates', requireAuth, async (req, res) => {
+  if (!roleAtLeast(req.account!.role, 'admin')) {
+    res.json({ pairs: [] });
+    return;
+  }
+  res.json({ pairs: await likelyDuplicates(req.account!.id) });
+});
+
+const pairSchema = z.object({ first_id: z.string().uuid(), second_id: z.string().uuid() });
+
+directoryRouter.post('/providers/duplicates/dismiss', requireAuth, async (req, res) => {
+  const account = req.account!;
+  const parsed = pairSchema.safeParse(req.body);
+  if (!roleAtLeast(account.role, 'admin') || !parsed.success) {
+    res.status(!parsed.success ? 400 : 403).json({ error: 'That could not be dismissed.', code: 'FORBIDDEN' });
+    return;
+  }
+  const [a, b] = await Promise.all([editableProvider(account, parsed.data.first_id), editableProvider(account, parsed.data.second_id)]);
+  if (!a || !b) {
+    res.status(404).json({ error: 'One of those records is no longer there.', code: 'NOT_FOUND' });
+    return;
+  }
+  await dismissDuplicate(a.account_id, a.id, b.id);
+  res.json({ message: 'Dismissed. They will not be suggested as the same again.' });
+});
+
+const mergeSchema = z.object({ keep_id: z.string().uuid(), remove_id: z.string().uuid() });
+
+directoryRouter.post('/providers/merge', requireAuth, async (req, res) => {
+  const account = req.account!;
+  if (!roleAtLeast(account.role, 'admin')) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+  const parsed = mergeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Pick the two records to merge.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const [keep, remove] = await Promise.all([editableProvider(account, parsed.data.keep_id), editableProvider(account, parsed.data.remove_id)]);
+  if (!keep || !remove) {
+    res.status(404).json({ error: 'One of those records is no longer there. Refresh the page and try again.', code: 'NOT_FOUND' });
+    return;
+  }
+  const result = await mergeProviders(keep.id, remove.id, account.id);
+  if ('error' in result) {
+    res.status(409).json({ error: result.error, code: 'MERGE_FAILED' });
+    return;
+  }
+  res.json({ merge_id: result.mergeId, message: result.summary });
+});
+
+directoryRouter.post('/providers/merges/:mergeId/undo', requireAuth, async (req, res) => {
+  const account = req.account!;
+  if (!roleAtLeast(account.role, 'admin')) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+  const result = await undoMerge(String(req.params['mergeId']), roleAtLeast(account.role, 'super_admin') ? null : account.id);
+  if ('error' in result) {
+    res.status(409).json({ error: result.error, code: 'UNDO_FAILED' });
+    return;
+  }
+  res.json(result);
+});
 
 // -- People who work at a practice, from the practice's side ---------------
 
@@ -1162,10 +1232,12 @@ const providerPort: PortDescriptor<AnyRow, PortRecord> = {
     { key: 'address_country', header: 'Country', toCell: (r) => cell(r['address_country']) },
     { key: 'booking_link', header: 'Booking link', aliases: ['booking'], toCell: (r) => cell(r['booking_link']) },
     { key: 'directions_link', header: 'Directions', aliases: ['directions link', 'map'], toCell: (r) => cell(r['directions_link']) },
+    { key: 'also_known_as', header: 'Also known as', aliases: ['other names', 'aka'], toCell: (r) => ((r['also_known_as'] as string[] | null) ?? []).join('; ') },
   ],
   coerce: (raw, n) => {
     const name = (raw['name'] ?? '').trim();
     if (!name) return { ok: false as const, error: `Row ${n}: a provider name is required.` };
+    const otherNames = (raw['also_known_as'] ?? '').split(';').map((s) => s.trim()).filter(Boolean);
     return {
       ok: true as const,
       value: withComposedAddress({
@@ -1182,6 +1254,7 @@ const providerPort: PortDescriptor<AnyRow, PortRecord> = {
         address_country: portBlank(raw['address_country']),
         booking_link: portUrl(raw['booking_link']),
         directions_link: portUrl(raw['directions_link']),
+        also_known_as: otherNames,
       }),
     };
   },

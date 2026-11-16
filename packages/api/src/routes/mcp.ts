@@ -429,7 +429,7 @@ const READ_TOOLS: ToolDef[] = [
       let q = db('providers as p')
         .where('p.account_id', ctx.account.id)
         .select(
-          'p.name', 'p.provider_type', 'p.organisation', 'p.phone', 'p.email', 'p.address',
+          'p.name', 'p.provider_type', 'p.organisation', 'p.phone', 'p.email', 'p.address', 'p.also_known_as',
           db.raw(`(SELECT string_agg(cp.full_name, ', ' ORDER BY cp.full_name) FROM care_profile_providers cpp JOIN care_profiles cp ON cp.id = cpp.care_profile_id WHERE cpp.provider_id = p.id) AS linked`),
           db.raw('(SELECT count(*)::int FROM providers m WHERE m.practice_id = p.id) AS member_count'),
         )
@@ -437,7 +437,7 @@ const READ_TOOLS: ToolDef[] = [
         .limit(100);
       if (search) {
         q = q.where((w) => {
-          w.whereILike('p.name', `%${search}%`).orWhereILike('p.organisation', `%${search}%`).orWhereILike('p.provider_type', `%${search}%`);
+          w.whereILike('p.name', `%${search}%`).orWhereILike('p.organisation', `%${search}%`).orWhereILike('p.provider_type', `%${search}%`).orWhereRaw("array_to_string(p.also_known_as, ' ') ilike ?", [`%${search}%`]);
         });
       }
       const rows = await q;
@@ -448,6 +448,7 @@ const READ_TOOLS: ToolDef[] = [
           const parts = [
             `${r.name}`,
             `type: ${label(r.provider_type)}`,
+            r.also_known_as?.length ? `also known as: ${r.also_known_as.join(', ')}` : null,
             r.organisation ? `based at: ${r.organisation}` : null,
             r.member_count ? `based here: ${r.member_count}` : null,
             r.phone ? `phone: ${r.phone}` : null,

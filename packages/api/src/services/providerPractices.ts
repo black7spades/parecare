@@ -1,6 +1,23 @@
 import { db } from '../config/database';
 import { PLACE_TYPES, isBuiltInProviderType, normaliseProviderType, placeTypeFromName } from '../lib/providerTypes';
 import { resolveOptions } from '../routes/optionCatalogue';
+import { sameName } from '../lib/providerNames';
+import type { Knex } from 'knex';
+
+const SPACED = "lower(regexp_replace(trim(?? ), '\\s+', ' ', 'g'))";
+
+/**
+ * Match a provider by what someone called it: its name or any of its other
+ * names (kept from merged duplicates), ignoring case and spacing.
+ */
+export function whereNamed(q: Knex.QueryBuilder, name: string, table = 'providers'): Knex.QueryBuilder {
+  const clean = name.trim().replace(/\s+/g, ' ');
+  return q.where((w) =>
+    w
+      .whereRaw(`${SPACED} = lower(?)`, [`${table}.name`, clean])
+      .orWhereRaw(`exists (select 1 from unnest(${table}.also_known_as) as aka(n) where lower(regexp_replace(trim(aka.n), '\\s+', ' ', 'g')) = lower(?))`, [clean])
+  );
+}
 
 /**
  * Practitioners and the practice they work at, kept in step both ways.
@@ -47,13 +64,22 @@ export async function storeProviderType(input: string | null | undefined, accoun
 export async function findPracticeByName(accountId: string, name: string): Promise<ProviderRow | undefined> {
   const clean = name.trim().replace(/\s+/g, ' ');
   if (!clean) return undefined;
-  return db('providers')
-    .where({ account_id: accountId })
-    .whereRaw("lower(regexp_replace(trim(name), '\\s+', ' ', 'g')) = lower(?)", [clean])
+  const exact: ProviderRow | undefined = await whereNamed(db('providers').where({ account_id: accountId }), clean)
     // Prefer something filed as a place over a person who happens to share the name.
     .orderByRaw(`CASE WHEN provider_type IN (${PLACE_TYPES.map(() => '?').join(', ')}) THEN 0 ELSE 1 END`, PLACE_TYPES)
     .orderBy('created_at', 'asc')
     .first();
+  if (exact) return exact;
+  // The same name give or take filler words ("Health Hub Doctors Morayfield"
+  // for "Health Hub Morayfield"): use it when exactly one place fits, rather
+  // than filing a second copy.
+  const places: ProviderRow[] = await db('providers')
+    .where({ account_id: accountId })
+    .whereIn('provider_type', PLACE_TYPES)
+    .select('*')
+    .limit(2000);
+  const close = places.filter((p) => [p.name, ...(((p['also_known_as'] as string[] | null) ?? []))].some((n) => sameName(n, clean)));
+  return close.length === 1 ? close[0] : undefined;
 }
 
 /** Find a practice by name, or file it as a new one. */
@@ -216,11 +242,10 @@ export async function addPracticeMember(
     }
   }
   const name = practitionerName.trim().replace(/\s+/g, ' ');
-  const existing: ProviderRow | undefined = await db('providers')
-    .where({ account_id: accountId })
-    .whereNot({ id: practice.id })
-    .whereRaw("lower(regexp_replace(trim(name), '\\s+', ' ', 'g')) = lower(?)", [name])
-    .first();
+  const existing: ProviderRow | undefined = await whereNamed(
+    db('providers').where({ account_id: accountId }).whereNot({ id: practice.id }),
+    name
+  ).first();
 
   const filedPractice = `${practiceCreated ? ` ${practice.name} was not filed yet, so it is now. Add its address once and everyone there shares it.` : ''}${placed}`;
 

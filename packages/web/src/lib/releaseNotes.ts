@@ -20,6 +20,15 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.30.0',
+    date: '2026-11-16',
+    summary: 'Merge duplicate records, other names for providers, and a better address finder.',
+    groups: [
+      { heading: 'Added', items: ['Merge two records for the same thing. Tick both in the provider directory and choose Merge selected, or use the list of likely duplicates PareCare spots for you. Everything linked to the duplicate moves across: the people it is linked to, appointments, and whatever is based there. Details only the duplicate had are copied in, and its name is kept as another name, so Pare and your assistants still find it. Undo is there for 30 minutes.', 'Also known as. A provider can go by more than one name. Add names people use, and Pare, your assistants and imports find it by any of them.'] },
+      { heading: 'Changed', items: ['A better address finder. It looks in your own directory first, then searches your own country before the rest of the world. When a place is not on the map, as with some shopping centres, it says so and points you to typing the address in yourself.', 'Fewer second copies. Filing a new place with a name close to one you already have, like Health Hub Doctors Morayfield, now finds the one you have instead of making another.', 'Clearer filters. They read Any type and Anywhere, in place of All type and All based at.'] },
+    ],
+  },
+  {
     version: '0.29.0',
     date: '2026-11-16',
     summary: 'Health hubs, with clinics and doctors inside them.',

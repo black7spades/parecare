@@ -19,7 +19,7 @@ interface DataToolbarProps {
   sorts?: { key: string; label: string }[];
   sortKey?: string;
   onSort?: (key: string) => void;
-  filters?: { key: string; label: string; options: { value: string; label: string }[] }[];
+  filters?: { key: string; label: string; anyLabel?: string; options: { value: string; label: string }[] }[];
   filterValues?: Record<string, string>;
   onFilter?: (key: string, value: string) => void;
   // Selection / bulk actions (only supply actions the viewer is allowed to run).
@@ -65,7 +65,7 @@ export function DataToolbar({
             value={filterValues[f.key] ?? ''}
             onChange={(e) => onFilter?.(f.key, e.target.value)}
           >
-            <option value="">All {f.label.toLowerCase()}</option>
+            <option value="">{f.anyLabel ?? `Any ${f.label.toLowerCase()}`}</option>
             {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         ))}
