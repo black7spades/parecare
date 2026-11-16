@@ -27,15 +27,16 @@ export const BUILT_IN_PROVIDER_TYPES = [
 export const PRACTICE_TYPE = 'practice';
 
 /** Kinds of provider that are places people work at. */
-export const PLACE_TYPES = ['practice', 'clinic', 'pharmacy', 'care_facility', 'Hospital', 'Medical centre', 'Health centre', 'Pathology', 'Radiology'];
+export const PLACE_TYPES = ['Health hub', 'practice', 'clinic', 'pharmacy', 'care_facility', 'Hospital', 'Medical centre', 'Health centre', 'Pathology', 'Radiology'];
 
 /**
  * What kind of place a name describes, so a newly filed place gets a fitting
  * type without anyone being asked: "Brain Clinic" is a clinic, "Caboolture
- * Hospital" a hospital, "Health Hub Morayfield" a practice.
+ * Hospital" a hospital, "Health Hub Morayfield" a health hub.
  */
 export function placeTypeFromName(name: string): string {
   const n = name.toLowerCase();
+  if (/\bhealth ?hub\b/.test(n)) return 'Health hub';
   if (/\bclinic\b/.test(n)) return 'clinic';
   if (/\bhospital\b/.test(n)) return 'Hospital';
   if (/\b(pharmacy|chemist)\b/.test(n)) return 'pharmacy';
@@ -65,6 +66,7 @@ export const SEEDED_PROVIDER_TYPES = [
   'Gynaecologist',
   'Haematologist',
   'Health centre',
+  'Health hub',
   'Hospital',
   'Medical centre',
   'Nephrologist',
@@ -111,7 +113,7 @@ export function normaliseProviderType(input: string | null | undefined): string 
     if (t.value === asCode || t.label.toLowerCase() === lower) return t.value;
   }
   // Everyday ways of naming one kind of place.
-  if (['medical practice', 'surgery', 'health hub', 'gp practice'].includes(lower)) return PRACTICE_TYPE;
+  if (['medical practice', 'surgery', 'gp practice'].includes(lower)) return PRACTICE_TYPE;
   if (['medical center'].includes(lower)) return 'Medical centre';
   if (['health center'].includes(lower)) return 'Health centre';
   // Keep the person's own spelling of a known shared type.

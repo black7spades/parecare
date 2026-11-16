@@ -32,7 +32,7 @@ import { useProfile } from './ProfileLayout';
 const SORTS: DataSort<Provider>[] = [
   { key: 'name', label: 'Name', compare: (a, b) => a.name.localeCompare(b.name) },
   { key: 'type', label: 'Type', compare: (a, b) => providerTypeLabel(a.provider_type).localeCompare(providerTypeLabel(b.provider_type)) },
-  { key: 'works_at', label: 'Works at', compare: (a, b) => (a.organisation ?? '').localeCompare(b.organisation ?? '') },
+  { key: 'works_at', label: 'Based at', compare: (a, b) => (a.organisation ?? '').localeCompare(b.organisation ?? '') },
 ];
 
 
@@ -175,10 +175,10 @@ export function ProvidersPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <h3 className="text-sm font-semibold text-ink">{p.name}</h3>
-                      {p.organisation ? <p className="text-xs text-muted">Works at {p.organisation}</p> : null}
+                      {p.organisation ? <p className="text-xs text-muted">Based at {p.organisation}</p> : null}
                       {p.member_count ? (
                         <p className="text-xs text-muted">
-                          {p.member_count} {p.member_count === 1 ? 'person works' : 'people work'} here
+                          {p.member_count} based here
                         </p>
                       ) : null}
                     </div>

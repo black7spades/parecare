@@ -20,6 +20,15 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.29.0',
+    date: '2026-11-16',
+    summary: 'Health hubs, with clinics and doctors inside them.',
+    groups: [
+      { heading: 'Added', items: ['Health hubs, with places inside places. A health hub such as Health Hub Morayfield is now its own type, for one building with many services under the one roof. Clinics and practices are based at the hub, and doctors are based at their clinic, so the address of the hub reaches everyone inside. Move the hub and every clinic and doctor in it follows. Tell Pare or your assistant "add Dr Carly Examplename to the Neuro Clinic at Health Hub Morayfield" and it files all three in one go. Health Hub Morayfield is already filed as a health hub.'] },
+      { heading: 'Changed', items: ['Based at, in place of Works at. The same field now suits a doctor at a clinic and a clinic inside a hub, and the list of what is based at a place includes its clinics as well as its people.'] },
+    ],
+  },
+  {
     version: '0.28.1',
     date: '2026-11-16',
     summary: 'One type means one thing, and the Pare conversations list loads again.',

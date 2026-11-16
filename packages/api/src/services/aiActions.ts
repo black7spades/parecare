@@ -361,6 +361,8 @@ const addToPracticeSchema = z.object({
   type: z.literal('add_to_practice'),
   practitioner: z.string().min(1).max(255),
   practice: z.string().min(1).max(255),
+  // The bigger place the practice is in, such as a health hub.
+  part_of: z.string().max(255).optional().nullable(),
   provider_type: providerTypeField.optional().nullable(),
   phone: z.string().max(50).optional().nullable(),
   email: z.string().max(255).optional().nullable(),
@@ -1559,6 +1561,7 @@ async function executeOne(
     case 'add_to_practice': {
       const profile = await db('care_profiles').where({ id: profileId }).select('account_id').first();
       const { outcome } = await addPracticeMember(profile?.account_id ?? account.id, action.practitioner, action.practice, {
+        part_of: action.part_of,
         provider_type: action.provider_type,
         phone: action.phone,
         email: action.email,

@@ -155,7 +155,7 @@ export function WorksAtField({
 
   return (
     <div ref={boxRef} className="relative">
-      <label htmlFor={id} className="block text-sm font-medium text-ink mb-1">Works at</label>
+      <label htmlFor={id} className="block text-sm font-medium text-ink mb-1">Based at</label>
       <input
         id={id}
         type="text"
@@ -202,7 +202,7 @@ export function WorksAtField({
           ))}
         </ul>
       ) : null}
-      <p className="mt-1 text-xs text-muted">Leave empty if they work on their own.</p>
+      <p className="mt-1 text-xs text-muted">Leave empty if not based anywhere else. A clinic inside a health hub is based at the hub.</p>
     </div>
   );
 }
@@ -259,7 +259,7 @@ export function PracticeAddress({
 // ── People who work here ───────────────────────────────────────────────
 
 /** Kinds of provider that are places people work at. */
-const PLACE_TYPES = new Set(['practice', 'clinic', 'care_facility', 'pharmacy', 'vet', 'allied_health', 'Hospital', 'Medical centre', 'Health centre', 'Pathology', 'Radiology']);
+const PLACE_TYPES = new Set(['Health hub', 'practice', 'clinic', 'care_facility', 'pharmacy', 'vet', 'allied_health', 'Hospital', 'Medical centre', 'Health centre', 'Pathology', 'Radiology']);
 
 export const isPlace = (p: Pick<Provider, 'provider_type' | 'member_count'>): boolean =>
   PLACE_TYPES.has(p.provider_type) || (p.member_count ?? 0) > 0;
@@ -318,13 +318,13 @@ export function PracticeMembers({
   return (
     <div className="rounded-md border border-border p-3 space-y-3">
       <div>
-        <h3 className="text-sm font-semibold text-ink">People who work here</h3>
-        <p className="text-xs text-muted">Everyone filed here shares {practiceName}&apos;s address. Change the address once and it changes for all of them.</p>
+        <h3 className="text-sm font-semibold text-ink">Based here</h3>
+        <p className="text-xs text-muted">Everyone and everything based here shares {practiceName}&apos;s address, all the way down. Change the address once and it changes for all of them.</p>
       </div>
       {isLoading ? (
         <p className="text-xs text-muted">Loading…</p>
       ) : members.length === 0 ? (
-        <p className="text-xs text-muted">No one is filed here yet. Add the doctors and staff seen here.</p>
+        <p className="text-xs text-muted">Nothing is based here yet. Add the clinics, practices, doctors and staff here.</p>
       ) : (
         <ul className="divide-y divide-border">
           {members.map((m) => (
@@ -349,7 +349,7 @@ export function PracticeMembers({
       )}
       {canEdit ? (
         <div className="space-y-2">
-          <Input label="Add someone who works here" placeholder="e.g. Dr Carly Examplename" value={name}
+          <Input label="Add someone or something based here" placeholder="e.g. Neuro Clinic, or Dr Carly Examplename" value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
