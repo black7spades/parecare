@@ -168,15 +168,23 @@ export async function practiceColumns(
  * After a practice changes, bring everyone who works there up to date:
  * their organisation name, and their address while they share it.
  */
-export async function syncPracticeMembers(practiceId: string): Promise<void> {
+export async function syncPracticeMembers(practiceId: string, seen: Set<string> = new Set()): Promise<void> {
+  // A place can be inside a place (a clinic inside a health hub, a doctor
+  // inside the clinic), so a change carries all the way down, once each.
+  if (seen.has(practiceId) || seen.size > 50) return;
+  seen.add(practiceId);
   const practice = await db('providers').where({ id: practiceId }).first();
   if (!practice) return;
   await db('providers').where({ practice_id: practiceId }).update({ organisation: practice.name });
   await db('providers').where({ practice_id: practiceId, uses_practice_address: true }).update(addressCopy(practice));
+  const children: Array<{ id: string }> = await db('providers').where({ practice_id: practiceId }).select('id');
+  for (const child of children) await syncPracticeMembers(child.id, seen);
 }
 
 export interface NewMember {
   name: string;
+  /** The bigger place the practice itself is in, e.g. a health hub. */
+  part_of?: string | null;
   provider_type?: string | null;
   phone?: string | null;
   email?: string | null;
@@ -194,7 +202,19 @@ export async function addPracticeMember(
   practiceName: string,
   details: Omit<NewMember, 'name'> = {}
 ): Promise<{ outcome: string; practitionerId: string; practiceId: string }> {
-  const { practice, created: practiceCreated } = await findOrCreatePractice(accountId, practiceName);
+  const found = await findOrCreatePractice(accountId, practiceName);
+  let practice = found.practice;
+  const practiceCreated = found.created;
+  // "Dr X at the Neuro Clinic in Health Hub Morayfield": file the clinic in
+  // the hub too, before the person, so the person takes the right address.
+  let placed = '';
+  if (details.part_of?.trim()) {
+    const { practice: hub } = await findOrCreatePractice(accountId, details.part_of);
+    if (hub.id !== practice.id && practice.practice_id !== hub.id) {
+      placed = ` ${await attachToPractice(practice, hub)}`;
+      practice = await db('providers').where({ id: practice.id }).first();
+    }
+  }
   const name = practitionerName.trim().replace(/\s+/g, ' ');
   const existing: ProviderRow | undefined = await db('providers')
     .where({ account_id: accountId })
@@ -202,7 +222,7 @@ export async function addPracticeMember(
     .whereRaw("lower(regexp_replace(trim(name), '\\s+', ' ', 'g')) = lower(?)", [name])
     .first();
 
-  const filedPractice = practiceCreated ? ` ${practice.name} was not filed yet, so it is now. Add its address once and everyone there shares it.` : '';
+  const filedPractice = `${practiceCreated ? ` ${practice.name} was not filed yet, so it is now. Add its address once and everyone there shares it.` : ''}${placed}`;
 
   if (existing) {
     const outcome = await attachToPractice(existing, practice, details);
@@ -236,8 +256,8 @@ async function attachToPractice(
   practice: ProviderRow,
   details: Omit<NewMember, 'name'> = {}
 ): Promise<string> {
-  if (existing.practice_id === practice.id) return `${existing.name} is already filed at ${practice.name}.`;
-  if (await wouldLoop(existing.id, practice.id)) return `${existing.name} cannot be filed as working at ${practice.name}.`;
+  if (existing.practice_id === practice.id) return `${existing.name} is already based at ${practice.name}.`;
+  if (await wouldLoop(existing.id, practice.id)) return `${existing.name} cannot be based at ${practice.name}, because ${practice.name} is already based there.`;
   const update: Record<string, unknown> = { practice_id: practice.id, organisation: practice.name };
   const ownAddress = PARTS.some((k) => String(existing[k] ?? '').trim() !== '');
   if (!ownAddress || existing['uses_practice_address']) Object.assign(update, { uses_practice_address: true, ...addressCopy(practice) });
@@ -245,7 +265,7 @@ async function attachToPractice(
   if (details.email && !existing['email']) update['email'] = details.email;
   if (details.provider_type) update['provider_type'] = await storeProviderType(details.provider_type, existing.account_id);
   await db('providers').where({ id: existing.id }).update(update);
-  return `${existing.name} now works at ${practice.name}.`;
+  return `${existing.name} is now based at ${practice.name}.`;
 }
 
 /** File one chosen provider, by id, at a practice in the same account. */

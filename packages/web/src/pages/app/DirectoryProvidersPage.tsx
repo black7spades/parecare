@@ -42,8 +42,8 @@ interface DirectoryProvider extends Provider {
 const SORTS: DataSort<DirectoryProvider>[] = [
   { key: 'name', label: 'Name', compare: (a, b) => a.name.localeCompare(b.name) },
   { key: 'type', label: 'Type', compare: (a, b) => providerTypeLabel(a.provider_type).localeCompare(providerTypeLabel(b.provider_type)) },
-  { key: 'works_at', label: 'Works at', compare: (a, b) => (a.organisation ?? '').localeCompare(b.organisation ?? '') },
-  { key: 'members', label: 'People here', compare: (a, b) => (b.members?.length ?? 0) - (a.members?.length ?? 0) },
+  { key: 'works_at', label: 'Based at', compare: (a, b) => (a.organisation ?? '').localeCompare(b.organisation ?? '') },
+  { key: 'members', label: 'Based here', compare: (a, b) => (b.members?.length ?? 0) - (a.members?.length ?? 0) },
   { key: 'phone', label: 'Phone', compare: (a, b) => (a.phone ?? '').localeCompare(b.phone ?? '') },
   { key: 'address', label: 'Address', compare: (a, b) => (a.address ?? '').localeCompare(b.address ?? '') },
   { key: 'profiles', label: 'Linked profiles', compare: (a, b) => (b.linked_profiles?.length ?? 0) - (a.linked_profiles?.length ?? 0) },
@@ -76,7 +76,7 @@ export function DirectoryProvidersPage() {
     },
     {
       key: 'works_at',
-      label: 'Works at',
+      label: 'Based at',
       options: [...new Set(providers.map((p) => p.organisation).filter((o): o is string => !!o))]
         .sort((a, b) => a.localeCompare(b))
         .map((o) => ({ value: o, label: o })),
@@ -123,7 +123,7 @@ export function DirectoryProvidersPage() {
             resource="providers"
             canImport={canEdit}
             onImported={invalidate}
-            templateHeaders={['Name', 'Type', 'Works at', 'Phone', 'Email', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country', 'Booking link', 'Directions']}
+            templateHeaders={['Name', 'Type', 'Based at', 'Phone', 'Email', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country', 'Booking link', 'Directions']}
             templateSample={['Dr Jane Smith', 'GP', 'City Medical', '07 5555 5555', 'jane@example.com', '1 Main St', '', 'Morayfield', 'QLD', '4506', 'Australia', '', '']}
           />
           {canEdit ? (
@@ -196,8 +196,8 @@ export function DirectoryProvidersPage() {
                 ) : null}
                 <SortableTh label="Name" sortKey="name" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Type" sortKey="type" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
-                <SortableTh label="Works at" sortKey="works_at" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
-                <SortableTh label="People here" sortKey="members" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Based at" sortKey="works_at" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Based here" sortKey="members" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Phone" sortKey="phone" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Address" sortKey="address" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Linked to" sortKey="profiles" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />

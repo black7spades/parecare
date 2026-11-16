@@ -448,8 +448,8 @@ const READ_TOOLS: ToolDef[] = [
           const parts = [
             `${r.name}`,
             `type: ${label(r.provider_type)}`,
-            r.organisation ? `works at: ${r.organisation}` : null,
-            r.member_count ? `people working here: ${r.member_count}` : null,
+            r.organisation ? `based at: ${r.organisation}` : null,
+            r.member_count ? `based here: ${r.member_count}` : null,
             r.phone ? `phone: ${r.phone}` : null,
             r.email ? `email: ${r.email}` : null,
             r.address ? `address: ${r.address}` : null,
@@ -471,7 +471,8 @@ const ACCOUNT_TOOLS: ToolDef[] = [
       type: 'object',
       properties: {
         practitioner: { type: 'string', description: 'Their name, e.g. "Dr Carly Examplename".' },
-        practice: { type: 'string', description: 'The clinic or practice, e.g. "Health Hub Morayfield".' },
+        practice: { type: 'string', description: 'The clinic or practice they are based at, e.g. "Neuro Clinic" or "Health Hub Morayfield".' },
+        part_of: { type: 'string', description: 'The bigger place that clinic or practice is inside, if any, e.g. "Health Hub Morayfield". It is filed there too.' },
         provider_type: { type: 'string', description: 'What kind of provider they are, in plain words, e.g. "GP", "Neurologist", "Physiotherapist".' },
         phone: { type: 'string' },
         email: { type: 'string' },
@@ -486,6 +487,7 @@ const ACCOUNT_TOOLS: ToolDef[] = [
       const practice = str('practice');
       if (!practitioner || !practice) return 'Nothing was saved: both the practitioner and the practice need a name.';
       const { outcome } = await addPracticeMember(ctx.account.id, practitioner, practice, {
+        part_of: str('part_of'),
         provider_type: str('provider_type'),
         phone: str('phone'),
         email: str('email'),

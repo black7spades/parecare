@@ -62,6 +62,7 @@ const addToPracticeSchema = z.object({
   action: z.literal('add_to_practice'),
   practitioner: z.string().min(1).max(255),
   practice: z.string().min(1).max(255),
+  part_of: z.string().max(255).optional().nullable(),
   provider_type: z.string().max(100).optional().nullable(),
   phone: z.string().max(50).optional().nullable(),
   email: z.string().max(255).optional().nullable(),
@@ -228,6 +229,7 @@ export async function executeDashboardActions(actions: DashboardAction[], accoun
         clientActions.push({ action: 'navigate_to_profile', profile_id: action.profile_id, section: action.section });
       } else if (action.action === 'add_to_practice') {
         const { outcome } = await addPracticeMember(account.id, action.practitioner, action.practice, {
+          part_of: action.part_of,
           provider_type: action.provider_type,
           phone: action.phone,
           email: action.email,

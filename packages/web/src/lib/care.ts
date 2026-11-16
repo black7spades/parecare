@@ -435,7 +435,7 @@ export interface Provider {
   address_country?: string | null;
   booking_link: string | null;
   directions_link: string | null;
-  /** The provider this one works at, such as their clinic. */
+  /** The provider this one is based at, such as their clinic, or the health hub a clinic is in. */
   practice_id?: string | null;
   /** Whether their address is kept in step with the practice's. */
   uses_practice_address?: boolean;
