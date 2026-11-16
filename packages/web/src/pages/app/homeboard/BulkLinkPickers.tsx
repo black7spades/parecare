@@ -63,13 +63,13 @@ export function BulkLinkProviderPicker({
   if (!open) return null;
 
   return (
-    <Modal open onClose={onClose} title="Link provider to selected profiles">
+    <Modal open onClose={onClose} title="Link a contact to selected profiles">
       <p className="text-sm text-muted mb-3">
         Choose a provider to link to the {profileIds.length} selected profile{profileIds.length !== 1 ? 's' : ''}.
       </p>
       <input
         type="text"
-        placeholder="Search providers…"
+        placeholder="Search professionals and organisations…"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary mb-3"
@@ -78,7 +78,7 @@ export function BulkLinkProviderPicker({
         <p className="text-sm text-muted py-4 text-center">Loading…</p>
       ) : filtered.length === 0 ? (
         <p className="text-sm text-muted py-4 text-center">
-          {providers.length === 0 ? 'No providers in the directory yet.' : 'No providers match your search.'}
+          {providers.length === 0 ? 'Nothing in the directory yet.' : 'Nothing matches your search.'}
         </p>
       ) : (
         <div className="max-h-64 overflow-y-auto -mx-1">

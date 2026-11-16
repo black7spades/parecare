@@ -23,10 +23,12 @@ import { LinkIcon, PencilIcon, TrashIcon } from '../../components/ui/icons';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
 import {
+  KIND_WORDS,
   providerTypeFilterOptions,
   providerTypeLabel,
   type PracticeMember,
   type Provider,
+  type ProviderKind,
 } from '../../lib/care';
 
 interface LinkedProfile {
@@ -35,8 +37,8 @@ interface LinkedProfile {
 }
 
 interface DuplicatePair {
-  first: { id: string; name: string; provider_type: string; address: string | null };
-  second: { id: string; name: string; provider_type: string; address: string | null };
+  first: { id: string; name: string; provider_type: string; kind: ProviderKind; address: string | null };
+  second: { id: string; name: string; provider_type: string; kind: ProviderKind; address: string | null };
 }
 
 interface DirectoryProvider extends Provider {
@@ -45,17 +47,39 @@ interface DirectoryProvider extends Provider {
   members: PracticeMember[] | null;
 }
 
-const SORTS: DataSort<DirectoryProvider>[] = [
-  { key: 'name', label: 'Name', compare: (a, b) => a.name.localeCompare(b.name) },
-  { key: 'type', label: 'Type', compare: (a, b) => providerTypeLabel(a.provider_type).localeCompare(providerTypeLabel(b.provider_type)) },
-  { key: 'works_at', label: 'Based at', compare: (a, b) => (a.organisation ?? '').localeCompare(b.organisation ?? '') },
-  { key: 'members', label: 'Based here', compare: (a, b) => (b.members?.length ?? 0) - (a.members?.length ?? 0) },
-  { key: 'phone', label: 'Phone', compare: (a, b) => (a.phone ?? '').localeCompare(b.phone ?? '') },
-  { key: 'address', label: 'Address', compare: (a, b) => (a.address ?? '').localeCompare(b.address ?? '') },
-  { key: 'profiles', label: 'Linked profiles', compare: (a, b) => (b.linked_profiles?.length ?? 0) - (a.linked_profiles?.length ?? 0) },
-];
+/** Where a record sits: a professional is based at an organisation, an organisation is part of a bigger one. */
+const basedAtLabel = (kind: ProviderKind) => (kind === 'organisation' ? 'Part of' : 'Based at');
 
-export function DirectoryProvidersPage() {
+function sortsFor(kind: ProviderKind): DataSort<DirectoryProvider>[] {
+  return [
+    { key: 'name', label: 'Name', compare: (a, b) => a.name.localeCompare(b.name) },
+    { key: 'type', label: 'Type', compare: (a, b) => providerTypeLabel(a.provider_type).localeCompare(providerTypeLabel(b.provider_type)) },
+    { key: 'works_at', label: basedAtLabel(kind), compare: (a, b) => (a.organisation ?? '').localeCompare(b.organisation ?? '') },
+    ...(kind === 'organisation'
+      ? [{ key: 'members', label: 'Based here', compare: (a: DirectoryProvider, b: DirectoryProvider) => (b.members?.length ?? 0) - (a.members?.length ?? 0) }]
+      : []),
+    { key: 'phone', label: 'Phone', compare: (a, b) => (a.phone ?? '').localeCompare(b.phone ?? '') },
+    { key: 'address', label: 'Address', compare: (a, b) => (a.address ?? '').localeCompare(b.address ?? '') },
+    { key: 'profiles', label: 'Linked profiles', compare: (a, b) => (b.linked_profiles?.length ?? 0) - (a.linked_profiles?.length ?? 0) },
+  ];
+}
+
+const kindOf = (p: { kind?: ProviderKind }): ProviderKind => p.kind ?? 'person';
+
+/** Clinics, health hubs, pharmacies, government departments and other bodies. */
+export function DirectoryOrganisationsPage() {
+  return <DirectoryProvidersPage key="organisation" kind="organisation" />;
+}
+
+/** Doctors, specialists, lawyers, caseworkers: the people, usually based at an organisation. */
+export function DirectoryProfessionalsPage() {
+  return <DirectoryProvidersPage key="person" kind="person" />;
+}
+
+function DirectoryProvidersPage({ kind }: { kind: ProviderKind }) {
+  const words = KIND_WORDS[kind];
+  const SORTS = sortsFor(kind);
+  const slug = kind === 'organisation' ? 'organisations' : 'professionals';
   const queryClient = useQueryClient();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<DirectoryProvider | null>(null);
@@ -68,7 +92,10 @@ export function DirectoryProvidersPage() {
     queryKey: ['directory-providers'],
     queryFn: () => api.get<{ providers: DirectoryProvider[]; can_edit: boolean }>('/directory/providers'),
   });
-  const providers = data?.providers ?? [];
+  // Both lists come from one directory: a duplicate pair or a merge can span
+  // an organisation and a professional filed by mistake as the other.
+  const everything = data?.providers ?? [];
+  const providers = everything.filter((p) => kindOf(p) === kind);
   const canEdit = data?.can_edit ?? false;
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['directory-providers'] });
 
@@ -77,12 +104,12 @@ export function DirectoryProvidersPage() {
     {
       key: 'type',
       label: 'Type',
-      options: providerTypeFilterOptions(providers),
+      options: providerTypeFilterOptions(providers, kind),
       match: (row, value) => row.provider_type === value,
     },
     {
       key: 'works_at',
-      label: 'Based at',
+      label: basedAtLabel(kind),
       anyLabel: 'Anywhere',
       options: [...new Set(providers.map((p) => p.organisation).filter((o): o is string => !!o))]
         .sort((a, b) => a.localeCompare(b))
@@ -117,12 +144,33 @@ export function DirectoryProvidersPage() {
     queryFn: () => api.get<{ pairs: DuplicatePair[] }>('/directory/providers/duplicates'),
     enabled: canEdit,
   });
-  const pairs = dupData?.pairs ?? [];
+  const pairs = (dupData?.pairs ?? []).filter((pair) => pair.first.kind === kind || pair.second.kind === kind);
   const refreshAll = () => {
     invalidate();
     void queryClient.invalidateQueries({ queryKey: ['directory-provider-duplicates'] });
   };
-  const byId = (id: string) => providers.find((p) => p.id === id);
+  const byId = (id: string) => everything.find((p) => p.id === id);
+  // Filed as the wrong kind: move it to the other list, keeping everything linked to it.
+  const moveMutation = useMutation({
+    mutationFn: async (rows: DirectoryProvider[]) => {
+      const notes: string[] = [];
+      for (const p of rows) {
+        const res = await api.patch<{ note?: string | null }>(`/directory/providers/${p.id}`, { kind: words.other });
+        if (res?.note) notes.push(`${p.name}: ${res.note}`);
+      }
+      return { count: rows.length, notes };
+    },
+    onSuccess: ({ count, notes }) => {
+      dv.clearSelection();
+      setMergeNote(
+        notes.length > 0
+          ? notes.join(' ')
+          : `Moved ${count === 1 ? 'it' : `${count} records`} to ${KIND_WORDS[words.other].many}.`
+      );
+      refreshAll();
+    },
+    onError: (err) => setMergeNote(err instanceof Error ? err.message : 'That could not be moved. Try again.'),
+  });
   const dismissPair = useMutation({
     mutationFn: (pair: DuplicatePair) =>
       api.post('/directory/providers/duplicates/dismiss', { first_id: pair.first.id, second_id: pair.second.id }),
@@ -152,21 +200,25 @@ export function DirectoryProvidersPage() {
     <div>
       <div className="flex items-center justify-between gap-3 mb-4">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold text-ink">Provider directory</h2>
-          <EditableSubheader copyKey="directory.providers.subheader" />
+          <h2 className="text-base font-semibold text-ink">{words.many}</h2>
+          <EditableSubheader copyKey={`directory.${slug}.subheader`} />
         </div>
         <div className="flex gap-2 shrink-0">
           <ImportExport
-            basePath="/directory/providers"
-            resource="providers"
+            basePath={`/directory/${slug}`}
+            resource={slug}
             canImport={canEdit}
             onImported={invalidate}
-            templateHeaders={['Name', 'Type', 'Based at', 'Phone', 'Email', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country', 'Booking link', 'Directions']}
-            templateSample={['Dr Jane Smith', 'GP', 'City Medical', '07 5555 5555', 'jane@example.com', '1 Main St', '', 'Morayfield', 'QLD', '4506', 'Australia', '', '']}
+            templateHeaders={['Name', 'Type', basedAtLabel(kind), 'Phone', 'Email', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country', 'Booking link', 'Directions']}
+            templateSample={
+              kind === 'organisation'
+                ? ['Neuro Clinic', 'Clinic', 'Health Hub Morayfield', '07 5555 5555', 'clinic@example.com', '1 Main St', '', 'Morayfield', 'QLD', '4506', 'Australia', '', '']
+                : ['Dr Jane Smith', 'GP', 'City Medical', '07 5555 5555', 'jane@example.com', '1 Main St', '', 'Morayfield', 'QLD', '4506', 'Australia', '', '']
+            }
           />
           {canEdit ? (
             <Button onClick={() => { setEditing(null); setEditorOpen(true); }}>
-              Add provider
+              Add {words.one}
             </Button>
           ) : null}
         </div>
@@ -186,7 +238,7 @@ export function DirectoryProvidersPage() {
       {canEdit && pairs.length > 0 ? (
         <div className="card mb-4 space-y-2">
           <div>
-            <h3 className="text-sm font-semibold text-ink">These look like the same provider</h3>
+            <h3 className="text-sm font-semibold text-ink">These look like the same {words.one}</h3>
             <p className="text-xs text-muted">Merge them so everything is in one record, or dismiss a pair that is not the same.</p>
           </div>
           <ul className="divide-y divide-border">
@@ -223,7 +275,7 @@ export function DirectoryProvidersPage() {
           <DataToolbar
             search={dv.search}
             onSearch={dv.setSearch}
-            searchPlaceholder="Search providers…"
+            searchPlaceholder={`Search ${words.many.toLowerCase()}…`}
             sorts={SORTS}
             sortKey={dv.sortKey}
             onSort={dv.setSortKey}
@@ -247,6 +299,11 @@ export function DirectoryProvidersPage() {
                         }
                       },
                     },
+                    {
+                      key: 'move',
+                      label: `Move to ${KIND_WORDS[words.other].many}`,
+                      onRun: () => moveMutation.mutate(dv.selectedRows),
+                    },
                     { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setBulkEditQueue(q); setEditing(q[0] ?? null); setEditorOpen(true); } },
                     { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => bulkDeleteMutation.mutate(dv.selectedRows.map((p) => p.id)) },
                   ]
@@ -267,17 +324,26 @@ export function DirectoryProvidersPage() {
         <p className="text-sm text-muted">Loading…</p>
       ) : providers.length === 0 ? (
         <div className="card text-center py-10 space-y-3">
-          <p className="text-sm text-ink">Keep every doctor, clinic and pharmacy in one place.</p>
-          <p className="text-xs text-muted">Add a clinic once, then file the people you see there. They share its address, so it is never typed twice.</p>
+          {kind === 'organisation' ? (
+            <>
+              <p className="text-sm text-ink">Keep every clinic, hospital, pharmacy and government department in one place.</p>
+              <p className="text-xs text-muted">Add an organisation once, with its address, and everyone based there shares it.</p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-ink">Keep every doctor, specialist, lawyer and caseworker in one place.</p>
+              <p className="text-xs text-muted">Say where each one is based and they take its address, so it is never typed twice.</p>
+            </>
+          )}
           {canEdit ? (
             <div>
-              <Button variant="secondary" onClick={() => { setEditing(null); setEditorOpen(true); }}>Add provider</Button>
+              <Button variant="secondary" onClick={() => { setEditing(null); setEditorOpen(true); }}>Add {words.one}</Button>
             </div>
           ) : null}
         </div>
       ) : dv.view.length === 0 ? (
         <div className="card text-center py-10">
-          <p className="text-sm text-muted">No providers match your search.</p>
+          <p className="text-sm text-muted">No {words.many.toLowerCase()} match your search.</p>
         </div>
       ) : (
         <div className="card p-0 overflow-x-auto">
@@ -292,8 +358,10 @@ export function DirectoryProvidersPage() {
                 ) : null}
                 <SortableTh label="Name" sortKey="name" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Type" sortKey="type" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
-                <SortableTh label="Based at" sortKey="works_at" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
-                <SortableTh label="Based here" sortKey="members" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label={basedAtLabel(kind)} sortKey="works_at" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                {kind === 'organisation' ? (
+                  <SortableTh label="Based here" sortKey="members" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                ) : null}
                 <SortableTh label="Phone" sortKey="phone" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Address" sortKey="address" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Linked to" sortKey="profiles" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
@@ -319,9 +387,11 @@ export function DirectoryProvidersPage() {
                   </td>
                   <td className="px-3 py-2 text-muted">{providerTypeLabel(p.provider_type)}</td>
                   <td className="px-3 py-2 text-muted">{p.organisation || '-'}</td>
-                  <td className="px-3 py-2 text-muted" title={(p.members ?? []).map((m) => m.name).join(', ') || undefined}>
-                    {p.members && p.members.length > 0 ? p.members.length : '-'}
-                  </td>
+                  {kind === 'organisation' ? (
+                    <td className="px-3 py-2 text-muted" title={(p.members ?? []).map((m) => m.name).join(', ') || undefined}>
+                      {p.members && p.members.length > 0 ? p.members.length : '-'}
+                    </td>
+                  ) : null}
                   <td className="px-3 py-2">
                     {p.phone ? (
                       <a href={`tel:${p.phone}`} className="text-primary hover:underline">{p.phone}</a>
@@ -356,6 +426,7 @@ export function DirectoryProvidersPage() {
       )}
 
       <DirectoryProviderEditor
+        kind={kind}
         open={editorOpen}
         provider={editing}
         canEdit={canEdit}
@@ -398,13 +469,13 @@ export function DirectoryProvidersPage() {
         onLinked={() => { setBulkLinkingIds([]); dv.clearSelection(); invalidate(); }}
       />
 
-      <Modal open={deleting !== null} onClose={() => setDeleting(null)} title="Delete provider">
+      <Modal open={deleting !== null} onClose={() => setDeleting(null)} title={`Delete ${words.one}`}>
         <p className="text-sm text-muted mb-2">
           Permanently delete <span className="font-medium text-ink">{deleting?.name}</span>?
         </p>
         {deleting?.linked_profiles && deleting.linked_profiles.length > 0 ? (
           <p className="text-sm text-red-600 mb-4">
-            This provider is linked to {deleting.linked_profiles.length} profile{deleting.linked_profiles.length > 1 ? 's' : ''}.
+            This {words.one} is linked to {deleting.linked_profiles.length} profile{deleting.linked_profiles.length > 1 ? 's' : ''}.
             Deleting it will remove it from all of them.
           </p>
         ) : null}
@@ -598,6 +669,7 @@ function BulkLinkDialog({
 }
 
 function DirectoryProviderEditor({
+  kind: listKind,
   open,
   provider,
   canEdit,
@@ -605,6 +677,7 @@ function DirectoryProviderEditor({
   onClose,
   onSaved,
 }: {
+  kind: ProviderKind;
   open: boolean;
   provider: DirectoryProvider | null;
   canEdit: boolean;
@@ -612,7 +685,9 @@ function DirectoryProviderEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [type, setType] = useState('gp');
+  const kind = provider ? kindOf(provider) : listKind;
+  const defaultType = kind === 'organisation' ? '' : 'gp';
+  const [type, setType] = useState(defaultType);
   const [name, setName] = useState('');
   const [worksAt, setWorksAt] = useState<WorksAtValue>(worksAtFrom(null));
   const [sharesAddress, setSharesAddress] = useState(true);
@@ -625,7 +700,7 @@ function DirectoryProviderEditor({
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setType(provider?.provider_type ?? 'gp');
+    setType(provider?.provider_type ?? defaultType);
     setName(provider?.name ?? '');
     setWorksAt(worksAtFrom(provider));
     setOtherNames(provider?.also_known_as ?? []);
@@ -641,7 +716,8 @@ function DirectoryProviderEditor({
   const mutation = useMutation({
     mutationFn: () => {
       const body = {
-        provider_type: type,
+        kind,
+        provider_type: type || 'other',
         name: name.trim(),
         phone: phone.trim() || null,
         email: email.trim() || null,
@@ -656,12 +732,12 @@ function DirectoryProviderEditor({
         : api.post('/directory/providers', body);
     },
     onSuccess: onSaved,
-    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save provider'),
+    onError: (err) => setError(err instanceof Error ? err.message : 'That could not be saved. Try again.'),
   });
 
   if (!open) return null;
   return (
-    <Modal open onClose={onClose} title={provider ? `Edit ${provider.name}` : 'Add provider'}>
+    <Modal open onClose={onClose} title={provider ? `Edit ${provider.name}` : `Add ${KIND_WORDS[kind].one}`}>
       <form
         className="space-y-4"
         onSubmit={(e) => {
@@ -669,10 +745,16 @@ function DirectoryProviderEditor({
           if (name.trim()) mutation.mutate();
         }}
       >
-        <ProviderTypeField key={`type-${provider?.id ?? 'new'}`} id="dir-provider-type" value={type} onChange={setType} />
-        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
+        <ProviderTypeField key={`type-${provider?.id ?? 'new'}`} id="dir-provider-type" value={type} onChange={setType} kind={kind} />
+        <Input
+          label="Name"
+          placeholder={kind === 'organisation' ? 'e.g. Health Hub Morayfield' : 'e.g. Dr Carly Examplename'}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+        />
         <OtherNamesField value={otherNames} onChange={setOtherNames} />
-        <WorksAtField id="dir-provider-works-at" value={worksAt} onChange={setWorksAt} excludeId={provider?.id} />
+        <WorksAtField id="dir-provider-works-at" value={worksAt} onChange={setWorksAt} excludeId={provider?.id} kind={kind} />
         <div className="grid grid-cols-2 gap-2">
           <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
           <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -694,7 +776,7 @@ function DirectoryProviderEditor({
           <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>Save</Button>
         </div>
       </form>
-      {provider && (isPlace(provider) || isPlace({ provider_type: type })) ? (
+      {provider && isPlace({ kind, member_count: provider.members?.length ?? 0 }) ? (
         <div className="mt-4">
           <PracticeMembers
             basePath={`/directory/providers/${provider.id}`}
@@ -704,8 +786,8 @@ function DirectoryProviderEditor({
           />
         </div>
       ) : null}
-      {!provider && isPlace({ provider_type: type }) ? (
-        <p className="mt-3 text-xs text-muted">Once this is saved, open it again to add the people who work here.</p>
+      {!provider && kind === 'organisation' ? (
+        <p className="mt-3 text-xs text-muted">Once this is saved, open it again to add who is based here.</p>
       ) : null}
     </Modal>
   );
@@ -750,9 +832,9 @@ function BulkLinkAllDialog({
   };
 
   return (
-    <Modal open onClose={onClose} title={`Link ${providers.length} providers to profiles`}>
+    <Modal open onClose={onClose} title={`Link ${providers.length} records to profiles`}>
       <p className="text-sm text-muted mb-3">
-        Select profiles to link all {providers.length} selected providers to.
+        Select profiles to link all {providers.length} selected records to.
       </p>
       {profiles.length === 0 ? (
         <p className="text-sm text-muted py-4 text-center">No profiles found.</p>

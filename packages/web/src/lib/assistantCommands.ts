@@ -112,9 +112,9 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
   },
   {
     name: 'provider',
-    hint: 'name and what kind of provider',
-    description: 'Add a provider, e.g. /provider Dr Chen, GP at Fremantle Medical',
-    expand: (a) => `Add this provider: ${a}`,
+    hint: 'name and what kind',
+    description: 'Add a contact, e.g. /provider Dr Chen, GP at Fremantle Medical, or /provider Department of Justice',
+    expand: (a) => `Add this contact, as a professional or as an organisation, whichever it is: ${a}`,
   },
   {
     name: 'practice',
@@ -125,8 +125,8 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
   },
   {
     name: 'link',
-    hint: 'a provider or address already in the directory',
-    description: 'Link an existing provider or address to this person, e.g. /link Dr Chen or /link 12 Ocean Road',
+    hint: 'a contact or address already in the directory',
+    description: 'Link an existing contact or address to this person, e.g. /link Dr Chen or /link 12 Ocean Road',
     expand: (a) =>
       `Link this existing entry from the directory to this profile, without creating a duplicate. It may be a provider (by name) or an address (by its label or street). If it is an address, also set it as where they live: ${a}`,
   },

@@ -370,11 +370,35 @@ export const PROVIDER_TYPES = [
   { value: 'clinic', label: 'Clinic' },
   { value: 'care_facility', label: 'Care facility' },
   { value: 'allied_health', label: 'Allied health' },
-  { value: 'legal', label: 'Legal' },
-  { value: 'financial', label: 'Financial' },
+  { value: 'legal', label: 'Lawyer' },
+  { value: 'financial', label: 'Financial adviser' },
   { value: 'social_worker', label: 'Social worker' },
   { value: 'other', label: 'Other' },
 ] as const;
+
+/**
+ * Two kinds of record in the directory: an organisation (a clinic, a health
+ * hub, a government department) and a professional (a doctor, a lawyer, a
+ * caseworker), usually based at an organisation. Stored as "organisation"
+ * and "person".
+ */
+export type ProviderKind = 'organisation' | 'person';
+
+/** Built-in types organisations are filed under. The rest are for professionals. */
+const ORGANISATION_BUILT_INS = new Set(['practice', 'clinic', 'pharmacy', 'care_facility']);
+
+/** The built-in types offered when filing this kind of record. */
+export function pickableTypesFor(kind: ProviderKind | 'any') {
+  return PROVIDER_TYPES.filter(
+    (t) => t.value !== 'other' && (kind === 'any' || ORGANISATION_BUILT_INS.has(t.value) === (kind === 'organisation'))
+  );
+}
+
+/** What each kind is called on screen, one way everywhere. */
+export const KIND_WORDS: Record<ProviderKind, { one: string; many: string; other: ProviderKind }> = {
+  organisation: { one: 'organisation', many: 'Organisations', other: 'person' },
+  person: { one: 'professional', many: 'Professionals', other: 'organisation' },
+};
 
 export const providerTypeLabel = (type: string) =>
   PROVIDER_TYPES.find((t) => t.value === type)?.label ?? type;
@@ -410,10 +434,13 @@ export function customProviderTypes(rows: Array<{ provider_type: string }>): str
  * types actually in use, so a custom-typed provider stays filterable.
  */
 export function providerTypeFilterOptions(
-  rows: Array<{ provider_type: string }>
+  rows: Array<{ provider_type: string }>,
+  kind?: ProviderKind
 ): { value: string; label: string }[] {
+  const inUse = new Set(rows.map((r) => r.provider_type));
+  const builtIns = kind ? PROVIDER_TYPES.filter((t) => pickableTypesFor(kind).some((k) => k.value === t.value) || inUse.has(t.value)) : PROVIDER_TYPES;
   return [
-    ...PROVIDER_TYPES.map((t) => ({ value: t.value, label: t.label })),
+    ...builtIns.map((t) => ({ value: t.value, label: t.label })),
     ...customProviderTypes(rows).map((c) => ({ value: c, label: c })),
   ];
 }
@@ -443,6 +470,8 @@ export interface Provider {
   member_count?: number;
   /** Other names it goes by, such as a merged duplicate's name. */
   also_known_as?: string[];
+  /** An organisation, or a professional. */
+  kind?: ProviderKind;
   poa_type: string | null;
   poa_activated: boolean;
   linked?: boolean;
@@ -453,6 +482,7 @@ export interface PracticeMember {
   id: string;
   name: string;
   provider_type: string;
+  kind?: ProviderKind;
 }
 
 export interface Task {
@@ -1473,7 +1503,7 @@ export const PLAN_SECTION_LABELS: Record<string, string> = {
   needs: 'Day-to-day needs',
   directive: 'Advance care directive',
   emergency_contacts: 'Emergency contacts',
-  providers: 'Providers',
+  providers: 'Professionals and organisations',
 };
 
 /** Presentation order: the synthesized narrative leads, the record follows. */
@@ -1581,7 +1611,7 @@ export interface PlanAccessRow {
 
 export const PLAN_ACCESS_ROLES = [
   { value: 'lead_coordinator', label: 'Lead coordinator' },
-  { value: 'provider', label: 'Assigned provider' },
+  { value: 'provider', label: 'Assigned professional' },
   { value: 'carer', label: 'Nominated carer' },
   { value: 'emergency_contact', label: 'Emergency contact' },
   { value: 'shared', label: 'Explicit share' },

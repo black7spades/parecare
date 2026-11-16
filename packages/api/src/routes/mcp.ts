@@ -417,10 +417,13 @@ const READ_TOOLS: ToolDef[] = [
   {
     name: 'list_providers',
     title: 'Search the provider directory',
-    description: 'The providers in their directory: doctors, specialists, clinics, pharmacies. Shows where each works, their type, phone, address and who they are linked to. Optionally filter by a word.',
+    description: 'Their directory of organisations (clinics, health hubs, pharmacies, government departments, agencies) and professionals (doctors, specialists, lawyers, caseworkers). Shows whether each is an organisation or a professional, where each is based, their type, phone, address and who they are linked to. Optionally filter by a word, or to organisations or professionals only.',
     inputSchema: {
       type: 'object',
-      properties: { search: { type: 'string', description: 'Part of a name, practice or type, e.g. "Health Hub" or "neuro".' } },
+      properties: {
+        search: { type: 'string', description: 'Part of a name, organisation or type, e.g. "Health Hub" or "neuro".' },
+        kind: { type: 'string', enum: ['organisation', 'person'], description: '"organisation" for organisations only, "person" for professionals only.' },
+      },
       additionalProperties: false,
     },
     write: false,
@@ -429,24 +432,26 @@ const READ_TOOLS: ToolDef[] = [
       let q = db('providers as p')
         .where('p.account_id', ctx.account.id)
         .select(
-          'p.name', 'p.provider_type', 'p.organisation', 'p.phone', 'p.email', 'p.address', 'p.also_known_as',
+          'p.name', 'p.kind', 'p.provider_type', 'p.organisation', 'p.phone', 'p.email', 'p.address', 'p.also_known_as',
           db.raw(`(SELECT string_agg(cp.full_name, ', ' ORDER BY cp.full_name) FROM care_profile_providers cpp JOIN care_profiles cp ON cp.id = cpp.care_profile_id WHERE cpp.provider_id = p.id) AS linked`),
           db.raw('(SELECT count(*)::int FROM providers m WHERE m.practice_id = p.id) AS member_count'),
         )
         .orderBy('p.name', 'asc')
         .limit(100);
+      if (args['kind'] === 'organisation' || args['kind'] === 'person') q = q.where('p.kind', args['kind'] as string);
       if (search) {
         q = q.where((w) => {
           w.whereILike('p.name', `%${search}%`).orWhereILike('p.organisation', `%${search}%`).orWhereILike('p.provider_type', `%${search}%`).orWhereRaw("array_to_string(p.also_known_as, ' ') ilike ?", [`%${search}%`]);
         });
       }
       const rows = await q;
-      if (rows.length === 0) return search ? `No providers match "${search}".` : 'The provider directory is empty.';
+      if (rows.length === 0) return search ? `Nothing in the directory matches "${search}".` : 'The directory has no organisations or professionals yet.';
       const label = (t: string) => BUILT_IN_PROVIDER_TYPES.find((b) => b.value === t)?.label ?? t;
       return rows
         .map((r) => {
           const parts = [
             `${r.name}`,
+            r.kind === 'organisation' ? 'organisation' : 'professional',
             `type: ${label(r.provider_type)}`,
             r.also_known_as?.length ? `also known as: ${r.also_known_as.join(', ')}` : null,
             r.organisation ? `based at: ${r.organisation}` : null,
@@ -466,15 +471,15 @@ const READ_TOOLS: ToolDef[] = [
 const ACCOUNT_TOOLS: ToolDef[] = [
   {
     name: 'add_to_practice',
-    title: 'File someone at their practice',
-    description: 'File a practitioner at a clinic or practice in the directory, e.g. "add Dr Carly Examplename to Health Hub Morayfield". Either side is found by name or filed if new, and the practitioner shares the practice\'s address. Saying it twice changes nothing. Does not link them to anyone; use add_provider for that.',
+    title: 'File someone at their organisation',
+    description: 'File a professional, or a smaller organisation such as a clinic, at an organisation in the directory, e.g. "add Dr Carly Examplename to Health Hub Morayfield". Either side is found by name or filed if new, and whoever is filed there shares its address. Saying it twice changes nothing. Does not link them to anyone; use add_provider for that.',
     inputSchema: {
       type: 'object',
       properties: {
         practitioner: { type: 'string', description: 'Their name, e.g. "Dr Carly Examplename".' },
-        practice: { type: 'string', description: 'The clinic or practice they are based at, e.g. "Neuro Clinic" or "Health Hub Morayfield".' },
-        part_of: { type: 'string', description: 'The bigger place that clinic or practice is inside, if any, e.g. "Health Hub Morayfield". It is filed there too.' },
-        provider_type: { type: 'string', description: 'What kind of provider they are, in plain words, e.g. "GP", "Neurologist", "Physiotherapist".' },
+        practice: { type: 'string', description: 'The organisation they are based at, e.g. "Neuro Clinic", "Health Hub Morayfield" or "Department of Justice".' },
+        part_of: { type: 'string', description: 'The bigger organisation that one is inside, if any, e.g. "Health Hub Morayfield". It is filed there too.' },
+        provider_type: { type: 'string', description: 'What kind of professional they are, in plain words, e.g. "GP", "Neurologist", "Caseworker".' },
         phone: { type: 'string' },
         email: { type: 'string' },
       },
@@ -486,7 +491,7 @@ const ACCOUNT_TOOLS: ToolDef[] = [
       const str = (k: string) => (typeof args[k] === 'string' && (args[k] as string).trim() ? (args[k] as string).trim() : null);
       const practitioner = str('practitioner');
       const practice = str('practice');
-      if (!practitioner || !practice) return 'Nothing was saved: both the practitioner and the practice need a name.';
+      if (!practitioner || !practice) return 'Nothing was saved: both who is being filed and the organisation need a name.';
       const { outcome } = await addPracticeMember(ctx.account.id, practitioner, practice, {
         part_of: str('part_of'),
         provider_type: str('provider_type'),

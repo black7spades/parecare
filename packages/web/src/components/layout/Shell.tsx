@@ -23,7 +23,7 @@ import { SortableNavGroup, type NavItemDef } from './SortableNavGroup';
 import { navHeadingClass, navLinkClass } from './navStyles';
 import { VersionBadge } from './VersionBadge';
 import { RouteFallback } from './RouteFallback';
-import { ActivityIcon, AssetIcon, CheckIcon, ChartIcon, MapPinIcon, PawIcon, StethoscopeIcon, StoreIcon, UsersIcon } from '../ui/icons';
+import { ActivityIcon, AssetIcon, BuildingIcon, CheckIcon, ChartIcon, MapPinIcon, PawIcon, StethoscopeIcon, StoreIcon, UsersIcon } from '../ui/icons';
 
 interface PinnedProfile {
   id: string;
@@ -40,7 +40,8 @@ interface PinnedProfile {
 const DIRECTORY_NAV: NavItemDef[] = [
   { key: 'people', label: 'People', to: '/app/directory/people', icon: <UsersIcon size={16} /> },
   { key: 'pets', label: 'Pets', to: '/app/directory/pets', icon: <PawIcon size={16} /> },
-  { key: 'providers', label: 'Providers', to: '/app/directory/providers', icon: <StethoscopeIcon size={16} /> },
+  { key: 'organisations', label: 'Organisations', to: '/app/directory/organisations', icon: <BuildingIcon size={16} /> },
+  { key: 'professionals', label: 'Professionals', to: '/app/directory/professionals', icon: <StethoscopeIcon size={16} /> },
   { key: 'suppliers', label: 'Suppliers', to: '/app/directory/suppliers', icon: <StoreIcon size={16} /> },
   { key: 'assets', label: 'Assets', to: '/app/directory/assets', icon: <AssetIcon size={16} /> },
   { key: 'addresses', label: 'Addresses', to: '/app/directory/addresses', icon: <MapPinIcon size={16} /> },

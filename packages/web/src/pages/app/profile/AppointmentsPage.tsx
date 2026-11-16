@@ -233,7 +233,7 @@ export function AppointmentsPage() {
                 <th className="px-3 py-2">When</th>
                 <th className="px-3 py-2">Appointment</th>
                 <th className="px-3 py-2">Kind</th>
-                <th className="px-3 py-2 hidden md:table-cell">Provider</th>
+                <th className="px-3 py-2 hidden md:table-cell">With</th>
                 <th className="px-3 py-2 hidden lg:table-cell">Location</th>
                 <th className="px-3 py-2">Status</th>
                 {canEdit ? <th className="px-3 py-2 text-right">Actions</th> : null}
@@ -525,9 +525,9 @@ export function AppointmentEditor({
           </label>
           <div>
             <label className="block">
-              <span className="block text-sm font-medium text-ink mb-1">Provider</span>
+              <span className="block text-sm font-medium text-ink mb-1">With</span>
               <select className={inputClass} value={providerId} onChange={(e) => handleProviderChange(e.target.value)}>
-                <option value="">No provider linked</option>
+                <option value="">Nobody linked</option>
                 {providers.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
@@ -538,7 +538,7 @@ export function AppointmentEditor({
                 <input
                   type="text"
                   className={inputClass}
-                  placeholder="Or type a new provider name"
+                  placeholder="Or type a new name"
                   value={providerName}
                   onChange={(e) => { setProviderName(e.target.value); setShowSaveProvider(false); }}
                   onBlur={handleProviderNameBlur}
@@ -563,7 +563,7 @@ export function AppointmentEditor({
             placeholder="e.g. Suite 4, 12 High St or a map link"
             value={location}
             onChange={(e) => setLocation(e.target.value)}
-            hint={providerId ? 'Auto-filled from provider. Edit if different.' : undefined}
+            hint={providerId ? 'Filled in from who it is with. Edit if different.' : undefined}
           />
           <Input
             label="Start date"

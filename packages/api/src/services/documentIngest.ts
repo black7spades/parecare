@@ -110,7 +110,7 @@ CRITICAL: the key is "type" (never "action"), the JSON must be valid, one object
 
 The action types you can use here and their fields:
 - {"type": "add_asset", "name" (required), "category"?, "make_model"?, "serial_number"?, "price"? (number), "purchase_date"? ("YYYY-MM-DD"), "supplier"? (who sold it), "warranty_expiry"? ("YYYY-MM-DD"), "condition"?, "location"?, "useful_life_years"? (number), "notes"?}
-- {"type": "add_provider", "provider_type": one of gp | specialist | pharmacy | care_facility | allied_health | legal | financial | social_worker | other, "name" (required), "organisation"?, "phone"?, "email"?}
+- {"type": "add_provider", "kind"?: "organisation" for a clinic, hospital, pharmacy, government department, agency or other body, "person" for a professional such as a doctor or caseworker, "provider_type": for a professional gp | specialist | psychologist | allied_health | legal | financial | social_worker or plain words such as "Neurologist"; for an organisation practice | clinic | pharmacy | care_facility or plain words such as "Hospital" or "Government department", "name" (required), "organisation"? (the organisation they are based at), "phone"?, "email"?}
 - {"type": "add_medication", "medication_name" (required), "dose"?, "route"?, "frequency"?, "instructions"?}
 - {"type": "add_task", "title" (required), "body"?, "due_at" (ISO time), "repeat": once | daily | weekly | monthly}
 - {"type": "log_event", "entry_type": visit | medical_appointment | observation | handover, "title"?, "body"?, "occurred_at"? (ISO time)}

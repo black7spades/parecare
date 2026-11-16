@@ -1,5 +1,5 @@
 import { db } from '../config/database';
-import { PLACE_TYPES, isBuiltInProviderType, normaliseProviderType, placeTypeFromName } from '../lib/providerTypes';
+import { isBuiltInProviderType, kindFor, normaliseProviderType, placeTypeFromName, type ProviderKind } from '../lib/providerTypes';
 import { resolveOptions } from '../routes/optionCatalogue';
 import { sameName } from '../lib/providerNames';
 import type { Knex } from 'knex';
@@ -41,6 +41,7 @@ type ProviderRow = Record<string, unknown> & {
   name: string;
   practice_id: string | null;
   provider_type: string;
+  kind?: ProviderKind;
 };
 
 function addressCopy(practice: Record<string, unknown>): Record<string, unknown> {
@@ -53,20 +54,43 @@ function addressCopy(practice: Record<string, unknown>): Record<string, unknown>
 const hasOwnAddressParts = (data: Record<string, unknown>) =>
   PARTS.some((k) => typeof data[k] === 'string' && (data[k] as string).trim() !== '');
 
-/** Store a provider type, adding a new one to the shared list. */
-export async function storeProviderType(input: string | null | undefined, accountId?: string): Promise<string> {
+/**
+ * Store a type, adding a new one to the shared list for its kind: kinds of
+ * organisation and kinds of professional are offered apart.
+ */
+export async function storeProviderType(
+  input: string | null | undefined,
+  accountId?: string,
+  kind: ProviderKind = 'person'
+): Promise<string> {
   const value = normaliseProviderType(input);
-  if (!isBuiltInProviderType(value)) await resolveOptions('provider_type', [value], accountId);
+  if (!isBuiltInProviderType(value)) await resolveOptions(kind === 'organisation' ? 'organisation_type' : 'provider_type', [value], accountId);
   return value;
+}
+
+/**
+ * Whether a new record is an organisation or a professional, when nobody
+ * said: from its type (including the kinds people have filed organisations
+ * under) and its name.
+ */
+export async function inferKind(type: string | null | undefined, name: string | null | undefined): Promise<ProviderKind> {
+  const t = String(type ?? '').trim();
+  let orgTypes: Set<string> | undefined;
+  if (t && !isBuiltInProviderType(t)) {
+    const hit = await db('option_catalogue').where({ category: 'organisation_type' }).whereRaw('lower(name) = lower(?)', [t]).first();
+    const asPerson = await db('option_catalogue').where({ category: 'provider_type' }).whereRaw('lower(name) = lower(?)', [t]).first();
+    if (hit && !asPerson) orgTypes = new Set([t.toLowerCase()]);
+  }
+  return kindFor(t, name, orgTypes);
 }
 
 /** The practice in an account with this name, ignoring case and spacing. */
 export async function findPracticeByName(accountId: string, name: string): Promise<ProviderRow | undefined> {
   const clean = name.trim().replace(/\s+/g, ' ');
   if (!clean) return undefined;
-  const exact: ProviderRow | undefined = await whereNamed(db('providers').where({ account_id: accountId }), clean)
-    // Prefer something filed as a place over a person who happens to share the name.
-    .orderByRaw(`CASE WHEN provider_type IN (${PLACE_TYPES.map(() => '?').join(', ')}) THEN 0 ELSE 1 END`, PLACE_TYPES)
+  // Only an organisation is somewhere to be based, never a professional who
+  // happens to share the name.
+  const exact: ProviderRow | undefined = await whereNamed(db('providers').where({ account_id: accountId, kind: 'organisation' }), clean)
     .orderBy('created_at', 'asc')
     .first();
   if (exact) return exact;
@@ -74,8 +98,7 @@ export async function findPracticeByName(accountId: string, name: string): Promi
   // for "Health Hub Morayfield"): use it when exactly one place fits, rather
   // than filing a second copy.
   const places: ProviderRow[] = await db('providers')
-    .where({ account_id: accountId })
-    .whereIn('provider_type', PLACE_TYPES)
+    .where({ account_id: accountId, kind: 'organisation' })
     .select('*')
     .limit(2000);
   const close = places.filter((p) => [p.name, ...(((p['also_known_as'] as string[] | null) ?? []))].some((n) => sameName(n, clean)));
@@ -89,8 +112,9 @@ export async function findOrCreatePractice(
 ): Promise<{ practice: ProviderRow; created: boolean }> {
   const existing = await findPracticeByName(accountId, name);
   if (existing) return { practice: existing, created: false };
+  const type = await storeProviderType(placeTypeFromName(name), accountId, 'organisation');
   const [practice] = await db('providers')
-    .insert({ account_id: accountId, provider_type: placeTypeFromName(name), name: name.trim().replace(/\s+/g, ' ') })
+    .insert({ account_id: accountId, kind: 'organisation', provider_type: type, name: name.trim().replace(/\s+/g, ' ') })
     .returning('*');
   return { practice: practice as ProviderRow, created: true };
 }
@@ -141,6 +165,10 @@ export async function practiceColumns(
     const named = (input.practice_name ?? input.organisation ?? '').trim();
     if (input.practice_id) {
       practice = await db('providers').where({ id: input.practice_id, account_id: accountId }).first();
+      // Somewhere people are based is an organisation, whatever it was filed as.
+      if (practice && practice['kind'] !== 'organisation') {
+        await db('providers').where({ id: practice.id }).update({ kind: 'organisation' });
+      }
     }
     if (!practice && named) {
       const found = await findOrCreatePractice(accountId, named);
@@ -254,10 +282,15 @@ export async function addPracticeMember(
     return { outcome: `${outcome}${filedPractice}`, practitionerId: existing.id, practiceId: practice.id };
   }
 
-  const type = await storeProviderType(details.provider_type ?? (/^dr\.?\s/i.test(name) ? 'gp' : 'other'), accountId);
+  // "Add Neuro Clinic to Health Hub Morayfield" files an organisation inside
+  // the hub; "add Dr Carly Examplename" files a professional there.
+  const kind = await inferKind(details.provider_type, name);
+  const fallbackType = kind === 'organisation' ? placeTypeFromName(name) : /^dr\.?\s/i.test(name) ? 'Doctor' : 'other';
+  const type = await storeProviderType(details.provider_type ?? fallbackType, accountId, kind);
   const [row] = await db('providers')
     .insert({
       account_id: accountId,
+      kind,
       provider_type: type,
       name,
       phone: details.phone ?? null,
@@ -288,7 +321,9 @@ async function attachToPractice(
   if (!ownAddress || existing['uses_practice_address']) Object.assign(update, { uses_practice_address: true, ...addressCopy(practice) });
   if (details.phone && !existing['phone']) update['phone'] = details.phone;
   if (details.email && !existing['email']) update['email'] = details.email;
-  if (details.provider_type) update['provider_type'] = await storeProviderType(details.provider_type, existing.account_id);
+  if (details.provider_type) {
+    update['provider_type'] = await storeProviderType(details.provider_type, existing.account_id, (existing['kind'] as ProviderKind) ?? 'person');
+  }
   await db('providers').where({ id: existing.id }).update(update);
   return `${existing.name} is now based at ${practice.name}.`;
 }
@@ -311,6 +346,10 @@ export async function removePracticeMember(practiceId: string, memberId: string)
 }
 
 /** The people filed at a practice, for showing on its record. */
-export async function practiceMembers(practiceId: string): Promise<Array<{ id: string; name: string; provider_type: string }>> {
-  return db('providers').where({ practice_id: practiceId }).select('id', 'name', 'provider_type').orderBy('name', 'asc');
+export async function practiceMembers(practiceId: string): Promise<Array<{ id: string; name: string; provider_type: string; kind: ProviderKind }>> {
+  return db('providers')
+    .where({ practice_id: practiceId })
+    .select('id', 'name', 'provider_type', 'kind')
+    .orderByRaw("CASE WHEN kind = 'organisation' THEN 0 ELSE 1 END")
+    .orderBy('name', 'asc');
 }

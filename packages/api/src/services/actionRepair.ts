@@ -39,7 +39,7 @@ export const PROFILE_ACTION_REFERENCE = [
   '- {"type":"add_allergy","substance":required,"reaction":optional}',
   '- {"type":"add_condition","name":required,"status":optional,"notes":optional}',
   '- {"type":"raise_question","title":required,"body":optional}',
-  '- {"type":"add_provider","provider_type":"gp|specialist|pharmacy|practice|care_facility|allied_health or plain words such as Neurologist","name":required,"organisation":"the practice they work at, optional","phone":optional}',
+  '- {"type":"add_provider","kind":"organisation or person, optional","provider_type":"gp|specialist|legal|social_worker for a professional, practice|clinic|pharmacy|care_facility for an organisation, or plain words such as Neurologist or Government department","name":required,"organisation":"the organisation they are based at, optional","phone":optional}',
   '- {"type":"add_substance","substance":required,"status":optional,"frequency":optional}',
   '- {"type":"book_appointment","title":required,"appointment_type":"consultation|test|procedure|therapy|review|vaccination|other","provider_name":optional,"location":optional,"starts_at":ISO,"ends_at":optional ISO,"notes":optional,"cost_estimate":optional number} for an appointment being made, never a log entry',
   '- {"type":"update_appointment","title":its current title, then any of "new_title","provider_name","location","starts_at" (to move it),"ends_at","status":"scheduled|completed|cancelled|missed","notes","cost_actual"}',

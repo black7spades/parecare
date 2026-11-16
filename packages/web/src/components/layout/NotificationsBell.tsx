@@ -39,7 +39,7 @@ const ENTITY_TARGETS: Record<string, { page: string; noun: string }> = {
   conditions: { page: '', noun: 'a condition' },
   questions: { page: 'questions', noun: 'a question' },
   documents: { page: 'documents', noun: 'a document' },
-  providers: { page: 'providers', noun: 'a provider' },
+  providers: { page: 'providers', noun: 'a contact' },
   reminders: { page: 'tasks', noun: 'a task' },
   medications: { page: 'medications', noun: 'a treatment' },
   treatments: { page: 'medications', noun: 'a treatment' },

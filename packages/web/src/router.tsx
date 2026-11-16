@@ -26,7 +26,7 @@ import { ProvidersPage } from './pages/app/profile/ProvidersPage';
 import { TreatmentsPage } from './pages/app/profile/TreatmentsPage';
 import { SubstanceUsePage } from './pages/app/profile/SubstanceUsePage';
 import { ActivityPage } from './pages/app/profile/ActivityPage';
-import { DirectoryProvidersPage } from './pages/app/DirectoryProvidersPage';
+import { DirectoryOrganisationsPage, DirectoryProfessionalsPage } from './pages/app/DirectoryProvidersPage';
 import { DirectorySuppliersPage } from './pages/app/DirectorySuppliersPage';
 import { DirectoryAssetsPage } from './pages/app/DirectoryAssetsPage';
 import { UpdatesPage } from './pages/app/UpdatesPage';
@@ -140,7 +140,10 @@ export const router = createBrowserRouter([
       { path: 'app/profiles/new', element: <NewCareProfile /> },
       { path: 'app/directory/people', element: <DirectoryPeoplePage /> },
       { path: 'app/directory/pets', element: <DirectoryPetsPage /> },
-      { path: 'app/directory/providers', element: <DirectoryProvidersPage /> },
+      { path: 'app/directory/organisations', element: <DirectoryOrganisationsPage /> },
+      { path: 'app/directory/professionals', element: <DirectoryProfessionalsPage /> },
+      // The old single list: old links and bookmarks land on Professionals.
+      { path: 'app/directory/providers', element: <Navigate to="/app/directory/professionals" replace /> },
       { path: 'app/directory/suppliers', element: <DirectorySuppliersPage /> },
       { path: 'app/directory/assets', element: <DirectoryAssetsPage /> },
       { path: 'app/directory/addresses', element: <DirectoryAddressesPage /> },

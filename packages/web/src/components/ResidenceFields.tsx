@@ -187,7 +187,7 @@ export function ResidenceFields({
               <Input label="Facility name" value={value.new_facility_name} onChange={(e) => set({ new_facility_name: e.target.value })} placeholder="e.g. Regis Aged Care" />
               <Input label="Facility phone" type="tel" value={value.new_facility_phone} onChange={(e) => set({ new_facility_phone: e.target.value })} />
               <AddressFields value={value.new_facility_address} onChange={(a) => set({ new_facility_address: a })} findLabel="Find facility address" />
-              <p className="text-xs text-muted">The facility is saved as a provider and linked to this person.</p>
+              <p className="text-xs text-muted">The facility is saved as an organisation and linked to this person.</p>
             </div>
           ) : null}
 

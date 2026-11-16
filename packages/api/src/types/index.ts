@@ -277,6 +277,8 @@ export interface Provider {
   practice_id: string | null;
   /** Whether this provider's address is kept as a copy of the practice's. */
   uses_practice_address: boolean;
+  /** An organisation (a clinic, a department) or a professional (a doctor, a caseworker). */
+  kind: 'organisation' | 'person';
   created_at: string | Date;
 }
 

@@ -143,7 +143,7 @@ export function CareNeedsPage() {
 
       <div className="card">
         <h3 className="text-sm font-semibold text-ink">Emergency contacts</h3>
-        <p className="text-sm text-muted mb-3">Who to call first, picked from the care circle and providers.</p>
+        <p className="text-sm text-muted mb-3">Who to call first, picked from the care circle and their contacts.</p>
         <EmergencyContactsTable
           profileId={profile.id}
           contacts={plan.emergency_contacts}
@@ -475,7 +475,7 @@ export function EmergencyContactsTable({
                 </optgroup>
               ) : null}
               {providers.length > 0 ? (
-                <optgroup label="Providers">
+                <optgroup label="Professionals and organisations">
                   {providers.map((p) => (
                     <option key={p.id} value={`provider:${p.id}`}>
                       {p.name}, {providerTypeLabel(p.provider_type)}

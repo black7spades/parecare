@@ -21,6 +21,9 @@ export const OPTION_CATEGORIES = [
   // Kinds of provider beyond the built-in few: Neurologist, Dentist, and
   // whatever else people type.
   'provider_type',
+  // Kinds of organisation: Health hub, Government department, and whatever
+  // else people type when filing an organisation.
+  'organisation_type',
 ] as const;
 
 export type OptionCategory = (typeof OPTION_CATEGORIES)[number];

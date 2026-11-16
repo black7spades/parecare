@@ -31,8 +31,8 @@ type Row = Record<string, unknown> & {
 };
 
 export interface DuplicatePair {
-  first: { id: string; name: string; provider_type: string; address: string | null };
-  second: { id: string; name: string; provider_type: string; address: string | null };
+  first: { id: string; name: string; provider_type: string; kind: string; address: string | null };
+  second: { id: string; name: string; provider_type: string; kind: string; address: string | null };
 }
 
 /** Pairs in one account that look like the same provider, not yet dismissed. */
@@ -44,7 +44,7 @@ export async function likelyDuplicates(accountId: string): Promise<DuplicatePair
     )
   );
   const names = (r: Row) => [r.name, ...(r.also_known_as ?? [])];
-  const brief = (r: Row) => ({ id: r.id, name: r.name, provider_type: r.provider_type, address: (r['address'] as string | null) ?? null });
+  const brief = (r: Row) => ({ id: r.id, name: r.name, provider_type: r.provider_type, kind: (r['kind'] as string) ?? 'person', address: (r['address'] as string | null) ?? null });
   const pairs: DuplicatePair[] = [];
   for (let i = 0; i < rows.length; i += 1) {
     for (let j = i + 1; j < rows.length; j += 1) {
@@ -145,6 +145,8 @@ export async function mergeProviders(
       if (clean && clean.toLowerCase() !== keep.name.trim().toLowerCase()) known.set(clean.toLowerCase(), clean);
     }
     update['also_known_as'] = [...known.values()];
+    // Others are now based at the kept record, so it is an organisation.
+    if (moved.based_here.length > 0) update['kind'] = 'organisation';
     await trx('providers').where({ id: keepId }).update(update);
 
     await trx('providers').where({ id: removeId }).delete();
