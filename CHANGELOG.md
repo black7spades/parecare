@@ -6,6 +6,17 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.32.0] - 2026-11-16
+
+### Added
+
+- **Contact details shared from the organisation.** Everyone based at an
+  organisation now uses its phone, email, booking link and directions, as
+  well as its address, whenever they have none of their own. Change the
+  organisation's phone once and everyone there has the new number. Type in a
+  doctor's own mobile and it stays theirs. An empty box shows what will be
+  used, and from where. Records already filed were filled in the same way.
+
 ## [0.31.0] - 2026-11-16
 
 ### Changed

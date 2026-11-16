@@ -80,9 +80,47 @@ export interface WorksAtValue {
   practiceAddress: string | null;
   /** Whether the practice has an address: null while not known. */
   practiceHasAddress: boolean | null;
+  /** The organisation's own contact details, offered to anyone based there. Null while not known. */
+  practiceContact: Partial<Record<SharedField, string | null>> | null;
 }
 
-export const emptyWorksAt: WorksAtValue = { practiceId: null, practiceName: '', practiceAddress: null, practiceHasAddress: null };
+/** Contact details everyone based at an organisation uses unless they have their own. */
+export const SHARED_FIELDS = ['phone', 'email', 'booking_link', 'directions_link'] as const;
+export type SharedField = (typeof SHARED_FIELDS)[number];
+
+const contactOf = (p: Partial<Record<SharedField, string | null>>) =>
+  Object.fromEntries(SHARED_FIELDS.map((f) => [f, p[f] ?? null])) as Record<SharedField, string | null>;
+
+export const emptyWorksAt: WorksAtValue = { practiceId: null, practiceName: '', practiceAddress: null, practiceHasAddress: null, practiceContact: null };
+
+/** What a contact box starts with: empty when the detail comes from where they are based. */
+export function ownValue(p: Provider | null, field: SharedField): string {
+  if (!p) return '';
+  if ((p.inherited_fields ?? []).includes(field)) return '';
+  return p[field] ?? '';
+}
+
+/**
+ * The hint inside an empty contact box for someone based at an
+ * organisation: what they get from it if the box stays empty.
+ */
+export function sharedPlaceholder(w: WorksAtValue, field: SharedField, fallback?: string): string | undefined {
+  const name = w.practiceName.trim();
+  if (!name) return fallback;
+  const theirs = w.practiceContact?.[field];
+  return theirs ? `${theirs}, from ${name}` : `From ${name}, once it has one`;
+}
+
+/** The line under the contact boxes, when based somewhere. */
+export function SharedContactNote({ worksAt }: { worksAt: WorksAtValue }) {
+  const name = worksAt.practiceName.trim();
+  if (!name) return null;
+  return (
+    <p className="text-xs text-muted">
+      Leave the phone, email, booking link or directions empty to use {name}&apos;s, and they change whenever {name}&apos;s do. Type one in to use their own instead.
+    </p>
+  );
+}
 
 /** Read where a saved provider works. */
 export function worksAtFrom(p: Provider | null): WorksAtValue {
@@ -92,6 +130,7 @@ export function worksAtFrom(p: Provider | null): WorksAtValue {
     practiceName: p.organisation,
     practiceAddress: p.uses_practice_address ? p.address : null,
     practiceHasAddress: p.uses_practice_address ? !!p.address : null,
+    practiceContact: null,
   };
 }
 
@@ -136,16 +175,24 @@ export function WorksAtField({
     ...(text.trim() && !exact ? [{ key: 'new', label: `File "${text.trim()}" as a new organisation`, detail: null, row: null }] : []),
   ];
 
-  // Editing a saved provider: look the practice up once, to learn its address.
+  // Editing a saved record: look the organisation up once, to learn its
+  // address and contact details.
   useEffect(() => {
-    if (!value.practiceId || value.practiceHasAddress !== null) return;
+    if (!value.practiceId || (value.practiceHasAddress !== null && value.practiceContact !== null)) return;
     let cancelled = false;
     void api
       .get<{ providers: SearchRow[] }>(`/providers/search?kind=organisation&q=${encodeURIComponent(value.practiceName.trim())}`)
       .then((res) => {
         if (cancelled) return;
         const hit = res.providers.find((p) => p.id === value.practiceId);
-        if (hit) onChange({ ...value, practiceAddress: hit.address, practiceHasAddress: !!hit.address });
+        if (hit) {
+          onChange({
+            ...value,
+            practiceAddress: value.practiceAddress ?? hit.address,
+            practiceHasAddress: !!hit.address,
+            practiceContact: contactOf(hit),
+          });
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -165,9 +212,9 @@ export function WorksAtField({
 
   const pick = (o: (typeof options)[number]) => {
     if (o.row) {
-      onChange({ practiceId: o.row.id, practiceName: o.row.name, practiceAddress: o.row.address, practiceHasAddress: !!o.row.address });
+      onChange({ practiceId: o.row.id, practiceName: o.row.name, practiceAddress: o.row.address, practiceHasAddress: !!o.row.address, practiceContact: contactOf(o.row) });
     } else {
-      onChange({ practiceId: null, practiceName: text.trim(), practiceAddress: null, practiceHasAddress: false });
+      onChange({ practiceId: null, practiceName: text.trim(), practiceAddress: null, practiceHasAddress: false, practiceContact: {} });
     }
     setOpen(false);
   };
@@ -185,7 +232,7 @@ export function WorksAtField({
         className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
         value={text}
         onChange={(e) => {
-          onChange({ practiceId: null, practiceName: e.target.value, practiceAddress: null, practiceHasAddress: e.target.value.trim() ? false : null });
+          onChange({ practiceId: null, practiceName: e.target.value, practiceAddress: null, practiceHasAddress: e.target.value.trim() ? false : null, practiceContact: {} });
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}

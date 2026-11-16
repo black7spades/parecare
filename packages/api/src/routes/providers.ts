@@ -9,6 +9,7 @@ import {
   practiceMembers,
   removePracticeMember,
   inferKind,
+  inheritContact,
   storeProviderType,
   syncPracticeMembers,
 } from '../services/providerPractices';
@@ -89,7 +90,7 @@ const PROVIDER_COLS = [
   'p.id', 'p.account_id', 'p.kind', 'p.provider_type', 'p.name', 'p.organisation',
   'p.phone', 'p.email', 'p.address',
   'p.address_line1', 'p.address_line2', 'p.address_suburb', 'p.address_state', 'p.address_postcode', 'p.address_country',
-  'p.booking_link', 'p.directions_link', 'p.practice_id', 'p.uses_practice_address', 'p.also_known_as',
+  'p.booking_link', 'p.directions_link', 'p.practice_id', 'p.uses_practice_address', 'p.also_known_as', 'p.inherited_fields',
   'p.created_at', 'cpp.poa_type', 'cpp.poa_activated', 'cpp.primary_contact_member_id',
   db.raw('(SELECT count(*)::int FROM providers m WHERE m.practice_id = p.id) AS member_count'),
 ] as const;
@@ -150,7 +151,13 @@ export async function providerWriteColumns(
   }
   const composed = withComposedAddress(own);
   const { columns, note } = await practiceColumns(accountId, practice, composed, selfId);
-  return { columns: { ...composed, ...columns }, note: [kindNote, note].filter(Boolean).join(' ') || null };
+  // Contact details shared from where they are based: an empty one uses the
+  // organisation's and follows it from then on.
+  const self = selfId ? await db('providers').where({ id: selfId }).first() : null;
+  const practiceId = 'practice_id' in columns ? (columns['practice_id'] as string | null) : (self?.practice_id ?? null);
+  const practiceRow = practiceId ? await db('providers').where({ id: practiceId }).first() : null;
+  const contact = inheritContact(practiceRow, composed, self);
+  return { columns: { ...composed, ...columns, ...contact }, note: [kindNote, note].filter(Boolean).join(' ') || null };
 }
 
 const linkSchema = z.object({
