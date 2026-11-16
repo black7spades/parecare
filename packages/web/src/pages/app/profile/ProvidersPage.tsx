@@ -1,7 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
-import { AddressFields, addressFrom, addressPayload, emptyAddress, type AddressValue } from '../../../components/AddressFields';
+import { addressFrom, addressPayload, emptyAddress, type AddressValue } from '../../../components/AddressFields';
+import {
+  PracticeAddress,
+  PracticeMembers,
+  ProviderTypeField,
+  WorksAtField,
+  isPlace,
+  practicePayload,
+  worksAtFrom,
+  type WorksAtValue,
+} from '../../../components/ProviderFields';
 import { DataToolbar } from '../../../components/data/DataToolbar';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { Button } from '../../../components/ui/Button';
@@ -12,9 +22,7 @@ import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
 import { PagePurpose } from '../../../components/PagePurpose';
 import {
-  PROVIDER_TYPES,
   POA_TYPES,
-  customProviderTypes,
   providerTypeFilterOptions,
   providerTypeLabel,
   type Provider,
@@ -24,6 +32,7 @@ import { useProfile } from './ProfileLayout';
 const SORTS: DataSort<Provider>[] = [
   { key: 'name', label: 'Name', compare: (a, b) => a.name.localeCompare(b.name) },
   { key: 'type', label: 'Type', compare: (a, b) => providerTypeLabel(a.provider_type).localeCompare(providerTypeLabel(b.provider_type)) },
+  { key: 'works_at', label: 'Works at', compare: (a, b) => (a.organisation ?? '').localeCompare(b.organisation ?? '') },
 ];
 
 
@@ -166,7 +175,12 @@ export function ProvidersPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <h3 className="text-sm font-semibold text-ink">{p.name}</h3>
-                      {p.organisation ? <p className="text-xs text-muted">{p.organisation}</p> : null}
+                      {p.organisation ? <p className="text-xs text-muted">Works at {p.organisation}</p> : null}
+                      {p.member_count ? (
+                        <p className="text-xs text-muted">
+                          {p.member_count} {p.member_count === 1 ? 'person works' : 'people work'} here
+                        </p>
+                      ) : null}
                     </div>
                     <div className="flex flex-col items-end gap-1">
                       <span className="badge bg-surface-2 text-muted text-xs">{providerTypeLabel(p.provider_type)}</span>
@@ -234,7 +248,7 @@ export function ProvidersPage() {
         profileId={profile.id}
         open={editorOpen}
         provider={editing}
-        typeSuggestions={customProviderTypes(providers)}
+        canEdit={canEdit}
         onClose={() => { setEditorOpen(false); setBulkEditQueue([]); }}
         onSaved={() => {
           invalidate();
@@ -352,21 +366,22 @@ function ProviderEditor({
   profileId,
   open,
   provider,
-  typeSuggestions,
+  canEdit,
   onClose,
   onSaved,
 }: {
   profileId: string;
   open: boolean;
   provider: Provider | null;
-  typeSuggestions: string[];
+  canEdit: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const queryClient = useQueryClient();
   const [type, setType] = useState('gp');
-  const [customType, setCustomType] = useState('');
   const [name, setName] = useState('');
-  const [organisation, setOrganisation] = useState('');
+  const [worksAt, setWorksAt] = useState<WorksAtValue>(worksAtFrom(null));
+  const [sharesAddress, setSharesAddress] = useState(true);
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState<AddressValue>(emptyAddress);
@@ -377,12 +392,10 @@ function ProviderEditor({
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const pt = provider?.provider_type ?? 'gp';
-    const isKnown = PROVIDER_TYPES.some((t) => t.value === pt);
-    setType(isKnown ? pt : 'other');
-    setCustomType(isKnown ? '' : pt);
+    setType(provider?.provider_type ?? 'gp');
     setName(provider?.name ?? '');
-    setOrganisation(provider?.organisation ?? '');
+    setWorksAt(worksAtFrom(provider));
+    setSharesAddress(provider ? !!provider.uses_practice_address || !provider.organisation : true);
     setPhone(provider?.phone ?? '');
     setEmail(provider?.email ?? '');
     setAddress(provider ? addressFrom(provider) : emptyAddress);
@@ -396,12 +409,12 @@ function ProviderEditor({
   const mutation = useMutation({
     mutationFn: () => {
       const body = {
-        provider_type: type === 'other' && customType.trim() ? customType.trim() : type,
+        provider_type: type,
         name: name.trim(),
-        organisation: organisation.trim() || null,
         phone: phone.trim() || null,
         email: email.trim() || null,
         ...addressPayload(address),
+        ...practicePayload(worksAt, sharesAddress),
         booking_link: bookingLink.trim() || null,
         directions_link: directionsLink.trim() || null,
         poa_type: poaType || null,
@@ -425,48 +438,20 @@ function ProviderEditor({
           if (name.trim()) mutation.mutate();
         }}
       >
-        <div>
-          <label htmlFor="provider-type" className="block text-sm font-medium text-ink mb-1">
-            Type
-          </label>
-          <select
-            id="provider-type"
-            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-            value={type}
-            onChange={(e) => setType(e.target.value)}
-          >
-            {PROVIDER_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-          {type === 'other' ? (
-            <>
-              <Input
-                label="Custom type"
-                placeholder="e.g. Naturopath, Osteopath"
-                value={customType}
-                onChange={(e) => setCustomType(e.target.value)}
-                className="mt-2"
-                list="custom-provider-types"
-                hint={typeSuggestions.length > 0 ? 'Pick an existing custom type to reuse it, or type a new one.' : undefined}
-              />
-              <datalist id="custom-provider-types">
-                {typeSuggestions.map((t) => (
-                  <option key={t} value={t} />
-                ))}
-              </datalist>
-            </>
-          ) : null}
-        </div>
+        <ProviderTypeField key={`type-${provider?.id ?? 'new'}`} id="provider-type" value={type} onChange={setType} />
         <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
-        <Input label="Organisation" value={organisation} onChange={(e) => setOrganisation(e.target.value)} />
+        <WorksAtField id="provider-works-at" value={worksAt} onChange={setWorksAt} excludeId={provider?.id} />
         <div className="grid grid-cols-2 gap-2">
           <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
           <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
-        <AddressFields value={address} onChange={setAddress} />
+        <PracticeAddress
+          worksAt={worksAt}
+          sharesAddress={sharesAddress}
+          onSharesAddress={setSharesAddress}
+          address={address}
+          onAddress={setAddress}
+        />
         <div className="grid grid-cols-2 gap-2">
           <Input label="Booking link" type="url" placeholder="https://…" value={bookingLink} onChange={(e) => setBookingLink(e.target.value)} />
           <Input label="Directions" type="url" placeholder="https://…" value={directionsLink} onChange={(e) => setDirectionsLink(e.target.value)} />
@@ -524,6 +509,19 @@ function ProviderEditor({
           </Button>
         </div>
       </form>
+      {provider && (isPlace(provider) || type === 'practice') ? (
+        <div className="mt-4">
+          <PracticeMembers
+            basePath={`/care-profiles/${profileId}/providers/${provider.id}`}
+            practiceName={provider.name}
+            canEdit={canEdit}
+            onChanged={() => void queryClient.invalidateQueries({ queryKey: ['providers', profileId] })}
+          />
+        </div>
+      ) : null}
+      {!provider && type === 'practice' ? (
+        <p className="mt-3 text-xs text-muted">Once this practice is saved, open it again to add the people who work here.</p>
+      ) : null}
     </Modal>
   );
 }

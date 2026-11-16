@@ -1,7 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import { AddressFields, addressFrom, addressPayload, emptyAddress, type AddressValue } from '../../components/AddressFields';
+import { addressFrom, addressPayload, emptyAddress, type AddressValue } from '../../components/AddressFields';
+import {
+  PracticeAddress,
+  PracticeMembers,
+  ProviderTypeField,
+  WorksAtField,
+  isPlace,
+  practicePayload,
+  worksAtFrom,
+  type WorksAtValue,
+} from '../../components/ProviderFields';
 import { ImportExport } from '../../components/ImportExport';
 import { EditableSubheader } from '../../components/ui/EditableSubheader';
 import { DataToolbar } from '../../components/data/DataToolbar';
@@ -12,10 +22,9 @@ import { LinkIcon, PencilIcon, TrashIcon } from '../../components/ui/icons';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
 import {
-  PROVIDER_TYPES,
-  customProviderTypes,
   providerTypeFilterOptions,
   providerTypeLabel,
+  type PracticeMember,
   type Provider,
 } from '../../lib/care';
 
@@ -27,11 +36,14 @@ interface LinkedProfile {
 interface DirectoryProvider extends Provider {
   account_id: string;
   linked_profiles: LinkedProfile[] | null;
+  members: PracticeMember[] | null;
 }
 
 const SORTS: DataSort<DirectoryProvider>[] = [
   { key: 'name', label: 'Name', compare: (a, b) => a.name.localeCompare(b.name) },
   { key: 'type', label: 'Type', compare: (a, b) => providerTypeLabel(a.provider_type).localeCompare(providerTypeLabel(b.provider_type)) },
+  { key: 'works_at', label: 'Works at', compare: (a, b) => (a.organisation ?? '').localeCompare(b.organisation ?? '') },
+  { key: 'members', label: 'People here', compare: (a, b) => (b.members?.length ?? 0) - (a.members?.length ?? 0) },
   { key: 'phone', label: 'Phone', compare: (a, b) => (a.phone ?? '').localeCompare(b.phone ?? '') },
   { key: 'address', label: 'Address', compare: (a, b) => (a.address ?? '').localeCompare(b.address ?? '') },
   { key: 'profiles', label: 'Linked profiles', compare: (a, b) => (b.linked_profiles?.length ?? 0) - (a.linked_profiles?.length ?? 0) },
@@ -61,6 +73,14 @@ export function DirectoryProvidersPage() {
       label: 'Type',
       options: providerTypeFilterOptions(providers),
       match: (row, value) => row.provider_type === value,
+    },
+    {
+      key: 'works_at',
+      label: 'Works at',
+      options: [...new Set(providers.map((p) => p.organisation).filter((o): o is string => !!o))]
+        .sort((a, b) => a.localeCompare(b))
+        .map((o) => ({ value: o, label: o })),
+      match: (row, value) => row.organisation === value,
     },
   ];
 
@@ -103,8 +123,8 @@ export function DirectoryProvidersPage() {
             resource="providers"
             canImport={canEdit}
             onImported={invalidate}
-            templateHeaders={['Name', 'Type', 'Organisation', 'Phone', 'Email', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country', 'Booking link', 'Directions']}
-            templateSample={['Dr Jane Smith', 'gp', 'City Medical', '07 5555 5555', 'jane@example.com', '1 Main St', '', 'Morayfield', 'QLD', '4506', 'Australia', '', '']}
+            templateHeaders={['Name', 'Type', 'Works at', 'Phone', 'Email', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country', 'Booking link', 'Directions']}
+            templateSample={['Dr Jane Smith', 'GP', 'City Medical', '07 5555 5555', 'jane@example.com', '1 Main St', '', 'Morayfield', 'QLD', '4506', 'Australia', '', '']}
           />
           {canEdit ? (
             <Button onClick={() => { setEditing(null); setEditorOpen(true); }}>
@@ -150,8 +170,14 @@ export function DirectoryProvidersPage() {
       {isLoading ? (
         <p className="text-sm text-muted">Loading…</p>
       ) : providers.length === 0 ? (
-        <div className="card text-center py-10">
-          <p className="text-sm text-muted">No providers in the directory yet.</p>
+        <div className="card text-center py-10 space-y-3">
+          <p className="text-sm text-ink">Keep every doctor, clinic and pharmacy in one place.</p>
+          <p className="text-xs text-muted">Add a clinic once, then file the people you see there. They share its address, so it is never typed twice.</p>
+          {canEdit ? (
+            <div>
+              <Button variant="secondary" onClick={() => { setEditing(null); setEditorOpen(true); }}>Add provider</Button>
+            </div>
+          ) : null}
         </div>
       ) : dv.view.length === 0 ? (
         <div className="card text-center py-10">
@@ -170,6 +196,8 @@ export function DirectoryProvidersPage() {
                 ) : null}
                 <SortableTh label="Name" sortKey="name" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Type" sortKey="type" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Works at" sortKey="works_at" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="People here" sortKey="members" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Phone" sortKey="phone" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Address" sortKey="address" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Linked to" sortKey="profiles" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
@@ -192,9 +220,12 @@ export function DirectoryProvidersPage() {
                   ) : null}
                   <td className="px-3 py-2">
                     <span className="font-medium text-ink">{p.name}</span>
-                    {p.organisation ? <span className="block text-xs text-muted">{p.organisation}</span> : null}
                   </td>
                   <td className="px-3 py-2 text-muted">{providerTypeLabel(p.provider_type)}</td>
+                  <td className="px-3 py-2 text-muted">{p.organisation || '-'}</td>
+                  <td className="px-3 py-2 text-muted" title={(p.members ?? []).map((m) => m.name).join(', ') || undefined}>
+                    {p.members && p.members.length > 0 ? p.members.length : '-'}
+                  </td>
                   <td className="px-3 py-2">
                     {p.phone ? (
                       <a href={`tel:${p.phone}`} className="text-primary hover:underline">{p.phone}</a>
@@ -231,7 +262,8 @@ export function DirectoryProvidersPage() {
       <DirectoryProviderEditor
         open={editorOpen}
         provider={editing}
-        typeSuggestions={customProviderTypes(providers)}
+        canEdit={canEdit}
+        onMembersChanged={invalidate}
         onClose={() => { setEditorOpen(false); setBulkEditQueue([]); }}
         onSaved={() => {
           invalidate();
@@ -377,20 +409,22 @@ function BulkLinkDialog({
 function DirectoryProviderEditor({
   open,
   provider,
-  typeSuggestions,
+  canEdit,
+  onMembersChanged,
   onClose,
   onSaved,
 }: {
   open: boolean;
   provider: DirectoryProvider | null;
-  typeSuggestions: string[];
+  canEdit: boolean;
+  onMembersChanged: () => void;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [type, setType] = useState('gp');
-  const [customType, setCustomType] = useState('');
   const [name, setName] = useState('');
-  const [organisation, setOrganisation] = useState('');
+  const [worksAt, setWorksAt] = useState<WorksAtValue>(worksAtFrom(null));
+  const [sharesAddress, setSharesAddress] = useState(true);
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState<AddressValue>(emptyAddress);
@@ -399,12 +433,10 @@ function DirectoryProviderEditor({
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const pt = provider?.provider_type ?? 'gp';
-    const isKnown = PROVIDER_TYPES.some((t) => t.value === pt);
-    setType(isKnown ? pt : 'other');
-    setCustomType(isKnown ? '' : pt);
+    setType(provider?.provider_type ?? 'gp');
     setName(provider?.name ?? '');
-    setOrganisation(provider?.organisation ?? '');
+    setWorksAt(worksAtFrom(provider));
+    setSharesAddress(provider ? !!provider.uses_practice_address || !provider.organisation : true);
     setPhone(provider?.phone ?? '');
     setEmail(provider?.email ?? '');
     setAddress(provider ? addressFrom(provider) : emptyAddress);
@@ -416,12 +448,12 @@ function DirectoryProviderEditor({
   const mutation = useMutation({
     mutationFn: () => {
       const body = {
-        provider_type: type === 'other' && customType.trim() ? customType.trim() : type,
+        provider_type: type,
         name: name.trim(),
-        organisation: organisation.trim() || null,
         phone: phone.trim() || null,
         email: email.trim() || null,
         ...addressPayload(address),
+        ...practicePayload(worksAt, sharesAddress),
         booking_link: bookingLink.trim() || null,
         directions_link: directionsLink.trim() || null,
       };
@@ -443,44 +475,20 @@ function DirectoryProviderEditor({
           if (name.trim()) mutation.mutate();
         }}
       >
-        <div>
-          <label htmlFor="dir-provider-type" className="block text-sm font-medium text-ink mb-1">Type</label>
-          <select
-            id="dir-provider-type"
-            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-            value={type}
-            onChange={(e) => setType(e.target.value)}
-          >
-            {PROVIDER_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>{t.label}</option>
-            ))}
-          </select>
-          {type === 'other' ? (
-            <>
-              <Input
-                label="Custom type"
-                placeholder="e.g. Naturopath, Osteopath"
-                value={customType}
-                onChange={(e) => setCustomType(e.target.value)}
-                className="mt-2"
-                list="directory-custom-provider-types"
-                hint={typeSuggestions.length > 0 ? 'Pick an existing custom type to reuse it, or type a new one.' : undefined}
-              />
-              <datalist id="directory-custom-provider-types">
-                {typeSuggestions.map((t) => (
-                  <option key={t} value={t} />
-                ))}
-              </datalist>
-            </>
-          ) : null}
-        </div>
+        <ProviderTypeField key={`type-${provider?.id ?? 'new'}`} id="dir-provider-type" value={type} onChange={setType} />
         <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
-        <Input label="Organisation" value={organisation} onChange={(e) => setOrganisation(e.target.value)} />
+        <WorksAtField id="dir-provider-works-at" value={worksAt} onChange={setWorksAt} excludeId={provider?.id} />
         <div className="grid grid-cols-2 gap-2">
           <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
           <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
-        <AddressFields value={address} onChange={setAddress} />
+        <PracticeAddress
+          worksAt={worksAt}
+          sharesAddress={sharesAddress}
+          onSharesAddress={setSharesAddress}
+          address={address}
+          onAddress={setAddress}
+        />
         <div className="grid grid-cols-2 gap-2">
           <Input label="Booking link" type="url" placeholder="https://…" value={bookingLink} onChange={(e) => setBookingLink(e.target.value)} />
           <Input label="Directions" type="url" placeholder="https://…" value={directionsLink} onChange={(e) => setDirectionsLink(e.target.value)} />
@@ -491,6 +499,19 @@ function DirectoryProviderEditor({
           <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>Save</Button>
         </div>
       </form>
+      {provider && (isPlace(provider) || type === 'practice') ? (
+        <div className="mt-4">
+          <PracticeMembers
+            basePath={`/directory/providers/${provider.id}`}
+            practiceName={provider.name}
+            canEdit={canEdit}
+            onChanged={onMembersChanged}
+          />
+        </div>
+      ) : null}
+      {!provider && type === 'practice' ? (
+        <p className="mt-3 text-xs text-muted">Once this practice is saved, open it again to add the people who work here.</p>
+      ) : null}
     </Modal>
   );
 }

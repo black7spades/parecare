@@ -24,12 +24,14 @@ apiKeysRouter.get('/', requireAuth, async (req, res) => {
     .where({ account_id: req.account!.id })
     .whereNull('revoked_at')
     .orderBy('created_at', 'desc')
-    .select('id', 'label', 'token_prefix', 'created_at', 'last_used_at');
+    .select('id', 'label', 'token_prefix', 'created_at', 'last_used_at', 'access', db.raw('(oauth_client_id IS NOT NULL) AS signed_in'));
   res.json({ keys });
 });
 
 apiKeysRouter.post('/', requireAuth, async (req, res) => {
-  const parsed = z.object({ label: z.string().min(1).max(100) }).safeParse(req.body);
+  const parsed = z
+    .object({ label: z.string().min(1).max(100), access: z.enum(['full', 'read']).default('full') })
+    .safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
@@ -41,8 +43,9 @@ apiKeysRouter.post('/', requireAuth, async (req, res) => {
       label: parsed.data.label,
       token_hash: hashApiKey(token),
       token_prefix: token.slice(0, 10),
+      access: parsed.data.access,
     })
-    .returning(['id', 'label', 'token_prefix', 'created_at']);
+    .returning(['id', 'label', 'token_prefix', 'created_at', 'access']);
   // The only time the token is ever shown.
   res.status(201).json({ key, token });
 });

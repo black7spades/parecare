@@ -17,6 +17,20 @@ async function authenticateApiKey(token: string, req: Request, res: Response, ne
     res.status(401).json({ error: 'Invalid or revoked API key', code: 'UNAUTHORIZED' });
     return;
   }
+  // A signed-in assistant's pass lasts a while and then renews itself.
+  if (key.expires_at && new Date(key.expires_at).getTime() < Date.now()) {
+    res.status(401).json({ error: 'This connection needs to sign in again.', code: 'UNAUTHORIZED' });
+    return;
+  }
+  // A look-only connection can read anything its account can, and change
+  // nothing. The assistant endpoint applies the same rule per tool, since
+  // every call there is a POST.
+  const access: 'full' | 'read' = key.access === 'read' ? 'read' : 'full';
+  const safe = req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS';
+  if (access === 'read' && !safe && !req.originalUrl.startsWith('/api/v1/mcp')) {
+    res.status(403).json({ error: 'This connection can only look at records, not change them.', code: 'READ_ONLY_CONNECTION' });
+    return;
+  }
   const account = await db<Account>('accounts').where({ id: key.account_id }).first();
   if (!account) {
     res.status(401).json({ error: 'Account not found', code: 'UNAUTHORIZED' });
@@ -31,6 +45,7 @@ async function authenticateApiKey(token: string, req: Request, res: Response, ne
     .update({ last_used_at: db.fn.now() })
     .catch(() => undefined);
   req.account = account;
+  req.connectionAccess = access;
   next();
 }
 

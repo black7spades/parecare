@@ -3,6 +3,7 @@ import { db } from '../config/database';
 import { accountHasRight } from '../middleware/accountRights';
 import { getEffectiveTier, PLAN_LIMITS, getCareAccess } from '../middleware/subscriptionGate';
 import { extractActionBlocks, collectActions, crossProfileActionSchema, resolveProfileByName, toJsonSchema, type CrossProfileAction, type ExtractedActions } from './aiActions';
+import { addPracticeMember } from './providerPractices';
 import type { Account, CareProfile } from '../types';
 
 /**
@@ -55,7 +56,18 @@ const proposeCompleteTaskSchema = z.object({
   title: z.string().min(1).max(255),
 });
 
-export const dashboardActionSchema = z.discriminatedUnion('action', [navigateSchema, createProfileSchema, proposeCompleteTaskSchema]);
+// File a practitioner at a practice in the directory, no profile needed:
+// "add Dr Carly Examplename to Health Hub Morayfield".
+const addToPracticeSchema = z.object({
+  action: z.literal('add_to_practice'),
+  practitioner: z.string().min(1).max(255),
+  practice: z.string().min(1).max(255),
+  provider_type: z.string().max(100).optional().nullable(),
+  phone: z.string().max(50).optional().nullable(),
+  email: z.string().max(255).optional().nullable(),
+});
+
+export const dashboardActionSchema = z.discriminatedUnion('action', [navigateSchema, createProfileSchema, proposeCompleteTaskSchema, addToPracticeSchema]);
 export type DashboardAction = z.infer<typeof dashboardActionSchema>;
 
 /**
@@ -214,6 +226,13 @@ export async function executeDashboardActions(actions: DashboardAction[], accoun
           continue;
         }
         clientActions.push({ action: 'navigate_to_profile', profile_id: action.profile_id, section: action.section });
+      } else if (action.action === 'add_to_practice') {
+        const { outcome } = await addPracticeMember(account.id, action.practitioner, action.practice, {
+          provider_type: action.provider_type,
+          phone: action.phone,
+          email: action.email,
+        });
+        outcomes.push(outcome);
       } else if (action.action === 'propose_complete_task') {
         const { confirmation, outcome } = await proposeCompleteTask(action, account);
         if (confirmation) confirmations.push(confirmation);

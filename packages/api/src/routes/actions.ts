@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { actionSchema, toJsonSchema, executeActions, type AssistantAction } from '../services/aiActions';
+import type { Account } from '../types';
 
 /**
  * The machine layer: the same actions Pare carries out, offered as a plain
@@ -86,12 +87,7 @@ profileActionsRouter.post('/', requireAuth, async (req, res) => {
   );
 
   // Reversible when this batch left at least one row we know how to remove.
-  const [{ count }] = (await db('audit_log')
-    .where({ undo_batch: undoBatch, care_profile_id: profileId })
-    .whereIn('entity_type', Object.keys(UNDO_TABLES))
-    .whereNotNull('entity_id')
-    .count<{ count: string }[]>('id as count')) as { count: string }[];
-  const reversible = Number(count) > 0;
+  const reversible = await batchIsReversible(profileId, undoBatch);
 
   res.json({ outcomes: [...outcomes, ...errors], undo_batch: reversible ? undoBatch : null, reversible });
 });
@@ -102,25 +98,54 @@ profileActionsRouter.post('/undo', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
-  const profileId = String(req.params['id']);
-  const rows = await db('audit_log').where({ undo_batch: parsed.data.batch, care_profile_id: profileId });
-  if (rows.length === 0) {
-    res.status(404).json({ error: 'There is nothing to undo for that change.', code: 'NOT_FOUND' });
+  const result = await undoActionBatch(String(req.params['id']), parsed.data.batch, req.account!);
+  if (result.status !== 200) {
+    res.status(result.status).json({ error: result.message, code: result.code });
     return;
+  }
+  res.json({ undone: result.undone, not_reversible: result.notReversible, message: result.message });
+});
+
+/** Whether a batch left at least one row that undo knows how to remove. */
+export async function batchIsReversible(profileId: string, undoBatch: string): Promise<boolean> {
+  const [{ count }] = (await db('audit_log')
+    .where({ undo_batch: undoBatch, care_profile_id: profileId })
+    .whereIn('entity_type', Object.keys(UNDO_TABLES))
+    .whereNotNull('entity_id')
+    .count<{ count: string }[]>('id as count')) as { count: string }[];
+  return Number(count) > 0;
+}
+
+export interface UndoResult {
+  status: 200 | 404 | 409;
+  code?: string;
+  undone: number;
+  notReversible: number;
+  message: string;
+}
+
+/**
+ * Undo what one action call created, within the undo window. A person may
+ * undo their own change; an admin may undo any. Shared by the action route
+ * and outside assistants.
+ */
+export async function undoActionBatch(profileId: string, batch: string, account: Account): Promise<UndoResult> {
+  const rows = await db('audit_log').where({ undo_batch: batch, care_profile_id: profileId });
+  if (rows.length === 0) {
+    return { status: 404, code: 'NOT_FOUND', undone: 0, notReversible: 0, message: 'There is nothing to undo for that change.' };
   }
   const newest = Math.max(...rows.map((r) => new Date(r.created_at as string).getTime()));
   if (Date.now() - newest > UNDO_WINDOW_MS) {
-    res.status(409).json({ error: 'That change is too old to undo now.', code: 'UNDO_EXPIRED' });
-    return;
+    return { status: 409, code: 'UNDO_EXPIRED', undone: 0, notReversible: rows.length, message: 'That change is too old to undo now.' };
   }
-  const isAdmin = req.account!.role === 'admin' || req.account!.role === 'super_admin';
+  const isAdmin = account.role === 'admin' || account.role === 'super_admin';
 
   let undone = 0;
   for (const r of rows) {
     const table = UNDO_TABLES[r.entity_type as string];
     if (!table || !r.entity_id) continue;
     // A person may undo their own change; an admin may undo any.
-    if (!isAdmin && r.actor_account_id && r.actor_account_id !== req.account!.id) continue;
+    if (!isAdmin && r.actor_account_id && r.actor_account_id !== account.id) continue;
     try {
       const n = await db(table).where({ id: r.entity_id, care_profile_id: profileId }).del();
       undone += n;
@@ -134,7 +159,7 @@ profileActionsRouter.post('/undo', requireAuth, async (req, res) => {
     await db('audit_log')
       .insert({
         care_profile_id: profileId,
-        actor_account_id: req.account!.id,
+        actor_account_id: account.id,
         action: 'deleted',
         entity_type: 'undo',
         summary: `undid ${undone} ${undone === 1 ? 'change' : 'changes'}`,
@@ -142,12 +167,13 @@ profileActionsRouter.post('/undo', requireAuth, async (req, res) => {
       .catch(() => {});
   }
 
-  res.json({
+  return {
+    status: 200,
     undone,
-    not_reversible: rows.length - undone,
+    notReversible: rows.length - undone,
     message:
       undone === 0
         ? 'Nothing here could be undone. A dose drawn from supply or a care phase, for instance, cannot be reversed this way.'
         : `Undone ${undone} ${undone === 1 ? 'change' : 'changes'}.`,
-  });
-});
+  };
+}

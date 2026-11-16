@@ -21,6 +21,9 @@ export const SITE_COPY_DEFAULTS: Record<string, string> = {
   // Notification settings
   'account.notifications.subheader': 'What you are told about, and where. The bell in the header always shows everything you have switched on; channels deliver it beyond the app.',
 
+  // Connected apps
+  'account.connected.subheader': 'Use PareCare from the assistant you already chat with. Connect it once, then ask it to file things in PareCare.',
+
   // Profile-level pages (use {name} placeholder)
   'profile.circle.subheader': "The family members, friends and organisations involved in {name}'s care.",
   'profile.medications.subheader': "{name}'s current regimen. Add, edit and organise medications here; log and review doses in the record below.",

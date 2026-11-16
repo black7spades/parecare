@@ -366,6 +366,7 @@ export const PROVIDER_TYPES = [
   { value: 'psychologist', label: 'Psychologist' },
   { value: 'vet', label: 'Vet' },
   { value: 'pharmacy', label: 'Pharmacy' },
+  { value: 'practice', label: 'Clinic or practice' },
   { value: 'care_facility', label: 'Care facility' },
   { value: 'allied_health', label: 'Allied health' },
   { value: 'legal', label: 'Legal' },
@@ -376,6 +377,24 @@ export const PROVIDER_TYPES = [
 
 export const providerTypeLabel = (type: string) =>
   PROVIDER_TYPES.find((t) => t.value === type)?.label ?? type;
+
+/**
+ * The stored value for what someone picked or typed as a provider type: a
+ * built-in code when it names one ("GP" is stored as gp), otherwise their
+ * words with a capital first letter ("neurologist" becomes "Neurologist").
+ * The server applies the same rule.
+ */
+export function providerTypeValue(input: string): string {
+  const raw = input.trim();
+  if (!raw) return 'other';
+  const lower = raw.toLowerCase();
+  const hit = PROVIDER_TYPES.find((t) => t.label.toLowerCase() === lower || t.value === lower.replace(/[\s-]+/g, '_'));
+  if (hit) return hit.value;
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+/** Built-in types offered in the type picker. "Other" is never needed: type the real kind. */
+export const PICKABLE_PROVIDER_TYPES = PROVIDER_TYPES.filter((t) => t.value !== 'other');
 
 /** The free-typed provider types in use, beyond the built-in list. */
 export function customProviderTypes(rows: Array<{ provider_type: string }>): string[] {
@@ -415,9 +434,22 @@ export interface Provider {
   address_country?: string | null;
   booking_link: string | null;
   directions_link: string | null;
+  /** The provider this one works at, such as their clinic. */
+  practice_id?: string | null;
+  /** Whether their address is kept in step with the practice's. */
+  uses_practice_address?: boolean;
+  /** How many people are filed as working here. */
+  member_count?: number;
   poa_type: string | null;
   poa_activated: boolean;
   linked?: boolean;
+}
+
+/** Someone filed as working at a practice. */
+export interface PracticeMember {
+  id: string;
+  name: string;
+  provider_type: string;
 }
 
 export interface Task {
