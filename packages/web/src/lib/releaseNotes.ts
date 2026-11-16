@@ -40,6 +40,12 @@ export const RELEASES: Release[] = [
           'The provider directory has sortable Works at and People here columns, and both provider forms ask where someone works in place of a separate organisation box.',
         ],
       },
+      {
+        heading: 'Fixed',
+        items: [
+          'The Pare conversations list under System loads again. It had stopped showing any conversations at all and only said it could not load them. It now lists them, leaves out empty ones, and says so when there are more than it shows.',
+        ],
+      },
     ],
   },
   {

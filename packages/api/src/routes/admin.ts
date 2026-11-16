@@ -654,13 +654,17 @@ function scopeChatsToCare(q: Knex.QueryBuilder, actor: Account): Knex.QueryBuild
   );
 }
 
+export const CHAT_PAGE_MAX = 1000;
+
 const chatListSchema = z.object({
   day: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
   page: z.coerce.number().int().min(1).default(1),
-  per_page: z.coerce.number().int().min(1).max(100).default(50),
+  // The chats screen loads a large page at once and searches, sorts and pages
+  // it in the browser, so the ceiling matches what it asks for.
+  per_page: z.coerce.number().int().min(1).max(CHAT_PAGE_MAX).default(50),
 });
 
 /**
@@ -733,6 +737,9 @@ adminRouter.get('/chats', async (req, res) => {
       .join('accounts', 'ai_conversations.account_id', 'accounts.id')
       .leftJoin('care_profiles', 'ai_conversations.care_profile_id', 'care_profiles.id');
     if (day) q.whereRaw('ai_conversations.created_at::date = ?', [day]);
+    // A conversation nobody said anything in is noise: leave it out here, so
+    // the count and the page are both about real chats.
+    q.whereRaw('jsonb_array_length(ai_conversations.messages) > 0');
     return scopeChatsToCare(q, req.account!);
   };
 

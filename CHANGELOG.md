@@ -45,6 +45,13 @@ record of updates stays traceable to source. Versions follow
   both provider forms ask where someone works in place of a separate
   organisation box.
 
+### Fixed
+
+- **The Pare conversations list under System loads again.** It had stopped
+  showing any conversations at all and only said it could not load them. It
+  now lists them, leaves out empty ones, and says so when there are more than
+  it shows.
+
 ## [0.27.0] - 2026-09-02
 
 ### Added
