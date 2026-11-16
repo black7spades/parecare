@@ -70,7 +70,7 @@ import { ensureSuperAdmin, runMigrations } from './services/bootstrap';
 import { loadSettings, seedSettingsFromEnv, subscribeSettingsInvalidation } from './config/settings';
 import { settingsRouter } from './routes/settings';
 import { siteCopyRouter } from './routes/siteCopy';
-import { mcpRouter } from './routes/mcp';
+import { assistantGuideRouter, mcpRouter } from './routes/mcp';
 import { oauthServerRouter, wellKnownRouter } from './routes/mcpOAuth';
 
 // Backstop for promise rejections outside request handling (e.g. redis,
@@ -156,6 +156,7 @@ v1.use('/account/api-keys', apiKeysRouter);
 // Outside assistants (Claude, ChatGPT and the like): the connector itself,
 // and the sign-in flow that connects one without copying a password.
 v1.use('/mcp', mcpRouter);
+v1.use('/assistant-guide', assistantGuideRouter);
 v1.use('/oauth', oauthServerRouter);
 // The care journey library: life stages and journey templates. Read for
 // everyone signed in; shaped by admins.
