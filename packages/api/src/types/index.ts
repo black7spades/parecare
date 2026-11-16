@@ -273,6 +273,10 @@ export interface Provider {
   address_country: string | null;
   booking_link: string | null;
   directions_link: string | null;
+  /** The provider this one works at, such as their clinic. */
+  practice_id: string | null;
+  /** Whether this provider's address is kept as a copy of the practice's. */
+  uses_practice_address: boolean;
   created_at: string | Date;
 }
 
@@ -391,6 +395,8 @@ declare global {
     interface Request {
       account?: Account;
       careAccess?: CareAccess;
+      /** Set when an outside app connected: 'read' may only look. */
+      connectionAccess?: 'full' | 'read';
     }
   }
 }

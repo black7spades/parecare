@@ -3,7 +3,16 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { roleAtLeast } from '../middleware/requireRole';
-import { providerAddressFields, withComposedAddress } from './providers';
+import { providerAddressFields, providerPracticeFields, providerWriteColumns, withComposedAddress } from './providers';
+import {
+  addPracticeMember,
+  attachMemberById,
+  practiceColumns,
+  practiceMembers,
+  removePracticeMember,
+  storeProviderType,
+  syncPracticeMembers,
+} from '../services/providerPractices';
 import { addressColumns, ADDRESS_PART_KEYS, RESIDENCE_KIND, syncProfileResidence, syncResidenceForAddress, wifiColumns, withReadableWifi } from '../services/addresses';
 import { decryptSecret } from '../services/secretsCrypto';
 import { exportRecords, importRecords, type PortDescriptor, type PortFormat } from '../services/dataPort';
@@ -148,10 +157,10 @@ directoryRouter.get('/pets', requireAuth, profilesEndpoint('pet'));
 const providerSchema = z.object({
   provider_type: z.string().min(1).max(100),
   name: z.string().min(1).max(255),
-  organisation: z.string().max(255).optional().nullable(),
   phone: z.string().max(50).optional().nullable(),
   email: z.string().email().optional().nullable(),
   ...providerAddressFields,
+  ...providerPracticeFields,
   booking_link: z.string().url().optional().nullable(),
   directions_link: z.string().url().optional().nullable(),
 });
@@ -177,6 +186,13 @@ directoryRouter.get('/providers', requireAuth, async (req, res) => {
         JOIN care_profiles cp ON cp.id = cpp.care_profile_id
         WHERE cpp.provider_id = p.id
       ) AS linked_profiles`),
+      // Who works here, so a practice shows its people and a person shows
+      // their practice: the same link read from both ends.
+      db.raw(`(
+        SELECT json_agg(json_build_object('id', m.id, 'name', m.name, 'provider_type', m.provider_type) ORDER BY m.name)
+        FROM providers m
+        WHERE m.practice_id = p.id
+      ) AS members`),
     )
     .orderBy('p.name', 'asc');
 
@@ -214,11 +230,12 @@ directoryRouter.post('/providers', requireAuth, async (req, res) => {
     return;
   }
 
+  const { columns, note } = await providerWriteColumns(account.id, parsed.data);
   const [provider] = await db<Provider>('providers')
-    .insert({ account_id: account.id, ...withComposedAddress(parsed.data) })
+    .insert({ account_id: account.id, ...columns })
     .returning('*');
 
-  res.status(201).json({ provider });
+  res.status(201).json({ provider, note });
 });
 
 /**
@@ -237,17 +254,92 @@ directoryRouter.patch('/providers/:id', requireAuth, async (req, res) => {
     return;
   }
 
-  let query = db<Provider>('providers').where({ id: req.params['id'] });
-  if (!roleAtLeast(account.role, 'super_admin')) {
-    query = query.where({ account_id: account.id });
-  }
-
-  const [provider] = await query.update(withComposedAddress(parsed.data)).returning('*');
-  if (!provider) {
+  const current = await editableProvider(account, req.params['id'] as string);
+  if (!current) {
     res.status(404).json({ error: 'Provider not found', code: 'NOT_FOUND' });
     return;
   }
-  res.json({ provider });
+
+  const { columns, note } = await providerWriteColumns(current.account_id, parsed.data, current.id);
+  const [provider] = Object.keys(columns).length > 0
+    ? await db<Provider>('providers').where({ id: current.id }).update(columns).returning('*')
+    : [current];
+  // Anyone who works here follows a rename or a move.
+  await syncPracticeMembers(current.id);
+  res.json({ provider, note });
+});
+
+/** A provider this account may change: its own, or any for a super admin. */
+async function editableProvider(account: { id: string; role: AccountRole }, id: string): Promise<Provider | undefined> {
+  let query = db<Provider>('providers').where({ id });
+  if (!roleAtLeast(account.role, 'super_admin')) query = query.where({ account_id: account.id });
+  return query.first();
+}
+
+// -- People who work at a practice, from the practice's side ---------------
+
+directoryRouter.get('/providers/:id/members', requireAuth, async (req, res) => {
+  const practice = await db<Provider>('providers').where({ id: req.params['id'] }).first();
+  if (!practice || (!roleAtLeast(req.account!.role, 'super_admin') && practice.account_id !== req.account!.id)) {
+    res.status(404).json({ error: 'Provider not found', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ members: await practiceMembers(practice.id) });
+});
+
+const directoryMemberSchema = z.union([
+  z.object({ provider_id: z.string().uuid() }),
+  z.object({
+    name: z.string().min(1).max(255),
+    provider_type: z.string().max(100).optional().nullable(),
+    phone: z.string().max(50).optional().nullable(),
+    email: z.string().max(255).optional().nullable(),
+  }),
+]);
+
+directoryRouter.post('/providers/:id/members', requireAuth, async (req, res) => {
+  const account = req.account!;
+  if (!roleAtLeast(account.role, 'admin')) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+  const practice = await editableProvider(account, req.params['id'] as string);
+  if (!practice) {
+    res.status(404).json({ error: 'Provider not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const parsed = directoryMemberSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  let message: string;
+  if ('provider_id' in parsed.data) {
+    const result = await attachMemberById(practice.id, parsed.data.provider_id);
+    if (!result) {
+      res.status(404).json({ error: 'Provider not found in this account', code: 'NOT_FOUND' });
+      return;
+    }
+    message = result;
+  } else {
+    const { name, ...details } = parsed.data;
+    message = (await addPracticeMember(practice.account_id, name, practice.name, details)).outcome;
+  }
+  res.status(201).json({ message, members: await practiceMembers(practice.id) });
+});
+
+directoryRouter.delete('/providers/:id/members/:memberId', requireAuth, async (req, res) => {
+  const account = req.account!;
+  if (!roleAtLeast(account.role, 'admin')) {
+    res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    return;
+  }
+  const practice = await editableProvider(account, req.params['id'] as string);
+  if (!practice || !(await removePracticeMember(practice.id, req.params['memberId'] as string))) {
+    res.status(404).json({ error: 'That person is not filed at this practice.', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ message: 'Removed from this practice.', members: await practiceMembers(practice.id) });
 });
 
 /**
@@ -1059,7 +1151,7 @@ const providerPort: PortDescriptor<AnyRow, PortRecord> = {
   columns: [
     { key: 'name', header: 'Name', aliases: ['provider', 'full name'], toCell: (r) => cell(r['name']) },
     { key: 'provider_type', header: 'Type', aliases: ['provider type', 'role'], toCell: (r) => cell(r['provider_type']) },
-    { key: 'organisation', header: 'Organisation', aliases: ['org', 'clinic', 'practice'], toCell: (r) => cell(r['organisation']) },
+    { key: 'organisation', header: 'Works at', aliases: ['organisation', 'organization', 'org', 'clinic', 'practice'], toCell: (r) => cell(r['organisation']) },
     { key: 'phone', header: 'Phone', toCell: (r) => cell(r['phone']) },
     { key: 'email', header: 'Email', toCell: (r) => cell(r['email']) },
     { key: 'address_line1', header: 'Address line 1', aliases: ['address', 'street'], toCell: (r) => cell(r['address_line1']) },
@@ -1377,7 +1469,22 @@ function mountPort(
 const adminWrite = (role: AccountRole) => roleAtLeast(role, 'admin');
 const anyWrite = () => true;
 
-mountPort('providers', providerPort, { table: 'providers', canWrite: adminWrite });
+mountPort('providers', providerPort, {
+  table: 'providers',
+  canWrite: adminWrite,
+  // Imported rows get the same treatment as typed ones: their type joins the
+  // shared list, and whoever names a practice is filed at it.
+  afterImport: async (ids) => {
+    const rows = await db('providers').whereIn('id', ids);
+    for (const r of rows) {
+      const provider_type = await storeProviderType(r.provider_type, r.account_id);
+      const { columns } = r.organisation
+        ? await practiceColumns(r.account_id, { organisation: r.organisation }, r, r.id)
+        : { columns: {} };
+      await db('providers').where({ id: r.id }).update({ provider_type, ...columns });
+    }
+  },
+});
 mountPort('suppliers', supplierPort, { table: 'suppliers', canWrite: anyWrite });
 mountPort('assets', assetPort, { table: 'assets', canWrite: anyWrite });
 mountPort('addresses', addressPort, { table: 'addresses', canWrite: adminWrite });

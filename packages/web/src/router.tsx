@@ -1,5 +1,5 @@
 import { lazy } from 'react';
-import { Navigate, createBrowserRouter } from 'react-router-dom';
+import { Navigate, createBrowserRouter, useLocation } from 'react-router-dom';
 import { useAuthStore } from './stores/auth';
 import { Shell } from './components/layout/Shell';
 import { Login } from './pages/auth/Login';
@@ -37,6 +37,8 @@ import { InvitePage } from './pages/InvitePage';
 import { SubscriptionPage } from './pages/account/Subscription';
 import { AccountSettings } from './pages/account/Settings';
 import { NotificationSettings } from './pages/account/NotificationSettings';
+import { ConnectedApps } from './pages/account/ConnectedApps';
+import { ConnectPage } from './pages/ConnectPage';
 import { SystemLayout } from './pages/admin/SystemLayout';
 
 /**
@@ -85,6 +87,14 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Signed in, or off to sign in and straight back here afterwards. */
+function ReturnAfterSignIn({ children }: { children: React.ReactNode }) {
+  const token = useAuthStore((s) => s.token);
+  const location = useLocation();
+  if (!token) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
+  return <>{children}</>;
+}
+
 function AdminGuard({ children }: { children: React.ReactNode }) {
   const role = useAuthStore((s) => s.account?.role);
   if (role !== 'admin' && role !== 'super_admin') return <Navigate to="/app" replace />;
@@ -107,6 +117,16 @@ export const router = createBrowserRouter([
   { path: '/invite/:token', element: <InvitePage /> },
   // Public: the secure-link receiving end of a care plan review invitation.
   { path: '/plan-review/:token', element: <PlanReviewPage /> },
+  // An outside assistant (Claude, ChatGPT) asking to connect: the person
+  // signs in if needed, then says yes or no.
+  {
+    path: '/connect',
+    element: (
+      <ReturnAfterSignIn>
+        <ConnectPage />
+      </ReturnAfterSignIn>
+    ),
+  },
   {
     path: '/',
     element: (
@@ -176,6 +196,7 @@ export const router = createBrowserRouter([
       { path: 'account/subscription', element: <SubscriptionPage /> },
       { path: 'account/settings', element: <AccountSettings /> },
       { path: 'account/notifications', element: <NotificationSettings /> },
+      { path: 'account/connected-apps', element: <ConnectedApps /> },
       { path: 'account/profile', element: <Navigate to="/account/settings" replace /> },
       {
         path: 'system',

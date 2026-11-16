@@ -1,5 +1,30 @@
 import { useQuery } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
+
+const AFTER_SIGN_IN_KEY = 'parecare.afterSignIn';
+
+/** Remember where to go after a Google or Facebook sign-in comes back. */
+function rememberNext(next: string | null) {
+  try {
+    if (next && next.startsWith('/') && !next.startsWith('//')) sessionStorage.setItem(AFTER_SIGN_IN_KEY, next);
+    else sessionStorage.removeItem(AFTER_SIGN_IN_KEY);
+  } catch {
+    // Storage blocked: they land on the dashboard instead, which still works.
+  }
+}
+
+/** Where to go now the sign-in is done, used once. */
+export function takeAfterSignIn(): string {
+  try {
+    const next = sessionStorage.getItem(AFTER_SIGN_IN_KEY);
+    sessionStorage.removeItem(AFTER_SIGN_IN_KEY);
+    if (next && next.startsWith('/') && !next.startsWith('//')) return next;
+  } catch {
+    // fall through
+  }
+  return '/app';
+}
 
 interface Providers {
   google: boolean;
@@ -11,6 +36,8 @@ interface Providers {
  * server has credentials for; renders nothing when none are configured.
  */
 export function OAuthButtons() {
+  const [params] = useSearchParams();
+  const next = params.get('next');
   const { data } = useQuery({
     queryKey: ['auth-providers'],
     queryFn: () => api.get<Providers>('/auth/providers'),
@@ -24,6 +51,7 @@ export function OAuthButtons() {
       {data.google ? (
         <a
           href="/api/v1/auth/oauth/google"
+          onClick={() => rememberNext(next)}
           className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm font-medium text-ink hover:bg-surface transition-colors"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
@@ -38,6 +66,7 @@ export function OAuthButtons() {
       {data.facebook ? (
         <a
           href="/api/v1/auth/oauth/facebook"
+          onClick={() => rememberNext(next)}
           className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm font-medium text-ink hover:bg-surface transition-colors"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">

@@ -16,6 +16,8 @@ import { linkAddressToProfile, syncProfileResidence, RESIDENCE_KIND } from './ad
 import { APPOINTMENT_TYPES, APPOINTMENT_STATUSES, syncAppointmentSpend } from '../routes/appointments';
 import { OBSERVATION_STATUSES } from '../routes/treatments';
 import { FUNDING_SOURCES, CLAIM_STATUSES } from './healthSpend';
+import { addPracticeMember, syncPracticeMembers } from './providerPractices';
+import { providerWriteColumns } from '../routes/providers';
 
 /**
  * Actions the assistant can carry out on the user's behalf: logging a care
@@ -89,18 +91,10 @@ const CARE_PHASES = [
   'end_of_life',
 ] as const;
 
-const PROVIDER_TYPES = [
-  'gp',
-  'specialist',
-  'psychologist',
-  'pharmacy',
-  'care_facility',
-  'allied_health',
-  'legal',
-  'financial',
-  'social_worker',
-  'other',
-] as const;
+// Any kind of provider: a built-in code (gp, pharmacy, practice ...) or plain
+// words ("Neurologist"). Stored through normaliseProviderType, so "GP",
+// "clinic" and "neurologist" all land as the person would expect.
+const providerTypeField = z.string().min(1).max(100);
 
 const addMedicationSchema = z.object({
   type: z.literal('add_medication'),
@@ -314,8 +308,10 @@ const setCarePhaseSchema = z.object({
 
 const addProviderSchema = z.object({
   type: z.literal('add_provider'),
-  provider_type: z.enum(PROVIDER_TYPES),
+  provider_type: providerTypeField,
   name: z.string().min(1).max(255),
+  // The clinic or practice they work at. It is found in the directory, or
+  // filed if new, and they share its address.
   organisation: z.string().max(255).optional().nullable(),
   phone: z.string().max(50).optional().nullable(),
   email: z.string().max(255).optional().nullable(),
@@ -342,7 +338,7 @@ const addAssetSchema = z.object({
 const updateProviderSchema = z.object({
   type: z.literal('update_provider'),
   name: z.string().min(1).max(255),
-  provider_type: z.enum(PROVIDER_TYPES).optional(),
+  provider_type: providerTypeField.optional(),
   organisation: z.string().max(255).optional().nullable(),
   phone: z.string().max(50).optional().nullable(),
   email: z.string().max(255).optional().nullable(),
@@ -355,6 +351,19 @@ const linkProviderSchema = z.object({
   // The name of an existing provider in the account's directory to attach to
   // this profile, the same way providers can be shared across people.
   name: z.string().min(1).max(255),
+});
+
+// File a practitioner at a practice in the account's directory: "add Dr
+// Carly Examplename to Health Hub Morayfield". Either side is found by name
+// or filed if new, and the practitioner shares the practice's address. It
+// does not link anyone to this profile; add_provider does that.
+const addToPracticeSchema = z.object({
+  type: z.literal('add_to_practice'),
+  practitioner: z.string().min(1).max(255),
+  practice: z.string().min(1).max(255),
+  provider_type: providerTypeField.optional().nullable(),
+  phone: z.string().max(50).optional().nullable(),
+  email: z.string().max(255).optional().nullable(),
 });
 
 const linkAddressSchema = z.object({
@@ -520,6 +529,7 @@ export const actionSchema = z.discriminatedUnion('type', [
   addAssetSchema,
   updateProviderSchema,
   linkProviderSchema,
+  addToPracticeSchema,
   linkAddressSchema,
   updateCarePlanSchema,
   updateProfileSchema,
@@ -1526,24 +1536,35 @@ async function executeOne(
       return `Set the care phase to ${action.phase.replace(/_/g, ' ')}.`;
     }
     case 'add_provider': {
+      const { columns, note } = await providerWriteColumns(account.id, {
+        provider_type: action.provider_type,
+        name: action.name.trim(),
+        phone: action.phone ?? null,
+        email: action.email ?? null,
+        booking_link: action.booking_link ?? null,
+        directions_link: action.directions_link ?? null,
+        ...(action.organisation?.trim() ? { organisation: action.organisation.trim() } : {}),
+      });
       const [provider] = await db('providers')
-        .insert({
-          account_id: account.id,
-          provider_type: action.provider_type,
-          name: action.name.trim(),
-          organisation: action.organisation ?? null,
-          phone: action.phone ?? null,
-          email: action.email ?? null,
-          booking_link: action.booking_link ?? null,
-          directions_link: action.directions_link ?? null,
-        })
+        .insert({ account_id: account.id, ...columns })
         .returning('id');
       await db('care_profile_providers').insert({
         care_profile_id: profileId,
         provider_id: provider.id,
       });
       await audit(profileId, account.id, 'providers', `added provider ${action.name}`);
-      return `Added ${action.name} to the providers list.`;
+      const at = columns['organisation'] ? ` at ${columns['organisation']}` : '';
+      return `Added ${action.name}${at} to the providers list.${note ? ` ${note}` : ''}`;
+    }
+    case 'add_to_practice': {
+      const profile = await db('care_profiles').where({ id: profileId }).select('account_id').first();
+      const { outcome } = await addPracticeMember(profile?.account_id ?? account.id, action.practitioner, action.practice, {
+        provider_type: action.provider_type,
+        phone: action.phone,
+        email: action.email,
+      });
+      await audit(profileId, account.id, 'providers', `filed ${action.practitioner} at ${action.practice}`);
+      return outcome;
     }
     case 'add_asset': {
       const [asset] = await db('assets')
@@ -1577,15 +1598,18 @@ async function executeOne(
       if (!provider) return `Could not find a provider called "${action.name}" on this profile.`;
       const updates: Record<string, unknown> = {};
       if (action.provider_type) updates.provider_type = action.provider_type;
-      if (action.organisation !== undefined) updates.organisation = action.organisation;
+      if (action.organisation !== undefined) updates.organisation = action.organisation ?? '';
       if (action.phone !== undefined) updates.phone = action.phone;
       if (action.email !== undefined) updates.email = action.email;
       if (action.booking_link !== undefined) updates.booking_link = action.booking_link;
       if (action.directions_link !== undefined) updates.directions_link = action.directions_link;
       if (Object.keys(updates).length === 0) return `No changes to make to ${action.name}.`;
-      await db('providers').where({ id: provider.id }).update(updates);
+      const owner = await db('providers').where({ id: provider.id }).select('account_id').first();
+      const { columns, note } = await providerWriteColumns(owner?.account_id ?? account.id, updates, provider.id);
+      if (Object.keys(columns).length > 0) await db('providers').where({ id: provider.id }).update(columns);
+      await syncPracticeMembers(provider.id);
       await audit(profileId, account.id, 'providers', `updated provider ${action.name}`);
-      return `Updated ${action.name}'s details.`;
+      return `Updated ${action.name}'s details.${note ? ` ${note}` : ''}`;
     }
     case 'link_provider': {
       const profile = await db('care_profiles').where({ id: profileId }).select('account_id').first();
@@ -1939,6 +1963,14 @@ async function reachableProfiles(accountId: string): Promise<NameCandidateRow[]>
     })),
     ...(shared as NameCandidateRow[]),
   ];
+}
+
+/** Everyone the account can reach, with their access, for listing to an outside assistant. */
+export async function listReachableProfiles(accountId: string): Promise<Array<{ id: string; name: string; access: CareAccess }>> {
+  const rows = await reachableProfiles(accountId);
+  return rows
+    .map((r) => ({ id: r.id, name: r.full_name, access: accessFor(r.membership) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function accessFor(membership: CareCircleMember | null): CareAccess {

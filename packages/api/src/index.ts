@@ -70,6 +70,8 @@ import { ensureSuperAdmin, runMigrations } from './services/bootstrap';
 import { loadSettings, seedSettingsFromEnv, subscribeSettingsInvalidation } from './config/settings';
 import { settingsRouter } from './routes/settings';
 import { siteCopyRouter } from './routes/siteCopy';
+import { mcpRouter } from './routes/mcp';
+import { oauthServerRouter, wellKnownRouter } from './routes/mcpOAuth';
 
 // Backstop for promise rejections outside request handling (e.g. redis,
 // timers). Log instead of taking the whole API down.
@@ -89,7 +91,9 @@ app.use(express.urlencoded({ extended: true }));
 app.use((_req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Mcp-Protocol-Version,Mcp-Session-Id,X-Time-Zone');
+  // Browser-based assistants read these to learn where to sign in.
+  res.setHeader('Access-Control-Expose-Headers', 'WWW-Authenticate,Mcp-Session-Id');
   if (_req.method === 'OPTIONS') {
     res.sendStatus(204);
     return;
@@ -149,6 +153,10 @@ v1.use('/option-catalogue', optionCatalogueRouter);
 v1.use('/notifications', notificationsRouter);
 // Personal access tokens for bots and outside apps.
 v1.use('/account/api-keys', apiKeysRouter);
+// Outside assistants (Claude, ChatGPT and the like): the connector itself,
+// and the sign-in flow that connects one without copying a password.
+v1.use('/mcp', mcpRouter);
+v1.use('/oauth', oauthServerRouter);
 // The care journey library: life stages and journey templates. Read for
 // everyone signed in; shaped by admins.
 v1.use('/life-stages', lifeStagesRouter);
@@ -224,6 +232,8 @@ v1.use('/device', deviceRouter);
 v1.get('/health', (_req, res) => res.json({ ok: true }));
 
 app.use('/api/v1', v1);
+// Assistants look for these at the site root to learn how to sign in.
+app.use('/.well-known', wellKnownRouter);
 
 app.use(notFound);
 app.use(errorHandler);

@@ -18,6 +18,9 @@ export const OPTION_CATEGORIES = [
   'mobility_aid',
   'communication_need',
   'directive_location',
+  // Kinds of provider beyond the built-in few: Neurologist, Dentist, and
+  // whatever else people type.
+  'provider_type',
 ] as const;
 
 export type OptionCategory = (typeof OPTION_CATEGORIES)[number];

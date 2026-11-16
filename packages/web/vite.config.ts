@@ -46,6 +46,10 @@ export default defineConfig({
       // (same bug nginx had, fixed in 9e26ac3)
       '/api': { target: 'http://api:3001' },
       '/webhooks': { target: 'http://api:3001' },
+      // How outside assistants discover the sign-in flow.
+      '/.well-known/oauth-protected-resource': { target: 'http://api:3001' },
+      '/.well-known/oauth-authorization-server': { target: 'http://api:3001' },
+      '/.well-known/openid-configuration': { target: 'http://api:3001' },
     },
   },
 });

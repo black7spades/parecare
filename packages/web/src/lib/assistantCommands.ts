@@ -117,6 +117,13 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
     expand: (a) => `Add this provider: ${a}`,
   },
   {
+    name: 'practice',
+    hint: 'who, and the practice they work at',
+    description: 'File someone at their practice, e.g. /practice Dr Carly Examplename at Health Hub Morayfield',
+    expand: (a) =>
+      `File this person at their practice in the directory, sharing the practice's address, without linking them to anyone: ${a}`,
+  },
+  {
     name: 'link',
     hint: 'a provider or address already in the directory',
     description: 'Link an existing provider or address to this person, e.g. /link Dr Chen or /link 12 Ocean Road',

@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
 import { api } from '../../api/client';
 import { Input } from '../../components/ui/Input';
 import { EditableSubheader } from '../../components/ui/EditableSubheader';
@@ -15,8 +14,8 @@ import { useAuthStore } from '../../stores/auth';
  *  - which kinds of notification you want at all;
  *  - the channels they are delivered to beyond the in-app bell: email,
  *    push to this device, Discord, Telegram, or a generic webhook, each
- *    with its own urgency and digest rhythm;
- *  - API keys, so your own bots and outside apps can talk to PareCare.
+ *    with its own urgency and digest rhythm.
+ *  Apps and bots that reach PareCare as you live on Connected apps.
  */
 
 interface Preferences {
@@ -78,7 +77,6 @@ export function NotificationSettings() {
       <KindPreferences preferences={data.preferences} onSaved={invalidate} />
       <AlertsCard channels={data.channels} />
       <ChannelsCard channels={data.channels} vapidKey={data.vapid_public_key} onChanged={invalidate} />
-      <ApiKeysCard />
     </div>
   );
 }
@@ -750,97 +748,5 @@ function AddChannelModal({ onClose, onAdded }: { onClose: () => void; onAdded: (
         </div>
       </div>
     </Modal>
-  );
-}
-
-interface ApiKey {
-  id: string;
-  label: string;
-  token_prefix: string;
-  created_at: string;
-  last_used_at: string | null;
-}
-
-/** Personal access tokens for bots and outside apps. */
-function ApiKeysCard() {
-  const queryClient = useQueryClient();
-  const [label, setLabel] = useState('');
-  const [createdToken, setCreatedToken] = useState('');
-  const [error, setError] = useState('');
-
-  const { data } = useQuery({
-    queryKey: ['api-keys'],
-    queryFn: () => api.get<{ keys: ApiKey[] }>('/account/api-keys'),
-  });
-  const keys = data?.keys ?? [];
-  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['api-keys'] });
-
-  const createMutation = useMutation({
-    mutationFn: () => api.post<{ token: string }>('/account/api-keys', { label: label.trim() }),
-    onSuccess: (res) => {
-      setLabel('');
-      setError('');
-      setCreatedToken(res.token);
-      invalidate();
-    },
-    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to create'),
-  });
-  const revokeMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/account/api-keys/${id}`),
-    onSuccess: invalidate,
-    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to revoke'),
-  });
-
-  return (
-    <div className="card space-y-4">
-      <div>
-        <h3>API keys for bots and outside apps</h3>
-        <p className="text-sm text-muted">
-          A key lets your own bot or script call the PareCare API as you: a Discord bot that logs doses, a Telegram bot
-          that asks Pare questions, a home automation flow. Send it as the bearer token on any API request. A key has
-          your full access, so treat it like a password.
-        </p>
-      </div>
-
-      {keys.length > 0 ? (
-        <ul className="divide-y divide-border">
-          {keys.map((k) => (
-            <li key={k.id} className="py-2 flex flex-wrap items-center gap-2 text-sm">
-              <code className="rounded bg-surface-2 px-1.5 py-0.5 text-xs">{k.token_prefix}…</code>
-              <span className="font-medium text-ink">{k.label}</span>
-              <span className="text-xs text-muted">
-                created {format(new Date(k.created_at), 'd MMM yyyy')}
-                {k.last_used_at ? `, last used ${format(new Date(k.last_used_at), 'd MMM yyyy')}` : ', never used'}
-              </span>
-              <Button size="xs" variant="ghost-danger" className="ml-auto" onClick={() => revokeMutation.mutate(k.id)}>
-                Revoke
-              </Button>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-sm text-muted">No keys yet.</p>
-      )}
-
-      {createdToken ? (
-        <div className="rounded-md border border-primary/40 bg-primary-50 dark:bg-primary-900/10 p-3 space-y-1">
-          <p className="text-sm font-medium text-ink">Copy this key now. It will not be shown again.</p>
-          <code className="block break-all rounded bg-card border border-border px-2 py-1 text-xs">{createdToken}</code>
-          <Button size="xs" variant="secondary" onClick={() => setCreatedToken('')}>
-            I have copied it
-          </Button>
-        </div>
-      ) : null}
-
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="flex-1 min-w-[12rem]">
-          <Input label="What is this key for?" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Discord bot" />
-        </div>
-        <Button type="button" variant="secondary" size="sm" disabled={!label.trim()} loading={createMutation.isPending} onClick={() => createMutation.mutate()}>
-          Create key
-        </Button>
-      </div>
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
-    </div>
   );
 }

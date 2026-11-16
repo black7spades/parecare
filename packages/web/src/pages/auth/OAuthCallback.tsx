@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth';
 import { api } from '../../api/client';
 import { MfaCodeInput } from '../../components/MfaCodeInput';
+import { takeAfterSignIn } from '../../components/OAuthButtons';
 
 const ERROR_MESSAGES: Record<string, string> = {
   super_admin_password_only: 'The super admin account must sign in with email and password.',
@@ -51,7 +52,7 @@ export function OAuthCallback() {
       }>('/auth/me')
       .then((me) => {
         setAuth(token, me);
-        navigate('/app', { replace: true });
+        navigate(takeAfterSignIn(), { replace: true });
       })
       .catch(() => setError('Signed in, but loading your account failed. Try refreshing.'));
   }, [fragment, navigate, setAuth]);
@@ -65,7 +66,7 @@ export function OAuthCallback() {
         code,
       });
       setAuth(data.token, data.account);
-      navigate('/app', { replace: true });
+      navigate(takeAfterSignIn(), { replace: true });
     } catch (err) {
       setMfaError(err instanceof Error ? err.message : 'Verification failed');
     } finally {

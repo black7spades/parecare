@@ -19,6 +19,8 @@ export function CatalogueCombo({
   keepValue = false,
   initial = '',
   widthClass = 'w-48',
+  extraItems = [],
+  id,
 }: {
   /** Catalogue URL, e.g. "/option-catalogue?category=allergen". */
   endpoint: string;
@@ -33,11 +35,21 @@ export function CatalogueCombo({
   keepValue?: boolean;
   initial?: string;
   widthClass?: string;
+  /** Fixed choices offered ahead of the catalogue's, filtered by what is typed. */
+  extraItems?: string[];
+  id?: string;
 }) {
   const [search, setSearch] = useState(initial);
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const boxRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // In edit-in-place mode the box shows the current value: follow it when the
+  // record behind it loads or changes, but never while someone is typing.
+  useEffect(() => {
+    if (keepValue && document.activeElement !== inputRef.current) setSearch(initial);
+  }, [initial, keepValue]);
 
   const { data } = useQuery({
     queryKey: ['catalogue', endpoint, search],
@@ -48,7 +60,15 @@ export function CatalogueCombo({
     enabled: open,
   });
   const excluded = new Set(exclude.map((v) => v.toLowerCase()));
-  const suggestions = (data?.items ?? []).filter((s) => !excluded.has(s.name.toLowerCase())).slice(0, 8);
+  const needle = search.trim().toLowerCase();
+  const fixed = extraItems.filter((n) => !needle || n.toLowerCase().includes(needle));
+  const fixedLower = new Set(fixed.map((n) => n.toLowerCase()));
+  const suggestions = [
+    ...fixed.map((name) => ({ id: `fixed-${name}`, name })),
+    ...(data?.items ?? []).filter((s) => !fixedLower.has(s.name.toLowerCase())),
+  ]
+    .filter((s) => !excluded.has(s.name.toLowerCase()))
+    .slice(0, 10);
   const trimmed = search.trim();
   const exactMatch = suggestions.some((s) => s.name.toLowerCase() === trimmed.toLowerCase());
   const options = [
@@ -78,6 +98,8 @@ export function CatalogueCombo({
   return (
     <div className={`relative ${widthClass}`} ref={boxRef}>
       <input
+        id={id}
+        ref={inputRef}
         type="text"
         role="combobox"
         aria-expanded={open && options.length > 0}
