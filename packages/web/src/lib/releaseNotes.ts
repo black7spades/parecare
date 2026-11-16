@@ -20,6 +20,26 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.28.1',
+    date: '2026-11-16',
+    summary: 'One type means one thing, and the Pare conversations list loads again.',
+    groups: [
+      {
+        heading: 'Changed',
+        items: [
+          'One type means one thing. Clinic and Practice are now two provider types, with Medical centre and Health centre in the list as well. Places you had filed are sorted by their name, so Brain Clinic is now a clinic. A new place gets a fitting type from its name without you choosing one.',
+          'Two more lists split the same way. Condition tracking has Test result and Scan result as separate kinds of entry, and a task can be closed as Blocked or as Unable to complete.',
+        ],
+      },
+      {
+        heading: 'Fixed',
+        items: [
+          'The Pare conversations list under System loads again. It had stopped showing any conversations at all and only said it could not load them. It now lists them, leaves out empty ones, and says so when there are more than it shows.',
+        ],
+      },
+    ],
+  },
+  {
     version: '0.28.0',
     date: '2026-11-16',
     summary: 'Use PareCare from the assistant you already chat with, keep records that hold up for claims, file doctors at their clinic once, and add any kind of provider.',
@@ -38,12 +58,6 @@ export const RELEASES: Release[] = [
         items: [
           'App passwords for bots and scripts moved from Notifications to the new Connected apps screen in your account menu.',
           'The provider directory has sortable Works at and People here columns, and both provider forms ask where someone works in place of a separate organisation box.',
-        ],
-      },
-      {
-        heading: 'Fixed',
-        items: [
-          'The Pare conversations list under System loads again. It had stopped showing any conversations at all and only said it could not load them. It now lists them, leaves out empty ones, and says so when there are more than it shows.',
         ],
       },
     ],

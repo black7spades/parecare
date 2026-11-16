@@ -499,7 +499,7 @@ function DirectoryProviderEditor({
           <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>Save</Button>
         </div>
       </form>
-      {provider && (isPlace(provider) || type === 'practice') ? (
+      {provider && (isPlace(provider) || isPlace({ provider_type: type })) ? (
         <div className="mt-4">
           <PracticeMembers
             basePath={`/directory/providers/${provider.id}`}
@@ -509,8 +509,8 @@ function DirectoryProviderEditor({
           />
         </div>
       ) : null}
-      {!provider && type === 'practice' ? (
-        <p className="mt-3 text-xs text-muted">Once this practice is saved, open it again to add the people who work here.</p>
+      {!provider && isPlace({ provider_type: type }) ? (
+        <p className="mt-3 text-xs text-muted">Once this is saved, open it again to add the people who work here.</p>
       ) : null}
     </Modal>
   );

@@ -1,5 +1,5 @@
 import { db } from '../config/database';
-import { PRACTICE_TYPE, isBuiltInProviderType, normaliseProviderType } from '../lib/providerTypes';
+import { PLACE_TYPES, isBuiltInProviderType, normaliseProviderType, placeTypeFromName } from '../lib/providerTypes';
 import { resolveOptions } from '../routes/optionCatalogue';
 
 /**
@@ -51,7 +51,7 @@ export async function findPracticeByName(accountId: string, name: string): Promi
     .where({ account_id: accountId })
     .whereRaw("lower(regexp_replace(trim(name), '\\s+', ' ', 'g')) = lower(?)", [clean])
     // Prefer something filed as a place over a person who happens to share the name.
-    .orderByRaw('CASE WHEN provider_type = ? THEN 0 ELSE 1 END', [PRACTICE_TYPE])
+    .orderByRaw(`CASE WHEN provider_type IN (${PLACE_TYPES.map(() => '?').join(', ')}) THEN 0 ELSE 1 END`, PLACE_TYPES)
     .orderBy('created_at', 'asc')
     .first();
 }
@@ -64,7 +64,7 @@ export async function findOrCreatePractice(
   const existing = await findPracticeByName(accountId, name);
   if (existing) return { practice: existing, created: false };
   const [practice] = await db('providers')
-    .insert({ account_id: accountId, provider_type: PRACTICE_TYPE, name: name.trim().replace(/\s+/g, ' ') })
+    .insert({ account_id: accountId, provider_type: placeTypeFromName(name), name: name.trim().replace(/\s+/g, ' ') })
     .returning('*');
   return { practice: practice as ProviderRow, created: true };
 }

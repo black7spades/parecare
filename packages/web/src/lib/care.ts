@@ -366,7 +366,8 @@ export const PROVIDER_TYPES = [
   { value: 'psychologist', label: 'Psychologist' },
   { value: 'vet', label: 'Vet' },
   { value: 'pharmacy', label: 'Pharmacy' },
-  { value: 'practice', label: 'Clinic or practice' },
+  { value: 'practice', label: 'Practice' },
+  { value: 'clinic', label: 'Clinic' },
   { value: 'care_facility', label: 'Care facility' },
   { value: 'allied_health', label: 'Allied health' },
   { value: 'legal', label: 'Legal' },
@@ -479,7 +480,8 @@ export const COMPLETION_REASONS = [
   { value: 'no_longer_needed', label: 'No longer needed' },
   { value: 'delegated', label: 'Delegated to someone else' },
   { value: 'rescheduled', label: 'Rescheduled' },
-  { value: 'blocked', label: 'Blocked or unable to complete' },
+  { value: 'blocked', label: 'Blocked' },
+  { value: 'unable_to_complete', label: 'Unable to complete' },
   { value: 'other', label: 'Other' },
 ] as const;
 
@@ -584,7 +586,8 @@ export const CONDITION_LOG_TYPES = [
   { value: 'symptom_change', label: 'Change in symptoms' },
   { value: 'treatment', label: 'Treatment' },
   { value: 'appointment_outcome', label: 'What came of an appointment' },
-  { value: 'test_result', label: 'Test or scan result' },
+  { value: 'test_result', label: 'Test result' },
+  { value: 'scan_result', label: 'Scan result' },
   { value: 'other', label: 'Other' },
 ] as const;
 
