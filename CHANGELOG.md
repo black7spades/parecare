@@ -6,6 +6,13 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.37.2] - 2026-11-18
+
+### Fixed
+
+- **Back to the overview in one click.** Click a person's name or picture
+  at the top of any of their pages to return to their overview.
+
 ## [0.37.1] - 2026-11-18
 
 ### Fixed
