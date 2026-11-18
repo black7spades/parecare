@@ -12,12 +12,15 @@ import type { Situation } from '../../lib/situation';
  * order wins from then on. So an adaptive default and a saved arrangement never
  * fight each other.
  */
-export function orderBySituation(keys: string[], situation: Situation | null): string[] {
-  if (!situation) return [...keys];
+export function orderBySituation(keys: string[], situation: Situation | null, fresh: Set<string> = new Set()): string[] {
   const rank = (key: string): number => {
-    if (situation.acuity === 'unwell' && key === 'health') return -3;
-    if (situation.acuity === 'watching' && key === 'health') return -1;
-    if (situation.ended && key === 'poa') return -2;
+    if (situation?.acuity === 'unwell' && key === 'health') return -3;
+    if (situation?.ended && key === 'poa') return -2;
+    if (situation?.acuity === 'watching' && key === 'health') return -1;
+    // Recent activity leads the ordinary cards, and any card with something
+    // new since the last visit comes up right behind it.
+    if (key === 'recent') return -0.75;
+    if (fresh.has(key)) return -0.5;
     return 0;
   };
   return keys

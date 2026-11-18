@@ -6,6 +6,17 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.37.0] - 2026-11-18
+
+### Added
+
+- **At a glance.** The top of each overview now shows the next appointment,
+  medications still to give today, open and overdue tasks, and the newest
+  document. Each one opens its page.
+- **Cards with news come first.** A card with changes since your last visit
+  has a dot beside its name and moves up, unless you have arranged the
+  cards yourself.
+
 ## [0.36.0] - 2026-11-18
 
 ### Added

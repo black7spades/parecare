@@ -6,6 +6,8 @@ import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { AttentionPanel } from '../../../components/AttentionPanel';
+import { AtAGlance } from '../../../components/AtAGlance';
+import { freshCardKeys, useRecentActivity } from '../../../components/cards/profile/RecentActivityCard';
 import { CardLayout } from '../../../components/cards/CardLayout';
 import { PROFILE_CARDS, PROFILE_CARD_KEYS } from '../../../components/cards/registry';
 import { orderBySituation } from '../../../components/cards/ordering';
@@ -59,8 +61,8 @@ function readSavedOrder(storageKey: string): string[] | null {
  * is on screen into a saved order, so the adaptive default and a saved
  * arrangement never fight.
  */
-function cardOrderFor(storageKey: string, situation: Situation | null): string[] {
-  return readSavedOrder(storageKey) ?? orderBySituation(PROFILE_CARD_KEYS, situation);
+function cardOrderFor(storageKey: string, situation: Situation | null, fresh: Set<string>): string[] {
+  return readSavedOrder(storageKey) ?? orderBySituation(PROFILE_CARD_KEYS, situation, fresh);
 }
 
 function loadCollapsed(storageKey: string): Set<string> {
@@ -80,7 +82,12 @@ export function OverviewPage() {
   const collapsedKey = collapsedKeyFor(accountId, profile.id);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [editView, setEditView] = useState(false);
-  const [cardOrder, setCardOrder] = useState<string[]>(() => cardOrderFor(orderKey, situation));
+  // Cards with something new since the last visit get a dot, and come
+  // forward unless the person has arranged the cards themselves.
+  const recent = useRecentActivity(profile.id);
+  const fresh = freshCardKeys(recent.data?.entries);
+  const freshSig = [...fresh].sort().join(',');
+  const [cardOrder, setCardOrder] = useState<string[]>(() => cardOrderFor(orderKey, situation, fresh));
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(collapsedKey));
 
   // Moving from one person to another keeps this component mounted, so the
@@ -89,11 +96,12 @@ export function OverviewPage() {
   // person's acuity or end-of-life status changes, while a saved order does not.
   const situationSig = `${situation?.acuity ?? ''}|${situation?.ended ?? ''}`;
   useEffect(() => {
-    setCardOrder(cardOrderFor(orderKey, situation));
+    setCardOrder(cardOrderFor(orderKey, situation, fresh));
     setCollapsed(loadCollapsed(collapsedKey));
-    // situation is read through situationSig to avoid re-running on every render.
+    // situation and fresh are read through their signatures to avoid
+    // re-running on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderKey, collapsedKey, situationSig]);
+  }, [orderKey, collapsedKey, situationSig, freshSig]);
 
   const [confirmText, setConfirmText] = useState('');
   const [deleteError, setDeleteError] = useState('');
@@ -163,6 +171,8 @@ export function OverviewPage() {
 
   return (
     <div className="space-y-6">
+      <AtAGlance profileId={profile.id} />
+
       <AttentionPanel profileId={profile.id} />
 
       <div className="flex items-center justify-end gap-1">
@@ -201,6 +211,7 @@ export function OverviewPage() {
         ctx={cardContext}
         order={cardOrder}
         collapsed={collapsed}
+        fresh={fresh}
         editView={editView}
         onToggle={toggleCollapse}
         onMove={moveCard}
