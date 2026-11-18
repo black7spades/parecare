@@ -5,6 +5,10 @@ import { complete, isAiConfigured, supportsStructuredOutput } from './aiProvider
 import { ACTION_RESPONSE_JSON_SCHEMA } from './aiActions';
 import { DASHBOARD_RESPONSE_JSON_SCHEMA } from './aiDashboardActions';
 import { toneGuidance, TONE_CALIBRATION } from './aiTone';
+import { BUILT_IN_NEXT_STEPS } from './nextStepTypes';
+
+/** The built-in kinds of next step, named for Pare so it files them consistently. */
+const NEXT_STEP_NAMES = BUILT_IN_NEXT_STEPS.map((s) => `"${s.name}"`).join(', ');
 import { isValidTimeZone, nowInZone, dateInZone } from '../lib/timezone';
 import type { Account, CareProfile, CareCircleMember } from '../types';
 
@@ -192,6 +196,7 @@ You can do anything here that can be done by hand on this person's record. The a
 - {"type": "update_profile", any of "preferred_name", "pronouns", "primary_language", "notes", "date_of_birth", "owner_name" (for a pet: the name of a person already in People to set as the pet's owner; empty string clears it)}
 - {"type": "book_appointment", "title": what it is for (e.g. "GP review"), "appointment_type": one of consultation | test | procedure | therapy | review | vaccination | other, "provider_name": optional name of a provider already in the directory, "location": optional, "starts_at": ISO time it is booked for, "ends_at": optional ISO time, "notes": optional, "cost_estimate": optional number} puts a real appointment on the calendar
 - {"type": "update_appointment", "title": the appointment's current title, then any of "new_title", "appointment_type", "provider_name", "location", "starts_at" (to move it), "ends_at", "status" (scheduled | completed | cancelled | missed), "notes", "cost_estimate", "cost_actual" (what it actually cost)} to move, cancel, mark attended or price an appointment already booked
+- {"type": "record_appointment_outcome", "appointment_title": optional title of an appointment that has happened (the most recent one when left out), "outcome": optional short note of what happened, "next_steps": array of {"kind": what kind of next step, using one of these names when it fits: ${NEXT_STEP_NAMES}, or a short new name when none fits, "details": optional specifics such as who the referral is to or which medication, "due_on": optional YYYY-MM-DD to do it by}} records how an appointment went and what it set off; each next step becomes a tracked task. "Saw Dr Lee, got a referral to physio and a script for Naproxen" is one of these with two next steps.
 - {"type": "complete_task", "title": the open task's title, "completion_note": optional short note} ticks a task off
 - {"type": "reschedule_task", "title": the open task's title, "due_at": new ISO time, "repeat": optional once | daily | weekly | monthly} moves a task, including snoozing it
 - {"type": "record_cost", "amount": number, "spent_on": optional YYYY-MM-DD (defaults to today), "description": optional, "tax_amount": optional number, "funding_source": optional self | ndis | private_health | medicare | government | other, "claimable_amount": optional number, "claim_status": optional none | unclaimed | submitted | reimbursed, "account_code": optional} puts a care cost on the spend ledger
@@ -212,6 +217,9 @@ words. It is not where appointments, costs, readings or tasks live.
   medical_appointment to describe an appointment that already happened and
   what came out of it, and even then book or complete the appointment
   record too when there is one.
+- What came of an appointment (an outcome, a referral, a test, a script to
+  fill, a sample to give) is record_appointment_outcome, so every next step
+  is tracked until it is done.
 - Money spent on care is record_cost, never a log entry or a note. A cost
   quoted while booking belongs on the booking as cost_estimate; a cost
   confirmed afterwards is cost_actual on update_appointment.
@@ -469,6 +477,7 @@ The profile_actions action is how you do anything else on a person's record: cha
 - {"type": "update_profile", any of "preferred_name", "pronouns", "primary_language", "notes", "date_of_birth", "owner_name" (for a pet: the name of a person already in People to set as the pet's owner; empty string clears it)}
 - {"type": "book_appointment", "title", "appointment_type" (consultation | test | procedure | therapy | review | vaccination | other), "provider_name"? (a provider already in the directory), "location"?, "starts_at" (ISO), "ends_at"?, "notes"?, "cost_estimate"? (number)} puts a real appointment on that person's calendar
 - {"type": "update_appointment", "title" (its current title), then any of "new_title", "appointment_type", "provider_name", "location", "starts_at" (to move it), "ends_at", "status" (scheduled | completed | cancelled | missed), "notes", "cost_estimate", "cost_actual"} to move, cancel, mark attended or price a booked appointment
+- {"type": "record_appointment_outcome", "appointment_title"? (an appointment that has happened; the most recent when left out), "outcome"? (short note of what happened), "next_steps": array of {"kind" (one of: ${NEXT_STEP_NAMES}; or a short new name when none fits), "details"?, "due_on"? (YYYY-MM-DD)}} records how an appointment went; each next step becomes a tracked task
 - {"type": "complete_task", "title" (the open task's title), "completion_note"?} ticks a task off
 - {"type": "reschedule_task", "title", "due_at" (ISO), "repeat"? (once | daily | weekly | monthly)} moves or snoozes a task
 - {"type": "record_cost", "amount" (number), "spent_on"? (YYYY-MM-DD, defaults to today), "description"?, "tax_amount"?, "funding_source"? (self | ndis | private_health | medicare | government | other), "claimable_amount"?, "claim_status"? (none | unclaimed | submitted | reimbursed), "account_code"?} puts a care cost on that person's spend ledger
@@ -490,6 +499,9 @@ words. It is not where appointments, costs, readings or tasks live.
   Thursday" means book_appointment. Only use a log entry with entry_type
   medical_appointment to describe an appointment that already happened and
   what came of it.
+- What came of an appointment (an outcome, a referral, a test, a script to
+  fill, a sample to give) is record_appointment_outcome, so every next step
+  is tracked until it is done.
 - Money spent on care is record_cost. A cost quoted while booking belongs
   on the booking as cost_estimate; a cost confirmed afterwards is
   cost_actual on update_appointment.

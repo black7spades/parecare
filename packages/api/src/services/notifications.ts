@@ -17,7 +17,7 @@ import type { Account } from '../types';
 const HORIZON_DAYS = 30;
 const MAX_ITEMS = 50;
 
-export type NotificationKind = 'activity' | 'supply_low' | 'supply_out' | 'dose_overdue' | 'care_plan_ready';
+export type NotificationKind = 'activity' | 'supply_low' | 'supply_out' | 'dose_overdue' | 'care_plan_ready' | 'outcome_due';
 
 export interface NotificationItem {
   /** Stable identifier, also used to record reads and deliveries. */
@@ -38,6 +38,8 @@ export interface NotificationItem {
   urgent: boolean;
   created_at: string;
   read: boolean;
+  /** The record it is about, when the link opens that one record. */
+  record_id?: string | null;
 }
 
 /**
@@ -48,6 +50,7 @@ export interface NotificationPrefs {
   activity?: boolean;
   dose_overdue?: boolean;
   supply?: boolean;
+  outcomes?: boolean;
 }
 
 export function prefsOf(account: Pick<Account, 'notification_prefs'>): Required<NotificationPrefs> {
@@ -56,12 +59,14 @@ export function prefsOf(account: Pick<Account, 'notification_prefs'>): Required<
     activity: raw.activity !== false,
     dose_overdue: raw.dose_overdue !== false,
     supply: raw.supply !== false,
+    outcomes: raw.outcomes !== false,
   };
 }
 
 function wanted(kind: NotificationKind, prefs: Required<NotificationPrefs>): boolean {
   if (kind === 'activity') return prefs.activity;
   if (kind === 'dose_overdue') return prefs.dose_overdue;
+  if (kind === 'outcome_due') return prefs.outcomes;
   // A plan the account asked for finishing is a direct answer to their own
   // action, so it is always surfaced regardless of the activity preference.
   if (kind === 'care_plan_ready') return true;
@@ -110,7 +115,7 @@ export async function gatherNotifications(
   const now = new Date();
   const startOfDay = startOfDayInZone(now, tz);
 
-  const [auditRows, medRows, adminRows, readRows, planJobRows] = await Promise.all([
+  const [auditRows, medRows, adminRows, readRows, planJobRows, outcomeRows] = await Promise.all([
     prefs.activity
       ? db('audit_log')
           .leftJoin('accounts', 'audit_log.actor_account_id', 'accounts.id')
@@ -158,6 +163,21 @@ export async function gatherNotifications(
       .where('updated_at', '>=', horizon)
       .orderBy('updated_at', 'desc')
       .select('id', 'care_profile_id', 'updated_at'),
+    // Appointments in the last fortnight that have finished with nothing yet
+    // recorded about how they went. Recording an outcome or a next step
+    // takes them off the list, so the alert clears itself.
+    prefs.outcomes
+      ? db('appointments as ap')
+          .leftJoin('providers as p', 'ap.provider_id', 'p.id')
+          .whereIn('ap.care_profile_id', profileIds)
+          .whereIn('ap.status', ['scheduled', 'completed'])
+          .whereNull('ap.outcome')
+          .where('ap.starts_at', '>=', new Date(Date.now() - 14 * 24 * 60 * 60 * 1000))
+          .whereRaw("coalesce(ap.ends_at, ap.starts_at + interval '1 hour') <= now()")
+          .whereNotExists(db('reminders').whereRaw('reminders.appointment_id = ap.id'))
+          .orderBy('ap.starts_at', 'desc')
+          .select('ap.id', 'ap.care_profile_id', 'ap.title', 'ap.starts_at', 'ap.ends_at', 'p.name as provider_name')
+      : Promise.resolve([]),
   ]);
 
   const read = new Set(readRows.map((r) => (r as { item_key: string }).item_key));
@@ -213,6 +233,26 @@ export async function gatherNotifications(
       urgent: false,
       created_at: new Date(job.updated_at ?? Date.now()).toISOString(),
       read: read.has(key),
+    });
+  }
+
+  for (const ap of outcomeRows as Array<{ id: string; care_profile_id: string; title: string; starts_at: Date; ends_at: Date | null; provider_name: string | null }>) {
+    const key = `outcome:${ap.id}`;
+    items.push({
+      key,
+      kind: 'outcome_due',
+      profile_id: ap.care_profile_id,
+      profile_name: nameById.get(ap.care_profile_id) ?? 'Unknown',
+      actor_name: null,
+      action: null,
+      entity_type: 'appointments',
+      summary: ap.provider_name ? `${ap.title} with ${ap.provider_name}` : ap.title,
+      medication_name: null,
+      missed_count: null,
+      urgent: false,
+      created_at: new Date(ap.ends_at ?? new Date(new Date(ap.starts_at).getTime() + 60 * 60 * 1000)).toISOString(),
+      read: read.has(key),
+      record_id: ap.id,
     });
   }
 
@@ -322,6 +362,7 @@ const ENTITY_PAGES: Record<string, string> = {
 
 /** The in-app path a notification points at. */
 export function notificationPath(item: NotificationItem): string {
+  if (item.kind === 'outcome_due') return `/app/${item.profile_id}/appointments?outcome=${item.record_id ?? ''}`;
   const page = ENTITY_PAGES[item.entity_type ?? ''] ?? '';
   return `/app/${item.profile_id}${page ? `/${page}` : ''}`;
 }
@@ -351,6 +392,9 @@ const ENTITY_NOUNS: Record<string, string> = {
 export function notificationText(item: NotificationItem): string {
   if (item.key.startsWith('test:')) {
     return 'If you can read this, this channel works.';
+  }
+  if (item.kind === 'outcome_due') {
+    return `How did ${item.profile_name}'s appointment go? ${item.summary ?? ''}`.trim();
   }
   if (item.kind === 'dose_overdue') {
     const n = item.missed_count ?? 1;

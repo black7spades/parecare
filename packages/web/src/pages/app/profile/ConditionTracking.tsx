@@ -217,7 +217,7 @@ export function ConditionTracking({
         <h4 className="text-xs font-semibold text-ink uppercase tracking-wide mb-2">
           Appointments for this
           <span className="font-normal text-muted ml-1 normal-case">
-            Booked under this condition, and marked with it on the calendar
+            Each visit, how it went and what it led to
           </span>
         </h4>
         {appointments.length === 0 ? (
@@ -227,16 +227,36 @@ export function ConditionTracking({
             and choose this condition to tie it here.
           </p>
         ) : (
-          <ul className="space-y-1">
-            {appointments.map((a) => (
-              <li key={a.id} className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="text-ink">{a.title}</span>
-                {a.provider_name ? <span className="text-xs text-muted">with {a.provider_name}</span> : null}
-                <span className="text-xs text-muted">{format(new Date(a.starts_at), 'd MMM yyyy, HH:mm')}</span>
-                <span className="badge bg-surface-2 text-muted text-[10px] capitalize">{a.status}</span>
+          <ol className="space-y-3 border-l-2 border-border pl-3">
+            {[...appointments].sort((x, y) => new Date(x.starts_at).getTime() - new Date(y.starts_at).getTime()).map((a) => (
+              <li key={a.id} className="text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link to={`/app/${profileId}/appointments?outcome=${a.id}`} className="text-ink font-medium hover:underline">{a.title}</Link>
+                  {a.provider_name ? <span className="text-xs text-muted">with {a.provider_name}</span> : null}
+                  <span className="text-xs text-muted">{format(new Date(a.starts_at), 'd MMM yyyy, HH:mm')}</span>
+                  <span className="badge bg-surface-2 text-muted text-[10px] capitalize">{a.status}</span>
+                </div>
+                {a.outcome ? <p className="text-sm text-ink mt-0.5 whitespace-pre-wrap">Outcome: {a.outcome}</p> : null}
+                {(a.next_steps ?? []).length > 0 ? (
+                  <ul className="mt-1 space-y-0.5">
+                    {(a.next_steps ?? []).map((s) => (
+                      <li key={s.id} className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className={`text-ink ${s.completed ? 'line-through' : ''}`}>{s.title}</span>
+                        <span className="text-muted">{s.type_name}</span>
+                        <span className="text-muted">
+                          {s.led_to
+                            ? `led to ${s.led_to.title}, ${format(new Date(s.led_to.starts_at), 'd MMM')}`
+                            : s.completed
+                              ? 'done'
+                              : `due ${format(new Date(s.next_due_at), 'd MMM')}`}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </li>
             ))}
-          </ul>
+          </ol>
         )}
       </div>
 

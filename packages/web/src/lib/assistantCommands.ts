@@ -55,6 +55,13 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
       `Book this as a real appointment on the calendar, not a care log entry. Ask me only if the date or time is genuinely unclear: ${a}`,
   },
   {
+    name: 'outcome',
+    hint: 'how the appointment went and what came of it',
+    description: 'Record how an appointment went, e.g. /outcome saw Dr Lee, referral to physio and a blood test',
+    expand: (a) =>
+      `Record how this appointment went and track every next step it set off, such as referrals, tests, samples or scripts to fill: ${a}`,
+  },
+  {
     name: 'cost',
     hint: 'the amount and what it was for',
     description: 'Record a care cost, e.g. /cost $42 at the chemist today',

@@ -493,6 +493,11 @@ export interface Task {
   claimed_at: string | null;
   claimed_by_name: string | null;
   co_owners: { id: string; display_name: string }[];
+  /** Set when this task is a next step from an appointment. */
+  appointment_id?: string | null;
+  appointment_title?: string | null;
+  appointment_starts_at?: string | null;
+  next_step_type_name?: string | null;
 }
 
 export const COMPLETION_REASONS = [
@@ -582,6 +587,19 @@ export interface ConditionAppointment {
   status: string;
   location: string | null;
   provider_name: string | null;
+  /** How it went, once recorded. */
+  outcome?: string | null;
+  /** Set when this appointment was booked to carry out an earlier next step. */
+  from_reminder_id?: string | null;
+  /** What it set off, each a task. */
+  next_steps?: Array<{
+    id: string;
+    title: string;
+    type_name: string;
+    completed: boolean;
+    next_due_at: string;
+    led_to: { id: string; title: string; starts_at: string } | null;
+  }>;
 }
 
 /** A document filed against a condition, seen from the condition. */

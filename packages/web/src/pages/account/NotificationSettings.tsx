@@ -22,6 +22,7 @@ interface Preferences {
   activity: boolean;
   dose_overdue: boolean;
   supply: boolean;
+  outcomes: boolean;
 }
 
 interface Channel {
@@ -101,6 +102,7 @@ function KindPreferences({ preferences, onSaved }: { preferences: Preferences; o
   const rows: { key: keyof Preferences; label: string; hint: string }[] = [
     { key: 'dose_overdue', label: 'Overdue doses', hint: 'A scheduled medication time passed with no dose recorded. Urgent only for medications marked dangerous to miss.' },
     { key: 'supply', label: 'Medication supply', hint: 'A prescription running low or out of stock.' },
+    { key: 'outcomes', label: 'How appointments went', hint: 'A nudge after an appointment to note what happened and any next steps, such as a referral or a test.' },
     { key: 'activity', label: 'Care circle activity', hint: 'Anything someone else adds or changes on a profile you can see: messages, care log entries, documents and the rest.' },
   ];
 

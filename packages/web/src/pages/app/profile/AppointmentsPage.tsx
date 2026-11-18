@@ -10,6 +10,9 @@ import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { useDataView, type DataFilter, type DataSort } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
+import { SortableTh } from '../../../components/data/SortableTh';
+import { OutcomeModal } from '../../../components/OutcomeModal';
+import type { NextStep } from '../../../lib/nextSteps';
 import { useProfile } from './ProfileLayout';
 import { useHealthConfig } from '../../../lib/appConfig';
 
@@ -35,6 +38,10 @@ export interface Appointment {
   cost_estimate: number | null;
   /** The confirmed actual cost, if logged (counts as spend). */
   cost_actual: number | null;
+  /** How it went, in a few words, once recorded. */
+  outcome?: string | null;
+  /** What it set off: referrals, tests, scripts and so on, each a task. */
+  next_steps?: NextStep[];
 }
 
 const APPOINTMENT_TYPES = [
@@ -57,19 +64,22 @@ const APPOINTMENT_STATUSES = [
 const typeLabel = (v: string) => APPOINTMENT_TYPES.find((t) => t.value === v)?.label ?? v;
 const statusLabel = (v: string) => APPOINTMENT_STATUSES.find((s) => s.value === v)?.label ?? v;
 
+const openSteps = (a: Appointment) => (a.next_steps ?? []).filter((s) => !s.completed).length;
+const byText = (x: string | null | undefined, y: string | null | undefined) => (x ?? '').localeCompare(y ?? '');
+
 const SORTS: DataSort<Appointment>[] = [
-  {
-    key: 'upcoming',
-    label: 'Soonest first',
-    compare: (a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime(),
-  },
-  {
-    key: 'newest',
-    label: 'Latest first',
-    compare: (a, b) => new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime(),
-  },
-  { key: 'title', label: 'Title', compare: (a, b) => a.title.localeCompare(b.title) },
+  { key: 'when', label: 'By date', compare: (a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime() },
+  { key: 'title', label: 'By appointment', compare: (a, b) => a.title.localeCompare(b.title) },
+  { key: 'kind', label: 'By kind', compare: (a, b) => typeLabel(a.appointment_type).localeCompare(typeLabel(b.appointment_type)) },
+  { key: 'with', label: 'By who with', compare: (a, b) => byText(a.provider_name, b.provider_name) },
+  { key: 'location', label: 'By location', compare: (a, b) => byText(a.location, b.location) },
+  { key: 'status', label: 'By status', compare: (a, b) => statusLabel(a.status).localeCompare(statusLabel(b.status)) },
+  { key: 'outcome', label: 'By outcome', compare: (a, b) => byText(a.outcome, b.outcome) },
+  { key: 'steps', label: 'By open next steps', defaultDir: 'desc', compare: (a, b) => openSteps(a) - openSteps(b) },
 ];
+
+/** Finished, so it is time to ask how it went. */
+const isPast = (a: Appointment) => new Date(a.ends_at ?? a.starts_at).getTime() < Date.now();
 
 const STATUS_FILTER: DataFilter<Appointment> = {
   key: 'status',
@@ -86,7 +96,7 @@ const TYPE_FILTER: DataFilter<Appointment> = {
 };
 
 export function AppointmentsPage() {
-  const { profile, careName, canEdit } = useProfile();
+  const { profile, careName, canEdit, isOwner } = useProfile();
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [initialProviderId, setInitialProviderId] = useState('');
@@ -102,6 +112,10 @@ export function AppointmentsPage() {
     }
   }, [searchParams, setSearchParams]);
   const [editing, setEditing] = useState<Appointment | null>(null);
+  // How it went: opened from the row, from the bell, or from a task.
+  const [outcomeFor, setOutcomeFor] = useState<string | null>(null);
+  // Booking the appointment a next step calls for.
+  const [booking, setBooking] = useState<{ step: NextStep; from: Appointment } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Appointment | null>(null);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkEditQueue, setBulkEditQueue] = useState<Appointment[]>([]);
@@ -115,7 +129,18 @@ export function AppointmentsPage() {
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['appointments', profile.id] });
     void queryClient.invalidateQueries({ queryKey: ['calendar', profile.id] });
+    void queryClient.invalidateQueries({ queryKey: ['tasks', profile.id] });
   };
+
+  // ?outcome=<id> arrives from the bell or a task and opens how it went.
+  useEffect(() => {
+    const id = searchParams.get('outcome');
+    if (id) {
+      setOutcomeFor(id);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+  const outcomeAppointment = outcomeFor ? appointments.find((a) => a.id === outcomeFor) ?? null : null;
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/appointments/${id}`),
@@ -230,12 +255,14 @@ export function AppointmentsPage() {
             <thead>
               <tr className="text-left text-xs text-muted border-b border-border">
                 {canEdit ? <th className="px-3 py-2 w-8" /> : null}
-                <th className="px-3 py-2">When</th>
-                <th className="px-3 py-2">Appointment</th>
-                <th className="px-3 py-2">Kind</th>
-                <th className="px-3 py-2 hidden md:table-cell">With</th>
-                <th className="px-3 py-2 hidden lg:table-cell">Location</th>
-                <th className="px-3 py-2">Status</th>
+                <SortableTh label="When" sortKey="when" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Appointment" sortKey="title" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Kind" sortKey="kind" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="hidden xl:table-cell" />
+                <SortableTh label="With" sortKey="with" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="hidden lg:table-cell" />
+                <SortableTh label="Location" sortKey="location" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="hidden 2xl:table-cell" />
+                <SortableTh label="Status" sortKey="status" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Outcome" sortKey="outcome" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Next steps open" sortKey="steps" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 {canEdit ? <th className="px-3 py-2 text-right">Actions</th> : null}
               </tr>
             </thead>
@@ -257,12 +284,29 @@ export function AppointmentsPage() {
                     {format(new Date(a.starts_at), 'EEE d MMM yyyy, HH:mm')}
                   </td>
                   <td className="px-3 py-2 font-medium text-ink">{a.title}</td>
-                  <td className="px-3 py-2 text-ink">{typeLabel(a.appointment_type)}</td>
-                  <td className="px-3 py-2 text-ink hidden md:table-cell">{a.provider_name ?? ''}</td>
-                  <td className="px-3 py-2 text-muted hidden lg:table-cell">{a.location ?? ''}</td>
+                  <td className="px-3 py-2 text-ink hidden xl:table-cell">{typeLabel(a.appointment_type)}</td>
+                  <td className="px-3 py-2 text-ink hidden lg:table-cell">{a.provider_name ?? ''}</td>
+                  <td className="px-3 py-2 text-muted hidden 2xl:table-cell">{a.location ?? ''}</td>
                   <td className="px-3 py-2 text-ink">{statusLabel(a.status)}</td>
+                  <td className="px-3 py-2 text-ink max-w-xs">
+                    {a.outcome ? (
+                      <span className="line-clamp-2 break-words">{a.outcome}</span>
+                    ) : canEdit && isPast(a) && a.status !== 'cancelled' && a.status !== 'missed' ? (
+                      <Button size="xs" variant="secondary" className="whitespace-nowrap" onClick={() => setOutcomeFor(a.id)}>How did it go?</Button>
+                    ) : null}
+                  </td>
+                  <td className="px-3 py-2 text-ink whitespace-nowrap">
+                    {(a.next_steps ?? []).length === 0
+                      ? ''
+                      : openSteps(a) === 0
+                        ? 'All done'
+                        : openSteps(a)}
+                  </td>
                   {canEdit ? (
                     <td className="px-3 py-2 text-right whitespace-nowrap">
+                      {a.outcome || (a.next_steps ?? []).length > 0 ? (
+                        <Button size="xs" variant="ghost" className="mr-1" aria-label={`Outcome of ${a.title}`} onClick={() => setOutcomeFor(a.id)}>Outcome</Button>
+                      ) : null}
                       <Button size="xs" variant="ghost" className="mr-1" aria-label={`Edit ${a.title}`} title="Edit" onClick={() => setEditing(a)}>
                         <PencilIcon />
                       </Button>
@@ -277,6 +321,37 @@ export function AppointmentsPage() {
           </table>
         </div>
       )}
+
+      {outcomeAppointment ? (
+        <OutcomeModal
+          key={outcomeAppointment.id}
+          profileId={profile.id}
+          appointment={outcomeAppointment}
+          canEdit={canEdit}
+          isOwner={isOwner}
+          onClose={() => setOutcomeFor(null)}
+          onBook={(step) => {
+            setBooking({ step, from: outcomeAppointment });
+            setOutcomeFor(null);
+          }}
+        />
+      ) : null}
+
+      {booking ? (
+        <AppointmentEditor
+          profileId={profile.id}
+          appointment={null}
+          initialTitle={booking.step.title}
+          initialType={/test|x-ray|scan|ultrasound|biopsy|blood/i.test(booking.step.type_name) ? 'test' : /procedure/i.test(booking.step.type_name) ? 'procedure' : /therapy/i.test(booking.step.type_name) ? 'therapy' : /vaccination/i.test(booking.step.type_name) ? 'vaccination' : 'consultation'}
+          initialConditionId={booking.from.medical_condition_id ?? ''}
+          fromReminderId={booking.step.id}
+          onClose={() => setBooking(null)}
+          onSaved={() => {
+            setBooking(null);
+            invalidate();
+          }}
+        />
+      ) : null}
 
       {adding || editing ? (
         <AppointmentEditor
@@ -352,6 +427,7 @@ export function AppointmentEditor({
   initialTitle = '',
   initialType = 'consultation',
   initialConditionId = '',
+  fromReminderId = '',
   onClose,
   onSaved,
 }: {
@@ -365,6 +441,8 @@ export function AppointmentEditor({
   initialType?: string;
   /** Preselect the condition this appointment is being booked for. */
   initialConditionId?: string;
+  /** The next step this appointment carries out; saving ticks it off. */
+  fromReminderId?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -484,6 +562,7 @@ export function AppointmentEditor({
         notes: notes.trim() || null,
         cost_estimate: costEstimate.trim() === '' ? null : Number(costEstimate),
         cost_actual: costActual.trim() === '' ? null : Number(costActual),
+        ...(isNew && fromReminderId ? { from_reminder_id: fromReminderId } : {}),
       };
       return isNew
         ? api.post(`/care-profiles/${profileId}/appointments`, body)

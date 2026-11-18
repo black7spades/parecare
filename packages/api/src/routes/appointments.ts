@@ -1,7 +1,11 @@
 import { Router } from 'express';
+import type { Knex } from 'knex';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
+import { accountIdForProfile } from '../services/documentCategories';
+import { resolveNextStepTypeByName, stepBooks } from '../services/nextStepTypes';
+import { isValidTimeZone, parseZonedTime } from '../lib/timezone';
 
 /**
  * Appointments are a first-class record: who is being seen, what for,
@@ -38,6 +42,9 @@ const appointmentSchema = z.object({
   // entry. An estimate is given when booking; the actual is confirmed after.
   cost_estimate: z.coerce.number().min(0).max(1e9).optional().nullable(),
   cost_actual: z.coerce.number().min(0).max(1e9).optional().nullable(),
+  // The next step this appointment carries out, such as the specialist visit
+  // a referral led to. Booking it ticks that next step off.
+  from_reminder_id: z.string().uuid().optional().nullable(),
 });
 
 /**
@@ -103,12 +110,175 @@ const serializeAppointment = <T extends Record<string, unknown>>(a: T): T => {
   };
 };
 
+/**
+ * The next steps each appointment set off, with what each led to: the task
+ * itself, its kind, and any appointment booked to carry it out.
+ */
+export async function nextStepsFor(appointmentIds: string[]) {
+  if (appointmentIds.length === 0) return new Map<string, unknown[]>();
+  const rows = await db('reminders as r')
+    .leftJoin('next_step_types as t', 'r.next_step_type_id', 't.id')
+    .whereIn('r.appointment_id', appointmentIds)
+    .orderBy('r.created_at', 'asc')
+    .select(
+      'r.id', 'r.appointment_id', 'r.title', 'r.next_due_at', 'r.completed', 'r.completed_at',
+      't.id as type_id', 't.name as type_name', 't.system_key as type_key'
+    );
+  const ledTo = rows.length
+    ? await db('appointments')
+        .whereIn('from_reminder_id', rows.map((r) => r.id))
+        .select('id', 'from_reminder_id', 'title', 'starts_at', 'status')
+    : [];
+  const ledToByTask = new Map(ledTo.map((a) => [a.from_reminder_id as string, a]));
+  const byAppointment = new Map<string, unknown[]>();
+  for (const r of rows) {
+    const list = byAppointment.get(r.appointment_id) ?? [];
+    list.push({
+      id: r.id,
+      title: r.title,
+      next_due_at: r.next_due_at,
+      completed: r.completed,
+      completed_at: r.completed_at,
+      type_id: r.type_id,
+      type_name: r.type_name ?? 'Other',
+      books: stepBooks(r.type_key),
+      led_to: ledToByTask.get(r.id) ?? null,
+    });
+    byAppointment.set(r.appointment_id, list);
+  }
+  return byAppointment;
+}
+
 appointmentsRouter.get('/', requireAuth, async (req, res) => {
   const query = appointmentSelect(String(req.params['id']));
   if (req.query['from']) query.where('a.starts_at', '>=', new Date(String(req.query['from'])));
   if (req.query['to']) query.where('a.starts_at', '<=', new Date(String(req.query['to'])));
   const appointments = await query.orderBy('a.starts_at', 'asc');
-  res.json({ appointments: appointments.map(serializeAppointment) });
+  const steps = await nextStepsFor(appointments.map((a: { id: string }) => a.id));
+  res.json({
+    appointments: appointments.map((a: Record<string, unknown>) => ({
+      ...serializeAppointment(a),
+      next_steps: steps.get(a['id'] as string) ?? [],
+    })),
+  });
+});
+
+const outcomeSchema = z.object({
+  outcome: z.string().max(4000).optional().nullable(),
+  // New next steps to add. Each becomes a task tied to this appointment.
+  next_steps: z
+    .array(
+      z.object({
+        type: z.string().trim().max(100),
+        details: z.string().trim().max(255).optional().nullable(),
+        due_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+      })
+    )
+    .max(30)
+    .default([]),
+  tz: z.string().max(64).optional().nullable(),
+});
+
+/** A week from today, for a next step given no date. */
+const inAWeek = (): string => new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+
+/**
+ * Add next steps to an appointment as tasks tied to it. Shared by the outcome
+ * form and by Pare, so both file a next step the same way.
+ */
+export async function addNextSteps(
+  trx: Knex.Transaction,
+  opts: {
+    profileId: string;
+    appointmentId: string;
+    actorId: string;
+    timeZone: string | null;
+    steps: Array<{ type: string; details?: string | null; due_on?: string | null }>;
+    source?: 'person' | 'pare';
+  }
+): Promise<Array<{ id: string; title: string; type_name: string }>> {
+  const accountId = (await accountIdForProfile(opts.profileId, trx))!;
+  const out: Array<{ id: string; title: string; type_name: string }> = [];
+  for (const step of opts.steps) {
+    const typeId = await resolveNextStepTypeByName(accountId, step.type || 'Other', trx);
+    const typeName = ((await trx('next_step_types').where({ id: typeId }).first('name')) as { name: string }).name;
+    const dueOn = step.due_on || inAWeek();
+    const due = parseZonedTime(`${dueOn}T09:00:00`, opts.timeZone) ?? new Date(`${dueOn}T09:00:00Z`);
+    const title = step.details?.trim() || typeName;
+    const [task] = await trx('reminders')
+      .insert({
+        care_profile_id: opts.profileId,
+        title: title.slice(0, 255),
+        reminder_type: 'once',
+        next_due_at: due,
+        appointment_id: opts.appointmentId,
+        next_step_type_id: typeId,
+      })
+      .returning('id');
+    const taskId = (task as { id: string }).id;
+    out.push({ id: taskId, title, type_name: typeName });
+    await trx('audit_log').insert({
+      care_profile_id: opts.profileId,
+      actor_account_id: opts.actorId,
+      action: 'created',
+      entity_type: 'reminders',
+      entity_id: taskId,
+      summary: title.slice(0, 255),
+      source: opts.source ?? 'person',
+    });
+  }
+  return out;
+}
+
+/**
+ * Record how an appointment went: what happened, and the next steps it set
+ * off. Each next step becomes a task, so it is tracked and nudged wherever
+ * tasks are. Recording an outcome also marks a still-scheduled appointment
+ * as attended.
+ */
+appointmentsRouter.put('/:appointmentId/outcome', requireAuth, async (req, res) => {
+  const parsed = outcomeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
+    return;
+  }
+  const profileId = String(req.params['id']);
+  const appointment = await db('appointments')
+    .where({ id: req.params['appointmentId'], care_profile_id: profileId })
+    .first();
+  if (!appointment) {
+    res.status(404).json({ error: 'Appointment not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const tzIn = parsed.data.tz ?? null;
+  const tz = isValidTimeZone(tzIn) ? tzIn : (req.account as { timezone?: string | null } | undefined)?.timezone ?? null;
+
+  const created = await db.transaction(async (trx) => {
+    const fields: Record<string, unknown> = { updated_at: trx.fn.now() };
+    if (parsed.data.outcome !== undefined) {
+      const text = parsed.data.outcome?.trim() || null;
+      fields['outcome'] = text;
+      fields['outcome_recorded_at'] = text ? trx.fn.now() : null;
+    }
+    if (appointment.status === 'scheduled' && (parsed.data.outcome?.trim() || parsed.data.next_steps.length > 0)) {
+      fields['status'] = 'completed';
+    }
+    await trx('appointments').where({ id: appointment.id }).update(fields);
+    return addNextSteps(trx, {
+      profileId,
+      appointmentId: appointment.id,
+      actorId: req.account!.id,
+      timeZone: tz,
+      steps: parsed.data.next_steps,
+    });
+  });
+
+  const enriched = await appointmentSelect(profileId).andWhere('a.id', appointment.id).first();
+  const steps = await nextStepsFor([appointment.id]);
+  res.json({
+    appointment: { ...serializeAppointment(enriched), next_steps: steps.get(appointment.id) ?? [] },
+    created: created.map((c) => c.id),
+  });
 });
 
 appointmentsRouter.post('/', requireAuth, async (req, res) => {
@@ -126,6 +296,12 @@ appointmentsRouter.post('/', requireAuth, async (req, res) => {
     })
     .returning('*');
   const appointmentId = (appointment as { id: string }).id;
+  // Booking the appointment a next step called for ticks that step off.
+  if (parsed.data.from_reminder_id) {
+    await db('reminders')
+      .where({ id: parsed.data.from_reminder_id, care_profile_id: req.params['id'], completed: false })
+      .update({ completed: true, completed_at: db.fn.now(), completed_by_account_id: req.account!.id });
+  }
   await syncAppointmentSpend(
     appointmentId,
     String(req.params['id']),
