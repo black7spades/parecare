@@ -756,26 +756,32 @@ const withoutExtension = (name: string) => name.replace(/\.[^.]+$/, '');
  * from a file dropped onto the list with that file ready to go and its
  * name already filled in as the label.
  */
-function UploadDocumentModal({
+export function UploadDocumentModal({
   profileId,
   members,
   initialFile,
+  initialLabel = '',
+  initialConditionId = '',
   onClose,
   onUploaded,
 }: {
   profileId: string;
   members: CircleMember[];
   initialFile: File | null;
+  /** Prefill the name, e.g. from a document an appointment said to file. */
+  initialLabel?: string;
+  /** Prefill the condition it is for, e.g. the one the appointment was for. */
+  initialConditionId?: string;
   onClose: () => void;
   onUploaded: (doc: CareDocument) => void;
 }) {
   const [file, setFile] = useState<File | null>(initialFile);
-  const [label, setLabel] = useState(initialFile ? withoutExtension(initialFile.name) : '');
+  const [label, setLabel] = useState(initialLabel || (initialFile ? withoutExtension(initialFile.name) : ''));
   // A category name; one not on the list yet is added when the file is saved.
   const [category, setCategory] = useState('');
   // File this document against a condition, so a scan report joins the
   // tracking thread of the ankle it was taken for.
-  const [conditionId, setConditionId] = useState('');
+  const [conditionId, setConditionId] = useState(initialConditionId);
   const [restricted, setRestricted] = useState(false);
   const [roles, setRoles] = useState<string[]>([]);
   const [uploadError, setUploadError] = useState('');

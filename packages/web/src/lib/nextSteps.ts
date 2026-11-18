@@ -32,6 +32,8 @@ export interface NextStep {
   completed_at: string | null;
   type_id: string | null;
   type_name: string;
+  /** The built-in kind, e.g. prescription, or null for one the account added. */
+  type_key: string | null;
   books: boolean;
   /** The appointment booked to carry it out, if any. */
   led_to: { id: string; title: string; starts_at: string; status: string } | null;

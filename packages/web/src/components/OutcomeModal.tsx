@@ -42,6 +42,8 @@ export function OutcomeModal({
   isOwner,
   onClose,
   onBook,
+  onAddMedication,
+  onUpload,
 }: {
   profileId: string;
   appointment: OutcomeAppointment;
@@ -50,6 +52,10 @@ export function OutcomeModal({
   onClose: () => void;
   /** Book the appointment a next step calls for. */
   onBook: (step: NextStep) => void;
+  /** Put a prescribed medication on the list. */
+  onAddMedication: (step: NextStep) => void;
+  /** Upload the document a next step is about. */
+  onUpload: (step: NextStep) => void;
 }) {
   const queryClient = useQueryClient();
   const { data } = useNextStepTypes(profileId);
@@ -135,6 +141,12 @@ export function OutcomeModal({
                     <span className="flex gap-1">
                       {s.books ? (
                         <Button size="xs" variant="secondary" onClick={() => onBook(s)}>Book it</Button>
+                      ) : null}
+                      {s.type_key === 'prescription' ? (
+                        <Button size="xs" variant="secondary" onClick={() => onAddMedication(s)}>Add to medications</Button>
+                      ) : null}
+                      {s.type_key === 'document' || s.type_key === 'certificate' || s.type_key === 'form' ? (
+                        <Button size="xs" variant="secondary" onClick={() => onUpload(s)}>Upload</Button>
                       ) : null}
                       <Button size="xs" variant="ghost" loading={markDone.isPending && markDone.variables?.id === s.id} onClick={() => markDone.mutate(s)}>
                         Done

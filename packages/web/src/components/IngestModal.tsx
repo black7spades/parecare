@@ -24,6 +24,7 @@ interface IngestResult {
  */
 const ACTION_TITLE: Record<string, string> = {
   file_document: 'Document', add_asset: 'Asset', add_provider: 'Provider', add_medication: 'Medication', add_treatment: 'Treatment', add_task: 'Task', log_event: 'Note',
+  record_appointment_outcome: 'How an appointment went',
 };
 const humanize = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/, (c) => c.toUpperCase());
 const inputClass = 'w-full rounded-md border border-border bg-card px-2 py-1 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -31,10 +32,16 @@ const inputClass = 'w-full rounded-md border border-border bg-card px-2 py-1 tex
 /** The scalar fields of a proposed action, editable before filing. */
 // Fields that point at a record rather than describe it; never shown for editing.
 const HIDDEN_KEYS = new Set(['type', 'document_id', 'document']);
-const FIELD_LABEL: Record<string, string> = { label: 'Name' };
+const FIELD_LABEL: Record<string, string> = { label: 'Name', appointment_title: 'Appointment', due_on: 'Do by', kind: 'Next step' };
+/** Lists inside a proposal, each item shown as its own editable row. */
+const LIST_LABEL: Record<string, string> = { next_steps: 'Next steps' };
 
 function ActionCard({ profileId, action, onChange, onRemove }: { profileId: string; action: ProposedAction; onChange: (a: ProposedAction) => void; onRemove: () => void }) {
   const keys = Object.keys(action).filter((k) => !HIDDEN_KEYS.has(k) && (action[k] == null || ['string', 'number'].includes(typeof action[k])));
+  // Lists of items, such as an outcome's next steps, so nothing is filed unseen.
+  const listKeys = Object.keys(action).filter(
+    (k) => !HIDDEN_KEYS.has(k) && Array.isArray(action[k]) && (action[k] as unknown[]).every((x) => x && typeof x === 'object')
+  );
   return (
     <div className="rounded-lg border border-border p-3">
       <div className="flex items-center justify-between mb-2">
@@ -65,6 +72,48 @@ function ActionCard({ profileId, action, onChange, onRemove }: { profileId: stri
           </label>
         ))}
       </div>
+      {listKeys.map((lk) => {
+        const items = action[lk] as Array<Record<string, unknown>>;
+        const setItems = (next: Array<Record<string, unknown>>) => onChange({ ...action, [lk]: next });
+        return (
+          <div key={lk} className="mt-3">
+            <span className="block text-xs text-muted mb-1">{LIST_LABEL[lk] ?? humanize(lk)}</span>
+            {items.length === 0 ? <p className="text-xs text-muted">None.</p> : null}
+            <ul className="space-y-2">
+              {items.map((item, i) => (
+                <li key={i} className="flex items-end gap-2 rounded-md border border-border p-2">
+                  <div className="grid flex-1 gap-2 sm:grid-cols-3">
+                    {Object.keys(item)
+                      .filter((f) => item[f] == null || ['string', 'number'].includes(typeof item[f]))
+                      .map((f) => (
+                        <label key={f} className="block">
+                          <span className="block text-xs text-muted mb-0.5">{FIELD_LABEL[f] ?? humanize(f)}</span>
+                          <input
+                            className={inputClass}
+                            value={item[f] == null ? '' : String(item[f])}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setItems(items.map((x, j) => (j === i ? { ...x, [f]: v === '' ? null : v } : x)));
+                            }}
+                          />
+                        </label>
+                      ))}
+                  </div>
+                  <Button
+                    size="xs"
+                    variant="ghost-danger"
+                    aria-label={`Remove this ${(LIST_LABEL[lk] ?? humanize(lk)).toLowerCase()} item`}
+                    title="Remove"
+                    onClick={() => setItems(items.filter((_, j) => j !== i))}
+                  >
+                    <CrossIcon />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
     </div>
   );
 }

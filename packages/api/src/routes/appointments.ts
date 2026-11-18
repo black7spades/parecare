@@ -141,6 +141,7 @@ export async function nextStepsFor(appointmentIds: string[]) {
       completed_at: r.completed_at,
       type_id: r.type_id,
       type_name: r.type_name ?? 'Other',
+      type_key: r.type_key ?? null,
       books: stepBooks(r.type_key),
       led_to: ledToByTask.get(r.id) ?? null,
     });
