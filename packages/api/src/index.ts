@@ -17,6 +17,7 @@ import { questionsRouter } from './routes/questions';
 import { documentsRouter } from './routes/documents';
 import { secretsRouter } from './routes/secrets';
 import { documentIngestRouter } from './routes/documentIngest';
+import { documentCategoriesRouter } from './routes/documentCategories';
 import { actionsContractRouter, profileActionsRouter } from './routes/actions';
 import { providersRouter, providerSearchRouter } from './routes/providers';
 import { suppliersRouter } from './routes/suppliers';
@@ -195,6 +196,7 @@ v1.use('/care-profiles/:id/documents', ...profileAccess, documentsRouter);
 // owner, plus a power of attorney holder once a death is recorded.
 v1.use('/care-profiles/:id/secrets', ...profileAccess, secretsRouter);
 v1.use('/care-profiles/:id/ingest', ...profileAccess, documentIngestRouter);
+v1.use('/care-profiles/:id/document-categories', ...profileAccess, documentCategoriesRouter);
 // The machine layer: a published action contract, one execution endpoint that
 // runs the same actions with the caller's own permissions, and undo.
 v1.use('/actions', actionsContractRouter);

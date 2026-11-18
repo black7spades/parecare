@@ -8,6 +8,7 @@ import { requireAuth } from '../middleware/auth';
 import { requireFeature } from '../middleware/subscriptionGate';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
 import type { Document } from '../types';
+import { accountIdForProfile, resolveCategoryByName, withCategory } from '../services/documentCategories';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -16,21 +17,12 @@ const upload = multer({
 
 export const documentsRouter = Router({ mergeParams: true });
 
-const documentCategory = z.enum([
-  'poa',
-  'will',
-  'advance_care_directive',
-  'insurance',
-  'identity',
-  'medical_record',
-  'facility_contract',
-  'financial',
-  'care_plan',
-  'other',
-]);
+// A category is chosen by name. A name the account has not used before
+// becomes a new category, which is how people add one while filing.
+const categoryName = z.string().trim().max(100);
 
 const documentMeta = z.object({
-  category: documentCategory,
+  category: categoryName.optional(),
   label: z.string().min(1).max(255),
   // The condition this document came out of, so a scan report files itself
   // under the sore ankle it was taken for.
@@ -43,7 +35,7 @@ const documentMeta = z.object({
 });
 
 const documentUpdate = z.object({
-  category: documentCategory.optional(),
+  category: categoryName.optional(),
   label: z.string().min(1).max(255).optional(),
   visible_to_roles: z.array(z.string().min(1).max(100)).max(50).optional(),
 });
@@ -59,9 +51,9 @@ export function canSeeDocument(req: { careAccess?: { level: string; member: { ro
 }
 
 documentsRouter.get('/', requireAuth, async (req, res) => {
-  const docs = await db<Document>('documents')
-    .where({ care_profile_id: req.params['id'] })
-    .orderBy('created_at', 'desc');
+  const docs = (await withCategory(db('documents'))
+    .where('documents.care_profile_id', req.params['id'])
+    .orderBy('documents.created_at', 'desc')) as Document[];
   res.json({ documents: docs.filter((d) => canSeeDocument(req, d)) });
 });
 
@@ -94,10 +86,12 @@ documentsRouter.post(
     const key = `${req.params['id']}/${Date.now()}${ext}`;
     const fileUrl = await uploadFile(req.file.buffer, key, req.file.mimetype);
 
-    const [doc] = await db<Document>('documents')
+    const accountId = (await accountIdForProfile(String(req.params['id'])))!;
+    const categoryId = await resolveCategoryByName(accountId, parsed.data.category ?? '');
+    const [inserted] = await db<Document>('documents')
       .insert({
         care_profile_id: req.params['id'],
-        category: parsed.data.category,
+        category_id: categoryId,
         label: parsed.data.label,
         medical_condition_id: parsed.data.medical_condition_id ?? null,
         file_url: fileUrl,
@@ -105,7 +99,8 @@ documentsRouter.post(
         mime_type: req.file.mimetype,
         visible_to_roles: parsed.data.visible_to_roles ?? [],
       })
-      .returning('*');
+      .returning('id');
+    const doc = await withCategory(db('documents')).where('documents.id', (inserted as { id: string }).id).first();
 
     res.status(201).json({ document: doc });
   }
@@ -171,10 +166,14 @@ documentsRouter.patch('/:docId', requireAuth, async (req, res) => {
     return;
   }
 
-  const [updated] = await db<Document>('documents')
-    .where({ id: doc.id })
-    .update(parsed.data)
-    .returning('*');
+  const { category, ...rest } = parsed.data;
+  const changes: Record<string, unknown> = { ...rest };
+  if (category !== undefined) {
+    const accountId = (await accountIdForProfile(String(req.params['id'])))!;
+    changes['category_id'] = await resolveCategoryByName(accountId, category);
+  }
+  await db('documents').where({ id: doc.id }).update(changes);
+  const updated = await withCategory(db('documents')).where('documents.id', doc.id).first();
   res.json({ document: updated });
 });
 

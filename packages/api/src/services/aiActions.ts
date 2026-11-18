@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import { accountIdForProfile, resolveCategoryByName, withCategory } from './documentCategories';
 import { db } from '../config/database';
 import { auditContext, currentAuditSource, currentUndoBatch, type AuditSource } from './auditContext';
 import type { Account, CareAccess, CareCircleMember, CareProfile } from '../types';
@@ -342,6 +343,20 @@ const addAssetSchema = z.object({
   useful_life_years: z.number().int().nonnegative().optional().nullable(),
 });
 
+/**
+ * File a document already on record under a category, and optionally give it
+ * a clearer name. The category is a name: a new one is added to the account's
+ * list. When Pare reads a document the server fills in which document.
+ */
+const fileDocumentSchema = z.object({
+  type: z.literal('file_document'),
+  document_id: z.string().uuid().optional(),
+  /** The document's current name, when the id is not known (the chat). */
+  document: z.string().max(255).optional(),
+  category: z.string().trim().max(100).optional().nullable(),
+  label: z.string().trim().max(255).optional().nullable(),
+});
+
 const updateProviderSchema = z.object({
   type: z.literal('update_provider'),
   name: z.string().min(1).max(255),
@@ -537,6 +552,7 @@ export const actionSchema = z.discriminatedUnion('type', [
   setCarePhaseSchema,
   addProviderSchema,
   addAssetSchema,
+  fileDocumentSchema,
   updateProviderSchema,
   linkProviderSchema,
   addToPracticeSchema,
@@ -1578,6 +1594,40 @@ async function executeOne(
       });
       await audit(profileId, account.id, 'providers', `filed ${action.practitioner} at ${action.practice}`);
       return outcome;
+    }
+    case 'file_document': {
+      if (!action.category && !action.label) return 'Say which category to file the document under, or what to call it.';
+      const docs = (await withCategory(db('documents'))
+        .where('documents.care_profile_id', profileId)) as Array<{ id: string; label: string; visible_to_roles: string[] | null }>;
+      const visible = docs.filter((d) => {
+        const roles = Array.isArray(d.visible_to_roles) ? d.visible_to_roles : [];
+        if (roles.length === 0 || access.level === 'owner' || access.level === 'admin') return true;
+        return !!access.member?.role && roles.includes(access.member.role);
+      });
+      let doc = action.document_id ? visible.find((d) => d.id === action.document_id) : undefined;
+      if (!doc && action.document) {
+        const want = action.document.trim().toLowerCase();
+        doc = visible.find((d) => d.label.toLowerCase() === want);
+        if (!doc) {
+          const near = visible.filter((d) => d.label.toLowerCase().includes(want));
+          if (near.length === 1) doc = near[0];
+          else if (near.length > 1) return `More than one document matches "${action.document}". Say which one by its full name.`;
+        }
+      }
+      if (!doc) return 'That document could not be found in their documents.';
+      const changes: Record<string, unknown> = {};
+      let categoryName: string | null = null;
+      if (action.category) {
+        const accountId = (await accountIdForProfile(profileId))!;
+        changes['category_id'] = await resolveCategoryByName(accountId, action.category);
+        const cat = await db('document_categories').where({ id: changes['category_id'] }).select('name').first();
+        categoryName = (cat as { name: string }).name;
+      }
+      const newLabel = action.label?.trim();
+      if (newLabel) changes['label'] = newLabel.slice(0, 255);
+      await db('documents').where({ id: doc.id }).update(changes);
+      const shown = newLabel || doc.label;
+      return categoryName ? `Filed ${shown} under ${categoryName}.` : `Renamed the document to ${shown}.`;
     }
     case 'add_asset': {
       const [asset] = await db('assets')

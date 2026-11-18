@@ -244,7 +244,11 @@ export interface Document {
   id: string;
   care_profile_id: string;
   uploaded_by: string | null;
-  category: string;
+  /** The account's document category it is filed under. */
+  category_id: string | null;
+  /** Joined in for display; not stored on the document. */
+  category_name?: string | null;
+  category_key?: string | null;
   label: string;
   /** The condition this document came out of, when it came out of one. */
   medical_condition_id: string | null;

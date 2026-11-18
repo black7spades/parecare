@@ -92,15 +92,16 @@ function extractPdfText(buffer: Buffer): string {
  * vocabulary (add_asset, add_provider, add_medication, and so on). Everything
  * is filed against the current profile.
  */
-export function buildIngestPrompt(profileName: string, today: string, knownAddresses: string[] = []): string {
+export function buildIngestPrompt(profileName: string, today: string, knownAddresses: string[] = [], categories: string[] = []): string {
   const addressGuard = knownAddresses.length
     ? `\n\nAddresses already on file in this account (they belong to the family, NOT to vendors):\n${knownAddresses.map((a) => `- ${a}`).join('\n')}\nIf an address on the document matches one of these, it is the person's own address (the "invoice to" / "bill to" / "ship to"), so do NOT create a provider or supplier from it. Only a business's own address (usually the letterhead or the top of the page, next to its name, phone and ABN) identifies a vendor.`
     : '';
   return `You are filing an uploaded document into ${profileName}'s care record. Today is ${today}.${addressGuard}
 
-Do two things:
+Do three things:
 1. In one or two short sentences, say what the document is (an invoice, a care plan, a referral letter, a business card, a prescription) and what you are filing from it. Do NOT quote or repeat the document text back.
-2. For each record you can extract, append a fenced code block in exactly this form, opening fence on its own line, one JSON object, closing fence:
+2. Always emit exactly one file_document block that files the document itself: the category it belongs in, and a short clear name for it such as "Discharge letter, Example Hospital, March 2026" or "Tax invoice, ResMed CPAP machine". Pick a category from this list whenever one fits: ${categories.length ? categories.join(', ') : 'Other'}. Only when none fits, give a short new category name of one to three words, such as "Tax" or "Hospital". Never use "Other" when you can tell what the document is.
+3. For each record you can extract, append a fenced code block in exactly this form, opening fence on its own line, one JSON object, closing fence:
 
 \`\`\`parecare-action
 {"type": "add_asset", "name": "ResMed AirSense 11 CPAP machine", "make_model": "ResMed AirSense 11 Auto", "serial_number": "22232961781", "price": 2080, "purchase_date": "2024-03-15", "supplier": "Sleep Healthcare Australia", "warranty_expiry": "2029-03-15", "notes": "Includes AirFit P10 mask, ClimateLine tube, humidifier."}
@@ -109,6 +110,7 @@ Do two things:
 CRITICAL: the key is "type" (never "action"), the JSON must be valid, one object per block, and the block must be fenced exactly as \`\`\`parecare-action ... \`\`\`. Emit one block per record.
 
 The action types you can use here and their fields:
+- {"type": "file_document", "category": the category to file this document under, "label": a short clear name for the document}
 - {"type": "add_asset", "name" (required), "category"?, "make_model"?, "serial_number"?, "price"? (number), "purchase_date"? ("YYYY-MM-DD"), "supplier"? (who sold it), "warranty_expiry"? ("YYYY-MM-DD"), "condition"?, "location"?, "useful_life_years"? (number), "notes"?}
 - {"type": "add_provider", "kind"?: "organisation" for a clinic, hospital, pharmacy, government department, agency or other body, "person" for a professional such as a doctor or caseworker, "provider_type": for a professional gp | specialist | psychologist | allied_health | legal | financial | social_worker or plain words such as "Neurologist"; for an organisation practice | clinic | pharmacy | care_facility or plain words such as "Hospital" or "Government department", "name" (required), "organisation"? (the organisation they are based at), "phone"?, "email"?}
 - {"type": "add_medication", "medication_name" (required), "dose"?, "route"?, "frequency"?, "instructions"?}

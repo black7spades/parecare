@@ -105,6 +105,12 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
       `Record this against the named neurotype as a trait, need or support (add_neurotype_attribute), choosing the kind from the wording: ${a}`,
   },
   {
+    name: 'file',
+    hint: 'which document and where it goes',
+    description: 'File a document under a category, e.g. /file the discharge letter under Hospital',
+    expand: (a) => `File this document already in their documents: ${a}`,
+  },
+  {
     name: 'question',
     hint: 'the question for the care circle',
     description: 'Raise a question, e.g. /question should we look at respite care for August?',

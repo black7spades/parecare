@@ -21,9 +21,10 @@ export function CatalogueCombo({
   widthClass = 'w-48',
   extraItems = [],
   id,
+  newLabel,
 }: {
-  /** Catalogue URL, e.g. "/option-catalogue?category=allergen". */
-  endpoint: string;
+  /** Catalogue URL, e.g. "/option-catalogue?category=allergen". Leave out to offer only extraItems. */
+  endpoint?: string;
   ariaLabel: string;
   placeholder?: string;
   /** Values already in use, kept out of the suggestions. */
@@ -38,6 +39,8 @@ export function CatalogueCombo({
   /** Fixed choices offered ahead of the catalogue's, filtered by what is typed. */
   extraItems?: string[];
   id?: string;
+  /** How the "add what was typed" choice reads; defaults to Add "name". */
+  newLabel?: (name: string) => string;
 }) {
   const [search, setSearch] = useState(initial);
   const [open, setOpen] = useState(false);
@@ -55,9 +58,9 @@ export function CatalogueCombo({
     queryKey: ['catalogue', endpoint, search],
     queryFn: () =>
       api.get<{ items: { id: string; name: string }[] }>(
-        `${endpoint}${endpoint.includes('?') ? '&' : '?'}search=${encodeURIComponent(search.trim())}`
+        `${endpoint ?? ''}${(endpoint ?? '').includes('?') ? '&' : '?'}search=${encodeURIComponent(search.trim())}`
       ),
-    enabled: open,
+    enabled: open && !!endpoint,
   });
   const excluded = new Set(exclude.map((v) => v.toLowerCase()));
   const needle = search.trim().toLowerCase();
@@ -68,7 +71,7 @@ export function CatalogueCombo({
     ...(data?.items ?? []).filter((s) => !fixedLower.has(s.name.toLowerCase())),
   ]
     .filter((s) => !excluded.has(s.name.toLowerCase()))
-    .slice(0, 10);
+    .slice(0, endpoint ? 10 : 100);
   const trimmed = search.trim();
   const exactMatch = suggestions.some((s) => s.name.toLowerCase() === trimmed.toLowerCase());
   const options = [
@@ -142,7 +145,7 @@ export function CatalogueCombo({
                   onMouseEnter={() => setHighlight(i)}
                   onClick={() => pick(name)}
                 >
-                  {isNew ? `Add "${name}"` : name}
+                  {isNew ? (newLabel ? newLabel(name) : `Add "${name}"`) : name}
                 </button>
               </li>
             );

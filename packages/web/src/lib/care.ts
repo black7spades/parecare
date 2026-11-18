@@ -333,25 +333,13 @@ const ENTITY_LABELS: Record<string, string> = {
 
 export const entityLabel = (type: string) => ENTITY_LABELS[type] ?? type;
 
-export const DOCUMENT_CATEGORIES = [
-  { value: 'poa', label: 'Power of attorney' },
-  { value: 'will', label: 'Will' },
-  { value: 'advance_care_directive', label: 'Advance care directive' },
-  { value: 'insurance', label: 'Insurance' },
-  { value: 'identity', label: 'Identity' },
-  { value: 'medical_record', label: 'Medical record / certificate' },
-  { value: 'facility_contract', label: 'Facility contract' },
-  { value: 'financial', label: 'Financial' },
-  { value: 'care_plan', label: 'Care plan' },
-  { value: 'other', label: 'Other' },
-] as const;
-
-export const documentCategoryLabel = (cat: string) =>
-  DOCUMENT_CATEGORIES.find((c) => c.value === cat)?.label ?? cat;
-
 export interface CareDocument {
   id: string;
-  category: string;
+  /** The account's category it is filed under, with its name joined in. */
+  category_id: string | null;
+  category_name: string | null;
+  /** Set for built-in categories, e.g. "advance_care_directive". */
+  category_key: string | null;
   label: string;
   file_url: string;
   file_size_bytes: number | null;

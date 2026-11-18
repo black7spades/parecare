@@ -1,5 +1,6 @@
 import { db } from '../config/database';
 import { formatInZone } from '../lib/timezone';
+import { withCategory } from './documentCategories';
 import type { CareAccess, CareProfile } from '../types';
 
 /**
@@ -93,7 +94,7 @@ export async function buildProfileContext(
       .where('occurred_at', '>=', logSince)
       .orderBy('occurred_at', 'desc')
       .limit(MAX_LIST),
-    db('documents').where({ care_profile_id: profileId }).orderBy('created_at', 'desc').limit(MAX_LIST),
+    withCategory(db('documents')).where('documents.care_profile_id', profileId).orderBy('documents.created_at', 'desc').limit(MAX_LIST),
   ]);
 
   const sections: string[] = [];
@@ -361,7 +362,7 @@ export async function buildProfileContext(
   if (visibleDocs.length) {
     sections.push(
       `## Documents on file (names only, contents not readable here)\n` +
-        visibleDocs.map((d) => `- ${d.label} (${String(d.category).replace(/_/g, ' ')}, added ${fmtDate(d.created_at, timeZone)})`).join('\n')
+        visibleDocs.map((d) => `- ${d.label} (${d.category_name ?? 'Other'}, added ${fmtDate(d.created_at, timeZone)})`).join('\n')
     );
   }
 

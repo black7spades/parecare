@@ -6,6 +6,34 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.34.0] - 2026-11-18
+
+### Added
+
+- **Your own document categories.** Type a category when filing a document.
+  If it is not on the list yet, choose Add and it is created on the spot.
+  Categories are shared by everyone you care for, so Tax set up for one
+  person is there for all of them.
+- **Edit categories.** The account owner has Edit categories beside the
+  Category filter on Documents. Rename a category and every document filed
+  under it follows. Rename it to a name already in use and it offers to
+  combine the two. Delete one and its documents move to Other, with Undo
+  right there. Care plan, Advance care directive and Other are always kept,
+  because PareCare files things there, but they can still be renamed.
+- **Change category for many documents at once.** Tick documents and choose
+  Change category.
+- **Pare files the document itself.** When Pare reads a document it now
+  suggests the category it belongs in and a clear name for it, such as
+  "Discharge letter, Example Hospital, March 2026" in place of
+  "IMG_2034". Check or change both before saving. In the chat, ask Pare to
+  "put the discharge letter under Hospital", or use /file.
+
+### Changed
+
+- **Medical record and Medical certificate are now two categories.**
+  Documents already filed with "certificate" or "cert" in their name moved
+  to Medical certificate. The rest stay in Medical record.
+
 ## [0.33.0] - 2026-11-18
 
 ### Added
