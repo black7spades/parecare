@@ -61,6 +61,25 @@ export async function deleteFile(fileUrl: string): Promise<void> {
   }
 }
 
+/** The bytes of a stored file, wherever it lives, so a filed document can be read again. */
+export async function readStoredFile(fileUrl: string): Promise<Buffer> {
+  if (fileUrl.startsWith('s3://')) {
+    const withoutScheme = fileUrl.slice(5);
+    const slashIndex = withoutScheme.indexOf('/');
+    const bucket = withoutScheme.slice(0, slashIndex);
+    const key = withoutScheme.slice(slashIndex + 1);
+    const client = getS3Client();
+    const out = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    if (!out.Body) throw new Error('Stored file is empty');
+    return Buffer.from(await out.Body.transformToByteArray());
+  }
+  if (fileUrl.startsWith('/uploads/')) {
+    const cfg = getStorageConfig();
+    return fs.promises.readFile(path.join(cfg.localPath, fileUrl.slice('/uploads/'.length)));
+  }
+  throw new Error('Unknown storage location');
+}
+
 export async function getDownloadUrl(fileUrl: string): Promise<string> {
   if (getStorageConfig().provider === 's3' && fileUrl.startsWith('s3://')) {
     const withoutScheme = fileUrl.slice(5);

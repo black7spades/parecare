@@ -60,12 +60,15 @@ export function IngestModal({
   profileId,
   onClose,
   initialFile,
+  document,
   title,
 }: {
   profileId: string;
   onClose: () => void;
   /** A file already chosen (a photo taken from the capture sheet); reading starts on its own. */
   initialFile?: File;
+  /** A document already filed; Pare reads it straight away, with nothing uploaded again. */
+  document?: { id: string; label: string };
   title?: string;
 }) {
   const queryClient = useQueryClient();
@@ -74,9 +77,13 @@ export function IngestModal({
   const [actions, setActions] = useState<ProposedAction[]>([]);
   const [outcomes, setOutcomes] = useState<string[] | null>(null);
   const [error, setError] = useState('');
+  const [filedOnly, setFiledOnly] = useState(false);
 
   const uploadMutation = useMutation({
     mutationFn: () => {
+      if (document) {
+        return api.post<IngestResult>(`/care-profiles/${profileId}/ingest/documents/${document.id}`, {});
+      }
       const form = new FormData();
       form.append('file', file!);
       return api.upload<IngestResult>(`/care-profiles/${profileId}/ingest`, form);
@@ -85,16 +92,33 @@ export function IngestModal({
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not read the file.'),
   });
 
-  // A photo handed in from the capture sheet reads itself, so the person is not
-  // asked to choose a file they have already taken.
+  // Keep the file in documents without reading it, for Pare to read later.
+  const fileOnlyMutation = useMutation({
+    mutationFn: () => {
+      const form = new FormData();
+      form.append('file', file!);
+      form.append('category', 'other');
+      form.append('label', file!.name.replace(/\.[^.]+$/, '').slice(0, 255) || file!.name);
+      return api.upload(`/care-profiles/${profileId}/documents`, form);
+    },
+    onSuccess: () => {
+      setFiledOnly(true);
+      setError('');
+      void queryClient.invalidateQueries({ queryKey: ['documents'] });
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'Could not file the document.'),
+  });
+
+  // A photo handed in from the capture sheet, or a document already on file,
+  // reads itself, so the person is not asked to choose a file they already gave.
   const started = useRef(false);
   useEffect(() => {
-    if (initialFile && !started.current) {
+    if ((initialFile || document) && !started.current) {
       started.current = true;
       uploadMutation.mutate();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialFile]);
+  }, [initialFile, document]);
 
   const applyMutation = useMutation({
     mutationFn: () => api.post<{ outcomes: string[] }>(`/care-profiles/${profileId}/ingest/apply`, { actions }),
@@ -110,11 +134,22 @@ export function IngestModal({
   return (
     <Modal open onClose={onClose} title={title ?? 'Upload and file with Pare'} wide>
       <div className="space-y-4">
-        {!result ? (
-          initialFile ? (
+        {filedOnly ? (
+          <>
+            <p className="text-sm font-medium text-ink">Filed in documents.</p>
+            <p className="text-sm text-muted">
+              Pare has not read it. Whenever you are ready, open Documents and choose Read with Pare beside it.
+            </p>
+            <div className="flex justify-end">
+              <Button onClick={onClose}>Done</Button>
+            </div>
+          </>
+        ) : !result ? (
+          initialFile || document ? (
             <>
               <p className="text-sm text-muted">
-                Reading the photo and working out what to file. Check and edit everything before it is saved.
+                {document ? `Reading ${document.label} and working out what to file.` : 'Reading the photo and working out what to file.'}{' '}
+                Check and edit everything before it is saved.
               </p>
               {uploadMutation.isPending ? <p className="text-sm text-muted">Reading…</p> : null}
               {error ? <p className="text-sm text-red-600">{error}</p> : null}
@@ -128,7 +163,8 @@ export function IngestModal({
             <>
               <p className="text-sm text-muted">
                 Upload a document, an invoice, a care plan or a business card. Pare reads it and proposes what to file into this
-                person's record. Edit every detail before anything is saved.
+                person's record. Edit every detail before anything is saved. Not ready for that? File it without reading, and
+                have Pare read it later from Documents.
               </p>
               <input
                 type="file"
@@ -138,7 +174,21 @@ export function IngestModal({
               {error ? <p className="text-sm text-red-600">{error}</p> : null}
               <div className="flex justify-end gap-2">
                 <Button variant="ghost" onClick={onClose}>Cancel</Button>
-                <Button loading={uploadMutation.isPending} disabled={!file} onClick={() => uploadMutation.mutate()}>Read the document</Button>
+                <Button
+                  variant="secondary"
+                  loading={fileOnlyMutation.isPending}
+                  disabled={!file || uploadMutation.isPending}
+                  onClick={() => fileOnlyMutation.mutate()}
+                >
+                  File without reading
+                </Button>
+                <Button
+                  loading={uploadMutation.isPending}
+                  disabled={!file || fileOnlyMutation.isPending}
+                  onClick={() => uploadMutation.mutate()}
+                >
+                  Read the document
+                </Button>
               </div>
             </>
           )
@@ -170,7 +220,9 @@ export function IngestModal({
                 </div>
               </>
             ) : (
-              <p className="text-sm text-muted">Nothing could be filed automatically. The file has been saved to documents.</p>
+              <p className="text-sm text-muted">
+                {document ? 'Nothing could be filed automatically. The document stays in documents.' : 'Nothing could be filed automatically. The file has been saved to documents.'}
+              </p>
             )}
             {error ? <p className="text-sm text-red-600">{error}</p> : null}
             <div className="flex justify-end gap-2">

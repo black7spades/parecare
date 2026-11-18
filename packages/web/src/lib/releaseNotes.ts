@@ -20,6 +20,15 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.33.0',
+    date: '2026-11-18',
+    summary: 'File a document now, and have Pare read it whenever you are ready.',
+    groups: [
+      { heading: 'Added', items: ['File a document without Pare reading it. Uploading with Pare now offers File without reading, which puts the file straight into documents and leaves it there untouched. Handy when there is no time to check what Pare finds, or when the file only needs keeping.', 'Have Pare read a document already on file. Every document in the list now has Read with Pare. Pare reads it, says what it is and proposes what to file from it, the same as a fresh upload, and nothing is saved until you check it. Documents filed before today work too. It sits beside each document in the list and in the window that opens when you view one.'] },
+      { heading: 'Fixed', items: ['The documents list fits on a laptop screen. Every button beside a document now shows without scrolling sideways, and the upload form moves under the list until the screen is wide enough for both.'] },
+    ],
+  },
+  {
     version: '0.32.0',
     date: '2026-11-16',
     summary: 'Contact details shared from the organisation, so nothing is typed twice.',

@@ -50,7 +50,7 @@ const documentUpdate = z.object({
 
 // Empty visible_to_roles = visible to the whole circle; otherwise only the
 // owner and members whose circle role is in the list can see the document.
-function canSeeDocument(req: { careAccess?: { level: string; member: { role: string } | null } }, doc: Document): boolean {
+export function canSeeDocument(req: { careAccess?: { level: string; member: { role: string } | null } }, doc: Document): boolean {
   const roles = Array.isArray(doc.visible_to_roles) ? doc.visible_to_roles : [];
   if (roles.length === 0) return true;
   if (req.careAccess?.level === 'owner') return true;
