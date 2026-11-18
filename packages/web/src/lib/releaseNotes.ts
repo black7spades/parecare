@@ -20,6 +20,14 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.37.0',
+    date: '2026-11-18',
+    summary: 'What matters today at the top of the overview, and cards with news come first.',
+    groups: [
+      { heading: 'Added', items: ['At a glance. The top of each overview now shows the next appointment, medications still to give today, open and overdue tasks, and the newest document. Each one opens its page.', 'Cards with news come first. A card with changes since your last visit has a dot beside its name and moves up, unless you have arranged the cards yourself.'] },
+    ],
+  },
+  {
     version: '0.36.0',
     date: '2026-11-18',
     summary: 'See what changed since you last looked, right on the overview.',

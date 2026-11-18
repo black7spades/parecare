@@ -21,6 +21,43 @@ interface RecentEntry {
 
 const SHOWN = 8;
 
+/**
+ * What changed since this person last looked. Fetching records the visit,
+ * so it is fetched once per visit to the page and kept steady while read.
+ * The overview shares it to know which cards have news.
+ */
+export function useRecentActivity(profileId: string) {
+  return useQuery({
+    queryKey: ['recent-activity', profileId],
+    queryFn: () => api.get<{ since: string; entries: RecentEntry[] }>(`/care-profiles/${profileId}/activity/recent`),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/** Which overview card each kind of change belongs to. */
+const CARD_FOR: Record<string, string> = {
+  conditions: 'conditions',
+  neurotypes: 'neurotypes',
+  'substance-use': 'substance-use',
+  'health-statuses': 'health',
+  reminders: 'upcoming',
+  appointments: 'upcoming',
+  calendar: 'upcoming',
+  log: 'log',
+  'care-profiles': 'profile',
+};
+
+/** The overview cards with something new since the last visit. */
+export function freshCardKeys(entries: { entity_type: string }[] | undefined): Set<string> {
+  const keys = new Set<string>();
+  for (const e of entries ?? []) {
+    const k = CARD_FOR[e.entity_type];
+    if (k) keys.add(k);
+  }
+  return keys;
+}
+
 const VERB: Record<RecentEntry['action'], string> = { created: 'added', updated: 'changed', deleted: 'removed' };
 
 /** Where each kind of record lives in the profile. */
@@ -84,14 +121,7 @@ function addedSummary(entries: RecentEntry[]): string | null {
  */
 export function RecentActivityCard({ profileId }: CardProps) {
   const myId = useAuthStore((s) => s.account?.id);
-  // Fetching records the visit, so fetch once per visit to the page and keep
-  // the list steady while it is read.
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['recent-activity', profileId],
-    queryFn: () => api.get<{ since: string; entries: RecentEntry[] }>(`/care-profiles/${profileId}/activity/recent`),
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-  });
+  const { data, isLoading, isError } = useRecentActivity(profileId);
 
   const since = data ? format(new Date(data.since), 'dd/MM/yyyy') : null;
   const title = since ? `Recent activity since ${since}` : undefined;

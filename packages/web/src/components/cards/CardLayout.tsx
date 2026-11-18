@@ -15,6 +15,7 @@ export function CardLayout({
   ctx,
   order,
   collapsed,
+  fresh,
   editView,
   onToggle,
   onMove,
@@ -23,6 +24,8 @@ export function CardLayout({
   ctx: CardContext;
   order: string[];
   collapsed: Set<string>;
+  /** Cards with something new since the last visit, marked with a dot. */
+  fresh?: Set<string>;
   editView: boolean;
   onToggle: (key: string) => void;
   onMove: (key: string, dir: -1 | 1) => void;
@@ -59,6 +62,7 @@ export function CardLayout({
             value={{
               cardKey: key,
               label: card.label,
+              fresh: fresh?.has(key) ?? false,
               collapsed: collapsed.has(key),
               editView,
               onToggle,

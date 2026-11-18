@@ -12,6 +12,8 @@ import { createContext, useContext, useEffect } from 'react';
 export interface CardSlot {
   cardKey: string;
   label: string;
+  /** Something changed in this card since the person last looked. */
+  fresh?: boolean;
   collapsed: boolean;
   editView: boolean;
   onToggle: (key: string) => void;
@@ -52,7 +54,7 @@ export function CardShell({ children, title }: { children: React.ReactNode; titl
 
   if (!slot) return <div className="card">{children}</div>;
 
-  const { cardKey, label, collapsed, editView, onToggle, onMove, isFirst, isLast } = slot;
+  const { cardKey, label, fresh, collapsed, editView, onToggle, onMove, isFirst, isLast } = slot;
 
   return (
     <div className="card">
@@ -66,6 +68,11 @@ export function CardShell({ children, title }: { children: React.ReactNode; titl
         >
           <span className="text-xs text-muted">{collapsed ? '▶' : '▼'}</span>
           {title ?? label}
+          {fresh ? (
+            <span className="h-2 w-2 rounded-full bg-primary" title="New since your last visit">
+              <span className="sr-only">, new since your last visit</span>
+            </span>
+          ) : null}
         </button>
         {editView ? (
           <span className="flex items-center gap-1">
