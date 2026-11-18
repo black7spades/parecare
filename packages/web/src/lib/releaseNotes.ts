@@ -20,6 +20,14 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.37.2',
+    date: '2026-11-18',
+    summary: 'Click a person’s name or picture to go back to their overview.',
+    groups: [
+      { heading: 'Fixed', items: ['Back to the overview in one click. Click a person’s name or picture at the top of any of their pages to return to their overview.'] },
+    ],
+  },
+  {
     version: '0.37.1',
     date: '2026-11-18',
     summary: 'Each dose counts on its own, medication times show in your own time, and the bell clears itself.',

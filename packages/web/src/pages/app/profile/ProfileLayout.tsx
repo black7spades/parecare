@@ -1,5 +1,5 @@
 import { Suspense, useState } from 'react';
-import { Outlet, useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import { Link, Outlet, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
@@ -130,17 +130,25 @@ export function ProfileLayout() {
     <div className="space-y-6">
       <div className={`flex items-start justify-between gap-4 flex-wrap ${alertLevel ? `${ALERT_HEADER_BORDER[alertLevel]} pl-3 rounded-sm` : ''}`}>
         <div className="flex items-center gap-3 min-w-0">
-          <Avatar
-            accountId={profile.id}
-            name={profile.full_name}
-            avatarUrl={profile.photo_url}
-            color={profile.photo_color}
-            fetchPath={`/care-profiles/${profile.id}/photo`}
-            size={52}
-          />
+          {/* The picture and the name both lead back to this person's
+              overview, which is where people expect a click on them to go.
+              The picture is skipped by keyboard and screen reader, since the
+              name next to it is the same link. */}
+          <Link to={`/app/${profile.id}`} tabIndex={-1} aria-hidden="true" className="shrink-0 rounded-full hover:opacity-90">
+            <Avatar
+              accountId={profile.id}
+              name={profile.full_name}
+              avatarUrl={profile.photo_url}
+              color={profile.photo_color}
+              fetchPath={`/care-profiles/${profile.id}/photo`}
+              size={52}
+            />
+          </Link>
           <div className="min-w-0">
             <h1 className="text-xl font-semibold text-ink truncate">
-              {profile.full_name}
+              <Link to={`/app/${profile.id}`} className="hover:text-primary" title={`${careName}'s overview`}>
+                {profile.full_name}
+              </Link>
               {age !== null ? (
                 <span
                   className="text-muted font-normal"
