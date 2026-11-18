@@ -20,6 +20,19 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.39.0',
+    date: '2026-11-18',
+    summary: 'Add a prescription or upload a document straight from an appointment, and letters fill in the outcome.',
+    groups: [
+      { heading: 'Added', items: [
+        'Add a prescription to medications from the appointment. A prescription to fill has Add to medications. The medication form opens with the name and condition filled in, and saving it ticks the prescription off.',
+        'Upload a document from the appointment. A document to file, a form or a medical certificate has Upload. The upload window opens with its name and condition filled in, and uploading ticks it off.',
+        'Letters from doctors fill in the outcome. When Pare reads a specialist’s letter, a consult summary or a discharge summary, it proposes how the visit went and each next step the letter asks for. Check or change every step before filing.',
+      ] },
+      { heading: 'Changed', items: ['Tasks sort by any column. Click a heading to sort, and again to reverse.'] },
+    ],
+  },
+  {
     version: '0.38.0',
     date: '2026-11-18',
     summary: 'Record how each appointment went, and track every referral, test and script it sets off.',

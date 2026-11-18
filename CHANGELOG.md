@@ -6,6 +6,25 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.39.0] - 2026-11-18
+
+### Added
+
+- **Add a prescription to medications from the appointment.** A prescription
+  to fill has Add to medications. The medication form opens with the name and
+  condition filled in, and saving it ticks the prescription off.
+- **Upload a document from the appointment.** A document to file, a form or a
+  medical certificate has Upload. The upload window opens with its name and
+  condition filled in, and uploading ticks it off.
+- **Letters from doctors fill in the outcome.** When Pare reads a specialist's
+  letter, a consult summary or a discharge summary, it proposes how the visit
+  went and each next step the letter asks for. Check or change every step
+  before filing.
+
+### Changed
+
+- **Tasks sort by any column.** Click a heading to sort, and again to reverse.
+
 ## [0.38.0] - 2026-11-18
 
 ### Added

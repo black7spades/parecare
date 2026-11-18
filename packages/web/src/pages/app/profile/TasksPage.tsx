@@ -10,6 +10,7 @@ import { useProfile } from './ProfileLayout';
 import { useAuthStore } from '../../../stores/auth';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
+import { SortableTh } from '../../../components/data/SortableTh';
 import { SENTIMENTS, COMPLETION_REASONS, sentimentEmoji, type CareProfile, type CircleMember, type Task } from '../../../lib/care';
 
 interface FanOutResult {
@@ -25,6 +26,9 @@ const REPEAT_LABELS: Record<Task['reminder_type'], string> = {
 };
 
 const isOverdue = (t: Task): boolean => !t.completed && new Date(t.next_due_at) < new Date();
+const REPEAT_ORDER: Task['reminder_type'][] = ['once', 'daily', 'weekly', 'monthly'];
+/** Overdue first, then open, then done. */
+const statusRank = (t: Task): number => (t.completed ? 2 : isOverdue(t) ? 0 : 1);
 const dueValue = (t: Task): number => new Date(t.next_due_at).getTime();
 const doneValue = (t: Task): number => (t.completed_at ? new Date(t.completed_at).getTime() : 0);
 const byTitle = (a: Task, b: Task) => a.title.localeCompare(b.title);
@@ -34,6 +38,12 @@ const TASK_SORTS: DataSort<Task>[] = [
   { key: 'due', label: 'By due date', compare: (a, b) => (dueValue(a) - dueValue(b)) || byTitle(a, b) },
   { key: 'completed', label: 'Recently completed', compare: (a, b) => (doneValue(b) - doneValue(a)) || (dueValue(a) - dueValue(b)) },
   { key: 'title', label: 'By task (A–Z)', compare: byTitle },
+  {
+    key: 'repeat',
+    label: 'By repeat',
+    compare: (a, b) => REPEAT_ORDER.indexOf(a.reminder_type) - REPEAT_ORDER.indexOf(b.reminder_type) || byTitle(a, b),
+  },
+  { key: 'status', label: 'By status', compare: (a, b) => statusRank(a) - statusRank(b) || (dueValue(a) - dueValue(b)) },
 ];
 
 function TaskCompletionModal({
@@ -290,11 +300,20 @@ export function TasksPage() {
     match: (t, v) => t.reminder_type === v,
   };
 
+  // Sorting by who it is assigned to needs the circle's names.
+  const taskSorts: DataSort<Task>[] = [
+    ...TASK_SORTS,
+    {
+      key: 'assigned',
+      label: 'By assigned to',
+      compare: (a, b) => (memberName(a.assigned_to) ?? '￿').localeCompare(memberName(b.assigned_to) ?? '￿') || byTitle(a, b),
+    },
+  ];
   const dv = useDataView<Task>({
     rows: tasks,
     getId: (t) => t.id,
     searchText: (t) => [t.title, t.body, memberName(t.assigned_to), t.completed_by_name, t.desired_outcome].filter(Boolean).join(' '),
-    sorts: TASK_SORTS,
+    sorts: taskSorts,
     filters: [statusFilter, assigneeFilter, repeatFilter],
   });
 
@@ -328,7 +347,7 @@ export function TasksPage() {
           search={dv.search}
           onSearch={dv.setSearch}
           searchPlaceholder="Search tasks, notes or people…"
-          sorts={TASK_SORTS.map((s) => ({ key: s.key, label: s.label }))}
+          sorts={taskSorts.map((s) => ({ key: s.key, label: s.label }))}
           sortKey={dv.sortKey}
           onSort={dv.setSortKey}
           filters={[statusFilter, assigneeFilter, repeatFilter].map((f) => ({ key: f.key, label: f.label, options: f.options }))}
@@ -356,11 +375,11 @@ export function TasksPage() {
                   </th>
                 ) : null}
                 <th className="px-2 py-3 w-8" aria-label="Done" />
-                <th className="px-3 py-3 font-medium">Task</th>
-                <th className="px-3 py-3 font-medium">Due</th>
-                <th className="px-3 py-3 font-medium">Repeat</th>
-                <th className="px-3 py-3 font-medium">Assigned to</th>
-                <th className="px-3 py-3 font-medium">Status</th>
+                <SortableTh label="Task" sortKey="title" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="py-3" />
+                <SortableTh label="Due" sortKey="due" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="py-3" />
+                <SortableTh label="Repeat" sortKey="repeat" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="py-3" />
+                <SortableTh label="Assigned to" sortKey="assigned" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="py-3" />
+                <SortableTh label="Status" sortKey="status" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="py-3" />
                 {canEdit ? <th className="px-3 py-3 font-medium text-right">Actions</th> : null}
               </tr>
             </thead>

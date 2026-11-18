@@ -13,6 +13,9 @@ import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/Da
 import { SortableTh } from '../../../components/data/SortableTh';
 import { OutcomeModal } from '../../../components/OutcomeModal';
 import type { NextStep } from '../../../lib/nextSteps';
+import { MedicationForm } from './medications/MedicationForm';
+import { UploadDocumentModal } from './DocumentsPage';
+import { SELF_RELATIONSHIP, type CircleMember } from '../../../lib/care';
 import { useProfile } from './ProfileLayout';
 import { useHealthConfig } from '../../../lib/appConfig';
 
@@ -96,7 +99,7 @@ const TYPE_FILTER: DataFilter<Appointment> = {
 };
 
 export function AppointmentsPage() {
-  const { profile, careName, canEdit, isOwner } = useProfile();
+  const { profile, careName, canEdit, isOwner, relationship } = useProfile();
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [initialProviderId, setInitialProviderId] = useState('');
@@ -116,6 +119,25 @@ export function AppointmentsPage() {
   const [outcomeFor, setOutcomeFor] = useState<string | null>(null);
   // Booking the appointment a next step calls for.
   const [booking, setBooking] = useState<{ step: NextStep; from: Appointment } | null>(null);
+  // Adding a prescribed medication, or uploading a document, a next step names.
+  const [addingMed, setAddingMed] = useState<{ step: NextStep; from: Appointment } | null>(null);
+  const [uploadingFor, setUploadingFor] = useState<{ step: NextStep; from: Appointment } | null>(null);
+
+  const { data: conditionData } = useQuery({
+    queryKey: ['conditions', profile.id],
+    queryFn: () => api.get<{ conditions: { id: string; name: string }[] }>(`/care-profiles/${profile.id}/conditions`),
+  });
+  const conditionName = (id: string | null) => (conditionData?.conditions ?? []).find((c) => c.id === id)?.name ?? '';
+  const { data: circleData } = useQuery({
+    queryKey: ['circle', profile.id],
+    queryFn: () => api.get<{ members: CircleMember[] }>(`/care-profiles/${profile.id}/circle`),
+  });
+
+  // The thing a next step asked for is done, so tick the step off.
+  const finishStep = useMutation({
+    mutationFn: (stepId: string) => api.patch(`/care-profiles/${profile.id}/reminders/${stepId}`, { completed: true }),
+    onSettled: () => invalidate(),
+  });
   const [confirmDelete, setConfirmDelete] = useState<Appointment | null>(null);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkEditQueue, setBulkEditQueue] = useState<Appointment[]>([]);
@@ -333,6 +355,47 @@ export function AppointmentsPage() {
           onBook={(step) => {
             setBooking({ step, from: outcomeAppointment });
             setOutcomeFor(null);
+          }}
+          onAddMedication={(step) => {
+            setAddingMed({ step, from: outcomeAppointment });
+            setOutcomeFor(null);
+          }}
+          onUpload={(step) => {
+            setUploadingFor({ step, from: outcomeAppointment });
+            setOutcomeFor(null);
+          }}
+        />
+      ) : null}
+
+      {addingMed ? (
+        <MedicationForm
+          profileId={profile.id}
+          selfCare={relationship === SELF_RELATIONSHIP}
+          initialName={addingMed.step.title === addingMed.step.type_name ? '' : addingMed.step.title}
+          initialCondition={conditionName(addingMed.from.medical_condition_id)}
+          onClose={() => setAddingMed(null)}
+          onSaved={() => {
+            finishStep.mutate(addingMed.step.id);
+            void queryClient.invalidateQueries({ queryKey: ['medications', profile.id] });
+            setOutcomeFor(addingMed.from.id);
+            setAddingMed(null);
+          }}
+        />
+      ) : null}
+
+      {uploadingFor ? (
+        <UploadDocumentModal
+          profileId={profile.id}
+          members={circleData?.members ?? []}
+          initialFile={null}
+          initialLabel={uploadingFor.step.title === uploadingFor.step.type_name ? '' : uploadingFor.step.title}
+          initialConditionId={uploadingFor.from.medical_condition_id ?? ''}
+          onClose={() => setUploadingFor(null)}
+          onUploaded={() => {
+            finishStep.mutate(uploadingFor.step.id);
+            void queryClient.invalidateQueries({ queryKey: ['documents', profile.id] });
+            setOutcomeFor(uploadingFor.from.id);
+            setUploadingFor(null);
           }}
         />
       ) : null}

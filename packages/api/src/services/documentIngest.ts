@@ -1,4 +1,5 @@
 import zlib from 'zlib';
+import { BUILT_IN_NEXT_STEPS } from './nextStepTypes';
 
 /**
  * Pull readable text out of an uploaded file so the assistant can classify it
@@ -92,6 +93,9 @@ function extractPdfText(buffer: Buffer): string {
  * vocabulary (add_asset, add_provider, add_medication, and so on). Everything
  * is filed against the current profile.
  */
+/** The built-in kinds of next step, named so documents are filed with the same words as the outcome form. */
+const NEXT_STEP_NAMES = BUILT_IN_NEXT_STEPS.map((s) => `"${s.name}"`).join(', ');
+
 export function buildIngestPrompt(profileName: string, today: string, knownAddresses: string[] = [], categories: string[] = []): string {
   const addressGuard = knownAddresses.length
     ? `\n\nAddresses already on file in this account (they belong to the family, NOT to vendors):\n${knownAddresses.map((a) => `- ${a}`).join('\n')}\nIf an address on the document matches one of these, it is the person's own address (the "invoice to" / "bill to" / "ship to"), so do NOT create a provider or supplier from it. Only a business's own address (usually the letterhead or the top of the page, next to its name, phone and ABN) identifies a vendor.`
@@ -116,11 +120,13 @@ The action types you can use here and their fields:
 - {"type": "add_medication", "medication_name" (required), "dose"?, "route"?, "frequency"?, "instructions"?}
 - {"type": "add_task", "title" (required), "body"?, "due_at" (ISO time), "repeat": once | daily | weekly | monthly}
 - {"type": "log_event", "entry_type": visit | medical_appointment | observation | handover, "title"?, "body"?, "occurred_at"? (ISO time)}
+- {"type": "record_appointment_outcome", "appointment_title"? (only the title of an appointment already on file; leave it out to use the most recent one), "outcome"? (what was found or decided, in a sentence), "next_steps": array of {"kind" (one of: ${NEXT_STEP_NAMES}; or a short new name when none fits), "details"? (who, what or where), "due_on"? ("YYYY-MM-DD")}}
 
 What goes where:
 - A tax invoice or receipt for a piece of equipment (a CPAP machine, a hoist, a wheelchair, a bed, a monitor) is an asset: add_asset with the unit name, make/model, serial number, the price actually paid, purchase date, the seller as "supplier", and the warranty expiry (compute it from the purchase date if the document gives a warranty length). Put accessories in notes. A GST-free medical device still has a price. The seller of equipment goes in the asset's "supplier" field, NOT as a provider; only use add_provider for a clinician or a clinic, not a retailer.
 - The seller is the business named on the letterhead (with its own phone and ABN); the "invoice to" / "bill to" party is the customer, usually ${profileName}, and that address is the person's own, not a vendor's. A provider's or supplier's name is the business name (e.g. "Sleep Healthcare Australia"), never an address.
 - A prescription or medication list is one add_medication per drug.
+- A letter about a visit that has happened (a specialist's letter to the GP, a consult summary, a discharge summary, test results with a plan) is one record_appointment_outcome: the outcome in a sentence, and one next step for each thing it says should happen next, such as a referral, a blood test, a sample to give, a scan, a follow-up or a prescription to fill. Use these next steps in place of add_task for anything the letter asks for.
 - Only extract facts that are actually in the document. Never invent serial numbers, prices or dates. Use "YYYY-MM-DD" for dates. If you cannot extract anything fileable, say so and emit no blocks.
 
 The document text is in the next message.`;

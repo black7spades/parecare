@@ -126,6 +126,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   update_profile: 'Update a person\'s profile details.',
   book_appointment: 'Book an appointment for a person, optionally with a provider from the directory.',
   update_appointment: 'Change or cancel one of a person\'s appointments.',
+  record_appointment_outcome: 'Record how one of a person\'s appointments went and each next step it set off, such as a referral, a blood test, a sample to give or a prescription to fill. Each next step becomes a task that is tracked until done.',
   complete_task: 'Tick off one of a person\'s tasks as done. Only when the user has said it is done.',
   reschedule_task: 'Move one of a person\'s tasks to a new time.',
   record_cost: 'Record a health cost for a person, with who paid and any claim.',
@@ -308,7 +309,7 @@ async function recordsBetween(args: Record<string, unknown>, ctx: ToolContext): 
       .orderBy('r.recorded_at', 'asc')
       .limit(LIMIT),
     within(db('appointments as a').leftJoin('providers as p', 'p.id', 'a.provider_id').where('a.care_profile_id', pid), 'a.starts_at')
-      .select('a.starts_at', 'a.title', 'a.appointment_type', 'a.status', 'a.location', 'a.notes', 'p.name as provider')
+      .select('a.starts_at', 'a.title', 'a.appointment_type', 'a.status', 'a.location', 'a.notes', 'a.outcome', 'p.name as provider')
       .orderBy('a.starts_at', 'asc')
       .limit(LIMIT),
   ]);
@@ -339,7 +340,7 @@ async function recordsBetween(args: Record<string, unknown>, ctx: ToolContext): 
       'Appointments',
       appointments.map(
         (r) =>
-          `- ${when(r.starts_at)}, ${r.title}${r.provider ? ` with ${r.provider}` : ''}${r.location ? ` at ${r.location}` : ''}, ${words(r.appointment_type)}, ${words(r.status)}${r.notes ? `. Notes: ${r.notes}` : ''}`
+          `- ${when(r.starts_at)}, ${r.title}${r.provider ? ` with ${r.provider}` : ''}${r.location ? ` at ${r.location}` : ''}, ${words(r.appointment_type)}, ${words(r.status)}${r.notes ? `. Notes: ${r.notes}` : ''}${r.outcome ? `. Outcome: ${r.outcome}` : ''}`
       )
     ),
     seesCosts

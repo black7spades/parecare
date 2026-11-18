@@ -16,10 +16,27 @@ import type { MedicationRecord, Supplier } from '../../../../lib/care';
  * the treatment, the schedule, and the supply. Every value in the
  * sentences is its own field underneath.
  */
-export function MedicationForm({ profileId, med, selfCare, onClose, onSaved }: { profileId: string; med?: MedicationRecord; selfCare: boolean; onClose: () => void; onSaved: () => void }) {
+export function MedicationForm({
+  profileId,
+  med,
+  selfCare,
+  initialName = '',
+  initialCondition = '',
+  onClose,
+  onSaved,
+}: {
+  profileId: string;
+  med?: MedicationRecord;
+  selfCare: boolean;
+  /** Prefill a new medication, e.g. from a prescription an appointment gave. */
+  initialName?: string;
+  initialCondition?: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const subject = selfCare ? 'I' : 'They';
-  const [name, setName] = useState(med?.name ?? '');
-  const [condition, setCondition] = useState(med?.condition_name ?? '');
+  const [name, setName] = useState(med?.name ?? initialName);
+  const [condition, setCondition] = useState(med?.condition_name ?? initialCondition);
   const [units, setUnits] = useState(med?.units_per_dose != null ? String(med.units_per_dose) : '1');
   const [doseAmount, setDoseAmount] = useState(med?.dose_amount ?? '');
   const [doseUnit, setDoseUnit] = useState(med?.dose_unit ?? '');
