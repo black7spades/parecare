@@ -1,10 +1,12 @@
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
-import { uploadFile } from '../services/storage';
+import { uploadFile, readStoredFile } from '../services/storage';
+import { canSeeDocument } from './documents';
+import type { Document } from '../types';
 import { complete, isAiConfigured, type ChatTurn } from '../services/aiProvider';
 import { dateInZone } from '../lib/timezone';
 import { extractText, buildIngestPrompt } from '../services/documentIngest';
@@ -71,9 +73,6 @@ documentIngestRouter.post('/', requireAuth, upload.single('file'), async (req, r
     return;
   }
   const profileId = profileIdOf(req);
-  const profile = await db('care_profiles').where({ id: profileId }).select('full_name', 'preferred_name').first();
-  const name = (profile as { preferred_name?: string; full_name?: string } | undefined);
-  const personName = name?.preferred_name || name?.full_name || 'this person';
 
   // Keep the file: store it as a document on the profile so the source stays.
   const ext = path.extname(req.file.originalname);
@@ -91,9 +90,68 @@ documentIngestRouter.post('/', requireAuth, upload.single('file'), async (req, r
     })
     .returning('id');
 
-  const docId = (doc as { id: string }).id;
-  const isImage = req.file.mimetype.startsWith('image/');
-  const text = extractText(req.file.buffer, req.file.mimetype, req.file.originalname);
+  await readAndPropose(req, res, {
+    docId: (doc as { id: string }).id,
+    buffer: req.file.buffer,
+    mimetype: req.file.mimetype,
+    filename: req.file.originalname,
+  });
+});
+
+/**
+ * Read a document that is already filed, the same way a fresh upload is read.
+ * Nothing new is stored: the proposals point back at the document on file.
+ */
+documentIngestRouter.post('/documents/:docId', requireAuth, async (req, res) => {
+  const profileId = profileIdOf(req);
+  const doc = await db<Document>('documents')
+    .where({ id: String(req.params['docId']), care_profile_id: profileId })
+    .first();
+  if (!doc || !canSeeDocument(req, doc)) {
+    res.status(404).json({ error: 'That document could not be found. It may have been deleted.', code: 'NOT_FOUND' });
+    return;
+  }
+  let buffer: Buffer;
+  try {
+    buffer = await readStoredFile(doc.file_url);
+  } catch (err) {
+    console.warn('Could not load a filed document for reading:', err);
+    res.json({
+      document_id: doc.id,
+      text_found: false,
+      summary: 'The file could not be opened from storage, so Pare could not read it. Try downloading it to check it is still there.',
+      needs_attention: true,
+      actions: [],
+    });
+    return;
+  }
+  const ext = path.extname(doc.file_url);
+  await readAndPropose(req, res, {
+    docId: doc.id,
+    buffer,
+    mimetype: doc.mime_type || 'application/octet-stream',
+    filename: `${doc.label}${ext}`,
+  });
+});
+
+/**
+ * Have the assistant read a document and propose what to file from it. Shared
+ * by fresh uploads and documents already on file; the file itself is always
+ * kept, so any failure here is reported without losing anything.
+ */
+async function readAndPropose(
+  req: Request,
+  res: Response,
+  file: { docId: string; buffer: Buffer; mimetype: string; filename: string },
+): Promise<void> {
+  const { docId } = file;
+  const profileId = profileIdOf(req);
+  const profile = await db('care_profiles').where({ id: profileId }).select('full_name', 'preferred_name').first();
+  const name = (profile as { preferred_name?: string; full_name?: string } | undefined);
+  const personName = name?.preferred_name || name?.full_name || 'this person';
+
+  const isImage = file.mimetype.startsWith('image/');
+  const text = extractText(file.buffer, file.mimetype, file.filename);
   const haveText = !!text && text.length >= 20;
 
   if (!isAiConfigured()) {
@@ -118,14 +176,14 @@ documentIngestRouter.post('/', requireAuth, upload.single('file'), async (req, r
       role: 'user',
       content: [
         { type: 'text', text: 'The document is the attached image. Read it and file what you find.' },
-        { type: 'image', media_type: req.file.mimetype, data: req.file.buffer.toString('base64') },
+        { type: 'image', media_type: file.mimetype, data: file.buffer.toString('base64') },
       ],
     };
   } else {
     res.json({
       document_id: docId,
       text_found: false,
-      summary: 'The file was saved, but no readable text could be pulled from it. You can still file its details by hand.',
+      summary: 'The file was saved, but no readable text could be pulled from it. Its details can still be filed by hand.',
       actions: [],
     });
     return;
@@ -173,7 +231,7 @@ documentIngestRouter.post('/', requireAuth, upload.single('file'), async (req, r
     } else if (pareFault) {
       summary = 'Your file is saved, but Pare could not read it just now. A system administrator can check Pare in System settings, then try reading this file again.';
     } else {
-      summary = 'Your file is saved, but Pare could not read it automatically. You can still file its details by hand.';
+      summary = 'Your file is saved, but Pare could not read it automatically. Its details can still be filed by hand.';
     }
     res.json({
       document_id: docId,
@@ -183,7 +241,7 @@ documentIngestRouter.post('/', requireAuth, upload.single('file'), async (req, r
       actions: [],
     });
   }
-});
+}
 
 const applySchema = z.object({ actions: z.array(z.unknown()).min(1).max(50) });
 

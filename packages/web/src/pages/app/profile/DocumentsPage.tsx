@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
-import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
+import { DownloadIcon, PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
@@ -63,6 +63,7 @@ export function DocumentsPage() {
   const [confirmBulk, setConfirmBulk] = useState(false);
   const [bulkEditQueue, setBulkEditQueue] = useState<CareDocument[]>([]);
   const [ingesting, setIngesting] = useState(false);
+  const [reading, setReading] = useState<CareDocument | null>(null);
 
   const { data: uploadConditionData } = useQuery({
     queryKey: ['conditions', profile.id],
@@ -168,7 +169,7 @@ export function DocumentsPage() {
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_20rem] items-start">
+    <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_20rem] items-start">
       <div className="card">
         <div className="flex items-center gap-2 mb-4">
           <h2 className="text-base font-semibold text-ink">Document repository</h2>
@@ -251,7 +252,7 @@ export function DocumentsPage() {
                       <span className="badge bg-surface-2 text-muted text-xs">{documentCategoryLabel(doc.category)}</span>
                     </td>
                     <td className="px-4 py-3 text-muted">{formatSize(doc.file_size_bytes)}</td>
-                    <td className="px-4 py-3 text-muted">{format(new Date(doc.created_at), 'd MMM yyyy')}</td>
+                    <td className="px-4 py-3 text-muted whitespace-nowrap">{format(new Date(doc.created_at), 'd MMM yyyy')}</td>
                     <td className="px-4 py-3">
                       {(doc.visible_to_roles?.length ?? 0) > 0 ? (
                         <span
@@ -271,8 +272,13 @@ export function DocumentsPage() {
                         <Button size="sm" variant="secondary" onClick={() => setViewing(doc)}>
                           View
                         </Button>
-                        <Button size="sm" variant="secondary" onClick={() => void download(doc)}>
-                          Download
+                        {canEdit ? (
+                          <Button size="sm" variant="secondary" title="Pare reads it and proposes what to file from it" onClick={() => setReading(doc)}>
+                            Read with Pare
+                          </Button>
+                        ) : null}
+                        <Button size="xs" variant="ghost" aria-label={`Download ${doc.label}`} title="Download" onClick={() => void download(doc)}>
+                          <DownloadIcon />
                         </Button>
                         {canEdit ? (
                           <>
@@ -436,6 +442,7 @@ export function DocumentsPage() {
           doc={viewing}
           onClose={() => setViewing(null)}
           onDownload={() => void download(viewing)}
+          onRead={canEdit ? () => { setReading(viewing); setViewing(null); } : undefined}
         />
       ) : null}
 
@@ -461,11 +468,20 @@ export function DocumentsPage() {
         />
       ) : null}
       {ingesting ? <IngestModal profileId={profile.id} onClose={() => setIngesting(false)} /> : null}
+      {reading ? (
+        <IngestModal
+          key={reading.id}
+          profileId={profile.id}
+          document={{ id: reading.id, label: reading.label }}
+          title={`Read ${reading.label} with Pare`}
+          onClose={() => setReading(null)}
+        />
+      ) : null}
 
       {/* The secrets vault. It shows itself only to the account owner, and to
           a power of attorney once a date of death is recorded, so it renders
           nothing at all for everyone else. */}
-      <div className="lg:col-span-2">
+      <div className="2xl:col-span-2">
         <SecretsSection profileId={profile.id} careName={profile.preferred_name || profile.full_name} />
       </div>
     </div>
@@ -544,11 +560,14 @@ function DocumentViewerModal({
   doc,
   onClose,
   onDownload,
+  onRead,
 }: {
   profileId: string;
   doc: CareDocument;
   onClose: () => void;
   onDownload: () => void;
+  /** Hand this document to Pare to read; absent for those who cannot edit. */
+  onRead?: () => void;
 }) {
   const kind = previewKind(doc);
   const [url, setUrl] = useState('');
@@ -625,6 +644,7 @@ function DocumentViewerModal({
         )}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Close</Button>
+          {onRead ? <Button variant="secondary" onClick={onRead}>Read with Pare</Button> : null}
           <Button variant="secondary" onClick={onDownload}>Download</Button>
         </div>
       </div>
