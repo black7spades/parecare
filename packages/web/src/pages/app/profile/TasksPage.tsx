@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
@@ -395,6 +396,15 @@ export function TasksPage() {
                       {t.sentiment ? <span className="ml-1.5" title={SENTIMENTS.find((s) => s.value === t.sentiment)?.label}>{sentimentEmoji(t.sentiment)}</span> : null}
                     </div>
                     {t.body ? <div className="text-xs text-muted">{t.body}</div> : null}
+                    {t.appointment_id ? (
+                      <div className="text-xs text-muted mt-0.5">
+                        Next step: {t.next_step_type_name ?? 'Other'}, from{' '}
+                        <Link to={`/app/${profile.id}/appointments?outcome=${t.appointment_id}`} className="text-primary hover:underline">
+                          {t.appointment_title ?? 'an appointment'}
+                          {t.appointment_starts_at ? ` on ${format(new Date(t.appointment_starts_at), 'd MMM')}` : ''}
+                        </Link>
+                      </div>
+                    ) : null}
                     {t.desired_outcome ? <div className="text-xs text-muted italic mt-0.5">Goal: {t.desired_outcome}</div> : null}
                     {t.completion_reason ? (
                       <div className="text-xs text-muted mt-0.5">

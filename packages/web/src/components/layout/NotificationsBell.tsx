@@ -14,7 +14,8 @@ import { browserTimeZone } from '../../lib/datetime';
 
 interface NotificationItem {
   key: string;
-  kind: 'activity' | 'supply_low' | 'supply_out' | 'dose_overdue' | 'care_plan_ready';
+  kind: 'activity' | 'supply_low' | 'supply_out' | 'dose_overdue' | 'care_plan_ready' | 'outcome_due';
+  record_id?: string | null;
   profile_id: string;
   profile_name: string;
   actor_name: string | null;
@@ -51,6 +52,9 @@ const ENTITY_TARGETS: Record<string, { page: string; noun: string }> = {
 const VERBS: Record<string, string> = { created: 'added', updated: 'updated', deleted: 'removed' };
 
 function itemText(item: NotificationItem): string {
+  if (item.kind === 'outcome_due') {
+    return `How did ${item.profile_name}'s appointment go? ${item.summary ?? ''}`.trim();
+  }
   if (item.kind === 'dose_overdue') {
     const n = item.missed_count ?? 1;
     return n === 1
@@ -79,6 +83,8 @@ function itemText(item: NotificationItem): string {
 function itemPath(item: NotificationItem): string {
   // An unrecorded dose is logged on the Medication record page, not the list.
   if (item.kind === 'dose_overdue') return `/app/${item.profile_id}/mar`;
+  // How an appointment went is recorded on the appointment itself.
+  if (item.kind === 'outcome_due') return `/app/${item.profile_id}/appointments?outcome=${item.record_id ?? ''}`;
   const page = ENTITY_TARGETS[item.entity_type ?? '']?.page ?? '';
   return `/app/${item.profile_id}${page ? `/${page}` : ''}`;
 }

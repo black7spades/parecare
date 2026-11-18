@@ -4,6 +4,7 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { resolveConditionCatalogueId } from './conditionCatalogue';
 import { resolveOptions } from './optionCatalogue';
+import { nextStepsFor } from './appointments';
 import {
   ATTRIBUTE_DOMAINS,
   ATTRIBUTE_KINDS,
@@ -219,14 +220,20 @@ conditionsRouter.get('/', requireAuth, async (req, res) => {
     ? await db('appointments as ap')
         .leftJoin('providers as p', 'p.id', 'ap.provider_id')
         .whereIn('ap.medical_condition_id', ids)
-        .select('ap.id', 'ap.medical_condition_id', 'ap.title', 'ap.appointment_type', 'ap.starts_at', 'ap.status', 'ap.location', 'p.name as provider_name')
+        .select(
+          'ap.id', 'ap.medical_condition_id', 'ap.title', 'ap.appointment_type', 'ap.starts_at', 'ap.status', 'ap.location',
+          'ap.outcome', 'ap.from_reminder_id', 'p.name as provider_name'
+        )
         .orderBy('ap.starts_at', 'desc')
     : [];
+  // Each appointment carries what came of it, so the thread reads from the
+  // first visit through every referral, test and follow-up it set off.
+  const stepsByAppointment = await nextStepsFor((conditionAppointments as Array<{ id: string }>).map((a) => a.id));
   const apptsByCondition = new Map<string, unknown[]>();
   for (const a of conditionAppointments as Array<Record<string, unknown>>) {
     const key = a['medical_condition_id'] as string;
     const arr = apptsByCondition.get(key) ?? [];
-    arr.push(a);
+    arr.push({ ...a, next_steps: stepsByAppointment.get(a['id'] as string) ?? [] });
     apptsByCondition.set(key, arr);
   }
 

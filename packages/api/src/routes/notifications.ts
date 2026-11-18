@@ -79,6 +79,7 @@ notificationsRouter.get('/settings', requireAuth, async (req, res) => {
 const prefsSchema = z.object({
   activity: z.boolean().optional(),
   dose_overdue: z.boolean().optional(),
+  outcomes: z.boolean().optional(),
   supply: z.boolean().optional(),
 });
 

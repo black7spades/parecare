@@ -6,6 +6,35 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.38.0] - 2026-11-18
+
+### Added
+
+- **How did it go?** After an appointment, note what happened and what came
+  out of it. Choose from common next steps such as a referral, a follow-up,
+  a prescription to fill, a blood test, a urine, stool or semen sample, an
+  X-ray or scan, results to chase or a document to file. Anything else is
+  added by typing it, and is then on the list for everyone you care for.
+- **Every next step is tracked.** Each one becomes a task with its own date,
+  so it shows on the Tasks page, in At a glance and in the bell until it is
+  done. A referral, test or follow-up can be booked straight from it, and
+  booking it ticks it off.
+- **A thread for each condition.** A condition's appointments now read in
+  order, each with how it went and what it led to, from the first visit on.
+- **A nudge after each appointment.** The bell asks how an appointment went
+  once it has finished, and clears itself when you answer. It can be turned
+  off in notification settings.
+- **Pare records outcomes.** Tell Pare "saw Dr Lee, got a referral to physio
+  and a script for Naproxen", or use /outcome, and it files the outcome and
+  both next steps.
+- **Edit the list of next steps.** The account owner can rename, combine and
+  delete kinds of next step, with Undo.
+
+### Changed
+
+- **Appointments sort by any column.** Click a heading to sort, and again to
+  reverse.
+
 ## [0.37.2] - 2026-11-18
 
 ### Fixed

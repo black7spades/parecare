@@ -25,8 +25,14 @@ remindersRouter.get('/', requireAuth, async (req, res) => {
   const query = db('reminders as r')
     .leftJoin('accounts as a', 'r.completed_by_account_id', 'a.id')
     .leftJoin('accounts as cl', 'r.claimed_by', 'cl.id')
+    // A next step knows its kind and the appointment it came out of.
+    .leftJoin('next_step_types as nst', 'r.next_step_type_id', 'nst.id')
+    .leftJoin('appointments as ap', 'r.appointment_id', 'ap.id')
     .where('r.care_profile_id', req.params['id'])
-    .select('r.*', 'a.display_name as completed_by_name', 'cl.display_name as claimed_by_name');
+    .select(
+      'r.*', 'a.display_name as completed_by_name', 'cl.display_name as claimed_by_name',
+      'nst.name as next_step_type_name', 'ap.title as appointment_title', 'ap.starts_at as appointment_starts_at'
+    );
   if (status === 'open') query.where('r.completed', false);
   else if (status === 'done') query.where('r.completed', true);
   const reminders = await query.orderBy('r.completed', 'asc').orderBy('r.next_due_at', 'asc');

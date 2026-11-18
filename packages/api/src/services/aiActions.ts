@@ -14,7 +14,7 @@ import { SUBSTANCE_STATUSES, SUBSTANCE_ROUTES } from '../routes/substanceUse';
 import { resolveSymptomCatalogueId } from '../routes/symptomCatalogue';
 import { resolveNeurotypeAttributeCatalogueId, ATTRIBUTE_KINDS } from '../routes/neurotypeAttributeCatalogue';
 import { linkAddressToProfile, syncProfileResidence, RESIDENCE_KIND } from './addresses';
-import { APPOINTMENT_TYPES, APPOINTMENT_STATUSES, syncAppointmentSpend } from '../routes/appointments';
+import { APPOINTMENT_TYPES, APPOINTMENT_STATUSES, addNextSteps, syncAppointmentSpend } from '../routes/appointments';
 import { OBSERVATION_STATUSES } from '../routes/treatments';
 import { FUNDING_SOURCES, CLAIM_STATUSES } from './healthSpend';
 import { addPracticeMember, syncPracticeMembers, whereNamed } from './providerPractices';
@@ -459,6 +459,29 @@ const updateAppointmentSchema = z.object({
   cost_actual: z.number().min(0).max(1e9).optional().nullable(),
 });
 
+/**
+ * How an appointment went and what it set off. The outcome is a short note on
+ * the appointment; each next step (a referral, a blood test, a prescription to
+ * fill, a semen sample, anything) becomes a task tied to it, exactly as the
+ * outcome form files them. The kind is one of the account's next-step kinds
+ * by name, or a new name, which is added to their list.
+ */
+const recordAppointmentOutcomeSchema = z.object({
+  type: z.literal('record_appointment_outcome'),
+  appointment_title: z.string().max(255).optional().nullable(),
+  outcome: z.string().max(4000).optional().nullable(),
+  next_steps: z
+    .array(
+      z.object({
+        kind: z.string().min(1).max(100),
+        details: z.string().max(255).optional().nullable(),
+        due_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+      })
+    )
+    .max(20)
+    .default([]),
+});
+
 const completeTaskSchema = z.object({
   type: z.literal('complete_task'),
   title: z.string().min(1).max(255),
@@ -561,6 +584,7 @@ export const actionSchema = z.discriminatedUnion('type', [
   updateProfileSchema,
   bookAppointmentSchema,
   updateAppointmentSchema,
+  recordAppointmentOutcomeSchema,
   completeTaskSchema,
   rescheduleTaskSchema,
   recordCostSchema,
@@ -1089,6 +1113,29 @@ async function resolveProviderForAppointment(
  * partial match, preferring the next one still to come so "move my
  * physio appointment" lands on the upcoming one rather than last month's.
  */
+/**
+ * The appointment an outcome belongs to: one that has already started, found
+ * by title (exact first, then partial), most recent first. With no title,
+ * the most recent appointment that has happened.
+ */
+async function findPastAppointment(
+  title: string,
+  profileId: string
+): Promise<{ id: string; title: string; status: string } | undefined> {
+  const rows = (await db('appointments')
+    .where({ care_profile_id: profileId })
+    .whereNot('status', 'cancelled')
+    .where('starts_at', '<=', new Date())
+    .select('id', 'title', 'status')
+    .orderBy('starts_at', 'desc')) as Array<{ id: string; title: string; status: string }>;
+  const needle = title.trim().toLowerCase();
+  if (!needle) return rows[0];
+  return (
+    rows.find((r) => r.title.toLowerCase() === needle) ??
+    rows.find((r) => r.title.toLowerCase().includes(needle) || needle.includes(r.title.toLowerCase()))
+  );
+}
+
 async function findAppointmentByTitle(
   title: string,
   profileId: string
@@ -1830,6 +1877,38 @@ async function executeOne(
       if (action.status === 'missed') return `Marked "${name}" as missed.${providerNote}`;
       if (startsAt) return `Moved "${name}" to ${formatInZone(startsAt, timeZone)}.${providerNote}`;
       return `Updated "${name}".${providerNote}`;
+    }
+    case 'record_appointment_outcome': {
+      const appointment = await findPastAppointment(action.appointment_title ?? '', profileId);
+      if (!appointment) {
+        return action.appointment_title
+          ? `${CLARIFY_MARK} I could not find a past appointment called "${action.appointment_title}". Which one was it?`
+          : `${CLARIFY_MARK} I could not find a past appointment to record this against. Which one was it?`;
+      }
+      const steps = await db.transaction(async (trx) => {
+        const fields: Record<string, unknown> = { updated_at: trx.fn.now() };
+        if (action.outcome?.trim()) {
+          fields['outcome'] = action.outcome.trim();
+          fields['outcome_recorded_at'] = trx.fn.now();
+        }
+        if (appointment.status === 'scheduled') fields['status'] = 'completed';
+        await trx('appointments').where({ id: appointment.id, care_profile_id: profileId }).update(fields);
+        return addNextSteps(trx, {
+          profileId,
+          appointmentId: appointment.id,
+          actorId: account.id,
+          timeZone: timeZone ?? null,
+          steps: action.next_steps.map((s) => ({ type: s.kind, details: s.details ?? null, due_on: s.due_on ?? null })),
+          source: 'pare',
+        });
+      });
+      await audit(profileId, account.id, 'appointments', `outcome of ${appointment.title}`);
+      const parts: string[] = [];
+      if (action.outcome?.trim()) parts.push(`Noted how "${appointment.title}" went.`);
+      if (steps.length) {
+        parts.push(`Added ${steps.length === 1 ? 'a next step' : `${steps.length} next steps`} to track: ${steps.map((s) => (s.title === s.type_name ? s.title : `${s.title} (${s.type_name})`)).join(', ')}.`);
+      }
+      return parts.join(' ') || `Marked "${appointment.title}" as attended.`;
     }
     case 'complete_task': {
       const task = await findOpenTaskByTitle(action.title, profileId);

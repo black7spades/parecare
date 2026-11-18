@@ -304,6 +304,47 @@ export async function buildProfileContext(
     sections.push(lines.join('\n'));
   }
 
+  // Recent appointments and what came of them, so Pare can ask how one went
+  // and knows which next steps are still open.
+  const recentAppts = (await db('appointments as ap')
+    .leftJoin('providers as p', 'ap.provider_id', 'p.id')
+    .where('ap.care_profile_id', profileId)
+    .whereNot('ap.status', 'cancelled')
+    .where('ap.starts_at', '<=', now)
+    .where('ap.starts_at', '>=', new Date(now.getTime() - 60 * 24 * 3600 * 1000))
+    .orderBy('ap.starts_at', 'desc')
+    .limit(10)
+    .select('ap.id', 'ap.title', 'ap.starts_at', 'ap.outcome', 'p.name as provider_name')) as Array<{
+    id: string;
+    title: string;
+    starts_at: Date;
+    outcome: string | null;
+    provider_name: string | null;
+  }>;
+  if (recentAppts.length) {
+    const stepRows = (await db('reminders as r')
+      .leftJoin('next_step_types as t', 'r.next_step_type_id', 't.id')
+      .whereIn('r.appointment_id', recentAppts.map((a) => a.id))
+      .select('r.appointment_id', 'r.title', 'r.completed', 't.name as kind')) as Array<{
+      appointment_id: string;
+      title: string;
+      completed: boolean;
+      kind: string | null;
+    }>;
+    const lines = [`## Recent appointments and what came of them, last 60 days`];
+    for (const a of recentAppts) {
+      const steps = stepRows.filter((s) => s.appointment_id === a.id);
+      lines.push(
+        `- ${fmtDate(a.starts_at, timeZone)}: ${a.title}${a.provider_name ? ` with ${a.provider_name}` : ''}. ` +
+          (a.outcome ? `Outcome: ${a.outcome}.` : steps.length ? '' : 'No outcome recorded yet.') +
+          (steps.length
+            ? ` Next steps: ${steps.map((s) => `${s.title}${s.kind && s.kind !== s.title ? ` [${s.kind}]` : ''} ${s.completed ? 'done' : 'open'}`).join('; ')}.`
+            : '')
+      );
+    }
+    sections.push(lines.join('\n'));
+  }
+
   if (tasks.length) {
     sections.push(
       `## Upcoming tasks and appointments, next 30 days\n` +
