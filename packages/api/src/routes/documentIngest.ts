@@ -6,6 +6,7 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { uploadFile, readStoredFile } from '../services/storage';
 import { canSeeDocument } from './documents';
+import { accountIdForProfile, categoryIdByKey, listCategories } from '../services/documentCategories';
 import type { Document } from '../types';
 import { complete, isAiConfigured, type ChatTurn } from '../services/aiProvider';
 import { dateInZone } from '../lib/timezone';
@@ -78,10 +79,11 @@ documentIngestRouter.post('/', requireAuth, upload.single('file'), async (req, r
   const ext = path.extname(req.file.originalname);
   const key = `${profileId}/ingest/${Date.now()}${ext}`;
   const fileUrl = await uploadFile(req.file.buffer, key, req.file.mimetype);
+  const accountId = (await accountIdForProfile(profileId))!;
   const [doc] = await db('documents')
     .insert({
       care_profile_id: profileId,
-      category: 'other',
+      category_id: await categoryIdByKey(accountId, 'other'),
       label: req.file.originalname.slice(0, 255),
       file_url: fileUrl,
       file_size_bytes: req.file.size,
@@ -197,12 +199,21 @@ async function readAndPropose(
     ? await db('addresses').where({ account_id: (account as { account_id: string }).account_id }).select('formatted').limit(30)
     : [];
   const knownAddresses = knownRows.map((r) => (r as { formatted: string | null }).formatted).filter((v): v is string => !!v);
-  const system = buildIngestPrompt(personName, today, knownAddresses);
+  const categories = account ? (await listCategories((account as { account_id: string }).account_id)).map((c) => c.name) : [];
+  const system = buildIngestPrompt(personName, today, knownAddresses, categories);
 
   try {
     // Reading a whole document is a heavy, rare job worth the best model available.
     const result = await complete(system, [userTurn], 1500, 'mediation');
-    const actions = parseProposedActions(result.text);
+    // Pare files the document it just read, never another one, and only once.
+    let filedOnce = false;
+    const actions = parseProposedActions(result.text).flatMap((a): AssistantAction[] => {
+      if (a.type !== 'file_document') return [a];
+      if (filedOnce) return [];
+      filedOnce = true;
+      const { document: _ignored, ...rest } = a;
+      return [{ ...rest, document_id: docId }];
+    });
     // The summary is the model's prose with any fenced blocks removed.
     const summary = result.text.replace(/```[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim();
     res.json({

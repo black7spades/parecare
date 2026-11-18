@@ -1126,17 +1126,18 @@ registerSection({
   async fetch({ profileIds, dateRange, db }) {
     let query = db('documents')
       .join('care_profiles', 'care_profiles.id', 'documents.care_profile_id')
+      .leftJoin('document_categories as dc', 'dc.id', 'documents.category_id')
       .whereIn('documents.care_profile_id', profileIds);
     if (dateRange) {
       query = query.where('documents.created_at', '>=', dateRange.from).where('documents.created_at', '<=', dateRange.to);
     }
-    const rows = await query.select('documents.*', 'care_profiles.full_name as _profile_name')
+    const rows = await query.select('documents.*', 'dc.name as category_name', 'care_profiles.full_name as _profile_name')
       .orderBy('documents.created_at', 'desc');
     return rows.map((r) => ({
       _profile_id: r.care_profile_id,
       _profile_name: r._profile_name,
       label: r.label,
-      category: r.category,
+      category: r.category_name ?? 'Other',
       mime_type: r.mime_type,
       file_size_bytes: r.file_size_bytes,
       created_at: r.created_at,

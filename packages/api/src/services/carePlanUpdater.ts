@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'crypto';
 import { z } from 'zod';
+import { accountIdForProfile, categoryIdByKey } from './documentCategories';
 import { db } from '../config/database';
 import { uploadFile, deleteFile } from './storage';
 import { composeReport, reportToHtml } from './carePlanReport';
@@ -1136,10 +1137,11 @@ async function createVersion(input: CreateVersionInput): Promise<VersionRow> {
 
   try {
     return await db.transaction(async (trx) => {
+      const planAccountId = (await accountIdForProfile(input.profileId, trx))!;
       const [doc] = await trx('documents')
         .insert({
           care_profile_id: input.profileId,
-          category: 'care_plan',
+          category_id: await categoryIdByKey(planAccountId, 'care_plan', trx),
           label: `Care plan version ${versionNumber}`,
           file_url: fileUrl,
           file_size_bytes: Buffer.byteLength(html, 'utf8'),

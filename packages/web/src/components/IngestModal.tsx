@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import { Button } from './ui/Button';
 import { Modal } from './ui/Modal';
 import { CrossIcon } from './ui/icons';
+import { DocumentCategoryField } from './DocumentCategoryField';
 
 interface ProposedAction { type: string; [k: string]: unknown }
 interface IngestResult {
@@ -22,14 +23,18 @@ interface IngestResult {
  * confirmed. Owner and admin, via the profile's edit right.
  */
 const ACTION_TITLE: Record<string, string> = {
-  add_asset: 'Asset', add_provider: 'Provider', add_medication: 'Medication', add_treatment: 'Treatment', add_task: 'Task', log_event: 'Note',
+  file_document: 'Document', add_asset: 'Asset', add_provider: 'Provider', add_medication: 'Medication', add_treatment: 'Treatment', add_task: 'Task', log_event: 'Note',
 };
 const humanize = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/, (c) => c.toUpperCase());
 const inputClass = 'w-full rounded-md border border-border bg-card px-2 py-1 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
 /** The scalar fields of a proposed action, editable before filing. */
-function ActionCard({ action, onChange, onRemove }: { action: ProposedAction; onChange: (a: ProposedAction) => void; onRemove: () => void }) {
-  const keys = Object.keys(action).filter((k) => k !== 'type' && (action[k] == null || ['string', 'number'].includes(typeof action[k])));
+// Fields that point at a record rather than describe it; never shown for editing.
+const HIDDEN_KEYS = new Set(['type', 'document_id', 'document']);
+const FIELD_LABEL: Record<string, string> = { label: 'Name' };
+
+function ActionCard({ profileId, action, onChange, onRemove }: { profileId: string; action: ProposedAction; onChange: (a: ProposedAction) => void; onRemove: () => void }) {
+  const keys = Object.keys(action).filter((k) => !HIDDEN_KEYS.has(k) && (action[k] == null || ['string', 'number'].includes(typeof action[k])));
   return (
     <div className="rounded-lg border border-border p-3">
       <div className="flex items-center justify-between mb-2">
@@ -37,9 +42,17 @@ function ActionCard({ action, onChange, onRemove }: { action: ProposedAction; on
         <Button size="xs" variant="ghost-danger" aria-label={`Remove this ${ACTION_TITLE[action.type] ?? 'proposed'} item`} title="Remove" onClick={onRemove}><CrossIcon /></Button>
       </div>
       <div className="grid sm:grid-cols-2 gap-2">
-        {keys.map((k) => (
+        {keys.map((k) => action.type === 'file_document' && k === 'category' ? (
+          <DocumentCategoryField
+            key={k}
+            id={`ingest-category-${k}`}
+            profileId={profileId}
+            value={action[k] == null ? '' : String(action[k])}
+            onChange={(v) => onChange({ ...action, [k]: v || null })}
+          />
+        ) : (
           <label key={k} className="block">
-            <span className="block text-xs text-muted mb-0.5">{humanize(k)}</span>
+            <span className="block text-xs text-muted mb-0.5">{FIELD_LABEL[k] ?? humanize(k)}</span>
             <input
               className={inputClass}
               value={action[k] == null ? '' : String(action[k])}
@@ -124,7 +137,7 @@ export function IngestModal({
     mutationFn: () => api.post<{ outcomes: string[] }>(`/care-profiles/${profileId}/ingest/apply`, { actions }),
     onSuccess: (r) => {
       setOutcomes(r.outcomes);
-      for (const key of ['directory-assets', 'providers', 'medications', 'documents', 'health-spend']) {
+      for (const key of ['directory-assets', 'providers', 'medications', 'documents', 'document-categories', 'health-spend']) {
         void queryClient.invalidateQueries({ queryKey: [key] });
       }
     },
@@ -212,6 +225,7 @@ export function IngestModal({
                   {actions.map((a, i) => (
                     <ActionCard
                       key={i}
+                      profileId={profileId}
                       action={a}
                       onChange={(next) => setActions((prev) => prev.map((x, j) => (j === i ? next : x)))}
                       onRemove={() => setActions((prev) => prev.filter((_, j) => j !== i))}

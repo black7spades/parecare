@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
@@ -22,6 +23,8 @@ interface DataToolbarProps {
   filters?: { key: string; label: string; anyLabel?: string; options: { value: string; label: string }[] }[];
   filterValues?: Record<string, string>;
   onFilter?: (key: string, value: string) => void;
+  /** One extra control shown after the filters, such as Edit categories. */
+  extra?: ReactNode;
   // Selection / bulk actions (only supply actions the viewer is allowed to run).
   selectedCount?: number;
   bulkActions?: ToolbarBulkAction[];
@@ -44,7 +47,7 @@ interface DataToolbarProps {
 export function DataToolbar({
   search, onSearch, searchPlaceholder = 'Search…',
   sorts = [], sortKey, onSort,
-  filters = [], filterValues = {}, onFilter,
+  filters = [], filterValues = {}, onFilter, extra,
   selectedCount = 0, bulkActions = [], onClearSelection,
   page, totalPages, pageSize, totalFiltered,
   onPageChange, onPageSizeChange,
@@ -69,6 +72,7 @@ export function DataToolbar({
             {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         ))}
+        {extra}
         {sorts.length > 0 ? (
           <select className={SELECT} aria-label="Sort" value={sortKey} onChange={(e) => onSort?.(e.target.value)}>
             {sorts.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}

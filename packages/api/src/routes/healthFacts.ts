@@ -232,9 +232,10 @@ conditionsRouter.get('/', requireAuth, async (req, res) => {
 
   const conditionDocuments = ids.length
     ? await db('documents')
-        .whereIn('medical_condition_id', ids)
-        .select('id', 'medical_condition_id', 'label', 'category', 'mime_type', 'file_size_bytes', 'created_at')
-        .orderBy('created_at', 'desc')
+        .leftJoin('document_categories as dc', 'dc.id', 'documents.category_id')
+        .whereIn('documents.medical_condition_id', ids)
+        .select('documents.id', 'documents.medical_condition_id', 'documents.label', 'dc.name as category_name', 'dc.system_key as category_key', 'documents.mime_type', 'documents.file_size_bytes', 'documents.created_at')
+        .orderBy('documents.created_at', 'desc')
     : [];
   const docsByCondition = new Map<string, unknown[]>();
   for (const d of conditionDocuments as Array<Record<string, unknown>>) {

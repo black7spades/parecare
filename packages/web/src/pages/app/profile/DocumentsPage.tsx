@@ -10,7 +10,10 @@ import { Modal } from '../../../components/ui/Modal';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
 import { IngestModal } from '../../../components/IngestModal';
-import { CIRCLE_ROLES, circleRoleLabel, DOCUMENT_CATEGORIES, documentCategoryLabel, type CareDocument, type CircleMember } from '../../../lib/care';
+import { CIRCLE_ROLES, circleRoleLabel, type CareDocument, type CircleMember } from '../../../lib/care';
+import { categoryNameOf, documentCategoriesKey } from '../../../lib/documentCategories';
+import { DocumentCategoryField } from '../../../components/DocumentCategoryField';
+import { EditCategoriesModal } from '../../../components/EditCategoriesModal';
 import { PagePurpose } from '../../../components/PagePurpose';
 import { useProfile } from './ProfileLayout';
 import { SecretsSection } from './SecretsSection';
@@ -41,17 +44,18 @@ const byName = (a: CareDocument, b: CareDocument) => a.label.localeCompare(b.lab
 const DOC_SORTS: DataSort<CareDocument>[] = [
   { key: 'name', label: 'By name', compare: byName },
   { key: 'date', label: 'By date', defaultDir: 'desc', compare: (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime() || byName(a, b) },
-  { key: 'category', label: 'By category', compare: (a, b) => documentCategoryLabel(a.category).localeCompare(documentCategoryLabel(b.category)) || byName(a, b) },
+  { key: 'category', label: 'By category', compare: (a, b) => categoryNameOf(a).localeCompare(categoryNameOf(b)) || byName(a, b) },
   { key: 'size', label: 'By size', defaultDir: 'desc', compare: (a, b) => sizeValue(a) - sizeValue(b) || byName(a, b) },
 ];
 
 export function DocumentsPage() {
-  const { profile, canEdit } = useProfile();
+  const { profile, canEdit, isOwner } = useProfile();
   const queryClient = useQueryClient();
   const fileInput = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [label, setLabel] = useState('');
-  const [category, setCategory] = useState('medical_record');
+  // A category name; one not on the list yet is added when the file is saved.
+  const [category, setCategory] = useState('');
   // File this document against a condition, so a scan report joins the
   // tracking thread of the ankle it was taken for.
   const [docConditionId, setDocConditionId] = useState('');
@@ -64,6 +68,8 @@ export function DocumentsPage() {
   const [bulkEditQueue, setBulkEditQueue] = useState<CareDocument[]>([]);
   const [ingesting, setIngesting] = useState(false);
   const [reading, setReading] = useState<CareDocument | null>(null);
+  const [editingCategories, setEditingCategories] = useState(false);
+  const [recategorising, setRecategorising] = useState<CareDocument[] | null>(null);
 
   const { data: uploadConditionData } = useQuery({
     queryKey: ['conditions', profile.id],
@@ -76,7 +82,11 @@ export function DocumentsPage() {
     queryFn: () => api.get<{ documents: CareDocument[] }>(`/care-profiles/${profile.id}/documents`),
   });
   const documents = data?.documents ?? [];
-  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['documents', profile.id] });
+  // Filing can add a category, so the category list refreshes with the documents.
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['documents', profile.id] });
+    void queryClient.invalidateQueries({ queryKey: documentCategoriesKey(profile.id) });
+  };
 
   const { data: circleData } = useQuery({
     queryKey: ['circle', profile.id],
@@ -97,6 +107,7 @@ export function DocumentsPage() {
     onSuccess: () => {
       setFile(null);
       setLabel('');
+      setCategory('');
       setRestrictedRoles([]);
       setError('');
       if (fileInput.current) fileInput.current.value = '';
@@ -126,14 +137,16 @@ export function DocumentsPage() {
   const categoryFilter: DataFilter<CareDocument> = {
     key: 'category',
     label: 'Category',
-    options: [...new Set(documents.map((d) => d.category))].map((c) => ({ value: c, label: documentCategoryLabel(c) })),
-    match: (d, v) => d.category === v,
+    options: [...new Map(documents.map((d) => [d.category_id ?? '', categoryNameOf(d)])).entries()]
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([value, label]) => ({ value, label })),
+    match: (d, v) => (d.category_id ?? '') === v,
   };
 
   const dv = useDataView<CareDocument>({
     rows: documents,
     getId: (d) => d.id,
-    searchText: (d) => [d.label, documentCategoryLabel(d.category)].join(' '),
+    searchText: (d) => [d.label, categoryNameOf(d)].join(' '),
     sorts: DOC_SORTS,
     filters: [categoryFilter],
   });
@@ -152,6 +165,7 @@ export function DocumentsPage() {
 
   const bulkActions: ToolbarBulkAction[] = canEdit
     ? [
+        { key: 'category', label: 'Change category', onRun: () => setRecategorising([...dv.selectedRows]) },
         { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setBulkEditQueue(q); setEditing(q[0] ?? null); } },
         { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulk(true) },
       ]
@@ -189,6 +203,9 @@ export function DocumentsPage() {
           filters={[categoryFilter].map((f) => ({ key: f.key, label: f.label, options: f.options }))}
           filterValues={dv.filterValues}
           onFilter={dv.setFilter}
+          extra={isOwner ? (
+            <Button size="sm" variant="ghost" onClick={() => setEditingCategories(true)}>Edit categories</Button>
+          ) : undefined}
           selectedCount={dv.selectedRows.length}
           bulkActions={bulkActions}
           onClearSelection={dv.clearSelection}
@@ -249,7 +266,7 @@ export function DocumentsPage() {
                       <span className="font-medium text-ink break-words">{doc.label}</span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="badge bg-surface-2 text-muted text-xs">{documentCategoryLabel(doc.category)}</span>
+                      <span className="badge bg-surface-2 text-muted text-xs">{categoryNameOf(doc)}</span>
                     </td>
                     <td className="px-4 py-3 text-muted">{formatSize(doc.file_size_bytes)}</td>
                     <td className="px-4 py-3 text-muted whitespace-nowrap">{format(new Date(doc.created_at), 'd MMM yyyy')}</td>
@@ -326,23 +343,7 @@ export function DocumentsPage() {
           <p className="mt-1 text-xs text-muted">Up to 50 MB.</p>
         </div>
         <Input label="Label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Medical certificate, March" />
-        <div>
-          <label htmlFor="doc-category" className="block text-sm font-medium text-ink mb-1">
-            Category
-          </label>
-          <select
-            id="doc-category"
-            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-          >
-            {DOCUMENT_CATEGORIES.map((c) => (
-              <option key={c.value} value={c.value}>
-                {c.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        <DocumentCategoryField id="doc-category" profileId={profile.id} value={category} onChange={setCategory} />
         <div>
           <label htmlFor="doc-condition" className="block text-sm font-medium text-ink mb-1">What is it for</label>
           <select
@@ -468,6 +469,15 @@ export function DocumentsPage() {
         />
       ) : null}
       {ingesting ? <IngestModal profileId={profile.id} onClose={() => setIngesting(false)} /> : null}
+      {editingCategories ? <EditCategoriesModal profileId={profile.id} onClose={() => setEditingCategories(false)} /> : null}
+      {recategorising ? (
+        <ChangeCategoryModal
+          profileId={profile.id}
+          docs={recategorising}
+          onClose={() => setRecategorising(null)}
+          onSaved={() => { setRecategorising(null); dv.clearSelection(); invalidate(); }}
+        />
+      ) : null}
       {reading ? (
         <IngestModal
           key={reading.id}
@@ -654,7 +664,7 @@ function DocumentViewerModal({
 
 function EditDocumentModal({ profileId, doc, members, onClose, onSaved }: { profileId: string; doc: CareDocument; members: CircleMember[]; onClose: () => void; onSaved: () => void }) {
   const [editLabel, setEditLabel] = useState(doc.label);
-  const [editCategory, setEditCategory] = useState(doc.category);
+  const [editCategory, setEditCategory] = useState(categoryNameOf(doc));
   const [restricted, setRestricted] = useState((doc.visible_to_roles?.length ?? 0) > 0);
   const [roles, setRoles] = useState<string[]>(doc.visible_to_roles ?? []);
   const [editError, setEditError] = useState('');
@@ -667,7 +677,7 @@ function EditDocumentModal({ profileId, doc, members, onClose, onSaved }: { prof
   const mutation = useMutation({
     mutationFn: () => api.patch(`/care-profiles/${profileId}/documents/${doc.id}`, {
       label: editLabel.trim(),
-      category: editCategory,
+      category: editCategory.trim() || 'Other',
       visible_to_roles: restricted ? roles : [],
     }),
     onSuccess: onSaved,
@@ -680,19 +690,7 @@ function EditDocumentModal({ profileId, doc, members, onClose, onSaved }: { prof
     <Modal open onClose={onClose} title="Edit document">
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (canSave) mutation.mutate(); }}>
         <Input label="Label" value={editLabel} onChange={(e) => setEditLabel(e.target.value)} required />
-        <div>
-          <label htmlFor="edit-doc-category" className="block text-sm font-medium text-ink mb-1">Category</label>
-          <select
-            id="edit-doc-category"
-            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-            value={editCategory}
-            onChange={(e) => setEditCategory(e.target.value)}
-          >
-            {DOCUMENT_CATEGORIES.map((c) => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-          </select>
-        </div>
+        <DocumentCategoryField id="edit-doc-category" profileId={profileId} value={editCategory} onChange={setEditCategory} />
         <div>
           <span className="block text-sm font-medium text-ink mb-1">Who can see it</span>
           <label className="flex items-center gap-2 text-sm text-ink">
@@ -769,6 +767,44 @@ function EditDocumentModal({ profileId, doc, members, onClose, onSaved }: { prof
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={mutation.isPending} disabled={!canSave}>Save</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Move several documents into one category at once. */
+function ChangeCategoryModal({
+  profileId,
+  docs,
+  onClose,
+  onSaved,
+}: {
+  profileId: string;
+  docs: CareDocument[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const shared = new Set(docs.map(categoryNameOf));
+  const [name, setName] = useState(shared.size === 1 ? [...shared][0] : '');
+  const [saveError, setSaveError] = useState('');
+  const mutation = useMutation({
+    mutationFn: () =>
+      Promise.all(docs.map((d) => api.patch(`/care-profiles/${profileId}/documents/${d.id}`, { category: name.trim() }))),
+    onSuccess: onSaved,
+    onError: (err) => setSaveError(err instanceof Error ? err.message : 'Could not change the category.'),
+  });
+  return (
+    <Modal open onClose={onClose} title="Change category">
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (name.trim()) mutation.mutate(); }}>
+        <p className="text-sm text-muted">
+          Files the {docs.length} selected document{docs.length === 1 ? '' : 's'} under one category.
+        </p>
+        <DocumentCategoryField id="bulk-doc-category" profileId={profileId} value={name} onChange={setName} />
+        {saveError ? <p className="text-sm text-red-600">{saveError}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>Save</Button>
         </div>
       </form>
     </Modal>

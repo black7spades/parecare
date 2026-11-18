@@ -174,7 +174,7 @@ function DirectiveSection({
     queryKey: ['documents', profileId],
     queryFn: () => api.get<{ documents: CareDocument[] }>(`/care-profiles/${profileId}/documents`),
   });
-  const directiveDocs = (data?.documents ?? []).filter((d) => d.category === 'advance_care_directive');
+  const directiveDocs = (data?.documents ?? []).filter((d) => d.category_key === 'advance_care_directive');
 
   return (
     <div className="space-y-3">
