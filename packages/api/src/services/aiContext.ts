@@ -304,6 +304,29 @@ export async function buildProfileContext(
     sections.push(lines.join('\n'));
   }
 
+  // Notes people have added to individual records lately, so Pare knows the
+  // detail that does not fit a field.
+  const recentNotes = (await db('record_notes as n')
+    .leftJoin('accounts as a', 'n.author_account_id', 'a.id')
+    .where('n.care_profile_id', profileId)
+    .where('n.created_at', '>=', new Date(now.getTime() - 60 * 24 * 3600 * 1000))
+    .orderBy('n.created_at', 'desc')
+    .limit(30)
+    .select('n.entity_type', 'n.body', 'n.created_at', 'a.display_name as author')) as Array<{
+    entity_type: string;
+    body: string;
+    created_at: Date;
+    author: string | null;
+  }>;
+  if (recentNotes.length) {
+    sections.push(
+      `## Notes added to records, last 60 days\n` +
+        recentNotes
+          .map((n) => `- ${fmtDate(n.created_at, timeZone)}, on a ${n.entity_type.replace(/-/g, ' ')} record${n.author ? `, by ${n.author}` : ''}: ${n.body}`)
+          .join('\n')
+    );
+  }
+
   // Recent appointments and what came of them, so Pare can ask how one went
   // and knows which next steps are still open.
   const recentAppts = (await db('appointments as ap')

@@ -17,6 +17,10 @@ import { ImportExport } from '../../../components/ImportExport';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
 import { SortableTh } from '../../../components/data/SortableTh';
+import { RecordPanel, type RecordAction, type RecordLink } from '../../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../../stores/undo';
+import { format } from 'date-fns';
 import { SELF_RELATIONSHIP,
   daysOfSupply,
   isLowSupply,
@@ -61,10 +65,8 @@ export function MedicationsPage() {
   const queryClient = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<MedicationRecord | null>(null);
-  const [confirmBulk, setConfirmBulk] = useState(false);
   const [confirmBulkLog, setConfirmBulkLog] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
-  const [confirmSingleDelete, setConfirmSingleDelete] = useState<MedicationRecord | null>(null);
   // Recording an ad-hoc dose from the list. This is the entry point for
   // as-needed medications, which have no scheduled slots to tap in the record.
   const [recording, setRecording] = useState<MedicationRecord | null>(null);
@@ -108,20 +110,30 @@ export function MedicationsPage() {
     match: (m, v) => (v === 'active' ? m.active : !m.active),
   };
 
+  // Deleting is held back a few seconds with Undo, never a "sure?" box.
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const hidden = useHiddenIds();
+  const deleteMeds = (items: MedicationRecord[]) => {
+    if (items.length === 0) return;
+    deferDelete({
+      message: items.length === 1 ? `Deleted ${items[0].name}.` : `Deleted ${items.length} medications.`,
+      ids: items.map((m) => m.id),
+      commit: () =>
+        items.length === 1
+          ? api.delete(`/care-profiles/${profile.id}/medications/${items[0].id}`)
+          : api.post(`/care-profiles/${profile.id}/medications/bulk`, { action: 'delete', ids: items.map((m) => m.id) }),
+      onCommitted: invalidate,
+    });
+  };
+
+  const visible = meds.filter((m) => !hidden.has(m.id));
+  const panel = useRecordPanel(visible, (m) => m.id);
   const dv = useDataView<MedicationRecord>({
-    rows: meds,
+    rows: visible,
     getId: (m) => m.id,
     searchText: (m) => [m.name, m.dose, m.route, m.frequency, m.supplier].filter(Boolean).join(' '),
     sorts: MED_SORTS,
     filters: [statusFilter, routeFilter],
-  });
-
-  const bulkDelete = useMutation({
-    mutationFn: () => api.post<{ deleted: number }>(`/care-profiles/${profile.id}/medications/bulk`, {
-      action: 'delete',
-      ids: dv.selectedRows.map((m) => m.id),
-    }),
-    onSuccess: () => { setConfirmBulk(false); dv.clearSelection(); invalidate(); },
   });
 
   // Record a dose now for every selected medication in one shot.
@@ -130,11 +142,6 @@ export function MedicationsPage() {
       entries: dv.selectedRows.map((m) => ({ medication_id: m.id, administered_at: new Date().toISOString(), status: 'given' })),
     }),
     onSuccess: () => { setConfirmBulkLog(false); dv.clearSelection(); invalidate(); },
-  });
-
-  const singleDelete = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/medications/${id}`),
-    onSuccess: () => { setConfirmSingleDelete(null); invalidate(); },
   });
 
   // Mark a low medication as ordered: the reorder workflow's middle state.
@@ -157,7 +164,7 @@ export function MedicationsPage() {
       { key: 'activate', label: 'Mark active', onRun: () => bulkSetActive.mutate('activate') },
       { key: 'deactivate', label: 'Mark inactive', onRun: () => bulkSetActive.mutate('deactivate') },
     ] : []),
-    ...(canBulkDelete ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulk(true) }] : []),
+    ...(canBulkDelete ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => { deleteMeds(dv.selectedRows); dv.clearSelection(); } }] : []),
   ];
 
   const colCount = canSelect ? 11 : 10;
@@ -181,7 +188,7 @@ export function MedicationsPage() {
     const orderedDays = ordered ? Math.floor((Date.now() - new Date(m.reorder_ordered_at!).getTime()) / 86400000) : 0;
     const orderedOverdue = ordered && orderedDays >= 5;
     return (
-      <tr key={m.id} className={`border-b border-border last:border-0 ${m.active ? '' : 'opacity-60'} ${low ? 'bg-amber-50 dark:bg-amber-900/10' : ''}`}>
+      <tr key={m.id} {...panel.rowProps(m.id)} className={`border-b border-border last:border-0 ${m.active ? '' : 'opacity-60'} ${low ? 'bg-amber-50 dark:bg-amber-900/10' : ''} ${RECORD_ROW_CLASS}`}>
         {canSelect ? (
           <td className="px-4 py-3">
             <input type="checkbox" aria-label={`Select ${m.name}`} className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
@@ -256,7 +263,7 @@ export function MedicationsPage() {
             ) : null}
             {canAdminister ? <Button size="xs" variant="ghost" aria-label={`Record dose of ${m.name}`} title="Record dose" onClick={() => setRecording(m)}><PillIcon /></Button> : null}
             {canManageMeds ? <Button size="xs" variant="ghost" aria-label={`Edit ${m.name}`} title="Edit" onClick={() => setEditing(m)}><PencilIcon /></Button> : null}
-            {canManageMeds ? <Button size="xs" variant="ghost-danger" aria-label={`Delete ${m.name}`} title="Delete" onClick={() => setConfirmSingleDelete(m)}><TrashIcon /></Button> : null}
+            {canManageMeds ? <Button size="xs" variant="ghost-danger" aria-label={`Delete ${m.name}`} title="Delete" onClick={() => deleteMeds([m])}><TrashIcon /></Button> : null}
           </div>
         </td>
       </tr>
@@ -398,26 +405,73 @@ export function MedicationsPage() {
       {editing ? <MedicationForm profileId={profile.id} med={editing} selfCare={selfCare} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} /> : null}
       {bulkEditOpen ? <BulkEditModal profileId={profile.id} meds={dv.selectedRows} onClose={() => setBulkEditOpen(false)} onSaved={() => { setBulkEditOpen(false); dv.clearSelection(); invalidate(); }} /> : null}
 
-      <Modal open={confirmBulk} onClose={() => setConfirmBulk(false)} title="Delete medications">
-        <p className="text-sm text-muted mb-4">
-          Permanently delete <span className="font-medium text-ink">{dv.selectedRows.length}</span> selected
-          medication{dv.selectedRows.length === 1 ? '' : 's'}? Their administration history is removed too. This cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmBulk(false)}>Cancel</Button>
-          <Button variant="danger" loading={bulkDelete.isPending} onClick={() => bulkDelete.mutate()}>Delete {dv.selectedRows.length}</Button>
-        </div>
-      </Modal>
-
-      <Modal open={confirmSingleDelete !== null} onClose={() => setConfirmSingleDelete(null)} title="Delete medication">
-        <p className="text-sm text-muted mb-4">
-          Permanently delete <span className="font-medium text-ink">{confirmSingleDelete?.name}</span> and its administration history? This cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmSingleDelete(null)}>Cancel</Button>
-          <Button variant="danger" loading={singleDelete.isPending} onClick={() => confirmSingleDelete && singleDelete.mutate(confirmSingleDelete.id)}>Delete</Button>
-        </div>
-      </Modal>
+      {panel.current ? (() => {
+        const m = panel.current;
+        const remaining = totalOnHand(m);
+        const days = daysOfSupply(m);
+        const low = m.active && remaining != null && remaining > 0 && isLowSupply(m);
+        const depleted = m.active && remaining != null && (remaining <= 0 || low);
+        const ordered = !!m.reorder_ordered_at;
+        const extra: RecordAction[] = [
+          ...(canAdminister ? [{ label: 'Record a dose', onRun: () => setRecording(m) }] : []),
+          ...(canManageMeds && depleted && !ordered
+            ? [{ label: 'Mark as ordered', onRun: () => markOrdered.mutate(m.id), pending: markOrdered.isPending && markOrdered.variables === m.id }]
+            : []),
+          ...(canManageMeds && ordered ? [{ label: 'Mark as arrived', onRun: () => setReplenishing(m) }] : []),
+        ];
+        const links: RecordLink[] = [
+          ...(m.medical_condition_id && m.condition_name
+            ? [{ label: 'For', value: m.condition_name, to: `/app/${profile.id}/conditions?record=${m.medical_condition_id}` }]
+            : []),
+          ...(m.supplier
+            ? [{
+                label: 'Supplier',
+                value: m.supplier,
+                to: m.supplier_id ? `/app/directory/suppliers?record=${m.supplier_id}` : '/app/directory/suppliers',
+              }]
+            : []),
+          ...(m.supplier_order_url ? [{ label: 'Reorder', value: 'Open the order page', href: m.supplier_order_url }] : []),
+        ];
+        return (
+          <RecordPanel
+            key={m.id}
+            kindLabel="Medication"
+            title={m.name}
+            subtitle={regimenLine(m) || undefined}
+            kind="medications"
+            recordId={m.id}
+            profileId={profile.id}
+            canEdit={canAdminister}
+            fields={[
+              { label: 'Units per dose', value: m.units_per_dose != null ? fmtNum(m.units_per_dose) : null },
+              { label: 'Dose', value: m.dose_amount },
+              { label: 'Measure', value: m.dose_unit },
+              { label: 'Type', value: m.form },
+              { label: 'Route', value: m.route },
+              { label: 'With food', value: m.with_food ? 'Yes' : null },
+              { label: 'As needed', value: m.as_needed ? 'Yes, only when required' : null },
+              { label: 'Times', value: !m.as_needed && m.schedule_times?.length ? m.schedule_times.join(', ') : null },
+              { label: 'How often', value: m.frequency },
+              { label: 'Instructions', value: m.instructions },
+              { label: 'Pack size', value: m.supply != null ? supplyLabel(m.supply, m) : null },
+              { label: 'Loose units left', value: m.supply_remaining != null ? supplyLabel(m.supply_remaining, m) : null },
+              { label: 'Packs on hand', value: m.packs_on_hand != null ? fmtNum(m.packs_on_hand) : null },
+              { label: 'Supply left', value: remaining == null ? null : remaining <= 0 ? 'Out of stock' : supplyLabel(remaining, m) },
+              { label: 'Days left', value: days != null ? `About ${Math.floor(days)}` : null },
+              { label: 'Supplier branch', value: m.supplier_suburb },
+              { label: 'On order since', value: m.reorder_ordered_at ? format(new Date(m.reorder_ordered_at), 'd MMM yyyy') : null },
+              { label: 'Next repeat due', value: m.repeats_due ? format(new Date(m.repeats_due), 'd MMM yyyy') : null },
+              { label: 'Dangerous to miss', value: m.critical ? 'Yes' : null },
+              { label: 'Status', value: m.active ? 'Active' : 'Inactive' },
+            ]}
+            links={links}
+            onEdit={canManageMeds ? () => setEditing(m) : undefined}
+            extra={extra}
+            onDelete={canManageMeds ? () => { deleteMeds([m]); panel.close(); } : undefined}
+            onClose={panel.close}
+          />
+        );
+      })() : null}
 
       <Modal open={confirmBulkLog} onClose={() => setConfirmBulkLog(false)} title="Record all doses">
         <p className="text-sm text-muted mb-4">

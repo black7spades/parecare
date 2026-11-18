@@ -46,6 +46,7 @@ const ENTITY_TARGETS: Record<string, { page: string; noun: string }> = {
   treatments: { page: 'medications', noun: 'a treatment' },
   messages: { page: 'messages', noun: 'a message' },
   'memory-book': { page: 'memory-book', noun: 'a memory' },
+  records: { page: '', noun: 'a note' },
   calendar: { page: 'calendar', noun: 'a calendar event' },
 };
 

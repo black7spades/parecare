@@ -15,6 +15,9 @@ import { categoryNameOf, documentCategoriesKey } from '../../../lib/documentCate
 import { DocumentCategoryField } from '../../../components/DocumentCategoryField';
 import { EditCategoriesModal } from '../../../components/EditCategoriesModal';
 import { PagePurpose } from '../../../components/PagePurpose';
+import { RecordPanel } from '../../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { useProfile } from './ProfileLayout';
 import { SecretsSection } from './SecretsSection';
 
@@ -39,6 +42,8 @@ function restrictedVisibilityTitle(roles: string[], members: CircleMember[]): st
 }
 
 const sizeValue = (d: CareDocument): number => d.file_size_bytes ?? 0;
+const visibilityText = (d: CareDocument): string =>
+  (d.visible_to_roles?.length ?? 0) > 0 ? d.visible_to_roles!.map(circleRoleLabel).join(', ') : 'Everyone';
 const byName = (a: CareDocument, b: CareDocument) => a.label.localeCompare(b.label);
 
 const DOC_SORTS: DataSort<CareDocument>[] = [
@@ -46,6 +51,7 @@ const DOC_SORTS: DataSort<CareDocument>[] = [
   { key: 'date', label: 'By date', defaultDir: 'desc', compare: (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime() || byName(a, b) },
   { key: 'category', label: 'By category', compare: (a, b) => categoryNameOf(a).localeCompare(categoryNameOf(b)) || byName(a, b) },
   { key: 'size', label: 'By size', defaultDir: 'desc', compare: (a, b) => sizeValue(a) - sizeValue(b) || byName(a, b) },
+  { key: 'visibility', label: 'By who can see it', compare: (a, b) => visibilityText(a).localeCompare(visibilityText(b)) || byName(a, b) },
 ];
 
 export function DocumentsPage() {
@@ -59,10 +65,8 @@ export function DocumentsPage() {
   // The document just uploaded, lit up in the list for a few seconds so
   // people see where it went.
   const [justAdded, setJustAdded] = useState<CareDocument | null>(null);
-  const [deleting, setDeleting] = useState<CareDocument | null>(null);
   const [editing, setEditing] = useState<CareDocument | null>(null);
   const [viewing, setViewing] = useState<CareDocument | null>(null);
-  const [confirmBulk, setConfirmBulk] = useState(false);
   const [bulkEditQueue, setBulkEditQueue] = useState<CareDocument[]>([]);
   const [ingesting, setIngesting] = useState(false);
   const [reading, setReading] = useState<CareDocument | null>(null);
@@ -123,22 +127,26 @@ export function DocumentsPage() {
       }
     : {};
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/documents/${id}`),
-    onSuccess: () => {
-      setDeleting(null);
-      invalidate();
-    },
+  // The condition a document was filed against, by name, for its record.
+  const { data: conditionData } = useQuery({
+    queryKey: ['conditions', profile.id],
+    queryFn: () => api.get<{ conditions: { id: string; name: string }[] }>(`/care-profiles/${profile.id}/conditions`),
   });
+  const conditionName = (id: string | null | undefined) =>
+    id ? conditionData?.conditions.find((c) => c.id === id)?.name ?? null : null;
 
-  const bulkDeleteMutation = useMutation({
-    mutationFn: (ids: string[]) => Promise.all(ids.map((id) => api.delete(`/care-profiles/${profile.id}/documents/${id}`))),
-    onSuccess: () => {
-      setConfirmBulk(false);
-      dv.clearSelection();
-      invalidate();
-    },
-  });
+  // Deleting is held back a few seconds with Undo, never a "sure?" box.
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const hidden = useHiddenIds();
+  const deleteDocuments = (items: CareDocument[]) => {
+    if (items.length === 0) return;
+    deferDelete({
+      message: items.length === 1 ? `Deleted ${items[0].label}.` : `Deleted ${items.length} documents.`,
+      ids: items.map((d) => d.id),
+      commit: () => Promise.all(items.map((d) => api.delete(`/care-profiles/${profile.id}/documents/${d.id}`))),
+      onCommitted: invalidate,
+    });
+  };
 
   // Build category filter dynamically from existing documents.
   const categoryFilter: DataFilter<CareDocument> = {
@@ -150,8 +158,10 @@ export function DocumentsPage() {
     match: (d, v) => (d.category_id ?? '') === v,
   };
 
+  const visible = documents.filter((d) => !hidden.has(d.id));
+  const panel = useRecordPanel(visible, (d) => d.id);
   const dv = useDataView<CareDocument>({
-    rows: documents,
+    rows: visible,
     getId: (d) => d.id,
     searchText: (d) => [d.label, categoryNameOf(d)].join(' '),
     sorts: DOC_SORTS,
@@ -174,7 +184,7 @@ export function DocumentsPage() {
     ? [
         { key: 'category', label: 'Change category', onRun: () => setRecategorising([...dv.selectedRows]) },
         { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setBulkEditQueue(q); setEditing(q[0] ?? null); } },
-        { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulk(true) },
+        { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => { deleteDocuments([...dv.selectedRows]); dv.clearSelection(); } },
       ]
     : [];
 
@@ -277,7 +287,7 @@ export function DocumentsPage() {
                   <SortableHeader label="Category" sortKey="category" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                   <SortableHeader label="Size" sortKey="size" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                   <SortableHeader label="Date" sortKey="date" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
-                  <th className="px-4 py-3 font-medium">Visibility</th>
+                  <SortableHeader label="Visibility" sortKey="visibility" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                   <th className="px-4 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
@@ -285,7 +295,8 @@ export function DocumentsPage() {
                 {dv.view.map((doc) => (
                   <tr
                     key={doc.id}
-                    className={`border-b border-border last:border-0 transition-colors duration-700 ${doc.id === linkedDocId || doc.id === justAdded?.id ? 'bg-primary-50' : ''}`}
+                    {...panel.rowProps(doc.id)}
+                    className={`border-b border-border last:border-0 transition-colors duration-700 ${RECORD_ROW_CLASS} ${doc.id === linkedDocId || doc.id === justAdded?.id ? 'bg-primary-50' : ''}`}
                   >
                     <td className="px-4 py-3">
                       <input
@@ -336,7 +347,7 @@ export function DocumentsPage() {
                             <Button size="xs" variant="ghost" aria-label={`Edit ${doc.label}`} title="Edit" onClick={() => setEditing(doc)}>
                               <PencilIcon />
                             </Button>
-                            <Button size="xs" variant="ghost-danger" aria-label={`Delete ${doc.label}`} title="Delete" onClick={() => setDeleting(doc)}>
+                            <Button size="xs" variant="ghost-danger" aria-label={`Delete ${doc.label}`} title="Delete" onClick={() => deleteDocuments([doc])}>
                               <TrashIcon />
                             </Button>
                           </>
@@ -354,40 +365,47 @@ export function DocumentsPage() {
         ) : null}
       </div>
 
-      <Modal open={deleting !== null} onClose={() => setDeleting(null)} title="Delete document">
-        <p className="text-sm text-muted mb-4">
-          Permanently delete <span className="font-medium text-ink">{deleting?.label}</span>? This cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setDeleting(null)}>
-            Cancel
-          </Button>
-          <Button
-            variant="danger"
-            loading={deleteMutation.isPending}
-            onClick={() => deleting && deleteMutation.mutate(deleting.id)}
-          >
-            Delete
-          </Button>
-        </div>
-      </Modal>
-
-      <Modal open={confirmBulk} onClose={() => setConfirmBulk(false)} title="Delete documents">
-        <p className="text-sm text-muted mb-4">
-          Permanently delete <span className="font-medium text-ink">{dv.selectedRows.length}</span> selected
-          document{dv.selectedRows.length === 1 ? '' : 's'}? This cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmBulk(false)}>Cancel</Button>
-          <Button
-            variant="danger"
-            loading={bulkDeleteMutation.isPending}
-            onClick={() => bulkDeleteMutation.mutate(dv.selectedRows.map((d) => d.id))}
-          >
-            Delete {dv.selectedRows.length}
-          </Button>
-        </div>
-      </Modal>
+      {panel.current ? (() => {
+        const doc = panel.current;
+        const condition = conditionName(doc.medical_condition_id);
+        return (
+          <RecordPanel
+            key={doc.id}
+            kindLabel="Document"
+            title={doc.label}
+            subtitle={categoryNameOf(doc)}
+            kind="documents"
+            recordId={doc.id}
+            profileId={profile.id}
+            canEdit={canEdit}
+            fields={[
+              { label: 'Name', value: doc.label },
+              { label: 'Category', value: categoryNameOf(doc) },
+              { label: 'Size', value: formatSize(doc.file_size_bytes) },
+              { label: 'Date', value: format(new Date(doc.created_at), 'd MMM yyyy') },
+              { label: 'Condition', value: condition },
+              {
+                label: 'Who can see it',
+                value: (doc.visible_to_roles?.length ?? 0) > 0
+                  ? restrictedVisibilityTitle(doc.visible_to_roles!, members)
+                  : 'Everyone in the care circle',
+              },
+            ]}
+            links={condition ? [{ label: 'Condition', value: condition, to: `/app/${profile.id}/conditions?record=${doc.medical_condition_id}` }] : []}
+            onEdit={() => setEditing(doc)}
+            extra={[
+              { label: 'View', onRun: () => setViewing(doc) },
+              { label: 'Read with Pare', onRun: () => setReading(doc) },
+              { label: 'Download', onRun: () => void download(doc) },
+            ]}
+            onDelete={() => {
+              deleteDocuments([doc]);
+              panel.close();
+            }}
+            onClose={panel.close}
+          />
+        );
+      })() : null}
 
       {viewing ? (
         <DocumentViewerModal
@@ -762,6 +780,7 @@ export function UploadDocumentModal({
   initialFile,
   initialLabel = '',
   initialConditionId = '',
+  link,
   onClose,
   onUploaded,
 }: {
@@ -772,6 +791,8 @@ export function UploadDocumentModal({
   initialLabel?: string;
   /** Prefill the condition it is for, e.g. the one the appointment was for. */
   initialConditionId?: string;
+  /** Attach the new document to a record as it is filed. */
+  link?: { kind: string; id: string };
   onClose: () => void;
   onUploaded: (doc: CareDocument) => void;
 }) {
@@ -800,6 +821,10 @@ export function UploadDocumentModal({
       form.append('label', label.trim() || file!.name);
       if (conditionId) form.append('medical_condition_id', conditionId);
       if (restricted) for (const role of roles) form.append('visible_to_roles', role);
+      if (link) {
+        form.append('link_entity_type', link.kind);
+        form.append('link_entity_id', link.id);
+      }
       return api.upload<{ document: CareDocument }>(`/care-profiles/${profileId}/documents`, form);
     },
     onSuccess: (res) => onUploaded(res.document),

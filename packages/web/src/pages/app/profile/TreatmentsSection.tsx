@@ -6,6 +6,9 @@ import { Button } from '../../../components/ui/Button';
 import { PencilIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
+import { RecordPanel } from '../../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import {
   METRIC_VALUE_TYPES,
   OBSERVATION_STATUSES,
@@ -51,12 +54,25 @@ export function TreatmentsSection({ profileId, careName, canManage, canLog }: {
     queryKey: ['treatments', profileId],
     queryFn: () => api.get<{ treatments: Treatment[] }>(`/care-profiles/${profileId}/treatments`),
   });
-  const treatments = data?.treatments ?? [];
+  // Deleting is held back a few seconds with Undo, never a "sure?" box.
+  const hidden = useHiddenIds();
+  const treatments = (data?.treatments ?? []).filter((t) => !hidden.has(t.id));
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['treatments', profileId] });
     void queryClient.invalidateQueries({ queryKey: ['observations', profileId] });
     void queryClient.invalidateQueries({ queryKey: ['conditions', profileId] });
   };
+  const panel = useRecordPanel(treatments, (t) => t.id);
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const deleteTreatment = (t: Treatment) => {
+    deferDelete({
+      message: `Deleted ${t.name}.`,
+      ids: [t.id],
+      commit: () => api.delete(`/care-profiles/${profileId}/treatments/${t.id}`),
+      onCommitted: invalidate,
+    });
+  };
+  const current = panel.current;
 
   return (
     <div className="space-y-4">
@@ -80,7 +96,7 @@ export function TreatmentsSection({ profileId, careName, canManage, canLog }: {
       ) : (
         <div className="space-y-3">
           {treatments.map((t) => (
-            <div key={t.id} className={`card space-y-3 ${t.active ? '' : 'opacity-60'}`}>
+            <div key={t.id} {...panel.rowProps(t.id)} className={`card space-y-3 ${RECORD_ROW_CLASS} ${t.active ? '' : 'opacity-60'}`}>
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
@@ -117,7 +133,9 @@ export function TreatmentsSection({ profileId, careName, canManage, canLog }: {
                 </div>
               </div>
               {historyFor === t.id ? (
-                <ObservationHistory profileId={profileId} treatment={t} canLog={canLog} onChanged={invalidate} />
+                <div data-no-open>
+                  <ObservationHistory profileId={profileId} treatment={t} canLog={canLog} onChanged={invalidate} />
+                </div>
               ) : null}
             </div>
           ))}
@@ -128,7 +146,17 @@ export function TreatmentsSection({ profileId, careName, canManage, canLog }: {
         <TreatmentForm profileId={profileId} onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); invalidate(); }} />
       ) : null}
       {editing ? (
-        <TreatmentForm profileId={profileId} treatment={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} />
+        <TreatmentForm
+          profileId={profileId}
+          treatment={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); invalidate(); }}
+          onDelete={() => {
+            deleteTreatment(editing);
+            if (current?.id === editing.id) panel.close();
+            setEditing(null);
+          }}
+        />
       ) : null}
       {logging ? (
         <LogObservationModal
@@ -138,6 +166,49 @@ export function TreatmentsSection({ profileId, careName, canManage, canLog }: {
           onClose={() => setLogging(null)}
           onSaved={() => { setLogging(null); invalidate(); }}
         />
+      ) : null}
+      {current ? (
+        <RecordPanel
+          key={current.id}
+          kindLabel="Treatment"
+          title={current.name}
+          subtitle={treatmentCategoryLabel(current.category)}
+          kind="treatments"
+          recordId={current.id}
+          profileId={profileId}
+          canEdit={canManage}
+          fields={[
+            { label: 'Kind of treatment', value: treatmentCategoryLabel(current.category) },
+            { label: 'Manages the condition', value: current.condition_name },
+            { label: 'How often', value: current.frequency },
+            { label: 'Times', value: (current.schedule_times ?? []).join(', ') },
+            { label: 'Only when needed', value: current.as_needed ? 'Yes' : null },
+            { label: 'Status', value: current.active ? 'Active' : 'Inactive' },
+            { label: 'Instructions', value: current.instructions },
+            { label: 'Measures', value: current.metrics.map((m) => (m.unit ? `${m.name} in ${m.unit}` : m.name)).join(', ') },
+            {
+              label: 'Last logged',
+              value: current.last_observed_at ? format(new Date(current.last_observed_at), 'EEE d MMM yyyy, HH:mm') : 'Nothing logged yet',
+            },
+          ]}
+          links={
+            current.medical_condition_id && current.condition_name
+              ? [{ label: 'Condition', value: current.condition_name, to: `/app/${profileId}/conditions?record=${current.medical_condition_id}` }]
+              : []
+          }
+          onEdit={() => setEditing(current)}
+          extra={canLog && current.active ? [{ label: 'Log session', onRun: () => setLogging(current), always: true }] : []}
+          onDelete={() => {
+            deleteTreatment(current);
+            panel.close();
+          }}
+          onClose={panel.close}
+        >
+          <section>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Sessions</h3>
+            <ObservationHistory profileId={profileId} treatment={current} canLog={canLog} onChanged={invalidate} />
+          </section>
+        </RecordPanel>
       ) : null}
     </div>
   );
@@ -373,11 +444,13 @@ interface MetricDraft {
  * The treatment editor. Adding offers ready-made set-ups; everything stays
  * editable. Editing also manages the treatment's device keys.
  */
-function TreatmentForm({ profileId, treatment, onClose, onSaved }: {
+function TreatmentForm({ profileId, treatment, onClose, onSaved, onDelete }: {
   profileId: string;
   treatment?: Treatment;
   onClose: () => void;
   onSaved: () => void;
+  /** Deleting is held back with Undo by the list, so there is no "sure?" box here. */
+  onDelete?: () => void;
 }) {
   const [name, setName] = useState(treatment?.name ?? '');
   const [category, setCategory] = useState(treatment?.category ?? 'other');
@@ -390,7 +463,6 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved }: {
     (treatment?.metrics ?? []).map((m) => ({ id: m.id, name: m.name, unit: m.unit ?? '', value_type: m.value_type }))
   );
   const [removedMetricIds, setRemovedMetricIds] = useState<string[]>([]);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState('');
 
   const { data: conditionData } = useQuery({
@@ -457,12 +529,6 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved }: {
     },
     onSuccess: onSaved,
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: () => api.delete(`/care-profiles/${profileId}/treatments/${treatment!.id}`),
-    onSuccess: onSaved,
-    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to delete'),
   });
 
   return (
@@ -563,8 +629,8 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved }: {
 
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex items-center justify-between gap-2">
-          {treatment ? (
-            <Button type="button" variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>Delete treatment</Button>
+          {treatment && onDelete ? (
+            <Button type="button" variant="danger" size="sm" onClick={onDelete}>Delete treatment</Button>
           ) : <span />}
           <div className="flex gap-2">
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
@@ -572,17 +638,6 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved }: {
           </div>
         </div>
       </form>
-
-      <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete treatment">
-        <p className="text-sm text-muted mb-4">
-          Permanently delete <span className="font-medium text-ink">{treatment?.name}</span>? Its session history and
-          device keys are removed too. This cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Button>
-          <Button variant="danger" loading={deleteMutation.isPending} onClick={() => deleteMutation.mutate()}>Delete</Button>
-        </div>
-      </Modal>
     </Modal>
   );
 }

@@ -1,11 +1,10 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
-import { Modal } from '../../../components/ui/Modal';
 import { useDataView, type DataFilter, type DataSort } from '../../../components/data/useDataView';
 import { SortableTh } from '../../../components/data/SortableTh';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
@@ -18,12 +17,18 @@ import {
   conditionCategoryLabel,
   conditionStatusLabel,
   conditionTypeLabel,
+  expectedDurationLabel,
   functionDomainLabel,
+  temporalPatternLabel,
+  LIMITATION_LEVELS,
   type MedicalCondition,
 } from '../../../lib/care';
 import { PagePurpose } from '../../../components/PagePurpose';
 import { useProfile } from './ProfileLayout';
 import { ConditionEditor } from './conditions/ConditionEditor';
+import { RecordPanel, type RecordLink } from '../../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 
 
 const fmtDate = (d: string | null | undefined) => (d ? format(new Date(d), 'd MMM yyyy') : '');
@@ -76,8 +81,6 @@ export function ConditionsPage() {
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<MedicalCondition | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<MedicalCondition | null>(null);
-  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkEditQueue, setBulkEditQueue] = useState<MedicalCondition[]>([]);
 
   const { data, isLoading } = useQuery({
@@ -88,26 +91,23 @@ export function ConditionsPage() {
 
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['conditions', profile.id] });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/conditions/${id}`),
-    onSuccess: () => {
-      setConfirmDelete(null);
-      invalidate();
-    },
-  });
+  // Deleting is held back a few seconds with Undo, never a "sure?" box.
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const hidden = useHiddenIds();
+  const deleteConditions = (items: MedicalCondition[]) => {
+    if (items.length === 0) return;
+    deferDelete({
+      message: items.length === 1 ? `Deleted ${items[0].name}.` : `Deleted ${items.length} conditions.`,
+      ids: items.map((c) => c.id),
+      commit: () => Promise.all(items.map((c) => api.delete(`/care-profiles/${profile.id}/conditions/${c.id}`))),
+      onCommitted: invalidate,
+    });
+  };
 
-  const bulkDeleteMutation = useMutation({
-    mutationFn: (ids: string[]) =>
-      Promise.all(ids.map((id) => api.delete(`/care-profiles/${profile.id}/conditions/${id}`))),
-    onSuccess: () => {
-      setConfirmBulkDelete(false);
-      dv.clearSelection();
-      invalidate();
-    },
-  });
-
+  const visible = conditions.filter((c) => !hidden.has(c.id));
+  const panel = useRecordPanel(visible, (c) => c.id);
   const dv = useDataView<MedicalCondition>({
-    rows: conditions,
+    rows: visible,
     getId: (c) => c.id,
     searchText: (c) =>
       [
@@ -140,7 +140,15 @@ export function ConditionsPage() {
             setEditing(queue[0]);
           },
         },
-        { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulkDelete(true) },
+        {
+          key: 'delete',
+          label: 'Delete selected',
+          destructive: true,
+          onRun: () => {
+            deleteConditions(visible.filter((c) => dv.selected.has(c.id)));
+            dv.clearSelection();
+          },
+        },
       ]
     : [];
 
@@ -224,7 +232,7 @@ export function ConditionsPage() {
                 ];
                 const treatmentCount = allTreatments.length;
                 return (
-                  <tr key={c.id} className="border-b border-border last:border-0 align-top">
+                  <tr key={c.id} {...panel.rowProps(c.id)} className={`border-b border-border last:border-0 align-top ${RECORD_ROW_CLASS}`}>
                     {canEdit ? (
                       <td className="px-3 py-2">
                         <input
@@ -280,7 +288,7 @@ export function ConditionsPage() {
                         <Button size="xs" variant="ghost" className="mr-1" aria-label={`Edit ${c.name}`} title="Edit" onClick={() => setEditing(c)}>
                           <PencilIcon />
                         </Button>
-                        <Button size="xs" variant="ghost-danger" aria-label={`Delete ${c.name}`} title="Delete" onClick={() => setConfirmDelete(c)}>
+                        <Button size="xs" variant="ghost-danger" aria-label={`Delete ${c.name}`} title="Delete" onClick={() => deleteConditions([c])}>
                           <TrashIcon />
                         </Button>
                       </td>
@@ -322,39 +330,90 @@ export function ConditionsPage() {
         />
       ) : null}
 
-      <Modal open={confirmDelete !== null} onClose={() => setConfirmDelete(null)} title="Delete condition">
-        <p className="text-sm text-muted mb-4">
-          Delete <span className="font-medium text-ink">{confirmDelete?.name}</span> and its codes, functional
-          impact, symptoms, and treatment links? This cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmDelete(null)}>Cancel</Button>
-          <Button
-            variant="danger"
-            loading={deleteMutation.isPending}
-            onClick={() => confirmDelete && deleteMutation.mutate(confirmDelete.id)}
-          >
-            Delete
-          </Button>
-        </div>
-      </Modal>
-
-      <Modal open={confirmBulkDelete} onClose={() => setConfirmBulkDelete(false)} title="Delete conditions">
-        <p className="text-sm text-muted mb-4">
-          Delete {dv.selected.size} {dv.selected.size === 1 ? 'condition' : 'conditions'} and their codes,
-          functional impact, symptoms, and treatment links? This cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmBulkDelete(false)}>Cancel</Button>
-          <Button
-            variant="danger"
-            loading={bulkDeleteMutation.isPending}
-            onClick={() => bulkDeleteMutation.mutate([...dv.selected])}
-          >
-            Delete
-          </Button>
-        </div>
-      </Modal>
+      {panel.current ? (() => {
+        const c = panel.current;
+        const yes = (v: boolean | null | undefined) => (v ? 'Yes' : null);
+        const limitLabel = (v: string) => LIMITATION_LEVELS.find((l) => l.value === v)?.label ?? v;
+        const links: RecordLink[] = [
+          ...(c.appointments ?? []).map((a) => ({
+            label: 'Appointment',
+            value: `${a.title}, ${format(new Date(a.starts_at), 'd MMM yyyy')}`,
+            to: `/app/${profile.id}/appointments?record=${a.id}`,
+          })),
+          ...(c.medications ?? []).map((m) => ({
+            label: m.active ? 'Medication' : 'Medication, stopped',
+            value: m.name,
+            to: m.id ? `/app/${profile.id}/medications?record=${m.id}` : `/app/${profile.id}/medications`,
+          })),
+          ...(c.treatments ?? []).map((t) => ({
+            label: t.active ? 'Treatment' : 'Treatment, stopped',
+            value: t.name,
+            to: `/app/${profile.id}/treatments?record=${t.id}`,
+          })),
+          ...(c.documents ?? []).map((d) => ({
+            label: 'Document',
+            value: d.label,
+            to: `/app/${profile.id}/documents?doc=${d.id}`,
+          })),
+        ];
+        return (
+          <RecordPanel
+            key={c.id}
+            kindLabel="Condition"
+            title={c.name}
+            kind="conditions"
+            recordId={c.id}
+            profileId={profile.id}
+            canEdit={canEdit}
+            fields={[
+              { label: 'Category', value: conditionCategoryLabel(c.category) },
+              { label: 'Type', value: conditionTypeLabel(c.condition_type) },
+              { label: 'Severity', value: CONDITION_SEVERITIES.find((x) => x.value === c.severity)?.label ?? c.severity },
+              { label: 'Normal level', value: c.baseline_severity != null ? `${c.baseline_severity} out of 10` : null },
+              { label: 'Status', value: conditionStatusLabel(c.status) },
+              { label: 'Started', value: fmtDate(c.started_on) },
+              { label: 'Resolved', value: fmtDate(c.resolved_on) },
+              { label: 'Expected duration', value: expectedDurationLabel(c.expected_duration) },
+              { label: 'Permanent', value: yes(c.is_permanent) },
+              { label: 'Contagious', value: yes(c.is_contagious) },
+              { label: 'Isolation required', value: yes(c.isolation_required) },
+              { label: 'Body region', value: c.region },
+              {
+                label: 'Codes',
+                value: (c.codes ?? []).map((code) => `${codeSystemLabel(code.system)} ${code.code}`).join(', '),
+              },
+              {
+                label: 'Daily life',
+                value: (c.functions ?? [])
+                  .map((f) =>
+                    [
+                      `${functionDomainLabel(f.domain)}: ${limitLabel(f.limitation_level).toLowerCase()} limit`,
+                      f.temporal_pattern ? temporalPatternLabel(f.temporal_pattern).toLowerCase() : null,
+                    ]
+                      .filter(Boolean)
+                      .join(', ')
+                  )
+                  .join('\n'),
+              },
+              {
+                label: 'Symptoms',
+                value: (c.symptoms ?? [])
+                  .filter((sy) => !sy.resolved_at)
+                  .map((sy) => `${sy.name}, ${sy.severity} out of 10`)
+                  .join('\n'),
+              },
+              { label: 'Notes', value: c.notes },
+            ]}
+            links={links}
+            onEdit={() => setEditing(c)}
+            onDelete={() => {
+              deleteConditions([c]);
+              panel.close();
+            }}
+            onClose={panel.close}
+          />
+        );
+      })() : null}
     </div>
   );
 }

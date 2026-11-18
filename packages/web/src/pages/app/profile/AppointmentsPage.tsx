@@ -16,6 +16,9 @@ import type { NextStep } from '../../../lib/nextSteps';
 import { MedicationForm } from './medications/MedicationForm';
 import { UploadDocumentModal } from './DocumentsPage';
 import { SELF_RELATIONSHIP, type CircleMember } from '../../../lib/care';
+import { RecordPanel } from '../../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { useProfile } from './ProfileLayout';
 import { useHealthConfig } from '../../../lib/appConfig';
 
@@ -138,8 +141,6 @@ export function AppointmentsPage() {
     mutationFn: (stepId: string) => api.patch(`/care-profiles/${profile.id}/reminders/${stepId}`, { completed: true }),
     onSettled: () => invalidate(),
   });
-  const [confirmDelete, setConfirmDelete] = useState<Appointment | null>(null);
-  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkEditQueue, setBulkEditQueue] = useState<Appointment[]>([]);
 
   const { data, isLoading } = useQuery({
@@ -159,31 +160,52 @@ export function AppointmentsPage() {
     const id = searchParams.get('outcome');
     if (id) {
       setOutcomeFor(id);
-      setSearchParams({}, { replace: true });
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('outcome');
+          return next;
+        },
+        { replace: true }
+      );
     }
   }, [searchParams, setSearchParams]);
   const outcomeAppointment = outcomeFor ? appointments.find((a) => a.id === outcomeFor) ?? null : null;
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/appointments/${id}`),
-    onSuccess: () => {
-      setConfirmDelete(null);
-      invalidate();
-    },
+  // Deleting is held back a few seconds with Undo, never a "sure?" box.
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const hidden = useHiddenIds();
+  const deleteAppointments = (items: Appointment[]) => {
+    if (items.length === 0) return;
+    deferDelete({
+      message: items.length === 1 ? `Deleted ${items[0].title}.` : `Deleted ${items.length} appointments.`,
+      ids: items.map((a) => a.id),
+      commit: () =>
+        items.length === 1
+          ? api.delete(`/care-profiles/${profile.id}/appointments/${items[0].id}`)
+          : api.post(`/care-profiles/${profile.id}/appointments/bulk`, { action: 'delete', ids: items.map((a) => a.id) }),
+      onCommitted: invalidate,
+    });
+  };
+
+  const markAttended = useMutation({
+    mutationFn: (a: Appointment) => api.patch(`/care-profiles/${profile.id}/appointments/${a.id}`, { status: 'completed' }),
+    onSuccess: invalidate,
   });
 
   const bulkMutation = useMutation({
     mutationFn: (payload: { action: 'complete' | 'cancel' | 'delete'; ids: string[] }) =>
       api.post(`/care-profiles/${profile.id}/appointments/bulk`, payload),
     onSuccess: () => {
-      setConfirmBulkDelete(false);
       dv.clearSelection();
       invalidate();
     },
   });
 
+  const visible = appointments.filter((a) => !hidden.has(a.id));
+  const panel = useRecordPanel(visible, (a) => a.id);
   const dv = useDataView<Appointment>({
-    rows: appointments,
+    rows: visible,
     getId: (a) => a.id,
     searchText: (a) =>
       [a.title, typeLabel(a.appointment_type), a.provider_name, a.location, statusLabel(a.status)]
@@ -216,7 +238,15 @@ export function AppointmentsPage() {
           label: 'Cancel selected',
           onRun: () => bulkMutation.mutate({ action: 'cancel', ids: [...dv.selected] }),
         },
-        { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulkDelete(true) },
+        {
+          key: 'delete',
+          label: 'Delete selected',
+          destructive: true,
+          onRun: () => {
+            deleteAppointments(appointments.filter((a) => dv.selected.has(a.id)));
+            dv.clearSelection();
+          },
+        },
       ]
     : [];
 
@@ -290,7 +320,7 @@ export function AppointmentsPage() {
             </thead>
             <tbody>
               {dv.view.map((a) => (
-                <tr key={a.id} className="border-b border-border last:border-0 align-top">
+                <tr key={a.id} {...panel.rowProps(a.id)} className={`border-b border-border last:border-0 align-top ${RECORD_ROW_CLASS}`}>
                   {canEdit ? (
                     <td className="px-3 py-2">
                       <input
@@ -332,7 +362,7 @@ export function AppointmentsPage() {
                       <Button size="xs" variant="ghost" className="mr-1" aria-label={`Edit ${a.title}`} title="Edit" onClick={() => setEditing(a)}>
                         <PencilIcon />
                       </Button>
-                      <Button size="xs" variant="ghost-danger" aria-label={`Delete ${a.title}`} title="Delete" onClick={() => setConfirmDelete(a)}>
+                      <Button size="xs" variant="ghost-danger" aria-label={`Delete ${a.title}`} title="Delete" onClick={() => deleteAppointments([a])}>
                         <TrashIcon />
                       </Button>
                     </td>
@@ -343,6 +373,60 @@ export function AppointmentsPage() {
           </table>
         </div>
       )}
+
+      {panel.current ? (
+        <RecordPanel
+          key={panel.current.id}
+          kindLabel="Appointment"
+          title={panel.current.title}
+          subtitle={format(new Date(panel.current.starts_at), 'EEEE d MMMM yyyy, HH:mm')}
+          kind="appointments"
+          recordId={panel.current.id}
+          profileId={profile.id}
+          canEdit={canEdit}
+          fields={[
+            { label: 'When', value: format(new Date(panel.current.starts_at), 'EEE d MMM yyyy, HH:mm') },
+            { label: 'Ends', value: panel.current.ends_at ? format(new Date(panel.current.ends_at), 'HH:mm') : null },
+            { label: 'Kind', value: typeLabel(panel.current.appointment_type) },
+            { label: 'With', value: panel.current.provider_name },
+            { label: 'Practice', value: panel.current.provider_organisation },
+            { label: 'Location', value: panel.current.location ?? panel.current.provider_address },
+            { label: 'Status', value: statusLabel(panel.current.status) },
+            { label: 'Outcome', value: panel.current.outcome },
+            { label: 'Notes', value: panel.current.notes },
+            { label: 'Cost estimate', value: panel.current.cost_estimate != null ? `$${panel.current.cost_estimate.toFixed(2)}` : null },
+            { label: 'Actual cost', value: panel.current.cost_actual != null ? `$${panel.current.cost_actual.toFixed(2)}` : null },
+          ]}
+          links={[
+            ...(panel.current.medical_condition_id && conditionName(panel.current.medical_condition_id)
+              ? [{ label: 'Condition', value: conditionName(panel.current.medical_condition_id), to: `/app/${profile.id}/conditions?record=${panel.current.medical_condition_id}` }]
+              : []),
+            ...(panel.current.provider_id && panel.current.provider_name
+              ? [{ label: 'Provider', value: panel.current.provider_name, to: `/app/${profile.id}/providers?record=${panel.current.provider_id}` }]
+              : []),
+            ...(panel.current.provider_directions_link
+              ? [{ label: 'Directions', value: 'Open map', href: panel.current.provider_directions_link }]
+              : []),
+            ...(panel.current.next_steps ?? []).map((st) => ({
+              label: st.completed ? 'Next step, done' : 'Next step',
+              value: st.title === st.type_name ? st.title : `${st.title}, ${st.type_name.toLowerCase()}`,
+              to: `/app/${profile.id}/tasks?record=${st.id}`,
+            })),
+          ]}
+          onEdit={() => setEditing(panel.current)}
+          done={
+            panel.current.status === 'scheduled'
+              ? { label: 'Mark attended', onRun: () => markAttended.mutate(panel.current!), pending: markAttended.isPending }
+              : null
+          }
+          extra={[{ label: 'How did it go?', onRun: () => setOutcomeFor(panel.current!.id) }]}
+          onDelete={() => {
+            deleteAppointments([panel.current!]);
+            panel.close();
+          }}
+          onClose={panel.close}
+        />
+      ) : null}
 
       {outcomeAppointment ? (
         <OutcomeModal
@@ -436,38 +520,6 @@ export function AppointmentsPage() {
         />
       ) : null}
 
-      <Modal open={confirmDelete !== null} onClose={() => setConfirmDelete(null)} title="Delete appointment">
-        <p className="text-sm text-muted mb-4">
-          Delete <span className="font-medium text-ink">{confirmDelete?.title}</span>? This cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmDelete(null)}>Cancel</Button>
-          <Button
-            variant="danger"
-            loading={deleteMutation.isPending}
-            onClick={() => confirmDelete && deleteMutation.mutate(confirmDelete.id)}
-          >
-            Delete
-          </Button>
-        </div>
-      </Modal>
-
-      <Modal open={confirmBulkDelete} onClose={() => setConfirmBulkDelete(false)} title="Delete appointments">
-        <p className="text-sm text-muted mb-4">
-          Delete {dv.selected.size} {dv.selected.size === 1 ? 'appointment' : 'appointments'}? This cannot be
-          undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmBulkDelete(false)}>Cancel</Button>
-          <Button
-            variant="danger"
-            loading={bulkMutation.isPending}
-            onClick={() => bulkMutation.mutate({ action: 'delete', ids: [...dv.selected] })}
-          >
-            Delete
-          </Button>
-        </div>
-      </Modal>
     </div>
   );
 }

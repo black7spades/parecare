@@ -8,6 +8,8 @@ import { Avatar } from '../../components/ui/Avatar';
 import { Button } from '../../components/ui/Button';
 import { ImportExport } from '../../components/ImportExport';
 import { EditableSubheader } from '../../components/ui/EditableSubheader';
+import { RecordPanel } from '../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../components/record/useRecordPanel';
 import { ageFrom, phaseLabel, CARE_PHASES, type ProfileKind } from '../../lib/care';
 import { format } from 'date-fns';
 
@@ -115,6 +117,8 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
     sorts,
     filters,
   });
+  const panel = useRecordPanel(profiles, (p) => p.id);
+  const current = panel.current;
 
   return (
     <div>
@@ -206,7 +210,8 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
               {dv.view.map((p) => (
                 <tr
                   key={p.id}
-                  className="border-b border-border last:border-0 align-top hover:bg-surface-2/50"
+                  {...panel.rowProps(p.id)}
+                  className={`border-b border-border last:border-0 align-top ${RECORD_ROW_CLASS}`}
                 >
                   <td className="px-3 py-2">
                     <Link
@@ -317,6 +322,50 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
           </table>
         </div>
       )}
+
+      {current ? (
+        <RecordPanel
+          key={current.id}
+          kindLabel={isPeople ? 'Person' : 'Pet'}
+          title={current.full_name}
+          subtitle={current.preferred_name ? `Known as ${current.preferred_name}` : undefined}
+          recordId={current.id}
+          canEdit={canEdit}
+          fields={[
+            { label: 'Preferred name', value: current.preferred_name },
+            { label: 'Relationship', value: current.owner_relationship },
+            { label: 'Date of birth', value: current.date_of_birth ? format(new Date(current.date_of_birth), 'd MMM yyyy') : null },
+            { label: 'Age', value: ageFrom(current.date_of_birth) != null ? String(ageFrom(current.date_of_birth)) : null },
+            ...(isPeople
+              ? [{ label: 'Phase', value: phaseLabel(current.current_phase) }]
+              : [
+                  { label: 'Species', value: current.species },
+                  { label: 'Breed', value: current.breed },
+                  { label: 'Desexed', value: current.desexed ? 'Yes' : 'No' },
+                  { label: 'Microchip number', value: current.microchip_number },
+                  { label: 'Owner', value: current.owner_name },
+                ]),
+            { label: 'Contact name', value: current.contact_name },
+            {
+              label: 'Contact phone',
+              value: current.contact_phone ? <a href={`tel:${current.contact_phone}`} className="text-primary hover:underline">{current.contact_phone}</a> : null,
+            },
+            {
+              label: 'Contact email',
+              value: current.contact_email ? <a href={`mailto:${current.contact_email}`} className="text-primary hover:underline">{current.contact_email}</a> : null,
+            },
+          ]}
+          links={[
+            { label: 'Overview', value: `Open ${current.preferred_name || current.full_name}`, to: `/app/${current.id}` },
+            ...(current.circle_members ?? []).map((m) => ({
+              label: m.relationship || 'Care circle',
+              value: m.display_name,
+              to: `/app/${current.id}/circle`,
+            })),
+          ]}
+          onClose={panel.close}
+        />
+      ) : null}
     </div>
   );
 }

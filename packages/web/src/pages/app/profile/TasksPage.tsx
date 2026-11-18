@@ -12,6 +12,9 @@ import { useDataView, type DataSort, type DataFilter } from '../../../components
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
 import { SortableTh } from '../../../components/data/SortableTh';
 import { SENTIMENTS, COMPLETION_REASONS, sentimentEmoji, type CareProfile, type CircleMember, type Task } from '../../../lib/care';
+import { RecordPanel, type RecordAction } from '../../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 
 interface FanOutResult {
   created: { profile_id: string }[];
@@ -266,13 +269,24 @@ export function TasksPage() {
     onSuccess: () => invalidate(),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/reminders/${id}`),
-    onSuccess: () => invalidate(),
-  });
+  // Deleting is held back a few seconds with Undo, never a "sure?" box.
+  const deferDelete = useUndoStore((st) => st.deferDelete);
+  const hidden = useHiddenIds();
+  const deleteTasks = (items: Task[]) => {
+    if (items.length === 0) return;
+    deferDelete({
+      message: items.length === 1 ? `Deleted ${items[0].title}.` : `Deleted ${items.length} tasks.`,
+      ids: items.map((t) => t.id),
+      commit: () =>
+        items.length === 1
+          ? api.delete(`/care-profiles/${profile.id}/reminders/${items[0].id}`)
+          : api.post(`/care-profiles/${profile.id}/reminders/bulk`, { action: 'delete', ids: items.map((t) => t.id) }),
+      onCommitted: () => invalidate(),
+    });
+  };
 
   const bulk = useMutation({
-    mutationFn: (action: 'complete' | 'reopen' | 'delete') =>
+    mutationFn: (action: 'complete' | 'reopen') =>
       api.post(`/care-profiles/${profile.id}/reminders/bulk`, { action, ids: dv.selectedRows.map((t) => t.id) }),
     onSuccess: () => { dv.clearSelection(); invalidate(); },
   });
@@ -309,8 +323,10 @@ export function TasksPage() {
       compare: (a, b) => (memberName(a.assigned_to) ?? '￿').localeCompare(memberName(b.assigned_to) ?? '￿') || byTitle(a, b),
     },
   ];
+  const visible = tasks.filter((t) => !hidden.has(t.id));
+  const panel = useRecordPanel(visible, (t) => t.id);
   const dv = useDataView<Task>({
-    rows: tasks,
+    rows: visible,
     getId: (t) => t.id,
     searchText: (t) => [t.title, t.body, memberName(t.assigned_to), t.completed_by_name, t.desired_outcome].filter(Boolean).join(' '),
     sorts: taskSorts,
@@ -321,11 +337,11 @@ export function TasksPage() {
     ? [
         { key: 'complete', label: 'Mark done', onRun: () => bulk.mutate('complete') },
         { key: 'reopen', label: 'Reopen', onRun: () => bulk.mutate('reopen') },
-        { key: 'delete', label: 'Delete', destructive: true, onRun: () => bulk.mutate('delete') },
+        { key: 'delete', label: 'Delete', destructive: true, onRun: () => { deleteTasks(dv.selectedRows); dv.clearSelection(); } },
       ]
     : [];
 
-  const openCount = tasks.filter((t) => !t.completed).length;
+  const openCount = visible.filter((t) => !t.completed).length;
 
   const handleComplete = (t: Task) => {
     if (t.completed) {
@@ -340,7 +356,7 @@ export function TasksPage() {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-ink">Tasks</h2>
-          <span className="text-xs text-muted">{openCount} open · {tasks.length} in the record</span>
+          <span className="text-xs text-muted">{openCount} open · {visible.length} in the record</span>
         </div>
 
         <DataToolbar
@@ -392,7 +408,7 @@ export function TasksPage() {
                 </td></tr>
               ) : dv.view.map((t) => (
                 <React.Fragment key={t.id}>
-                <tr className={`border-b border-border last:border-0 align-top group ${t.completed ? 'opacity-60' : ''}`}>
+                <tr {...panel.rowProps(t.id)} className={`border-b border-border last:border-0 align-top group ${t.completed ? 'opacity-60' : ''} ${RECORD_ROW_CLASS}`}>
                   {canEdit ? (
                     <td className="px-3 py-3">
                       <input type="checkbox" aria-label={`Select ${t.title}`} className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
@@ -501,7 +517,7 @@ export function TasksPage() {
                         type="button"
                         aria-label={`Delete ${t.title}`}
                         className="text-xs text-muted hover:text-red-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
-                        onClick={() => deleteMutation.mutate(t.id)}
+                        onClick={() => deleteTasks([t])}
                       >
                         Delete
                       </button>
@@ -615,6 +631,69 @@ export function TasksPage() {
         </Button>
       </form>
 
+      {panel.current ? (() => {
+        const t = panel.current;
+        const extra: RecordAction[] = [
+          ...(!t.completed && !t.claimed_by && !t.assigned_to
+            ? [{ label: 'Claim', onRun: () => claimMutation.mutate(t.id), pending: claimMutation.isPending }]
+            : []),
+          ...(!t.completed && t.claimed_by === account?.id
+            ? [{ label: 'Release', onRun: () => releaseMutation.mutate(t.id), pending: releaseMutation.isPending }]
+            : []),
+        ];
+        const sentiment = SENTIMENTS.find((x) => x.value === t.sentiment);
+        return (
+          <RecordPanel
+            key={t.id}
+            kindLabel="Task"
+            title={t.title}
+            subtitle={`Due ${format(new Date(t.next_due_at), 'EEEE d MMMM yyyy, HH:mm')}`}
+            kind="reminders"
+            recordId={t.id}
+            profileId={profile.id}
+            canEdit={canEdit}
+            fields={[
+              { label: 'Notes', value: t.body },
+              { label: 'Due', value: format(new Date(t.next_due_at), 'd MMM yyyy, HH:mm') },
+              { label: 'Repeats', value: t.reminder_type === 'once' ? 'Does not repeat' : REPEAT_LABELS[t.reminder_type] },
+              { label: 'Assigned to', value: memberName(t.assigned_to) ?? 'Anyone' },
+              { label: 'Shared with', value: (t.co_owners ?? []).map((c) => c.display_name).join(', ') },
+              { label: 'Claimed by', value: t.claimed_by && !t.completed ? (t.claimed_by === account?.id ? 'You' : t.claimed_by_name) : null },
+              { label: 'Status', value: t.completed ? 'Done' : isOverdue(t) ? 'Overdue' : 'Open' },
+              { label: 'Goal', value: t.desired_outcome },
+              { label: 'Next step kind', value: t.appointment_id ? t.next_step_type_name ?? 'Other' : null },
+              { label: 'Done on', value: t.completed && t.completed_at ? format(new Date(t.completed_at), 'd MMM yyyy, HH:mm') : null },
+              { label: 'Done by', value: t.completed ? t.completed_by_name : null },
+              { label: 'How it went', value: sentiment ? `${sentiment.emoji} ${sentiment.label}` : null },
+              { label: 'Reason', value: t.completion_reason ? COMPLETION_REASONS.find((r) => r.value === t.completion_reason)?.label ?? t.completion_reason : null },
+              { label: 'Reason in their words', value: t.completion_note },
+            ]}
+            links={
+              t.appointment_id
+                ? [{
+                    label: 'Came from',
+                    value: `${t.appointment_title ?? 'An appointment'}${t.appointment_starts_at ? `, ${format(new Date(t.appointment_starts_at), 'd MMM yyyy')}` : ''}`,
+                    to: `/app/${profile.id}/appointments?record=${t.appointment_id}`,
+                  }]
+                : []
+            }
+            done={
+              t.completed
+                ? { label: 'Reopen', onRun: () => setDone.mutate({ id: t.id, completed: false }), pending: setDone.isPending }
+                : { label: 'Mark done', onRun: () => setCompletingTask(t) }
+            }
+            extra={extra}
+            onDelete={() => {
+              deleteTasks([t]);
+              panel.close();
+            }}
+            onClose={panel.close}
+          >
+            <TaskNotesPanel profileId={profile.id} taskId={t.id} canEdit={false} heading="Earlier notes" hideWhenEmpty />
+          </RecordPanel>
+        );
+      })() : null}
+
       {completingTask ? (
         <TaskCompletionModal
           task={completingTask}
@@ -634,7 +713,20 @@ interface TaskNote {
   author_name: string;
 }
 
-function TaskNotesPanel({ profileId, taskId, canEdit }: { profileId: string; taskId: string; canEdit: boolean }) {
+function TaskNotesPanel({
+  profileId,
+  taskId,
+  canEdit,
+  heading = 'Notes',
+  hideWhenEmpty = false,
+}: {
+  profileId: string;
+  taskId: string;
+  canEdit: boolean;
+  heading?: string;
+  /** Show nothing at all when there are no notes and none can be added here. */
+  hideWhenEmpty?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [newNote, setNewNote] = useState('');
 
@@ -652,9 +744,11 @@ function TaskNotesPanel({ profileId, taskId, canEdit }: { profileId: string; tas
     },
   });
 
+  if (hideWhenEmpty && !canEdit && !isLoading && notes.length === 0) return null;
+
   return (
     <div className="max-w-lg">
-      <p className="text-xs font-medium text-muted mb-2">Notes</p>
+      <p className="text-xs font-medium text-muted mb-2">{heading}</p>
       {isLoading ? (
         <p className="text-xs text-muted">Loading...</p>
       ) : notes.length === 0 ? (

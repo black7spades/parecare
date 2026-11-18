@@ -25,6 +25,9 @@ import { Button } from '../../components/ui/Button';
 import { LinkIcon, PencilIcon, TrashIcon } from '../../components/ui/icons';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
+import { RecordPanel, type RecordLink } from '../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../stores/undo';
 import {
   KIND_WORDS,
   providerTypeFilterOptions,
@@ -86,7 +89,6 @@ function DirectoryProvidersPage({ kind }: { kind: ProviderKind }) {
   const queryClient = useQueryClient();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<DirectoryProvider | null>(null);
-  const [deleting, setDeleting] = useState<DirectoryProvider | null>(null);
   const [bulkLinking, setBulkLinking] = useState<DirectoryProvider | null>(null);
   const [bulkLinkingIds, setBulkLinkingIds] = useState<DirectoryProvider[]>([]);
   const [bulkEditQueue, setBulkEditQueue] = useState<DirectoryProvider[]>([]);
@@ -98,7 +100,9 @@ function DirectoryProvidersPage({ kind }: { kind: ProviderKind }) {
   // Both lists come from one directory: a duplicate pair or a merge can span
   // an organisation and a professional filed by mistake as the other.
   const everything = data?.providers ?? [];
-  const providers = everything.filter((p) => kindOf(p) === kind);
+  // Deleting is held back a few seconds with Undo, never a "sure?" box.
+  const hidden = useHiddenIds();
+  const providers = everything.filter((p) => kindOf(p) === kind && !hidden.has(p.id));
   const canEdit = data?.can_edit ?? false;
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['directory-providers'] });
 
@@ -129,13 +133,24 @@ function DirectoryProvidersPage({ kind }: { kind: ProviderKind }) {
     filters,
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/directory/providers/${id}`),
-    onSuccess: () => {
-      setDeleting(null);
-      invalidate();
-    },
-  });
+  const panel = useRecordPanel(providers, (p) => p.id);
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const deleteProviders = (items: DirectoryProvider[]) => {
+    if (items.length === 0) return;
+    deferDelete({
+      // Say who loses it, as the old warning did, so Undo is an informed choice.
+      message: (() => {
+        const linked = new Set(items.flatMap((p) => (p.linked_profiles ?? []).map((lp) => lp.profile_id))).size;
+        const what = items.length === 1 ? `Deleted ${items[0].name}.` : `Deleted ${items.length} ${words.many.toLowerCase()}.`;
+        return linked > 0 ? `${what} Removed from ${linked} ${linked === 1 ? 'profile' : 'profiles'}.` : what;
+      })(),
+      ids: items.map((p) => p.id),
+      commit: async () => {
+        for (const p of items) await api.delete(`/directory/providers/${p.id}`);
+      },
+      onCommitted: invalidate,
+    });
+  };
 
   // Two records for the same place: the ones spotted for the person, the pair
   // being merged, and the last merge, which can be undone for a while.
@@ -189,15 +204,20 @@ function DirectoryProvidersPage({ kind }: { kind: ProviderKind }) {
     onError: (err) => setMergeNote(err instanceof Error ? err.message : 'That merge could not be undone.'),
   });
 
-  const bulkDeleteMutation = useMutation({
-    mutationFn: async (ids: string[]) => {
-      for (const id of ids) await api.delete(`/directory/providers/${id}`);
-    },
-    onSuccess: () => {
-      dv.clearSelection();
-      invalidate();
-    },
-  });
+  const pageFor = (p: { kind?: ProviderKind }) => `/app/directory/${kindOf(p) === 'organisation' ? 'organisations' : 'professionals'}`;
+  const current = panel.current;
+  const practice = current?.practice_id ? byId(current.practice_id) : undefined;
+  const panelLinks: RecordLink[] = current
+    ? [
+        ...(practice
+          ? [{ label: basedAtLabel(kind), value: practice.name, to: `${pageFor(practice)}?record=${practice.id}` }]
+          : []),
+        ...(current.members ?? []).map((m) => ({ label: 'Based here', value: m.name, to: `${pageFor(m)}?record=${m.id}` })),
+        ...(current.linked_profiles ?? []).map((lp) => ({ label: 'Linked to', value: lp.profile_name, to: `/app/${lp.profile_id}` })),
+        ...(current.booking_link ? [{ label: 'Booking', value: 'Book online', href: current.booking_link }] : []),
+        ...(current.directions_link ? [{ label: 'Directions', value: 'Open map', href: current.directions_link }] : []),
+      ]
+    : [];
 
   return (
     <div>
@@ -308,7 +328,7 @@ function DirectoryProvidersPage({ kind }: { kind: ProviderKind }) {
                       onRun: () => moveMutation.mutate(dv.selectedRows),
                     },
                     { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setBulkEditQueue(q); setEditing(q[0] ?? null); setEditorOpen(true); } },
-                    { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => bulkDeleteMutation.mutate(dv.selectedRows.map((p) => p.id)) },
+                    { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => { deleteProviders(dv.selectedRows); dv.clearSelection(); } },
                   ]
                 : []
             }
@@ -373,7 +393,7 @@ function DirectoryProvidersPage({ kind }: { kind: ProviderKind }) {
             </thead>
             <tbody>
               {dv.view.map((p) => (
-                <tr key={p.id} className="border-b border-border last:border-0 align-top hover:bg-surface-2/50">
+                <tr key={p.id} {...panel.rowProps(p.id)} className={`border-b border-border last:border-0 align-top ${RECORD_ROW_CLASS}`}>
                   {canEdit ? (
                     <td className="px-3 py-2">
                       <input
@@ -417,7 +437,7 @@ function DirectoryProvidersPage({ kind }: { kind: ProviderKind }) {
                       <div className="flex gap-1">
                         <Button size="xs" variant="ghost" aria-label={`Link ${p.name} to profiles`} title="Link to profiles" onClick={() => setBulkLinking(p)}><LinkIcon /></Button>
                         <Button size="xs" variant="ghost" aria-label={`Edit ${p.name}`} title="Edit" onClick={() => { setEditing(p); setEditorOpen(true); }}><PencilIcon /></Button>
-                        <Button size="xs" variant="ghost-danger" aria-label={`Delete ${p.name}`} title="Delete" onClick={() => setDeleting(p)}><TrashIcon /></Button>
+                        <Button size="xs" variant="ghost-danger" aria-label={`Delete ${p.name}`} title="Delete" onClick={() => deleteProviders([p])}><TrashIcon /></Button>
                       </div>
                     </td>
                   ) : null}
@@ -472,23 +492,32 @@ function DirectoryProvidersPage({ kind }: { kind: ProviderKind }) {
         onLinked={() => { setBulkLinkingIds([]); dv.clearSelection(); invalidate(); }}
       />
 
-      <Modal open={deleting !== null} onClose={() => setDeleting(null)} title={`Delete ${words.one}`}>
-        <p className="text-sm text-muted mb-2">
-          Permanently delete <span className="font-medium text-ink">{deleting?.name}</span>?
-        </p>
-        {deleting?.linked_profiles && deleting.linked_profiles.length > 0 ? (
-          <p className="text-sm text-red-600 mb-4">
-            This {words.one} is linked to {deleting.linked_profiles.length} profile{deleting.linked_profiles.length > 1 ? 's' : ''}.
-            Deleting it will remove it from all of them.
-          </p>
-        ) : null}
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setDeleting(null)}>Cancel</Button>
-          <Button variant="danger" loading={deleteMutation.isPending} onClick={() => deleting && deleteMutation.mutate(deleting.id)}>
-            Delete
-          </Button>
-        </div>
-      </Modal>
+      {current ? (
+        <RecordPanel
+          key={current.id}
+          kindLabel={words.one.charAt(0).toUpperCase() + words.one.slice(1)}
+          title={current.name}
+          subtitle={providerTypeLabel(current.provider_type)}
+          recordId={current.id}
+          canEdit={canEdit}
+          fields={[
+            { label: 'Type', value: providerTypeLabel(current.provider_type) },
+            { label: 'Other names', value: (current.also_known_as ?? []).join(', ') },
+            { label: basedAtLabel(kind), value: current.organisation },
+            { label: 'Phone', value: current.phone ? <a href={`tel:${current.phone}`} className="text-primary hover:underline">{current.phone}</a> : null },
+            { label: 'Email', value: current.email ? <a href={`mailto:${current.email}`} className="text-primary hover:underline">{current.email}</a> : null },
+            { label: 'Address', value: current.address },
+          ]}
+          links={panelLinks}
+          onEdit={() => { setEditing(current); setEditorOpen(true); }}
+          extra={[{ label: 'Link to profiles', onRun: () => setBulkLinking(current) }]}
+          onDelete={() => {
+            deleteProviders([current]);
+            panel.close();
+          }}
+          onClose={panel.close}
+        />
+      ) : null}
     </div>
   );
 }

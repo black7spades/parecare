@@ -19,6 +19,7 @@ import { secretsRouter } from './routes/secrets';
 import { documentIngestRouter } from './routes/documentIngest';
 import { documentCategoriesRouter } from './routes/documentCategories';
 import { nextStepTypesRouter } from './routes/nextStepTypes';
+import { recordsRouter } from './routes/records';
 import { actionsContractRouter, profileActionsRouter } from './routes/actions';
 import { providersRouter, providerSearchRouter } from './routes/providers';
 import { suppliersRouter } from './routes/suppliers';
@@ -199,6 +200,7 @@ v1.use('/care-profiles/:id/secrets', ...profileAccess, secretsRouter);
 v1.use('/care-profiles/:id/ingest', ...profileAccess, documentIngestRouter);
 v1.use('/care-profiles/:id/document-categories', ...profileAccess, documentCategoriesRouter);
 v1.use('/care-profiles/:id/next-step-types', ...profileAccess, nextStepTypesRouter);
+v1.use('/care-profiles/:id/records', ...profileAccess, recordsRouter);
 // The machine layer: a published action contract, one execution endpoint that
 // runs the same actions with the caller's own permissions, and undo.
 v1.use('/actions', actionsContractRouter);

@@ -32,6 +32,10 @@ const documentMeta = z.object({
   visible_to_roles: z
     .preprocess((v) => (typeof v === 'string' ? [v] : v), z.array(z.string()))
     .optional(),
+  // Attach the new document to a record as it is filed, e.g. a scan report
+  // uploaded from the appointment it came out of.
+  link_entity_type: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/).optional(),
+  link_entity_id: z.string().uuid().optional(),
 });
 
 const documentUpdate = z.object({
@@ -100,7 +104,14 @@ documentsRouter.post(
         visible_to_roles: parsed.data.visible_to_roles ?? [],
       })
       .returning('id');
-    const doc = await withCategory(db('documents')).where('documents.id', (inserted as { id: string }).id).first();
+    const docId = (inserted as { id: string }).id;
+    if (parsed.data.link_entity_type && parsed.data.link_entity_id) {
+      await db('document_links')
+        .insert({ document_id: docId, entity_type: parsed.data.link_entity_type, entity_id: parsed.data.link_entity_id })
+        .onConflict(['document_id', 'entity_type', 'entity_id'])
+        .ignore();
+    }
+    const doc = await withCategory(db('documents')).where('documents.id', docId).first();
 
     res.status(201).json({ document: doc });
   }

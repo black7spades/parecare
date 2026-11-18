@@ -7,7 +7,10 @@ import { PencilIcon, CrossIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
-import { CIRCLE_ROLES, POA_TYPES, poaLabel, type CircleMember } from '../../../lib/care';
+import { CIRCLE_ROLES, POA_TYPES, circleRoleLabel, poaLabel, type CircleMember } from '../../../lib/care';
+import { RecordPanel } from '../../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
+import { format } from 'date-fns';
 import { RelationshipSelect } from '../../../components/RelationshipSelect';
 import { useProfile } from './ProfileLayout';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
@@ -26,7 +29,9 @@ export function CirclePage() {
   const queryClient = useQueryClient();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [editing, setEditing] = useState<CircleMember | null>(null);
-  const [removing, setRemoving] = useState<CircleMember | null>(null);
+  // Taking someone out of the circle ends their access, so it still asks
+  // first, for one person or several.
+  const [removing, setRemoving] = useState<CircleMember[] | null>(null);
   const [bulkEditQueue, setBulkEditQueue] = useState<CircleMember[]>([]);
 
   const { data, isLoading } = useQuery({
@@ -34,21 +39,15 @@ export function CirclePage() {
     queryFn: () => api.get<{ members: CircleMember[] }>(`/care-profiles/${profile.id}/circle`),
   });
   const members = data?.members ?? [];
+  const panel = useRecordPanel(members, (m) => m.id);
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['circle', profile.id] });
 
   const removeMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/circle/${id}`),
-    onSuccess: () => {
-      setRemoving(null);
-      invalidate();
-    },
-  });
-
-  const bulkRemoveMutation = useMutation({
     mutationFn: async (ids: string[]) => {
       for (const id of ids) await api.delete(`/care-profiles/${profile.id}/circle/${id}`);
     },
     onSuccess: () => {
+      setRemoving(null);
       dv.clearSelection();
       invalidate();
     },
@@ -127,7 +126,7 @@ export function CirclePage() {
               canManageEditors
                 ? [
                     { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setBulkEditQueue(q); setEditing(q[0] ?? null); } },
-                    { key: 'remove', label: 'Remove selected', destructive: true, onRun: () => bulkRemoveMutation.mutate(dv.selectedRows.map((m) => m.id)) },
+                    { key: 'remove', label: 'Remove selected', destructive: true, onRun: () => setRemoving([...dv.selectedRows]) },
                   ]
                 : []
             }
@@ -145,7 +144,7 @@ export function CirclePage() {
                 <p className="text-sm text-muted">No circle members match your search or filters.</p>
               </div>
             ) : dv.view.map((m) => (
-              <div key={m.id} className={`card ${m.poa_activated ? 'border-amber-400' : ''}`}>
+              <div key={m.id} {...panel.rowProps(m.id)} className={`card ${RECORD_ROW_CLASS} ${m.poa_activated ? 'border-amber-400' : ''}`}>
                 {canManageEditors ? (
                   <div className="mb-2">
                     <input
@@ -187,7 +186,7 @@ export function CirclePage() {
                     <Button size="xs" variant="ghost" aria-label={`Edit ${m.display_name}`} title="Edit" onClick={() => setEditing(m)}>
                       <PencilIcon />
                     </Button>
-                    <Button size="xs" variant="ghost-danger" aria-label={`Remove ${m.display_name}`} title="Remove" onClick={() => setRemoving(m)}>
+                    <Button size="xs" variant="ghost-danger" aria-label={`Remove ${m.display_name}`} title="Remove" onClick={() => setRemoving([m])}>
                       <CrossIcon />
                     </Button>
                   </div>
@@ -226,8 +225,17 @@ export function CirclePage() {
       />
       <Modal open={removing !== null} onClose={() => setRemoving(null)} title="Remove from circle">
         <p className="text-sm text-muted mb-4">
-          Remove <span className="font-medium text-ink">{removing?.display_name}</span> from the care circle? They
-          will lose access to this profile.
+          {removing && removing.length === 1 ? (
+            <>
+              Remove <span className="font-medium text-ink">{removing[0].display_name}</span> from the care circle? They
+              will lose access to this profile.
+            </>
+          ) : (
+            <>
+              Remove <span className="font-medium text-ink">{removing?.length ?? 0} people</span> from the care circle?
+              They will lose access to this profile.
+            </>
+          )}
         </p>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setRemoving(null)}>
@@ -236,12 +244,60 @@ export function CirclePage() {
           <Button
             variant="danger"
             loading={removeMutation.isPending}
-            onClick={() => removing && removeMutation.mutate(removing.id)}
+            onClick={() => removing && removeMutation.mutate(removing.map((m) => m.id))}
           >
             Remove
           </Button>
         </div>
       </Modal>
+
+      {panel.current ? (() => {
+        const m = panel.current;
+        return (
+          <RecordPanel
+            key={m.id}
+            kindLabel="Care circle member"
+            title={m.display_name}
+            subtitle={circleRoleLabel(m.role)}
+            kind="circle"
+            recordId={m.id}
+            profileId={profile.id}
+            canEdit={canManageEditors}
+            fields={[
+              { label: 'Role', value: circleRoleLabel(m.role) },
+              { label: `${careName} is their`, value: m.relationship },
+              { label: 'Access level', value: m.permission === 'viewer' ? 'Viewer: can read and join the conversation' : 'Contributor: can add and edit records' },
+              { label: 'Can edit the profile', value: m.can_edit_profile ? 'Yes' : 'No' },
+              { label: 'Status', value: m.invite_accepted ? 'Active' : 'Invite pending' },
+              {
+                label: 'Email',
+                value: (m.invited_email ?? m.account_email)
+                  ? <a href={`mailto:${m.invited_email ?? m.account_email}`} className="text-primary hover:underline">{m.invited_email ?? m.account_email}</a>
+                  : null,
+              },
+              { label: 'What they do', value: m.role_description },
+              { label: 'Power of attorney', value: m.poa_type ? poaLabel(m.poa_type) : null },
+              { label: 'In effect now', value: m.poa_type ? (m.poa_activated ? 'Yes' : 'No') : null },
+              { label: 'Invite expires', value: !m.invite_accepted && m.invite_expires_at ? format(new Date(m.invite_expires_at), 'd MMM yyyy') : null },
+              { label: 'Added', value: format(new Date(m.created_at), 'd MMM yyyy') },
+            ]}
+            onEdit={() => setEditing(m)}
+            deleteLabel="Remove"
+            onDelete={() => {
+              setRemoving([m]);
+              panel.close();
+            }}
+            onClose={panel.close}
+          >
+            {!m.invite_accepted && canManageEditors ? (
+              <section>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Invite</h3>
+                <PendingInviteActions profileId={profile.id} member={m} onChanged={invalidate} />
+              </section>
+            ) : null}
+          </RecordPanel>
+        );
+      })() : null}
     </div>
   );
 }

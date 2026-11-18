@@ -11,6 +11,7 @@ import { InstallPrompt } from '../InstallPrompt';
 import { ProfileSwitcher } from './ProfileSwitcher';
 import { useAssistantStore } from '../../stores/assistant';
 import { NotificationsBell } from './NotificationsBell';
+import { UndoBar } from '../UndoBar';
 import { AvatarMenu } from './AvatarMenu';
 import { PareStatus } from './PareStatus';
 import { Clock } from './Clock';
@@ -700,6 +701,7 @@ export function Shell() {
       </div>
 
       <AssistantWidget />
+      <UndoBar />
       <CaptureSheet />
       <InstallPrompt />
       <UpgradePrompt />

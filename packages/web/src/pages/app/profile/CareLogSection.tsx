@@ -6,6 +6,9 @@ import { Button } from '../../../components/ui/Button';
 import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
+import { RecordPanel } from '../../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { LOG_ENTRY_TYPES, SENTIMENTS, entryTypeLabel, sentimentEmoji, sentimentLabel, type CareLogEntry } from '../../../lib/care';
 
 /**
@@ -58,9 +61,7 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
   // Selection and bulk actions
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkType, setBulkType] = useState('');
-  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [editing, setEditing] = useState<CareLogEntry | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<CareLogEntry | null>(null);
   const [actionError, setActionError] = useState('');
 
   useEffect(() => {
@@ -78,7 +79,11 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
     queryKey: ['care-log', profileId, sort, typeFilter.join(','), debouncedQ, from, to],
     queryFn: () => api.get<{ entries: CareLogEntry[]; total: number }>(`/care-profiles/${profileId}/log?${params.toString()}`),
   });
-  const entries = data?.entries ?? [];
+  // Deleting is held back a few seconds with Undo, never a "sure?" box.
+  const hidden = useHiddenIds();
+  const allEntries = data?.entries ?? [];
+  const entries = useMemo(() => allEntries.filter((e) => !hidden.has(e.id)), [allEntries, hidden]);
+  const panel = useRecordPanel(entries, (e) => e.id);
   const total = data?.total ?? 0;
 
   const groups = useMemo(() => {
@@ -137,15 +142,20 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
     onError: (err) => setActionError(err instanceof Error ? err.message : 'Failed to save'),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profileId}/log/${id}`),
-    onSuccess: () => {
-      setConfirmDelete(null);
-      setActionError('');
-      invalidate();
-    },
-    onError: (err) => setActionError(err instanceof Error ? err.message : 'Failed to delete'),
-  });
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const deleteEntries = (items: CareLogEntry[]) => {
+    if (items.length === 0) return;
+    setActionError('');
+    deferDelete({
+      message: items.length === 1 ? 'Deleted the log entry.' : `Deleted ${items.length} log entries.`,
+      ids: items.map((e) => e.id),
+      commit: () =>
+        items.length === 1
+          ? api.delete(`/care-profiles/${profileId}/log/${items[0].id}`)
+          : api.post(`/care-profiles/${profileId}/log/bulk-delete`, { ids: items.map((e) => e.id) }),
+      onCommitted: invalidate,
+    });
+  };
 
   const bulkTypeMutation = useMutation({
     mutationFn: () => api.post(`/care-profiles/${profileId}/log/bulk-update`, { ids: [...selected], patch: { entry_type: bulkType } }),
@@ -156,17 +166,6 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
       invalidate();
     },
     onError: (err) => setActionError(err instanceof Error ? err.message : 'Failed to update entries'),
-  });
-
-  const bulkDeleteMutation = useMutation({
-    mutationFn: () => api.post(`/care-profiles/${profileId}/log/bulk-delete`, { ids: [...selected] }),
-    onSuccess: () => {
-      setSelected(new Set());
-      setConfirmBulkDelete(false);
-      setActionError('');
-      invalidate();
-    },
-    onError: (err) => setActionError(err instanceof Error ? err.message : 'Failed to delete entries'),
   });
 
   const toggleType = (value: string) =>
@@ -306,7 +305,14 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
               <Button size="sm" variant="secondary" disabled={!bulkType} loading={bulkTypeMutation.isPending} onClick={() => bulkTypeMutation.mutate()}>
                 Apply
               </Button>
-              <Button size="sm" variant="danger" onClick={() => setConfirmBulkDelete(true)}>
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={() => {
+                  deleteEntries(entries.filter((e) => selected.has(e.id)));
+                  setSelected(new Set());
+                }}
+              >
                 Delete selected
               </Button>
             </>
@@ -346,7 +352,7 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
                 {!isCollapsed ? (
                   <ul className="border-t border-border divide-y divide-border">
                     {groupEntries.map((entry) => (
-                      <li key={entry.id} className="flex gap-3 px-3 py-3">
+                      <li key={entry.id} {...panel.rowProps(entry.id)} className={`flex gap-3 px-3 py-3 ${RECORD_ROW_CLASS}`}>
                         {canEdit ? (
                           <input
                             type="checkbox"
@@ -374,7 +380,7 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
                             <Button size="xs" variant="ghost" aria-label="Edit log entry" title="Edit" onClick={() => { setActionError(''); setEditing(entry); }}>
                               <PencilIcon />
                             </Button>
-                            <Button size="xs" variant="ghost-danger" aria-label="Delete log entry" title="Delete" onClick={() => { setActionError(''); setConfirmDelete(entry); }}>
+                            <Button size="xs" variant="ghost-danger" aria-label="Delete log entry" title="Delete" onClick={() => deleteEntries([entry])}>
                               <TrashIcon />
                             </Button>
                           </div>
@@ -404,33 +410,47 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
         />
       ) : null}
 
-      <Modal open={confirmDelete !== null} onClose={() => setConfirmDelete(null)} title="Delete this entry">
-        <p className="text-sm text-muted mb-4">
-          Delete "{confirmDelete?.title ?? confirmDelete?.body.slice(0, 80)}"? This cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmDelete(null)}>
-            Cancel
-          </Button>
-          <Button variant="danger" loading={deleteMutation.isPending} onClick={() => confirmDelete && deleteMutation.mutate(confirmDelete.id)}>
-            Delete
-          </Button>
-        </div>
-      </Modal>
-
-      <Modal open={confirmBulkDelete} onClose={() => setConfirmBulkDelete(false)} title="Delete selected entries">
-        <p className="text-sm text-muted mb-4">
-          Delete {selected.size} {selected.size === 1 ? 'entry' : 'entries'} from the care log? This cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmBulkDelete(false)}>
-            Cancel
-          </Button>
-          <Button variant="danger" loading={bulkDeleteMutation.isPending} onClick={() => bulkDeleteMutation.mutate()}>
-            Delete {selected.size === 1 ? 'entry' : 'entries'}
-          </Button>
-        </div>
-      </Modal>
+      {panel.current ? (
+        <RecordPanel
+          key={panel.current.id}
+          kindLabel="Care log entry"
+          title={panel.current.title || entryTypeLabel(panel.current.entry_type)}
+          subtitle={format(new Date(panel.current.occurred_at), 'EEEE d MMMM yyyy, HH:mm')}
+          kind="log"
+          recordId={panel.current.id}
+          profileId={profileId}
+          canEdit={canEdit}
+          fields={[
+            { label: 'Kind', value: entryTypeLabel(panel.current.entry_type) },
+            { label: 'When it happened', value: format(new Date(panel.current.occurred_at), 'EEE d MMM yyyy, HH:mm') },
+            { label: 'Title', value: panel.current.title },
+            { label: 'What happened', value: panel.current.body },
+            {
+              label: 'Tone',
+              value: panel.current.sentiment != null
+                ? `${sentimentEmoji(panel.current.sentiment)} ${sentimentLabel(panel.current.sentiment)}`
+                : null,
+            },
+            {
+              label: 'Tone set by',
+              value: panel.current.sentiment == null
+                ? null
+                : panel.current.sentiment_source === 'manual'
+                  ? 'A carer'
+                  : panel.current.sentiment_source === 'ai'
+                    ? 'Pare'
+                    : null,
+            },
+            { label: 'Added', value: format(new Date(panel.current.created_at), 'EEE d MMM yyyy, HH:mm') },
+          ]}
+          onEdit={() => { setActionError(''); setEditing(panel.current); }}
+          onDelete={() => {
+            deleteEntries([panel.current!]);
+            panel.close();
+          }}
+          onClose={panel.close}
+        />
+      ) : null}
     </div>
   );
 }

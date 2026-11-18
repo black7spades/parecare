@@ -1,14 +1,17 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
-import { Modal } from '../../../components/ui/Modal';
 import { AllergyModal } from '../../../components/AllergyModal';
 import { PagePurpose } from '../../../components/PagePurpose';
 import { useDataView, type DataSort } from '../../../components/data/useDataView';
 import { DataToolbar } from '../../../components/data/DataToolbar';
+import { SortableTh } from '../../../components/data/SortableTh';
+import { RecordPanel } from '../../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import type { Allergy } from '../../../lib/care';
 import { useProfile } from './ProfileLayout';
 
@@ -26,7 +29,6 @@ export function AllergiesPage() {
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Allergy | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<Allergy | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['allergies', profile.id],
@@ -34,16 +36,22 @@ export function AllergiesPage() {
   });
   const allergies = data?.allergies ?? [];
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/allergies/${id}`),
-    onSuccess: () => {
-      setConfirmDelete(null);
-      void queryClient.invalidateQueries({ queryKey: ['allergies', profile.id] });
-    },
-  });
+  // Deleting is held back a few seconds with Undo, never a "sure?" box.
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const hidden = useHiddenIds();
+  const deleteAllergy = (a: Allergy) => {
+    deferDelete({
+      message: `Deleted the allergy to ${a.substance}.`,
+      ids: [a.id],
+      commit: () => api.delete(`/care-profiles/${profile.id}/allergies/${a.id}`),
+      onCommitted: () => void queryClient.invalidateQueries({ queryKey: ['allergies', profile.id] }),
+    });
+  };
 
+  const visible = allergies.filter((a) => !hidden.has(a.id));
+  const panel = useRecordPanel(visible, (a) => a.id);
   const dv = useDataView<Allergy>({
-    rows: allergies,
+    rows: visible,
     getId: (a) => a.id,
     searchText: (a) => [a.substance, a.reaction].filter(Boolean).join(' '),
     sorts: SORTS,
@@ -104,14 +112,14 @@ export function AllergiesPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-muted border-b border-border">
-                <th className="px-3 py-2">Allergic to</th>
-                <th className="px-3 py-2">Reaction</th>
+                <SortableTh label="Allergic to" sortKey="substance" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Reaction" sortKey="reaction" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 {canEdit ? <th className="px-3 py-2 text-right">Actions</th> : null}
               </tr>
             </thead>
             <tbody>
               {dv.view.map((a) => (
-                <tr key={a.id} className="border-b border-border last:border-0">
+                <tr key={a.id} {...panel.rowProps(a.id)} className={`border-b border-border last:border-0 ${RECORD_ROW_CLASS}`}>
                   <td className="px-3 py-2 font-medium text-red-700 dark:text-red-300">{a.substance}</td>
                   <td className="px-3 py-2 text-ink">{a.reaction ?? ''}</td>
                   {canEdit ? (
@@ -119,7 +127,7 @@ export function AllergiesPage() {
                       <Button size="xs" variant="ghost" className="mr-1" aria-label={`Edit ${a.substance}`} title="Edit" onClick={() => setEditing(a)}>
                         <PencilIcon />
                       </Button>
-                      <Button size="xs" variant="ghost-danger" aria-label={`Delete ${a.substance}`} title="Delete" onClick={() => setConfirmDelete(a)}>
+                      <Button size="xs" variant="ghost-danger" aria-label={`Delete ${a.substance}`} title="Delete" onClick={() => deleteAllergy(a)}>
                         <TrashIcon />
                       </Button>
                     </td>
@@ -136,24 +144,27 @@ export function AllergiesPage() {
         <AllergyModal profileId={profile.id} allergy={editing} open onClose={() => setEditing(null)} />
       ) : null}
 
-      <Modal open={confirmDelete !== null} onClose={() => setConfirmDelete(null)} title="Delete allergy">
-        <p className="text-sm text-muted mb-4">
-          Delete the allergy to <span className="font-medium text-ink">{confirmDelete?.substance}</span>? This
-          cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmDelete(null)}>
-            Cancel
-          </Button>
-          <Button
-            variant="danger"
-            loading={deleteMutation.isPending}
-            onClick={() => confirmDelete && deleteMutation.mutate(confirmDelete.id)}
-          >
-            Delete
-          </Button>
-        </div>
-      </Modal>
+      {panel.current ? (
+        <RecordPanel
+          key={panel.current.id}
+          kindLabel="Allergy"
+          title={panel.current.substance}
+          kind="allergies"
+          recordId={panel.current.id}
+          profileId={profile.id}
+          canEdit={canEdit}
+          fields={[
+            { label: 'Allergic to', value: panel.current.substance },
+            { label: 'Reaction', value: panel.current.reaction },
+          ]}
+          onEdit={() => setEditing(panel.current)}
+          onDelete={() => {
+            deleteAllergy(panel.current!);
+            panel.close();
+          }}
+          onClose={panel.close}
+        />
+      ) : null}
     </div>
   );
 }
