@@ -52,6 +52,23 @@ export function auditTrail(req: Request, res: Response, next: NextFunction): voi
   const profileId = req.params['id'];
   const actorId = req.account?.id ?? null;
 
+  // The id of the record touched, so the activity can point back at it.
+  // An edit or delete names it in the path; a create returns it, usually as
+  // the one object in the response, e.g. { document: { id } }.
+  let entityId: string | null = /^\/([0-9a-f-]{36})(?:\/|$)/i.exec(req.path)?.[1] ?? null;
+  const sendJson = res.json.bind(res);
+  res.json = (payload: unknown) => {
+    if (!entityId && payload && typeof payload === 'object') {
+      const p = payload as Record<string, unknown>;
+      const inner = Object.values(p).find(
+        (v): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v) && typeof (v as Record<string, unknown>).id === 'string'
+      );
+      const id = typeof p.id === 'string' ? p.id : inner?.id;
+      if (typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)) entityId = id;
+    }
+    return sendJson(payload);
+  };
+
   res.on('finish', () => {
     if (res.statusCode >= 400 || !profileId) return;
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -79,6 +96,7 @@ export function auditTrail(req: Request, res: Response, next: NextFunction): voi
         actor_account_id: actorId,
         action,
         entity_type: resourceOf(req),
+        entity_id: entityId,
         summary: summary ?? null,
       })
       .catch((err) => console.warn('Audit log write failed:', (err as Error).message));

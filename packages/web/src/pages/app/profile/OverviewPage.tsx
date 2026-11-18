@@ -40,8 +40,13 @@ function readSavedOrder(storageKey: string): string[] | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as string[];
     const valid = parsed.filter((k) => PROFILE_CARD_KEYS.includes(k));
-    const missing = PROFILE_CARD_KEYS.filter((k) => !valid.includes(k));
-    return [...valid, ...missing];
+    // A card added since the arrangement was saved goes where it sits by
+    // default, not to the bottom where nobody would find it.
+    const order = [...valid];
+    PROFILE_CARD_KEYS.forEach((k, i) => {
+      if (!order.includes(k)) order.splice(Math.min(i, order.length), 0, k);
+    });
+    return order;
   } catch {
     return null;
   }

@@ -31,7 +31,11 @@ export function useCardSlot(): CardSlot | null {
   return useContext(SlotContext);
 }
 
-export function CardShell({ children }: { children: React.ReactNode }) {
+/**
+ * `title` replaces the card's usual heading when it needs to say more, such
+ * as the date it counts from.
+ */
+export function CardShell({ children, title }: { children: React.ReactNode; title?: string }) {
   const slot = useCardSlot();
 
   // Being on screen is what makes the up and down arrows honest. Without it
@@ -61,7 +65,7 @@ export function CardShell({ children }: { children: React.ReactNode }) {
           aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${label}`}
         >
           <span className="text-xs text-muted">{collapsed ? '▶' : '▼'}</span>
-          {label}
+          {title ?? label}
         </button>
         {editView ? (
           <span className="flex items-center gap-1">

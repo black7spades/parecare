@@ -7,6 +7,7 @@ import { UpcomingCard } from './profile/UpcomingCard';
 import { HealthCard } from './profile/HealthCard';
 import { HealthSpendCard } from './profile/HealthSpendCard';
 import { CareLogCard } from './profile/CareLogCard';
+import { RecentActivityCard } from './profile/RecentActivityCard';
 import type { CardDefinition } from './types';
 
 /**
@@ -18,6 +19,8 @@ import type { CardDefinition } from './types';
  * sidebar, and for the same reason.
  */
 export const PROFILE_CARDS: CardDefinition[] = [
+  // What changed since this person last looked leads, so a busy week shows.
+  { key: 'recent', label: 'Recent activity', Component: RecentActivityCard },
   { key: 'profile', label: 'Contact details', Component: ProfileContactCard },
   { key: 'conditions', label: 'Conditions', Component: ConditionsCard },
   // A pet has no neurotypes or substance use; only people do.

@@ -20,6 +20,14 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.36.0',
+    date: '2026-11-18',
+    summary: 'See what changed since you last looked, right on the overview.',
+    groups: [
+      { heading: 'Added', items: ['Recent activity on the overview. Each person’s overview now opens with what changed since you last looked, headed with the date of that visit. It counts what was added, lists each change by day with who made it, and each line opens the record it is about. The first time, it shows the last two weeks.'] },
+    ],
+  },
+  {
     version: '0.35.0',
     date: '2026-11-18',
     summary: 'More room for your documents, and drop a file onto the list to upload it.',
