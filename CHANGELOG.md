@@ -6,6 +6,16 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.36.0] - 2026-11-18
+
+### Added
+
+- **Recent activity on the overview.** Each person's overview now opens with
+  what changed since you last looked, headed with the date of that visit.
+  It counts what was added, lists each change by day with who made it, and
+  each line opens the record it is about. The first time, it shows the
+  last two weeks.
+
 ## [0.35.0] - 2026-11-18
 
 ### Changed
