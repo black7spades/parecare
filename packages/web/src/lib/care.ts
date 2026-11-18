@@ -329,6 +329,7 @@ const ENTITY_LABELS: Record<string, string> = {
   'health-statuses': 'health status',
   appointments: 'appointment',
   calendar: 'calendar entry',
+  records: 'note',
 };
 
 export const entityLabel = (type: string) => ENTITY_LABELS[type] ?? type;
@@ -345,6 +346,8 @@ export interface CareDocument {
   file_size_bytes: number | null;
   mime_type: string | null;
   visible_to_roles: string[] | null;
+  /** The condition it was filed against, if any. */
+  medical_condition_id?: string | null;
   created_at: string;
 }
 

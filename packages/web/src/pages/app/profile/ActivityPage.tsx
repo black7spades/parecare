@@ -5,6 +5,8 @@ import { entityLabel, type ActivityEntry } from '../../../lib/care';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar } from '../../../components/data/DataToolbar';
 import { EditableSubheader } from '../../../components/ui/EditableSubheader';
+import { RecordPanel } from '../../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useProfile } from './ProfileLayout';
 
 const ACTION_STYLES: Record<ActivityEntry['action'], string> = {
@@ -35,6 +37,39 @@ const ENTITY_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'appointments', label: 'Appointment' },
   { value: 'calendar', label: 'Calendar entry' },
 ];
+
+const ACTION_WORDS: Record<ActivityEntry['action'], string> = {
+  created: 'Added',
+  updated: 'Changed',
+  deleted: 'Deleted',
+};
+
+const SOURCE_WORDS: Record<string, string> = {
+  person: 'By hand',
+  pare: 'Through Pare',
+  assistant: 'Through an outside assistant',
+};
+
+/**
+ * Where each kind of record opens, inside the person's pages, for the ones
+ * whose list opens a record from the address. The care log lives on the
+ * overview. Anything not listed simply gets no link.
+ */
+const RECORD_PAGES: Record<string, (id: string) => string> = {
+  log: (id) => `?record=${id}`,
+  appointments: (id) => `/appointments?record=${id}`,
+  treatments: (id) => `/treatments?record=${id}`,
+  allergies: (id) => `/allergies?record=${id}`,
+  conditions: (id) => `/conditions?record=${id}`,
+  medications: (id) => `/medications?record=${id}`,
+  questions: (id) => `/questions?record=${id}`,
+  providers: (id) => `/providers?record=${id}`,
+  circle: (id) => `/circle?record=${id}`,
+  documents: (id) => `/documents?doc=${id}`,
+};
+
+/** The full list does not send which record an entry is about yet; the panel links it when it does. */
+type ActivityRow = ActivityEntry & { entity_id?: string | null };
 
 const ACTIVITY_SORTS: DataSort<ActivityEntry>[] = [
   {
@@ -70,7 +105,13 @@ export function ActivityPage() {
         `/care-profiles/${profile.id}/activity?limit=5000`
       ),
   });
-  const entries = data?.entries ?? [];
+  const entries: ActivityRow[] = data?.entries ?? [];
+  const panel = useRecordPanel(entries, (e) => e.id);
+  const current = panel.current;
+  const recordPath =
+    current && current.action !== 'deleted' && current.entity_id && RECORD_PAGES[current.entity_type]
+      ? `/app/${profile.id}${RECORD_PAGES[current.entity_type](current.entity_id)}`
+      : null;
 
   // Build entity type filter from actual data so only relevant options appear.
   const entityTypeFilter: DataFilter<ActivityEntry> = {
@@ -130,7 +171,12 @@ export function ActivityPage() {
       ) : (
         <ul className="space-y-3 mt-4">
           {dv.view.map((e) => (
-            <li key={e.id} data-record={e.id} className="flex items-start gap-3 border-b border-border last:border-0 pb-3 last:pb-0">
+            <li
+              key={e.id}
+              data-record={e.id}
+              {...panel.rowProps(e.id)}
+              className={`flex items-start gap-3 border-b border-border last:border-0 pb-3 last:pb-0 rounded-sm ${RECORD_ROW_CLASS}`}
+            >
               <span className={`badge text-xs capitalize shrink-0 ${ACTION_STYLES[e.action]}`}>{e.action}</span>
               <div className="flex-1">
                 <p className="text-sm text-ink">
@@ -146,6 +192,27 @@ export function ActivityPage() {
           ))}
         </ul>
       )}
+
+      {current ? (
+        <RecordPanel
+          key={current.id}
+          kindLabel="Activity"
+          title={`${ACTION_WORDS[current.action]} a ${entityLabel(current.entity_type)}`}
+          subtitle={format(new Date(current.created_at), 'EEEE d MMMM yyyy, HH:mm')}
+          recordId={current.id}
+          canEdit={false}
+          fields={[
+            { label: 'What happened', value: ACTION_WORDS[current.action] },
+            { label: 'Kind of record', value: entityLabel(current.entity_type) },
+            { label: 'About', value: current.summary },
+            { label: 'Who', value: current.actor_name ?? 'A former member' },
+            { label: 'How', value: current.source ? SOURCE_WORDS[current.source] : null },
+            { label: 'When', value: format(new Date(current.created_at), 'EEE d MMM yyyy, HH:mm') },
+          ]}
+          links={recordPath ? [{ label: 'Record', value: 'Open the record', to: recordPath }] : []}
+          onClose={panel.close}
+        />
+      ) : null}
     </div>
   );
 }

@@ -11,6 +11,9 @@ import { Button } from '../../components/ui/Button';
 import { LinkIcon, PencilIcon, TrashIcon } from '../../components/ui/icons';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
+import { RecordPanel } from '../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../stores/undo';
 import type { Supplier } from '../../lib/care';
 
 interface LinkedProfile {
@@ -36,7 +39,6 @@ export function DirectorySuppliersPage() {
   const queryClient = useQueryClient();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<DirectorySupplier | null>(null);
-  const [deleting, setDeleting] = useState<DirectorySupplier | null>(null);
   const [bulkLinking, setBulkLinking] = useState<DirectorySupplier | null>(null);
   const [bulkLinkingIds, setBulkLinkingIds] = useState<DirectorySupplier[]>([]);
   const [bulkEditQueue, setBulkEditQueue] = useState<DirectorySupplier[]>([]);
@@ -45,7 +47,9 @@ export function DirectorySuppliersPage() {
     queryKey: ['directory-suppliers'],
     queryFn: () => api.get<{ suppliers: DirectorySupplier[]; can_edit: boolean }>('/directory/suppliers'),
   });
-  const suppliers = data?.suppliers ?? [];
+  // Deleting is held back a few seconds with Undo, never a "sure?" box.
+  const hidden = useHiddenIds();
+  const suppliers = (data?.suppliers ?? []).filter((s) => !hidden.has(s.id));
   const canEdit = data?.can_edit ?? false;
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['directory-suppliers'] });
@@ -61,15 +65,20 @@ export function DirectorySuppliersPage() {
     filters: [],
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/directory/suppliers/${id}`),
-    onSuccess: () => { setDeleting(null); invalidate(); },
-  });
-
-  const bulkDeleteMutation = useMutation({
-    mutationFn: async (ids: string[]) => { for (const id of ids) await api.delete(`/directory/suppliers/${id}`); },
-    onSuccess: () => { dv.clearSelection(); invalidate(); },
-  });
+  const panel = useRecordPanel(suppliers, (s) => s.id);
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const deleteSuppliers = (items: DirectorySupplier[]) => {
+    if (items.length === 0) return;
+    deferDelete({
+      message: items.length === 1 ? `Deleted ${items[0].name}.` : `Deleted ${items.length} suppliers.`,
+      ids: items.map((s) => s.id),
+      commit: async () => {
+        for (const s of items) await api.delete(`/directory/suppliers/${s.id}`);
+      },
+      onCommitted: invalidate,
+    });
+  };
+  const current = panel.current;
 
   return (
     <div>
@@ -113,7 +122,7 @@ export function DirectorySuppliersPage() {
                 ? [
                     { key: 'link', label: 'Link selected', onRun: () => setBulkLinkingIds(dv.selectedRows) },
                     { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setBulkEditQueue(q); setEditing(q[0] ?? null); setEditorOpen(true); } },
-                    { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => bulkDeleteMutation.mutate(dv.selectedRows.map((s) => s.id)) },
+                    { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => { deleteSuppliers(dv.selectedRows); dv.clearSelection(); } },
                   ]
                 : []
             }
@@ -160,7 +169,7 @@ export function DirectorySuppliersPage() {
             </thead>
             <tbody>
               {dv.view.map((s) => (
-                <tr key={s.id} className="border-b border-border last:border-0 align-top hover:bg-surface-2/50">
+                <tr key={s.id} {...panel.rowProps(s.id)} className={`border-b border-border last:border-0 align-top ${RECORD_ROW_CLASS}`}>
                   {canEdit ? (
                     <td className="px-3 py-2">
                       <input
@@ -197,7 +206,7 @@ export function DirectorySuppliersPage() {
                       <div className="flex gap-1">
                         <Button size="xs" variant="ghost" aria-label={`Link ${s.name} to profiles`} title="Link to profiles" onClick={() => setBulkLinking(s)}><LinkIcon /></Button>
                         <Button size="xs" variant="ghost" aria-label={`Edit ${s.name}`} title="Edit" onClick={() => { setEditing(s); setEditorOpen(true); }}><PencilIcon /></Button>
-                        <Button size="xs" variant="ghost-danger" aria-label={`Delete ${s.name}`} title="Delete" onClick={() => setDeleting(s)}><TrashIcon /></Button>
+                        <Button size="xs" variant="ghost-danger" aria-label={`Delete ${s.name}`} title="Delete" onClick={() => deleteSuppliers([s])}><TrashIcon /></Button>
                       </div>
                     </td>
                   ) : null}
@@ -238,23 +247,35 @@ export function DirectorySuppliersPage() {
         onLinked={() => { setBulkLinkingIds([]); dv.clearSelection(); invalidate(); }}
       />
 
-      <Modal open={deleting !== null} onClose={() => setDeleting(null)} title="Delete supplier">
-        <p className="text-sm text-muted mb-2">
-          Permanently delete <span className="font-medium text-ink">{deleting?.name}</span>?
-        </p>
-        {deleting && deleting.medication_count > 0 ? (
-          <p className="text-sm text-red-600 mb-4">
-            {deleting.medication_count} medication{deleting.medication_count > 1 ? 's' : ''} name{deleting.medication_count > 1 ? '' : 's'} this supplier.
-            Deleting it keeps their typed-in name but removes the link and the reorder button.
-          </p>
-        ) : null}
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setDeleting(null)}>Cancel</Button>
-          <Button variant="danger" loading={deleteMutation.isPending} onClick={() => deleting && deleteMutation.mutate(deleting.id)}>
-            Delete
-          </Button>
-        </div>
-      </Modal>
+      {current ? (
+        <RecordPanel
+          key={current.id}
+          kindLabel="Supplier"
+          title={current.name}
+          subtitle={current.address_suburb ?? undefined}
+          recordId={current.id}
+          canEdit={canEdit}
+          fields={[
+            { label: 'Phone', value: current.phone ? <a href={`tel:${current.phone}`} className="text-primary hover:underline">{current.phone}</a> : null },
+            { label: 'Email', value: current.email ? <a href={`mailto:${current.email}`} className="text-primary hover:underline">{current.email}</a> : null },
+            { label: 'Address', value: current.address },
+            { label: 'Suburb', value: current.address_suburb },
+            { label: 'Medications', value: current.medication_count > 0 ? String(current.medication_count) : null },
+          ]}
+          links={[
+            ...(current.linked_profiles ?? []).map((lp) => ({ label: 'Used by', value: lp.profile_name, to: `/app/${lp.profile_id}` })),
+            ...(current.order_url ? [{ label: 'Reorder', value: 'Reorder online', href: current.order_url }] : []),
+            ...(current.directions_link ? [{ label: 'Directions', value: 'Open map', href: current.directions_link }] : []),
+          ]}
+          onEdit={() => { setEditing(current); setEditorOpen(true); }}
+          extra={[{ label: 'Link to profiles', onRun: () => setBulkLinking(current) }]}
+          onDelete={() => {
+            deleteSuppliers([current]);
+            panel.close();
+          }}
+          onClose={panel.close}
+        />
+      ) : null}
     </div>
   );
 }

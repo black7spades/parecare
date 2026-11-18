@@ -175,12 +175,11 @@ export function RecentActivityCard({ profileId }: CardProps) {
                 ) : (
                   <span className="text-ink">{capitalise(kind)} {VERB[e.action]}</span>
                 );
-                const target =
-                  e.entity_type === 'documents' && e.entity_id && e.action !== 'deleted'
-                    ? `/app/${profileId}/documents?doc=${e.entity_id}`
-                    : section
-                      ? `/app/${profileId}/${section}`
-                      : null;
+                // Every list opens its records by ?record=<id>, so a line goes
+                // straight to the record it is about while that record exists.
+                const target = section
+                  ? `/app/${profileId}/${section}${e.entity_id && e.action !== 'deleted' ? `?record=${e.entity_id}` : ''}`
+                  : null;
                 return (
                   <li key={e.id} className="flex items-baseline justify-between gap-3 text-sm">
                     <span className="min-w-0 break-words">

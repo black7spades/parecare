@@ -8,6 +8,10 @@ import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { useDataView, type DataSort } from '../../../components/data/useDataView';
 import { DataToolbar } from '../../../components/data/DataToolbar';
+import { SortableTh } from '../../../components/data/SortableTh';
+import { RecordPanel } from '../../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { useAuthStore } from '../../../stores/auth';
 import { useProfile } from './ProfileLayout';
 import { ItemNotesThread } from './JourneysSection';
@@ -22,7 +26,7 @@ import type { Achievement, CareJourney } from '../../../lib/journeys';
  * wants to write the story behind an achievement.
  */
 export function MemoryBookPage() {
-  const { profile } = useProfile();
+  const { profile, canEdit } = useProfile();
   const location = useLocation();
   const personName = profile.preferred_name ?? profile.first_name ?? profile.full_name.split(' ')[0];
   // Arriving from the Achievements page with "Write the story" prefills
@@ -35,6 +39,7 @@ export function MemoryBookPage() {
       <BookView
         profileId={profile.id}
         personName={personName}
+        canEdit={canEdit}
         storyOf={storyOf}
         onStoryDone={() => setStoryOf(null)}
       />
@@ -61,11 +66,13 @@ export function AchievementsPage() {
 function BookView({
   profileId,
   personName,
+  canEdit,
   storyOf,
   onStoryDone,
 }: {
   profileId: string;
   personName: string;
+  canEdit: boolean;
   storyOf: Achievement | null;
   onStoryDone: () => void;
 }) {
@@ -88,7 +95,11 @@ function BookView({
     queryKey: ['memory-book', profileId],
     queryFn: () => api.get<{ entries: MemoryEntry[] }>(`/care-profiles/${profileId}/memory-book`),
   });
-  const entries = data?.entries ?? [];
+  // Deleting is held back a few seconds with Undo, never a "sure?" box.
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const hidden = useHiddenIds();
+  const entries = (data?.entries ?? []).filter((e) => !hidden.has(e.id));
+  const panel = useRecordPanel(entries, (e) => e.id);
 
   // Milestone achievements join the timeline between the written memories.
   const { data: milestonesData } = useQuery({
@@ -143,10 +154,13 @@ function BookView({
     },
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profileId}/memory-book/${id}`),
-    onSuccess: invalidate,
-  });
+  const deleteEntry = (entry: MemoryEntry) =>
+    deferDelete({
+      message: entry.title ? `Deleted ${entry.title}.` : 'Deleted the memory.',
+      ids: [entry.id],
+      commit: () => api.delete(`/care-profiles/${profileId}/memory-book/${entry.id}`),
+      onCommitted: invalidate,
+    });
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -217,8 +231,9 @@ function BookView({
                 key={`e-${item.entry.id}`}
                 profileId={profileId}
                 entry={item.entry}
+                rowProps={panel.rowProps(item.entry.id)}
                 canDelete={item.entry.author_account_id === me?.id}
-                onDelete={() => deleteMutation.mutate(item.entry!.id)}
+                onDelete={() => deleteEntry(item.entry!)}
               />
             ) : (
               <MilestoneCard key={`a-${item.achievement!.id}`} achievement={item.achievement!} />
@@ -226,6 +241,47 @@ function BookView({
           )}
         </div>
       )}
+
+      {panel.current ? (() => {
+        const entry = panel.current;
+        const mine = entry.author_account_id === me?.id;
+        return (
+          <RecordPanel
+            key={entry.id}
+            kindLabel="Memory"
+            title={entry.title || format(new Date(entry.created_at), 'd MMMM yyyy')}
+            subtitle={entry.author_name ? `Written by ${entry.author_name}` : undefined}
+            kind="memory-book"
+            recordId={entry.id}
+            profileId={profileId}
+            canEdit={canEdit}
+            fields={[
+              { label: 'Title', value: entry.title },
+              { label: 'The memory', value: entry.body },
+              { label: 'The story of', value: entry.checklist_item_id ? entry.achievement_title : null },
+              { label: 'Written by', value: entry.author_name },
+              { label: 'Date', value: format(new Date(entry.created_at), 'd MMM yyyy') },
+            ]}
+            links={
+              entry.checklist_item_id && entry.achievement_title
+                ? [{ label: 'Achievement', value: entry.achievement_title, to: `/app/${profileId}/achievements` }]
+                : []
+            }
+            onDelete={mine ? () => {
+              deleteEntry(entry);
+              panel.close();
+            } : undefined}
+            onClose={panel.close}
+          >
+            {entry.photo_url ? (
+              <section>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Photo</h3>
+                <MemoryPhoto profileId={profileId} entryId={entry.id} alt={entry.title ?? 'Memory photo'} />
+              </section>
+            ) : null}
+          </RecordPanel>
+        );
+      })() : null}
     </div>
   );
 }
@@ -233,16 +289,18 @@ function BookView({
 function EntryCard({
   profileId,
   entry,
+  rowProps,
   canDelete,
   onDelete,
 }: {
   profileId: string;
   entry: MemoryEntry;
+  rowProps: ReturnType<ReturnType<typeof useRecordPanel>['rowProps']>;
   canDelete: boolean;
   onDelete: () => void;
 }) {
   return (
-    <div className="card group">
+    <div {...rowProps} className={`card group ${RECORD_ROW_CLASS}`}>
       {entry.photo_url ? <MemoryPhoto profileId={profileId} entryId={entry.id} alt={entry.title ?? 'Memory photo'} /> : null}
       {entry.title ? <h3 className="text-sm font-semibold text-ink mb-1">{entry.title}</h3> : null}
       {entry.checklist_item_id && entry.achievement_title ? (
@@ -254,13 +312,14 @@ function EntryCard({
           {entry.author_name ?? 'Someone'} · {format(new Date(entry.created_at), 'd MMM yyyy')}
         </p>
         {canDelete ? (
-          <button
-            type="button"
-            className="text-xs text-muted hover:text-red-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+          <Button
+            size="xs"
+            variant="ghost-danger"
+            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100 transition-opacity"
             onClick={onDelete}
           >
-            Remove
-          </button>
+            Delete
+          </Button>
         ) : null}
       </div>
     </div>
@@ -302,7 +361,7 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
   const [photosOnly, setPhotosOnly] = useState(false);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
-  const [openId, setOpenId] = useState<string | null>(null);
+  const { canEdit } = useProfile();
 
   const params = new URLSearchParams();
   if (journeyId) params.set('journey_id', journeyId);
@@ -330,6 +389,8 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
     return list;
   }, [data, photosOnly]);
 
+  // Each achievement opens in the record panel, with its notes thread.
+  const panel = useRecordPanel(serverRows, (a) => a.id);
   const dv = useDataView<Achievement>({
     rows: serverRows,
     getId: (a) => a.id,
@@ -442,27 +503,49 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
           <table className="w-full text-sm">
             <thead className="border-b border-border">
               <tr>
-                <th className="px-3 py-2 text-left font-medium text-muted">Achievement</th>
-                <th className="px-3 py-2 text-left font-medium text-muted hidden sm:table-cell">Journey</th>
-                <th className="px-3 py-2 text-left font-medium text-muted">Date</th>
-                <th className="px-3 py-2 text-left font-medium text-muted hidden sm:table-cell">Milestone</th>
+                <SortableTh label="Achievement" sortKey="title" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="text-left text-muted" />
+                <SortableTh label="Journey" sortKey="journey" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="text-left text-muted hidden sm:table-cell" />
+                <SortableTh label="Date" sortKey="achieved" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="text-left text-muted" />
+                <SortableTh label="Milestone" sortKey="milestone" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="text-left text-muted hidden sm:table-cell" />
               </tr>
             </thead>
             <tbody>
               {dv.view.map((a) => (
-                <AchievementRow
-                  key={a.id}
-                  profileId={profileId}
-                  achievement={a}
-                  open={openId === a.id}
-                  onToggle={() => setOpenId((v) => (v === a.id ? null : a.id))}
-                  onWriteStory={() => onWriteStory(a)}
-                />
+                <AchievementRow key={a.id} achievement={a} rowProps={panel.rowProps(a.id)} />
               ))}
             </tbody>
           </table>
         )}
       </div>
+      {panel.current ? (
+        <RecordPanel
+          key={panel.current.id}
+          kindLabel={panel.current.is_milestone ? 'Milestone' : 'Achievement'}
+          title={panel.current.title}
+          kind="checklists"
+          recordId={panel.current.id}
+          profileId={profileId}
+          canEdit={canEdit}
+          fields={[
+            { label: 'What it was', value: panel.current.description },
+            { label: 'Journey', value: panel.current.journey_name },
+            { label: 'Phase', value: panel.current.phase_name ?? panel.current.legacy_phase },
+            { label: 'Happened', value: panel.current.achieved_on ? format(new Date(panel.current.achieved_on), 'd MMM yyyy') : null },
+            { label: 'Recorded', value: format(new Date(panel.current.completed_at), 'd MMM yyyy') },
+            { label: 'Recorded by', value: panel.current.recorded_by_name },
+            { label: 'Milestone', value: panel.current.is_milestone ? 'Yes' : null },
+            { label: 'Story', value: panel.current.story_entry_id ? 'Written, in the memory book' : null },
+          ]}
+          links={panel.current.journey_id ? [{ label: 'Journey', value: panel.current.journey_name ?? 'Open the journey', to: `/app/${profileId}/journey` }] : []}
+          extra={panel.current.story_entry_id ? [] : [{ label: 'Write the story', onRun: () => { const a = panel.current!; panel.close(); onWriteStory(a); } }]}
+          onClose={panel.close}
+        >
+          <section>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Thread</h3>
+            <ItemNotesThread profileId={profileId} itemId={panel.current.id} />
+          </section>
+        </RecordPanel>
+      ) : null}
     </div>
   );
 }
@@ -472,63 +555,20 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
  * with the note, the photo, who recorded it and Write the story.
  */
 function AchievementRow({
-  profileId,
   achievement: a,
-  open,
-  onToggle,
-  onWriteStory,
+  rowProps,
 }: {
-  profileId: string;
   achievement: Achievement;
-  open: boolean;
-  onToggle: () => void;
-  onWriteStory: () => void;
+  rowProps: ReturnType<ReturnType<typeof useRecordPanel>['rowProps']>;
 }) {
   const when = a.achieved_on ?? a.completed_at;
   return (
-    <>
-      <tr className="border-b border-border last:border-0 align-top">
-        <td className="px-3 py-2">
-          <button type="button" className="text-left text-primary hover:underline" onClick={onToggle}>
-            {a.title}
-          </button>
-        </td>
-        <td className="px-3 py-2 text-muted hidden sm:table-cell">{a.journey_name ?? ''}</td>
-        <td className="px-3 py-2 text-muted whitespace-nowrap">{when ? format(new Date(when), 'd MMM yyyy') : ''}</td>
-        <td className="px-3 py-2 hidden sm:table-cell">{a.is_milestone ? '⭐' : ''}</td>
-      </tr>
-      {open ? (
-        <tr className="border-b border-border last:border-0">
-          <td colSpan={4} className="px-3 pb-3">
-            <div className="rounded-md border border-border bg-surface p-3 space-y-2">
-              {a.description ? <p className="text-sm text-ink">{a.description}</p> : null}
-              <p className="text-xs text-muted">
-                {[
-                  a.journey_name,
-                  a.phase_name ?? a.legacy_phase,
-                  a.achieved_on ? `Happened ${format(new Date(a.achieved_on), 'd MMM yyyy')}` : null,
-                  `Recorded ${format(new Date(a.completed_at), 'd MMM yyyy')}` +
-                    (a.recorded_by_name ? ` by ${a.recorded_by_name}` : ''),
-                  a.is_milestone ? 'Milestone' : null,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </p>
-              <ItemNotesThread profileId={profileId} itemId={a.id} />
-              <div>
-                {a.story_entry_id ? (
-                  <span className="text-xs text-muted">The story of this achievement is in the book.</span>
-                ) : (
-                  <Button size="xs" variant="ghost" onClick={onWriteStory}>
-                    Write the story
-                  </Button>
-                )}
-              </div>
-            </div>
-          </td>
-        </tr>
-      ) : null}
-    </>
+    <tr {...rowProps} className={`border-b border-border last:border-0 align-top ${RECORD_ROW_CLASS}`}>
+      <td className="px-3 py-2 text-ink font-medium">{a.title}</td>
+      <td className="px-3 py-2 text-muted hidden sm:table-cell">{a.journey_name ?? ''}</td>
+      <td className="px-3 py-2 text-muted whitespace-nowrap">{when ? format(new Date(when), 'd MMM yyyy') : ''}</td>
+      <td className="px-3 py-2 hidden sm:table-cell">{a.is_milestone ? '⭐' : ''}</td>
+    </tr>
   );
 }
 

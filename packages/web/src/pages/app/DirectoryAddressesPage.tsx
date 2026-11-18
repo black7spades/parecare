@@ -11,6 +11,9 @@ import { Button } from '../../components/ui/Button';
 import { LinkIcon, PencilIcon, TrashIcon } from '../../components/ui/icons';
 import { Input } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
+import { RecordPanel } from '../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../stores/undo';
 
 interface LinkedProfile {
   profile_id: string;
@@ -46,7 +49,6 @@ export function DirectoryAddressesPage() {
   const queryClient = useQueryClient();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<DirectoryAddress | null>(null);
-  const [deleting, setDeleting] = useState<DirectoryAddress | null>(null);
   const [linking, setLinking] = useState<DirectoryAddress | null>(null);
   const [linkingAll, setLinkingAll] = useState<DirectoryAddress[]>([]);
   const [editQueue, setEditQueue] = useState<DirectoryAddress[]>([]);
@@ -55,7 +57,9 @@ export function DirectoryAddressesPage() {
     queryKey: ['directory-addresses'],
     queryFn: () => api.get<{ addresses: DirectoryAddress[]; can_edit: boolean }>('/directory/addresses'),
   });
-  const addresses = data?.addresses ?? [];
+  // Deleting is held back a few seconds with Undo, never a "sure?" box.
+  const hidden = useHiddenIds();
+  const addresses = (data?.addresses ?? []).filter((a) => !hidden.has(a.id));
   const canEdit = data?.can_edit ?? false;
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['directory-addresses'] });
 
@@ -66,14 +70,21 @@ export function DirectoryAddressesPage() {
     sorts: SORTS,
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/directory/addresses/${id}`),
-    onSuccess: () => { setDeleting(null); invalidate(); },
-  });
-  const bulkDeleteMutation = useMutation({
-    mutationFn: async (ids: string[]) => { for (const id of ids) await api.delete(`/directory/addresses/${id}`); },
-    onSuccess: () => { dv.clearSelection(); invalidate(); },
-  });
+  const panel = useRecordPanel(addresses, (a) => a.id);
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const nameOf = (a: DirectoryAddress) => a.label || a.formatted || 'Address';
+  const deleteAddresses = (items: DirectoryAddress[]) => {
+    if (items.length === 0) return;
+    deferDelete({
+      message: items.length === 1 ? `Deleted ${nameOf(items[0])}.` : `Deleted ${items.length} addresses.`,
+      ids: items.map((a) => a.id),
+      commit: async () => {
+        for (const a of items) await api.delete(`/directory/addresses/${a.id}`);
+      },
+      onCommitted: invalidate,
+    });
+  };
+  const current = panel.current;
 
   return (
     <div>
@@ -113,7 +124,7 @@ export function DirectoryAddressesPage() {
                 ? [
                     { key: 'link', label: 'Link selected', onRun: () => setLinkingAll(dv.selectedRows) },
                     { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setEditQueue(q); setEditing(q[0] ?? null); setEditorOpen(true); } },
-                    { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => bulkDeleteMutation.mutate(dv.selectedRows.map((a) => a.id)) },
+                    { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => { deleteAddresses(dv.selectedRows); dv.clearSelection(); } },
                   ]
                 : []
             }
@@ -159,7 +170,7 @@ export function DirectoryAddressesPage() {
             </thead>
             <tbody>
               {dv.view.map((a) => (
-                <tr key={a.id} className="border-b border-border last:border-0 align-top hover:bg-surface-2/50">
+                <tr key={a.id} {...panel.rowProps(a.id)} className={`border-b border-border last:border-0 align-top ${RECORD_ROW_CLASS}`}>
                   {canEdit ? (
                     <td className="px-3 py-2">
                       <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
@@ -188,7 +199,7 @@ export function DirectoryAddressesPage() {
                       <div className="flex gap-1">
                         <Button size="xs" variant="ghost" aria-label={`Link ${a.label || a.formatted || 'address'} to profiles`} title="Link to profiles" onClick={() => setLinking(a)}><LinkIcon /></Button>
                         <Button size="xs" variant="ghost" aria-label={`Edit ${a.label || a.formatted || 'address'}`} title="Edit" onClick={() => { setEditing(a); setEditorOpen(true); }}><PencilIcon /></Button>
-                        <Button size="xs" variant="ghost-danger" aria-label={`Delete ${a.label || a.formatted || 'address'}`} title="Delete" onClick={() => setDeleting(a)}><TrashIcon /></Button>
+                        <Button size="xs" variant="ghost-danger" aria-label={`Delete ${a.label || a.formatted || 'address'}`} title="Delete" onClick={() => deleteAddresses([a])}><TrashIcon /></Button>
                       </div>
                     </td>
                   ) : null}
@@ -214,20 +225,35 @@ export function DirectoryAddressesPage() {
       <LinkDialog address={linking} onClose={() => setLinking(null)} onLinked={() => { setLinking(null); invalidate(); }} />
       <LinkAllDialog addresses={linkingAll} onClose={() => setLinkingAll([])} onLinked={() => { setLinkingAll([]); dv.clearSelection(); invalidate(); }} />
 
-      <Modal open={deleting !== null} onClose={() => setDeleting(null)} title="Delete address">
-        <p className="text-sm text-muted mb-2">
-          Permanently delete <span className="font-medium text-ink">{deleting?.formatted ?? deleting?.label}</span>?
-        </p>
-        {deleting?.linked_profiles && deleting.linked_profiles.length > 0 ? (
-          <p className="text-sm text-red-600 mb-4">
-            This address is linked to {deleting.linked_profiles.length} profile{deleting.linked_profiles.length > 1 ? 's' : ''}. Deleting it removes it from all of them.
-          </p>
-        ) : null}
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setDeleting(null)}>Cancel</Button>
-          <Button variant="danger" loading={deleteMutation.isPending} onClick={() => deleting && deleteMutation.mutate(deleting.id)}>Delete</Button>
-        </div>
-      </Modal>
+      {current ? (
+        <RecordPanel
+          key={current.id}
+          kindLabel="Address"
+          title={nameOf(current)}
+          subtitle={current.label && current.formatted ? current.formatted : undefined}
+          recordId={current.id}
+          canEdit={canEdit}
+          fields={[
+            { label: 'Label', value: current.label },
+            { label: 'Address line 1', value: current.address_line1 },
+            { label: 'Address line 2', value: current.address_line2 },
+            { label: 'Suburb', value: current.address_suburb },
+            { label: 'State', value: current.address_state },
+            { label: 'Postcode', value: current.address_postcode },
+            { label: 'Country', value: current.address_country },
+            // The Wi-Fi password stays in the editor, where showing it is a deliberate act.
+            { label: 'Wi-Fi network', value: current.wifi_network_name },
+          ]}
+          links={(current.linked_profiles ?? []).map((lp) => ({ label: 'Linked to', value: lp.profile_name, to: `/app/${lp.profile_id}` }))}
+          onEdit={() => { setEditing(current); setEditorOpen(true); }}
+          extra={[{ label: 'Link to profiles', onRun: () => setLinking(current) }]}
+          onDelete={() => {
+            deleteAddresses([current]);
+            panel.close();
+          }}
+          onClose={panel.close}
+        />
+      ) : null}
     </div>
   );
 }

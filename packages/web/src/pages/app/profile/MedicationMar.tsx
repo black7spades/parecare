@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, addMonths, addWeeks, eachDayOfInterval, endOfDay, endOfMonth, endOfWeek,
   format, isSameDay, startOfDay, startOfMonth, startOfWeek, subMonths,
@@ -13,6 +13,10 @@ import { MED_STATUSES, medStatusDescription, type MedicationRecord, type Medicat
 import { coverMedDay } from '../../../lib/marCoverage';
 import { C64_PALETTE, contrastText } from '../../../components/ui/Avatar';
 import { AdministerModal } from './medications/AdministerModal';
+import { SortableTh } from '../../../components/data/SortableTh';
+import { RecordPanel } from '../../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 
 const SELECT = 'rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
@@ -70,7 +74,9 @@ function Legend({ withPartial }: { withPartial?: boolean }) {
 }
 
 export function MedicationMar({ profileId, personName, canAdminister }: { profileId: string; personName: string; canAdminister: boolean }) {
-  const [tab, setTab] = useState<'chart' | 'log'>('chart');
+  // A link straight to one dose record opens the full record, where it lives.
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<'chart' | 'log'>(() => (searchParams.get('record') ? 'log' : 'chart'));
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 border-b border-border">
@@ -384,6 +390,24 @@ const statusNeedsNote = (s: string): boolean => !['given', 'self_administered'].
 // How the record can be grouped for collapsing: by day, month or year.
 type GroupBy = 'day' | 'month' | 'year';
 const GROUP_KEY_FMT: Record<GroupBy, string> = { day: 'yyyy-MM-dd', month: 'yyyy-MM', year: 'yyyy' };
+type LogSortKey = 'when' | 'medication' | 'dose' | 'route' | 'by' | 'outcome';
+const byText = (a: string | null | undefined, b: string | null | undefined) => (a ?? '').localeCompare(b ?? '');
+const LOG_SORTS: Record<LogSortKey, (a: MedicationAdministration, b: MedicationAdministration) => number> = {
+  when: (a, b) => new Date(a.administered_at).getTime() - new Date(b.administered_at).getTime(),
+  medication: (a, b) => byText(a.medication_name, b.medication_name),
+  dose: (a, b) => byText(a.dose_given, b.dose_given),
+  route: (a, b) => byText(a.route_given, b.route_given),
+  by: (a, b) => byText(a.administered_by_name, b.administered_by_name),
+  outcome: (a, b) => byText(statusLabel(a.status), statusLabel(b.status)),
+};
+const RIGHTS: { key: 'right_patient' | 'right_medication' | 'right_dose' | 'right_route' | 'right_time' | 'right_documentation'; label: string }[] = [
+  { key: 'right_patient', label: 'right person' },
+  { key: 'right_medication', label: 'right medication' },
+  { key: 'right_dose', label: 'right dose' },
+  { key: 'right_route', label: 'right route' },
+  { key: 'right_time', label: 'right time' },
+  { key: 'right_documentation', label: 'written down' },
+];
 const GROUP_LABEL_FMT: Record<GroupBy, string> = { day: 'EEEE d MMMM yyyy', month: 'MMMM yyyy', year: 'yyyy' };
 
 // A datetime-local string for an instant, in the viewer's own timezone.
@@ -431,8 +455,15 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
   const [pages, setPages] = useState<MedicationAdministration[][]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<MedicationAdministration | null>(null);
-  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [sortKey, setSortKey] = useState<LogSortKey>('when');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const toggleSort = (key: string) => {
+    if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else {
+      setSortKey(key as LogSortKey);
+      setSortDir(key === 'when' ? 'desc' : 'asc');
+    }
+  };
   const [editing, setEditing] = useState<MedicationAdministration | null>(null);
   const [bulkEditing, setBulkEditing] = useState(false);
   const [groupBy, setGroupBy] = useState<GroupBy>('day');
@@ -478,18 +509,28 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
     void queryClient.invalidateQueries({ queryKey: ['calendar-events', profileId] });
   };
 
-  // Deleting a mistaken dose also gives its supply back on the server.
-  const deleteDose = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profileId}/medications/administrations/${id}`),
-    onSuccess: () => { setPendingDelete(null); afterChange(); },
-  });
+  // Deleting a mistaken dose also gives its supply back on the server. It is
+  // held back a few seconds with Undo, never a "sure?" box.
+  const deferDelete = useUndoStore((st) => st.deferDelete);
+  const hidden = useHiddenIds();
+  const deleteDoses = (items: MedicationAdministration[]) => {
+    if (items.length === 0) return;
+    deferDelete({
+      message:
+        items.length === 1
+          ? `Deleted the record of ${items[0].medication_name} on ${format(new Date(items[0].administered_at), 'd MMM yyyy, HH:mm')}.`
+          : `Deleted ${items.length} dose records.`,
+      ids: items.map((a) => a.id),
+      commit: () =>
+        items.length === 1
+          ? api.delete(`/care-profiles/${profileId}/medications/administrations/${items[0].id}`)
+          : api.post(`/care-profiles/${profileId}/medications/administrations/bulk`, { action: 'delete', ids: items.map((a) => a.id) }),
+      onCommitted: afterChange,
+    });
+  };
 
-  const bulkDelete = useMutation({
-    mutationFn: (ids: string[]) => api.post<{ deleted: number }>(`/care-profiles/${profileId}/medications/administrations/bulk`, { action: 'delete', ids }),
-    onSuccess: () => { setConfirmBulkDelete(false); setSelected(new Set()); afterChange(); },
-  });
-
-  const rows = pages.flat();
+  const rows = pages.flat().filter((a) => !hidden.has(a.id));
+  const panel = useRecordPanel(rows, (a) => a.id);
   const isArchived = (a: MedicationAdministration) => (a as { archived?: boolean }).archived === true;
   // Only live (non-archived) records can be selected, edited or removed.
   const selectableIds = rows.filter((a) => !isArchived(a)).map((a) => a.id);
@@ -518,8 +559,16 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
       if (last && last.key === key) last.rows.push(a);
       else out.push({ key, label: format(d, GROUP_LABEL_FMT[groupBy]), rows: [a] });
     }
+    // Sorting by when also turns the groups round; any other column sorts
+    // the records inside each group, keeping the groups in date order.
+    const cmp = LOG_SORTS[sortKey];
+    for (const g of out) {
+      g.rows.sort((a, b) => cmp(a, b) || LOG_SORTS.when(a, b));
+      if (sortDir === 'desc') g.rows.reverse();
+    }
+    if (sortKey === 'when' && sortDir === 'asc') out.reverse();
     return out;
-  }, [rows, groupBy]);
+  }, [rows, groupBy, sortKey, sortDir]);
 
   const toggleCollapsed = (key: string) => setCollapsed((prev) => {
     const n = new Set(prev);
@@ -577,7 +626,7 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
           <Button size="sm" variant="secondary" onClick={() => setBulkEditing(true)}>Edit selected</Button>
           <Button size="sm" variant="secondary" onClick={() => exportAdminsCsv(selectedRows)}>Export to CSV</Button>
           <Button size="xs" variant="ghost" onClick={() => setSelected(new Set())}>Clear selection</Button>
-          <Button size="sm" variant="danger" className="ml-auto" onClick={() => setConfirmBulkDelete(true)}>Remove selected</Button>
+          <Button size="sm" variant="danger" className="ml-auto" onClick={() => { deleteDoses(selectedRows); setSelected(new Set()); }}>Delete selected</Button>
         </div>
       ) : null}
 
@@ -591,12 +640,12 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
                     checked={allSelected} onChange={toggleAll} disabled={selectableIds.length === 0} />
                 </th>
               ) : null}
-              <th className="px-4 py-3 font-medium">When</th>
-              <th className="px-4 py-3 font-medium">Medication</th>
-              <th className="px-4 py-3 font-medium">Dose</th>
-              <th className="px-4 py-3 font-medium">Route</th>
-              <th className="px-4 py-3 font-medium">By</th>
-              <th className="px-4 py-3 font-medium">Outcome</th>
+              <SortableTh label="When" sortKey="when" activeKey={sortKey} dir={sortDir} onToggle={toggleSort} className="px-4 py-3" />
+              <SortableTh label="Medication" sortKey="medication" activeKey={sortKey} dir={sortDir} onToggle={toggleSort} className="px-4 py-3" />
+              <SortableTh label="Dose" sortKey="dose" activeKey={sortKey} dir={sortDir} onToggle={toggleSort} className="px-4 py-3" />
+              <SortableTh label="Route" sortKey="route" activeKey={sortKey} dir={sortDir} onToggle={toggleSort} className="px-4 py-3" />
+              <SortableTh label="By" sortKey="by" activeKey={sortKey} dir={sortDir} onToggle={toggleSort} className="px-4 py-3" />
+              <SortableTh label="Outcome" sortKey="outcome" activeKey={sortKey} dir={sortDir} onToggle={toggleSort} className="px-4 py-3" />
               {canAdminister ? <th className="px-4 py-3 font-medium text-right">Actions</th> : null}
             </tr>
           </thead>
@@ -625,7 +674,7 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
                   {isCollapsed ? null : g.rows.map((a) => {
                     const archived = isArchived(a);
                     return (
-                    <tr key={a.id} className="border-b border-border last:border-0 align-top group">
+                    <tr key={a.id} {...panel.rowProps(a.id)} className={`border-b border-border last:border-0 align-top group ${RECORD_ROW_CLASS}`}>
                       {canAdminister ? (
                         <td className="px-4 py-3">
                           {archived ? null : (
@@ -654,7 +703,7 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
                           ) : (
                             <span className="inline-flex gap-3">
                               <Button size="xs" variant="ghost" aria-label={`Edit ${a.medication_name} record`} title="Edit" onClick={() => setEditing(a)}><PencilIcon /></Button>
-                              <Button size="xs" variant="ghost-danger" aria-label={`Remove ${a.medication_name} record`} title="Remove" onClick={() => setPendingDelete(a)}><CrossIcon /></Button>
+                              <Button size="xs" variant="ghost-danger" aria-label={`Delete ${a.medication_name} record`} title="Delete" onClick={() => deleteDoses([a])}><CrossIcon /></Button>
                             </span>
                           )}
                         </td>
@@ -677,33 +726,50 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
           onClose={() => setBulkEditing(false)} onSaved={() => { setBulkEditing(false); setSelected(new Set()); afterChange(); }} />
       ) : null}
 
-      <Modal open={pendingDelete !== null} onClose={() => setPendingDelete(null)} title="Remove this dose record">
-        <p className="text-sm text-muted mb-4">
-          Remove the record of{' '}
-          <span className="font-medium text-ink">{pendingDelete?.medication_name}</span>
-          {pendingDelete ? ` on ${format(new Date(pendingDelete.administered_at), 'd MMM yyyy, HH:mm')}` : ''}? If it was a
-          given dose, its supply is added back. This is for fixing a mistake, like logging the same dose twice.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setPendingDelete(null)}>Cancel</Button>
-          <Button variant="danger" loading={deleteDose.isPending} onClick={() => pendingDelete && deleteDose.mutate(pendingDelete.id)}>
-            Remove record
-          </Button>
-        </div>
-      </Modal>
-
-      <Modal open={confirmBulkDelete} onClose={() => setConfirmBulkDelete(false)} title="Remove selected records">
-        <p className="text-sm text-muted mb-4">
-          Remove <span className="font-medium text-ink">{selectedRows.length}</span> selected
-          record{selectedRows.length === 1 ? '' : 's'}? Any that were given have their supply added back. This cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmBulkDelete(false)}>Cancel</Button>
-          <Button variant="danger" loading={bulkDelete.isPending} onClick={() => bulkDelete.mutate(selectedRows.map((a) => a.id))}>
-            Remove {selectedRows.length}
-          </Button>
-        </div>
-      </Modal>
+      {panel.current ? (() => {
+        const a = panel.current;
+        const archived = isArchived(a);
+        const checks = RIGHTS.filter((r) => a[r.key]).map((r) => r.label);
+        return (
+          <RecordPanel
+            key={a.id}
+            kindLabel="Dose record"
+            title={a.medication_name}
+            subtitle={format(new Date(a.administered_at), 'EEEE d MMMM yyyy, HH:mm')}
+            recordId={a.id}
+            profileId={profileId}
+            canEdit={canAdminister && !archived}
+            fields={[
+              { label: 'When', value: format(new Date(a.administered_at), 'd MMM yyyy, HH:mm') },
+              { label: 'Was due', value: a.scheduled_for ? format(new Date(a.scheduled_for), 'd MMM yyyy, HH:mm') : null },
+              { label: 'Dose given', value: a.dose_given },
+              { label: 'Usual dose', value: a.medication_dose },
+              { label: 'Route given', value: a.route_given },
+              { label: 'Usual route', value: a.medication_route },
+              { label: 'Given by', value: a.administered_by_name },
+              {
+                label: 'Outcome',
+                value: (
+                  <>
+                    {statusLabel(a.status)}
+                    {medStatusDescription(a.status) ? <span className="block text-xs text-muted">{medStatusDescription(a.status)}</span> : null}
+                  </>
+                ),
+              },
+              { label: 'Checks done', value: checks.length > 0 ? checks.join(', ') : null },
+              { label: 'Notes', value: a.notes },
+              { label: 'Archived', value: archived ? 'Yes, kept as a permanent history and no longer changed' : null },
+            ]}
+            links={[{ label: 'Medication', value: a.medication_name, to: `/app/${profileId}/medications?record=${a.medication_id}` }]}
+            onEdit={() => setEditing(a)}
+            onDelete={() => {
+              deleteDoses([a]);
+              panel.close();
+            }}
+            onClose={panel.close}
+          />
+        );
+      })() : null}
 
       {!done && rows.length > 0 ? (
         <div className="text-center">

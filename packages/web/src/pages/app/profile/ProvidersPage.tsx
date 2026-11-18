@@ -25,9 +25,13 @@ import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { PoaBadge } from '../../../components/PoaBadge';
 import { PagePurpose } from '../../../components/PagePurpose';
+import { RecordPanel } from '../../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import {
   KIND_WORDS,
   POA_TYPES,
+  poaLabel,
   providerTypeFilterOptions,
   providerTypeLabel,
   type Provider,
@@ -57,7 +61,6 @@ export function ProvidersPage() {
   const queryClient = useQueryClient();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<Provider | null>(null);
-  const [removing, setRemoving] = useState<Provider | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [bulkEditQueue, setBulkEditQueue] = useState<Provider[]>([]);
 
@@ -65,8 +68,18 @@ export function ProvidersPage() {
     queryKey: ['providers', profile.id],
     queryFn: () => api.get<{ providers: Provider[] }>(`/care-profiles/${profile.id}/providers`),
   });
-  const everything = data?.providers ?? [];
+  // Removing is held back a few seconds with Undo, never a "sure?" box.
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const hidden = useHiddenIds();
+  const everything = (data?.providers ?? []).filter((p) => !hidden.has(p.id));
   const providers = everything.filter((p) => kindOf(p) === kind);
+  // Opens by the provider's own id, from either tab, so links from an
+  // appointment land on the right record.
+  const panel = useRecordPanel(everything, (p) => p.id);
+  const openKind = panel.current ? kindOf(panel.current) : null;
+  useEffect(() => {
+    if (openKind && openKind !== kind) setKind(openKind);
+  }, [openKind, kind]);
   const counts = {
     person: everything.filter((p) => kindOf(p) === 'person').length,
     organisation: everything.filter((p) => kindOf(p) === 'organisation').length,
@@ -91,23 +104,20 @@ export function ProvidersPage() {
     filters,
   });
 
-  const removeMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/providers/${id}`),
-    onSuccess: () => {
-      setRemoving(null);
-      invalidate();
-    },
-  });
-
-  const bulkDeleteMutation = useMutation({
-    mutationFn: async (ids: string[]) => {
-      for (const id of ids) await api.delete(`/care-profiles/${profile.id}/providers/${id}`);
-    },
-    onSuccess: () => {
-      dv.clearSelection();
-      invalidate();
-    },
-  });
+  // Takes them off this person only; they stay in the directory for others.
+  const removeProviders = (items: Provider[]) => {
+    if (items.length === 0) return;
+    deferDelete({
+      message: items.length === 1 ? `Removed ${items[0].name} from ${careName}.` : `Removed ${items.length} ${KIND_WORDS[kind].many.toLowerCase()} from ${careName}.`,
+      ids: items.map((p) => p.id),
+      commit: async () => {
+        for (const p of items) await api.delete(`/care-profiles/${profile.id}/providers/${p.id}`);
+      },
+      onCommitted: invalidate,
+    });
+  };
+  const practiceName = (id: string | null | undefined) =>
+    id ? (data?.providers ?? []).find((p) => p.id === id)?.name ?? null : null;
 
   return (
     <div>
@@ -171,7 +181,7 @@ export function ProvidersPage() {
               canEdit
                 ? [
                     { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setBulkEditQueue(q); setEditing(q[0] ?? null); setEditorOpen(true); } },
-                    { key: 'delete', label: 'Remove selected', destructive: true, onRun: () => bulkDeleteMutation.mutate(dv.selectedRows.map((p) => p.id)) },
+                    { key: 'delete', label: 'Remove selected', destructive: true, onRun: () => { removeProviders([...dv.selectedRows]); dv.clearSelection(); } },
                   ]
                 : []
             }
@@ -208,7 +218,7 @@ export function ProvidersPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {dv.view.map((p) => (
-            <div key={p.id} className="card">
+            <div key={p.id} {...panel.rowProps(p.id)} className={`card ${RECORD_ROW_CLASS}`}>
               <div className="flex items-start gap-2">
                 {canEdit ? (
                   <input
@@ -280,7 +290,7 @@ export function ProvidersPage() {
                       >
                         <PencilIcon />
                       </Button>
-                      <Button size="xs" variant="ghost-danger" aria-label={`Remove ${p.name}`} title="Remove" onClick={() => setRemoving(p)}>
+                      <Button size="xs" variant="ghost-danger" aria-label={`Remove ${p.name}`} title="Remove" onClick={() => removeProviders([p])}>
                         <CrossIcon />
                       </Button>
                     </div>
@@ -324,19 +334,66 @@ export function ProvidersPage() {
         }}
       />
 
-      <Modal open={removing !== null} onClose={() => setRemoving(null)} title={`Remove ${words.one}`}>
-        <p className="text-sm text-muted mb-4">
-          Remove <span className="font-medium text-ink">{removing?.name}</span> from this profile? It stays in your directory for other profiles.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setRemoving(null)}>
-            Cancel
-          </Button>
-          <Button variant="danger" loading={removeMutation.isPending} onClick={() => removing && removeMutation.mutate(removing.id)}>
-            Remove
-          </Button>
-        </div>
-      </Modal>
+      {panel.current ? (() => {
+        const p = panel.current;
+        const pKind = kindOf(p);
+        const practice = practiceName(p.practice_id);
+        const segmented = !!(p.address_line1 || p.address_suburb || p.address_state || p.address_postcode);
+        return (
+          <RecordPanel
+            key={p.id}
+            kindLabel={pKind === 'organisation' ? 'Organisation' : 'Professional'}
+            title={p.name}
+            subtitle={providerTypeLabel(p.provider_type)}
+            kind="providers"
+            recordId={p.id}
+            profileId={profile.id}
+            canEdit={canEdit}
+            fields={[
+              { label: 'Type', value: providerTypeLabel(p.provider_type) },
+              { label: 'Also known as', value: (p.also_known_as ?? []).join(', ') },
+              { label: basedAtLabel(pKind), value: p.organisation },
+              { label: 'Phone', value: p.phone ? <a href={`tel:${p.phone}`} className="text-primary hover:underline">{p.phone}</a> : null },
+              { label: 'Email', value: p.email ? <a href={`mailto:${p.email}`} className="text-primary hover:underline">{p.email}</a> : null },
+              ...(segmented
+                ? [
+                    { label: 'Street', value: p.address_line1 },
+                    { label: 'Street line 2', value: p.address_line2 },
+                    { label: 'Suburb', value: p.address_suburb },
+                    { label: 'State', value: p.address_state },
+                    { label: 'Postcode', value: p.address_postcode },
+                    { label: 'Country', value: p.address_country },
+                  ]
+                : [{ label: 'Address', value: p.address }]),
+              { label: 'People based here', value: p.member_count ? String(p.member_count) : null },
+              { label: 'Power of attorney', value: p.poa_type ? poaLabel(p.poa_type) : null },
+              { label: 'In effect now', value: p.poa_type ? (p.poa_activated ? 'Yes' : 'No') : null },
+            ]}
+            links={[
+              ...(p.practice_id && practice
+                ? [{ label: basedAtLabel(pKind), value: practice, to: `/app/${profile.id}/providers?record=${p.practice_id}` }]
+                : []),
+              ...(p.booking_link ? [{ label: 'Booking', value: 'Book appointment', href: p.booking_link }] : []),
+              ...(p.directions_link ? [{ label: 'Directions', value: 'Get directions', href: p.directions_link }] : []),
+            ]}
+            onEdit={() => {
+              setEditing(p);
+              setEditorOpen(true);
+            }}
+            extra={[
+              ...(p.phone ? [{ label: 'Call', onRun: () => { window.location.href = `tel:${p.phone}`; } }] : []),
+              ...(p.email ? [{ label: 'Email', onRun: () => { window.location.href = `mailto:${p.email}`; } }] : []),
+              ...(p.booking_link ? [{ label: 'Book', onRun: () => { window.open(p.booking_link!, '_blank', 'noopener,noreferrer'); } }] : []),
+            ]}
+            deleteLabel="Remove"
+            onDelete={() => {
+              removeProviders([p]);
+              panel.close();
+            }}
+            onClose={panel.close}
+          />
+        );
+      })() : null}
     </div>
   );
 }

@@ -9,6 +9,10 @@ import { Input, Textarea } from '../../../components/ui/Input';
 import { PagePurpose } from '../../../components/PagePurpose';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar } from '../../../components/data/DataToolbar';
+import { SortableTh } from '../../../components/data/SortableTh';
+import { RecordPanel } from '../../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import {
   SUBSTANCE_CLASSES,
   SUBSTANCE_STATUSES,
@@ -21,10 +25,16 @@ import {
 import { useProfile } from './ProfileLayout';
 import { format } from 'date-fns';
 
+const byText = (a: string | null | undefined, b: string | null | undefined) => (a ?? '').localeCompare(b ?? '', undefined, { numeric: true });
+
 const SORTS: DataSort<SubstanceUse>[] = [
   { key: 'substance', label: 'Substance', compare: (a, b) => a.substance.localeCompare(b.substance) },
   { key: 'class', label: 'Class', compare: (a, b) => substanceClassLabel(a.substance_class).localeCompare(substanceClassLabel(b.substance_class)) },
   { key: 'status', label: 'Status', compare: (a, b) => substanceStatusLabel(a.status).localeCompare(substanceStatusLabel(b.status)) },
+  { key: 'route', label: 'How', compare: (a, b) => byText(substanceRouteLabel(a.route), substanceRouteLabel(b.route)) },
+  { key: 'amount', label: 'Amount', compare: (a, b) => byText(a.quantity, b.quantity) },
+  { key: 'unit', label: 'Unit', compare: (a, b) => byText(a.quantity_unit, b.quantity_unit) },
+  { key: 'frequency', label: 'How often', compare: (a, b) => byText(a.frequency, b.frequency) },
   { key: 'started', label: 'Started', compare: (a, b) => (a.started_on ?? '').localeCompare(b.started_on ?? '') },
 ];
 
@@ -53,7 +63,6 @@ export function SubstanceUsePage() {
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<SubstanceUse | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<SubstanceUse | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['substance-use', profile.id],
@@ -61,16 +70,21 @@ export function SubstanceUsePage() {
   });
   const records = data?.substance_use ?? [];
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/substance-use/${id}`),
-    onSuccess: () => {
-      setConfirmDelete(null);
-      void queryClient.invalidateQueries({ queryKey: ['substance-use', profile.id] });
-    },
-  });
+  // Deleting is held back a few seconds with Undo, never a "sure?" box.
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const hidden = useHiddenIds();
+  const deleteRecord = (r: SubstanceUse) =>
+    deferDelete({
+      message: `Deleted the record for ${r.substance}.`,
+      ids: [r.id],
+      commit: () => api.delete(`/care-profiles/${profile.id}/substance-use/${r.id}`),
+      onCommitted: () => void queryClient.invalidateQueries({ queryKey: ['substance-use', profile.id] }),
+    });
 
+  const visible = records.filter((r) => !hidden.has(r.id));
+  const panel = useRecordPanel(visible, (r) => r.id);
   const dv = useDataView<SubstanceUse>({
-    rows: records,
+    rows: visible,
     getId: (r) => r.id,
     searchText: (r) =>
       [r.substance, substanceClassLabel(r.substance_class), substanceStatusLabel(r.status), r.frequency, r.notes].filter(Boolean).join(' '),
@@ -78,8 +92,6 @@ export function SubstanceUsePage() {
     filters: FILTERS,
     defaultPageSize: 25,
   });
-
-  const quantityText = (r: SubstanceUse) => [r.quantity, r.quantity_unit].filter(Boolean).join(' ');
 
   return (
     <div className="space-y-4 max-w-5xl">
@@ -134,26 +146,28 @@ export function SubstanceUsePage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-muted border-b border-border">
-                <th className="px-3 py-2">Substance</th>
-                <th className="px-3 py-2">Class</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">How</th>
-                <th className="px-3 py-2">Amount</th>
-                <th className="px-3 py-2">How often</th>
-                <th className="px-3 py-2">Started</th>
+                <SortableTh label="Substance" sortKey="substance" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Class" sortKey="class" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Status" sortKey="status" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="How" sortKey="route" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Amount" sortKey="amount" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Unit" sortKey="unit" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="How often" sortKey="frequency" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="Started" sortKey="started" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 {canEdit ? <th className="px-3 py-2 text-right">Actions</th> : null}
               </tr>
             </thead>
             <tbody>
               {dv.view.map((r) => (
-                <tr key={r.id} className="border-b border-border last:border-0 align-top">
+                <tr key={r.id} {...panel.rowProps(r.id)} className={`border-b border-border last:border-0 align-top ${RECORD_ROW_CLASS}`}>
                   <td className="px-3 py-2 font-medium text-ink">{r.substance}</td>
                   <td className="px-3 py-2 text-muted">{substanceClassLabel(r.substance_class)}</td>
                   <td className="px-3 py-2">
                     <span className="badge bg-surface-2 text-muted text-xs">{substanceStatusLabel(r.status)}</span>
                   </td>
                   <td className="px-3 py-2 text-muted">{substanceRouteLabel(r.route) || '-'}</td>
-                  <td className="px-3 py-2 text-muted">{quantityText(r) || '-'}</td>
+                  <td className="px-3 py-2 text-muted">{r.quantity || '-'}</td>
+                  <td className="px-3 py-2 text-muted">{r.quantity_unit || '-'}</td>
                   <td className="px-3 py-2 text-muted">{r.frequency || '-'}</td>
                   <td className="px-3 py-2 text-muted">
                     {r.started_on ? format(new Date(r.started_on), 'MMM yyyy') : '-'}
@@ -163,7 +177,7 @@ export function SubstanceUsePage() {
                       <Button size="xs" variant="ghost" className="mr-1" aria-label={`Edit ${r.substance}`} title="Edit" onClick={() => setEditing(r)}>
                         <PencilIcon />
                       </Button>
-                      <Button size="xs" variant="ghost-danger" aria-label={`Delete ${r.substance}`} title="Delete" onClick={() => setConfirmDelete(r)}>
+                      <Button size="xs" variant="ghost-danger" aria-label={`Delete ${r.substance}`} title="Delete" onClick={() => deleteRecord(r)}>
                         <TrashIcon />
                       </Button>
                     </td>
@@ -178,19 +192,39 @@ export function SubstanceUsePage() {
       {adding ? <SubstanceEditor profileId={profile.id} onClose={() => setAdding(false)} /> : null}
       {editing ? <SubstanceEditor profileId={profile.id} record={editing} onClose={() => setEditing(null)} /> : null}
 
-      <Modal open={confirmDelete !== null} onClose={() => setConfirmDelete(null)} title="Delete substance record">
-        <p className="text-sm text-muted mb-4">
-          Delete the record for <span className="font-medium text-ink">{confirmDelete?.substance}</span>? This cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmDelete(null)}>
-            Cancel
-          </Button>
-          <Button variant="danger" loading={deleteMutation.isPending} onClick={() => confirmDelete && deleteMutation.mutate(confirmDelete.id)}>
-            Delete
-          </Button>
-        </div>
-      </Modal>
+      {panel.current ? (() => {
+        const r = panel.current;
+        return (
+          <RecordPanel
+            key={r.id}
+            kindLabel="Substance use"
+            title={r.substance}
+            subtitle={substanceStatusLabel(r.status)}
+            kind="substance-use"
+            recordId={r.id}
+            profileId={profile.id}
+            canEdit={canEdit}
+            fields={[
+              { label: 'Substance', value: r.substance },
+              { label: 'Class', value: substanceClassLabel(r.substance_class) },
+              { label: 'Status', value: substanceStatusLabel(r.status) },
+              { label: 'How it is taken', value: substanceRouteLabel(r.route) },
+              { label: 'Amount', value: r.quantity },
+              { label: 'Unit', value: r.quantity_unit },
+              { label: 'How often', value: r.frequency },
+              { label: 'Started', value: r.started_on ? format(new Date(r.started_on), 'd MMM yyyy') : null },
+              { label: 'Stopped', value: r.quit_on ? format(new Date(r.quit_on), 'd MMM yyyy') : null },
+              { label: 'Notes', value: r.notes },
+            ]}
+            onEdit={() => setEditing(r)}
+            onDelete={() => {
+              deleteRecord(r);
+              panel.close();
+            }}
+            onClose={panel.close}
+          />
+        );
+      })() : null}
     </div>
   );
 }

@@ -386,6 +386,7 @@ const ENTITY_NOUNS: Record<string, string> = {
   messages: 'a message',
   'memory-book': 'a memory',
   calendar: 'a calendar event',
+  records: 'a note',
 };
 
 /** One plain sentence per notification, shared by every outbound channel. */

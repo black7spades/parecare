@@ -20,6 +20,25 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.40.0',
+    date: '2026-11-18',
+    summary: 'Click any line in any list to open it, with the same buttons on every record, and delete with Undo.',
+    groups: [
+      { heading: 'Added', items: [
+        'Open any record. Click any line in any list, from appointments, tasks and medications to documents, contacts, the care log and every directory list, and it opens on its own with every detail and what it is linked to. On a laptop it slides in beside the list; on a phone it fills the screen.',
+        'The same buttons on every record. Edit, Done where it applies, Add a note, Attach a document, Ask Pare about this, Print, Copy link and Delete, plus the buttons that belong to that kind of record, such as Record a dose or How did it go.',
+        'Notes and documents on any record. Add notes to anything, and attach a new or existing document to it. Each record also shows who changed it and when.',
+        'A link to every record. Copy link gives an address that opens straight to that record, and Back closes it.',
+      ] },
+      { heading: 'Changed', items: [
+        'Delete with Undo. Deleting no longer asks “are you sure”. The record goes at once and Undo brings it back for a few seconds. Removing someone from the care circle still asks first, because it ends their access.',
+        'More lists sort by any column, including tasks, allergies, substance use, the dose record and achievements.',
+        'Substance use shows the amount and the unit as separate columns.',
+        'Recent activity on the overview opens the exact record each line is about.',
+      ] },
+    ],
+  },
+  {
     version: '0.39.0',
     date: '2026-11-18',
     summary: 'Add a prescription or upload a document straight from an appointment, and letters fill in the outcome.',

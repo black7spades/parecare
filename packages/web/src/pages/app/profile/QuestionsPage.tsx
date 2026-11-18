@@ -12,6 +12,15 @@ import { useDataView, type DataSort, type DataFilter } from '../../../components
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
 import { ToneBlockNotice, extractToneBlock, type ToneBlock } from '../../../components/ToneBlockNotice';
 import type { OpenQuestion, QuestionResponse } from '../../../lib/care';
+import { RecordPanel } from '../../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../../stores/undo';
+
+const STATUS_LABELS: Record<OpenQuestion['status'], string> = {
+  open: 'Open',
+  resolved: 'Resolved',
+  deferred: 'Deferred',
+};
 
 const STATUS_STYLES: Record<OpenQuestion['status'], string> = {
   open: 'bg-amber-50 text-amber-700',
@@ -48,7 +57,6 @@ export function QuestionsPage() {
   const [toneBlock, setToneBlock] = useState<ToneBlock | null>(null);
   const [resolving, setResolving] = useState<OpenQuestion | null>(null);
   const [editing, setEditing] = useState<OpenQuestion | null>(null);
-  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
   const canManage = access === 'owner' || access === 'admin';
 
@@ -59,8 +67,26 @@ export function QuestionsPage() {
   const questions = data?.questions ?? [];
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['questions', profile.id] });
 
+  // Deleting is held back a few seconds with Undo, never a "sure?" box.
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const hidden = useHiddenIds();
+  const deleteQuestions = (items: OpenQuestion[]) => {
+    if (items.length === 0) return;
+    deferDelete({
+      message: items.length === 1 ? `Deleted ${items[0].title}.` : `Deleted ${items.length} questions.`,
+      ids: items.map((q) => q.id),
+      commit: () =>
+        items.length === 1
+          ? api.delete(`/care-profiles/${profile.id}/questions/${items[0].id}`)
+          : api.post(`/care-profiles/${profile.id}/questions/bulk`, { action: 'delete', ids: items.map((q) => q.id) }),
+      onCommitted: invalidate,
+    });
+  };
+
+  const visible = questions.filter((q) => !hidden.has(q.id));
+  const panel = useRecordPanel(visible, (q) => q.id);
   const dv = useDataView<OpenQuestion>({
-    rows: questions,
+    rows: visible,
     getId: (q) => q.id,
     searchText: (q) => [q.title, q.body, q.status, q.resolution].filter(Boolean).join(' '),
     sorts: QUESTION_SORTS,
@@ -87,11 +113,6 @@ export function QuestionsPage() {
     onSuccess: invalidate,
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/questions/${id}`),
-    onSuccess: invalidate,
-  });
-
   const bulkResolveMutation = useMutation({
     mutationFn: () => api.post(`/care-profiles/${profile.id}/questions/bulk`, {
       action: 'resolve',
@@ -100,17 +121,9 @@ export function QuestionsPage() {
     onSuccess: () => { dv.clearSelection(); invalidate(); },
   });
 
-  const bulkDeleteMutation = useMutation({
-    mutationFn: () => api.post(`/care-profiles/${profile.id}/questions/bulk`, {
-      action: 'delete',
-      ids: dv.selectedRows.map((q) => q.id),
-    }),
-    onSuccess: () => { setConfirmBulkDelete(false); dv.clearSelection(); invalidate(); },
-  });
-
   const bulkActions: ToolbarBulkAction[] = [
     ...(canEdit ? [{ key: 'resolve', label: 'Mark resolved', onRun: () => bulkResolveMutation.mutate() }] : []),
-    ...(canManage ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => setConfirmBulkDelete(true) }] : []),
+    ...(canManage ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => { deleteQuestions([...dv.selectedRows]); dv.clearSelection(); } }] : []),
   ];
 
   return (
@@ -166,7 +179,7 @@ export function QuestionsPage() {
       ) : (
         <div className="space-y-4">
           {dv.view.map((q) => (
-            <div key={q.id} className="flex items-start gap-3">
+            <div key={q.id} {...panel.rowProps(q.id)} className={`flex items-start gap-3 rounded-lg ${RECORD_ROW_CLASS}`}>
               {(canEdit || canManage) ? (
                 <div className="pt-4 shrink-0">
                   <input
@@ -188,7 +201,7 @@ export function QuestionsPage() {
                   onReopen={() => statusMutation.mutate({ id: q.id, status: 'open' })}
                   onDefer={() => statusMutation.mutate({ id: q.id, status: 'deferred' })}
                   onEdit={() => setEditing(q)}
-                  onDelete={() => deleteMutation.mutate(q.id)}
+                  onDelete={() => deleteQuestions([q])}
                 />
               </div>
             </div>
@@ -218,18 +231,42 @@ export function QuestionsPage() {
         />
       ) : null}
 
-      <Modal open={confirmBulkDelete} onClose={() => setConfirmBulkDelete(false)} title="Delete questions">
-        <p className="text-sm text-muted mb-4">
-          Permanently delete <span className="font-medium text-ink">{dv.selectedRows.length}</span> selected
-          question{dv.selectedRows.length === 1 ? '' : 's'}? Their responses will be removed too. This cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmBulkDelete(false)}>Cancel</Button>
-          <Button variant="danger" loading={bulkDeleteMutation.isPending} onClick={() => bulkDeleteMutation.mutate()}>
-            Delete {dv.selectedRows.length}
-          </Button>
-        </div>
-      </Modal>
+      {panel.current ? (() => {
+        const q = panel.current;
+        return (
+          <RecordPanel
+            key={q.id}
+            kindLabel="Question"
+            title={q.title}
+            subtitle={`Raised ${format(new Date(q.created_at), 'd MMM yyyy')}`}
+            kind="questions"
+            recordId={q.id}
+            profileId={profile.id}
+            canEdit={canEdit}
+            fields={[
+              { label: 'Question', value: q.title },
+              { label: 'Context', value: q.body },
+              { label: 'Status', value: STATUS_LABELS[q.status] },
+              { label: 'Raised', value: format(new Date(q.created_at), 'd MMM yyyy') },
+              { label: 'What was decided', value: q.resolution },
+            ]}
+            onEdit={() => setEditing(q)}
+            done={q.status === 'open' ? { label: 'Resolve', onRun: () => setResolving(q) } : null}
+            extra={
+              q.status === 'open'
+                ? [{ label: 'Defer', onRun: () => statusMutation.mutate({ id: q.id, status: 'deferred' }), pending: statusMutation.isPending }]
+                : [{ label: 'Reopen', onRun: () => statusMutation.mutate({ id: q.id, status: 'open' }), pending: statusMutation.isPending }]
+            }
+            onDelete={canManage ? () => {
+              deleteQuestions([q]);
+              panel.close();
+            } : undefined}
+            onClose={panel.close}
+          >
+            <QuestionDiscussion profileId={profile.id} questionId={q.id} />
+          </RecordPanel>
+        );
+      })() : null}
     </div>
   );
 }
@@ -341,7 +378,7 @@ function QuestionCard({
       </Button>
 
       {expanded ? (
-        <div className="mt-3 space-y-3 border-t border-border pt-3">
+        <div className="mt-3 space-y-3 border-t border-border pt-3" data-no-open>
           {responses.length === 0 ? (
             <p className="text-xs text-muted">No responses yet.</p>
           ) : (
@@ -398,6 +435,34 @@ function QuestionCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** The discussion so far, read-only, for the question's own view. */
+function QuestionDiscussion({ profileId, questionId }: { profileId: string; questionId: string }) {
+  const { data } = useQuery({
+    queryKey: ['question-responses', questionId],
+    queryFn: () => api.get<{ responses: QuestionResponse[] }>(`/care-profiles/${profileId}/questions/${questionId}/responses`),
+  });
+  const responses = data?.responses ?? [];
+  return (
+    <section>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Discussion</h3>
+      {responses.length === 0 ? (
+        <p className="text-sm text-muted">No responses yet. Reply from the question in the list.</p>
+      ) : (
+        <ul className="space-y-2">
+          {responses.map((r) => (
+            <li key={r.id} className="rounded-md border border-border px-3 py-2">
+              <p className="text-xs text-muted">
+                {r.is_ai ? 'PareCare mediator' : r.author_name ?? 'Someone'}, {format(new Date(r.created_at), 'd MMM, HH:mm')}
+              </p>
+              <p className="text-sm text-ink whitespace-pre-wrap">{r.body}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

@@ -10,6 +10,9 @@ import { Button } from '../../components/ui/Button';
 import { LinkIcon, PencilIcon, TrashIcon } from '../../components/ui/icons';
 import { Input, Textarea } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
+import { RecordPanel } from '../../components/record/RecordPanel';
+import { RECORD_ROW_CLASS, useRecordPanel } from '../../components/record/useRecordPanel';
+import { useHiddenIds, useUndoStore } from '../../stores/undo';
 import { useHealthConfig } from '../../lib/appConfig';
 import type { Asset } from '../../lib/care';
 
@@ -46,7 +49,6 @@ export function DirectoryAssetsPage() {
   const health = useHealthConfig();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<DirectoryAsset | null>(null);
-  const [deleting, setDeleting] = useState<DirectoryAsset | null>(null);
   const [bulkLinking, setBulkLinking] = useState<DirectoryAsset | null>(null);
   const [bulkLinkingIds, setBulkLinkingIds] = useState<DirectoryAsset[]>([]);
   const [bulkEditQueue, setBulkEditQueue] = useState<DirectoryAsset[]>([]);
@@ -55,7 +57,9 @@ export function DirectoryAssetsPage() {
     queryKey: ['directory-assets'],
     queryFn: () => api.get<{ assets: DirectoryAsset[]; can_edit: boolean }>('/directory/assets'),
   });
-  const assets = data?.assets ?? [];
+  // Deleting is held back a few seconds with Undo, never a "sure?" box.
+  const hidden = useHiddenIds();
+  const assets = (data?.assets ?? []).filter((a) => !hidden.has(a.id));
   const canEdit = data?.can_edit ?? false;
   const invalidate = () => { void queryClient.invalidateQueries({ queryKey: ['directory-assets'] }); };
 
@@ -70,15 +74,20 @@ export function DirectoryAssetsPage() {
     filters: [],
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/directory/assets/${id}`),
-    onSuccess: () => { setDeleting(null); invalidate(); },
-  });
-
-  const bulkDeleteMutation = useMutation({
-    mutationFn: async (ids: string[]) => { for (const id of ids) await api.delete(`/directory/assets/${id}`); },
-    onSuccess: () => { dv.clearSelection(); invalidate(); },
-  });
+  const panel = useRecordPanel(assets, (a) => a.id);
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const deleteAssets = (items: DirectoryAsset[]) => {
+    if (items.length === 0) return;
+    deferDelete({
+      message: items.length === 1 ? `Deleted ${items[0].name}.` : `Deleted ${items.length} assets.`,
+      ids: items.map((a) => a.id),
+      commit: async () => {
+        for (const a of items) await api.delete(`/directory/assets/${a.id}`);
+      },
+      onCommitted: invalidate,
+    });
+  };
+  const current = panel.current;
 
   return (
     <div>
@@ -122,7 +131,7 @@ export function DirectoryAssetsPage() {
                 ? [
                     { key: 'link', label: 'Link selected', onRun: () => setBulkLinkingIds(dv.selectedRows) },
                     { key: 'edit', label: 'Edit selected', onRun: () => { const q = [...dv.selectedRows]; setBulkEditQueue(q); setEditing(q[0] ?? null); setEditorOpen(true); } },
-                    { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => bulkDeleteMutation.mutate(dv.selectedRows.map((a) => a.id)) },
+                    { key: 'delete', label: 'Delete selected', destructive: true, onRun: () => { deleteAssets(dv.selectedRows); dv.clearSelection(); } },
                   ]
                 : []
             }
@@ -171,7 +180,7 @@ export function DirectoryAssetsPage() {
             </thead>
             <tbody>
               {dv.view.map((a) => (
-                <tr key={a.id} className="border-b border-border last:border-0 align-top hover:bg-surface-2/50">
+                <tr key={a.id} {...panel.rowProps(a.id)} className={`border-b border-border last:border-0 align-top ${RECORD_ROW_CLASS}`}>
                   {canEdit ? (
                     <td className="px-3 py-2">
                       <input
@@ -209,7 +218,7 @@ export function DirectoryAssetsPage() {
                       <div className="flex gap-1">
                         <Button size="xs" variant="ghost" aria-label={`Link ${a.name} to profiles`} title="Link to profiles" onClick={() => setBulkLinking(a)}><LinkIcon /></Button>
                         <Button size="xs" variant="ghost" aria-label={`Edit ${a.name}`} title="Edit" onClick={() => { setEditing(a); setEditorOpen(true); }}><PencilIcon /></Button>
-                        <Button size="xs" variant="ghost-danger" aria-label={`Delete ${a.name}`} title="Delete" onClick={() => setDeleting(a)}><TrashIcon /></Button>
+                        <Button size="xs" variant="ghost-danger" aria-label={`Delete ${a.name}`} title="Delete" onClick={() => deleteAssets([a])}><TrashIcon /></Button>
                       </div>
                     </td>
                   ) : null}
@@ -251,17 +260,40 @@ export function DirectoryAssetsPage() {
         onLinked={() => { setBulkLinkingIds([]); dv.clearSelection(); invalidate(); }}
       />
 
-      <Modal open={deleting !== null} onClose={() => setDeleting(null)} title="Delete asset">
-        <p className="text-sm text-muted mb-4">
-          Permanently delete <span className="font-medium text-ink">{deleting?.name}</span>? This also removes it from anyone it is linked to.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setDeleting(null)}>Cancel</Button>
-          <Button variant="danger" loading={deleteMutation.isPending} onClick={() => deleting && deleteMutation.mutate(deleting.id)}>
-            Delete
-          </Button>
-        </div>
-      </Modal>
+      {current ? (
+        <RecordPanel
+          key={current.id}
+          kindLabel="Asset"
+          title={current.name}
+          subtitle={current.category ?? undefined}
+          recordId={current.id}
+          canEdit={canEdit}
+          fields={[
+            { label: 'Category', value: current.category },
+            { label: 'Serial or unit number', value: current.serial_number },
+            { label: 'Make or model', value: current.make_model },
+            { label: 'Price', value: current.price != null ? money(current.price) : null },
+            { label: 'Purchase date', value: current.purchase_date },
+            { label: 'Bought from', value: current.supplier },
+            { label: 'Warranty expiry', value: current.warranty_expiry },
+            { label: 'Condition', value: current.condition ? (CONDITION_LABEL[current.condition] ?? current.condition) : null },
+            { label: 'Location', value: current.location },
+            { label: 'Useful life', value: current.useful_life_years != null ? `${current.useful_life_years} years` : null },
+            { label: 'Written down each year', value: current.annual_depreciation != null ? money(current.annual_depreciation) : null },
+            { label: 'Written down so far', value: current.depreciated_amount != null ? money(current.depreciated_amount) : null },
+            { label: 'Book value', value: current.book_value != null ? money(current.book_value) : null },
+            { label: 'Notes', value: current.notes },
+          ]}
+          links={(current.linked_profiles ?? []).map((lp) => ({ label: 'Used by', value: lp.profile_name, to: `/app/${lp.profile_id}` }))}
+          onEdit={() => { setEditing(current); setEditorOpen(true); }}
+          extra={[{ label: 'Link to profiles', onRun: () => setBulkLinking(current) }]}
+          onDelete={() => {
+            deleteAssets([current]);
+            panel.close();
+          }}
+          onClose={panel.close}
+        />
+      ) : null}
     </div>
   );
 }
