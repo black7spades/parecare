@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { browserTimeZone } from '../../../lib/datetime';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { CardShell } from '../CardShell';
@@ -30,7 +31,7 @@ function UpcomingEvents({ profileId }: { profileId: string }) {
           directions_link?: string | null;
           all_day?: boolean;
         }>;
-      }>(`/care-profiles/${profileId}/calendar?from=${from.toISOString()}&to=${to.toISOString()}`),
+      }>(`/care-profiles/${profileId}/calendar?from=${from.toISOString()}&to=${to.toISOString()}&tz=${encodeURIComponent(browserTimeZone() ?? '')}`),
   });
   const events = (data?.events ?? []).filter((e) => e.kind !== 'medication' && !e.completed).slice(0, 6);
   if (events.length === 0) {

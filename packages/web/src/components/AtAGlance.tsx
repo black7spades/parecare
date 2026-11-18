@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { browserTimeZone } from '../lib/datetime';
 import { useQuery } from '@tanstack/react-query';
 import { format, isToday, isTomorrow, startOfDay, endOfDay, addDays } from 'date-fns';
 import { api } from '../api/client';
@@ -51,7 +52,7 @@ export function AtAGlance({ profileId }: { profileId: string }) {
     queryKey: ['glance-calendar', profileId, from.toISOString()],
     queryFn: () =>
       api.get<{ events: CalendarEvent[] }>(
-        `/care-profiles/${profileId}/calendar?from=${from.toISOString()}&to=${to.toISOString()}`
+        `/care-profiles/${profileId}/calendar?from=${from.toISOString()}&to=${to.toISOString()}&tz=${encodeURIComponent(browserTimeZone() ?? '')}`
       ),
   });
   // Same request and cache as the Tasks page, so ticking one off there

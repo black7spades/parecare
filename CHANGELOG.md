@@ -6,6 +6,20 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.37.1] - 2026-11-18
+
+### Fixed
+
+- **Each dose counts on its own.** Recording one dose of a medication taken
+  three times a day no longer marks all three as given. Medications today,
+  the calendar and the overdue dose alert now agree on what is still to give.
+- **Medication times show in your own time.** The calendar placed scheduled
+  doses at the wrong hour for anyone outside UTC. An 8am dose now shows at
+  8am.
+- **The bell clears itself.** An alert to record a dose goes away the moment
+  the dose is recorded, whether on the medication chart, the medications
+  page or through Pare.
+
 ## [0.37.0] - 2026-11-18
 
 ### Added

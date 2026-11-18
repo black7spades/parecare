@@ -1,5 +1,6 @@
 import { useAuthStore } from '../stores/auth';
 import { useSubscriptionStore } from '../stores/subscription';
+import { refreshAfterDoses } from '../lib/queryClient';
 
 const BASE = '/api/v1';
 
@@ -101,6 +102,9 @@ async function request<T>(path: string, options: RequestInit = {}, reqOpts: Requ
     }
     throw new ApiError(res.status, data.code ?? 'ERROR', data.error ?? 'Request failed', data.feature, data);
   }
+
+  // However a dose was recorded, the bell and every dose count catch up at once.
+  if (options.method && options.method !== 'GET' && /\/administrations(\/|$|\?)/.test(path)) refreshAfterDoses();
 
   return data as T;
 }

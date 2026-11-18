@@ -6,6 +6,7 @@ import { describeAiError } from '../../lib/aiErrors';
 import { useAiStatus, AI_WARMING_MESSAGE } from '../../lib/aiStatus';
 import { ASSISTANT_COMMANDS, commandHelpText, expandSlashCommand } from '../../lib/assistantCommands';
 import { browserTimeZone } from '../../lib/datetime';
+import { refreshAfterDoses } from '../../lib/queryClient';
 import { useAssistantStore } from '../../stores/assistant';
 import { useAuthStore } from '../../stores/auth';
 import { IngestModal } from '../IngestModal';
@@ -468,6 +469,8 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
       void queryClient.invalidateQueries({ queryKey: ['assistant-conversation'] });
       // Anything Pare logged or created should show up in the open pages too.
       void queryClient.invalidateQueries({ queryKey: ['care-profile', profileId] });
+      // Pare may have recorded doses, which can clear an alert in the bell.
+      refreshAfterDoses();
       for (const action of data.client_actions ?? []) {
         if (action.action === 'profile_created') {
           void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
