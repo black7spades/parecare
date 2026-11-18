@@ -6,6 +6,23 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.35.0] - 2026-11-18
+
+### Changed
+
+- **More room for your documents.** The upload form no longer sits beside
+  the documents list, so the list now uses the whole width of the screen.
+  Choose Upload above the list to add a document. It asks the same things
+  as before: the file, its name, its category, what it is for and who can
+  see it.
+- **Drop a file onto the list to upload it.** Drag a file from your
+  computer onto the documents list and the upload window opens with that
+  file ready and its name filled in.
+- **See where a new document went.** After an upload the list shows newest
+  first and the new document lights up for a few seconds.
+- **A clearer start.** With no documents yet, the page says what to keep
+  here and offers one button to upload the first one.
+
 ## [0.34.0] - 2026-11-18
 
 ### Added

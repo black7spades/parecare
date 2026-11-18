@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -51,16 +51,14 @@ const DOC_SORTS: DataSort<CareDocument>[] = [
 export function DocumentsPage() {
   const { profile, canEdit, isOwner } = useProfile();
   const queryClient = useQueryClient();
-  const fileInput = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [label, setLabel] = useState('');
-  // A category name; one not on the list yet is added when the file is saved.
-  const [category, setCategory] = useState('');
-  // File this document against a condition, so a scan report joins the
-  // tracking thread of the ankle it was taken for.
-  const [docConditionId, setDocConditionId] = useState('');
-  const [restrictedRoles, setRestrictedRoles] = useState<string[]>([]);
-  const [error, setError] = useState('');
+  // The upload dialog: closed, open with nothing picked, or open with a
+  // file someone dropped onto the list.
+  const [uploading, setUploading] = useState<{ file: File | null } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
+  // The document just uploaded, lit up in the list for a few seconds so
+  // people see where it went.
+  const [justAdded, setJustAdded] = useState<CareDocument | null>(null);
   const [deleting, setDeleting] = useState<CareDocument | null>(null);
   const [editing, setEditing] = useState<CareDocument | null>(null);
   const [viewing, setViewing] = useState<CareDocument | null>(null);
@@ -70,12 +68,6 @@ export function DocumentsPage() {
   const [reading, setReading] = useState<CareDocument | null>(null);
   const [editingCategories, setEditingCategories] = useState(false);
   const [recategorising, setRecategorising] = useState<CareDocument[] | null>(null);
-
-  const { data: uploadConditionData } = useQuery({
-    queryKey: ['conditions', profile.id],
-    queryFn: () => api.get<{ conditions: { id: string; name: string }[] }>(`/care-profiles/${profile.id}/conditions`),
-  });
-  const uploadConditions = uploadConditionData?.conditions ?? [];
 
   const { data, isLoading } = useQuery({
     queryKey: ['documents', profile.id],
@@ -94,27 +86,42 @@ export function DocumentsPage() {
   });
   const members = circleData?.members ?? [];
 
-  const uploadMutation = useMutation({
-    mutationFn: () => {
-      const form = new FormData();
-      form.append('file', file!);
-      form.append('category', category);
-      form.append('label', label.trim() || file!.name);
-      if (docConditionId) form.append('medical_condition_id', docConditionId);
-      for (const role of restrictedRoles) form.append('visible_to_roles', role);
-      return api.upload(`/care-profiles/${profile.id}/documents`, form);
-    },
-    onSuccess: () => {
-      setFile(null);
-      setLabel('');
-      setCategory('');
-      setRestrictedRoles([]);
-      setError('');
-      if (fileInput.current) fileInput.current.value = '';
-      invalidate();
-    },
-    onError: (err) => setError(err instanceof Error ? err.message : 'Upload failed'),
-  });
+  useEffect(() => {
+    if (!justAdded) return;
+    const timer = window.setTimeout(() => setJustAdded(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [justAdded]);
+
+  // Dropping a file anywhere on the list opens the upload dialog with it
+  // already picked. The depth counter stops the outline flickering as the
+  // pointer crosses child elements.
+  const isFileDrag = (e: DragEvent) => canEdit && e.dataTransfer.types.includes('Files');
+  const dropHandlers = canEdit
+    ? {
+        onDragEnter: (e: DragEvent) => {
+          if (!isFileDrag(e)) return;
+          e.preventDefault();
+          dragDepth.current += 1;
+          setDragging(true);
+        },
+        onDragOver: (e: DragEvent) => {
+          if (isFileDrag(e)) e.preventDefault();
+        },
+        onDragLeave: (e: DragEvent) => {
+          if (!isFileDrag(e)) return;
+          dragDepth.current = Math.max(0, dragDepth.current - 1);
+          if (dragDepth.current === 0) setDragging(false);
+        },
+        onDrop: (e: DragEvent) => {
+          if (!isFileDrag(e)) return;
+          e.preventDefault();
+          dragDepth.current = 0;
+          setDragging(false);
+          const dropped = e.dataTransfer.files?.[0];
+          if (dropped) setUploading({ file: dropped });
+        },
+      }
+    : {};
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/care-profiles/${profile.id}/documents/${id}`),
@@ -183,13 +190,28 @@ export function DocumentsPage() {
   }
 
   return (
-    <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_20rem] items-start">
-      <div className="card">
-        <div className="flex items-center gap-2 mb-4">
+    <div className="space-y-6">
+      <div className="card relative" {...dropHandlers}>
+        {dragging ? (
+          <div
+            className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-primary bg-primary-50 opacity-95"
+            aria-hidden="true"
+          >
+            <p className="text-base font-semibold text-primary">Drop the file to upload it</p>
+          </div>
+        ) : null}
+        <div className="flex flex-wrap items-center gap-2 mb-4">
           <h2 className="text-base font-semibold text-ink">Document repository</h2>
           <PagePurpose kind="entry" />
           {canEdit ? (
-            <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setIngesting(true)}>Upload and file with Pare</Button>
+            <div className="ml-auto flex flex-wrap gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setIngesting(true)}>Upload and file with Pare</Button>
+              {/* The empty state carries its own Upload button, so this one
+                  waits until there is a list to sit above. */}
+              {documents.length > 0 ? (
+                <Button size="sm" onClick={() => setUploading({ file: null })}>Upload</Button>
+              ) : null}
+            </div>
           ) : null}
         </div>
 
@@ -217,14 +239,26 @@ export function DocumentsPage() {
           onPageSizeChange={dv.setPageSize}
         />
 
+        <p className="sr-only" aria-live="polite">{justAdded ? `${justAdded.label} uploaded.` : ''}</p>
+
         {isLoading ? (
           <p className="text-sm text-muted mt-4">Loading…</p>
+        ) : documents.length === 0 ? (
+          <div className="mt-4 rounded-lg border-2 border-dashed border-border px-6 py-10 text-center">
+            <p className="text-sm text-ink">
+              Keep medical certificates, the will, power of attorney papers and care plans here, so nobody hunts through email chains.
+            </p>
+            {canEdit ? (
+              <>
+                <Button className="mt-4" onClick={() => setUploading({ file: null })}>Upload a document</Button>
+                <p className="mt-2 text-xs text-muted">Or drop a file here.</p>
+              </>
+            ) : (
+              <p className="mt-2 text-xs text-muted">No documents yet.</p>
+            )}
+          </div>
         ) : dv.view.length === 0 ? (
-          <p className="text-sm text-muted mt-4">
-            {documents.length === 0
-              ? 'No documents yet. Keep medical certificates, the will, POA papers and care plans here so nobody hunts through email chains.'
-              : 'No documents match your search or filters.'}
-          </p>
+          <p className="text-sm text-muted mt-4">No documents match your search or filters.</p>
         ) : (
           <div className="card p-0 overflow-x-auto mt-4">
             <table className="w-full text-sm">
@@ -251,7 +285,7 @@ export function DocumentsPage() {
                 {dv.view.map((doc) => (
                   <tr
                     key={doc.id}
-                    className={`border-b border-border last:border-0 ${doc.id === linkedDocId ? 'bg-primary-50' : ''}`}
+                    className={`border-b border-border last:border-0 transition-colors duration-700 ${doc.id === linkedDocId || doc.id === justAdded?.id ? 'bg-primary-50' : ''}`}
                   >
                     <td className="px-4 py-3">
                       <input
@@ -315,91 +349,10 @@ export function DocumentsPage() {
             </table>
           </div>
         )}
+        {canEdit && documents.length > 0 ? (
+          <p className="mt-3 text-xs text-muted">Drop a file anywhere on the list to upload it.</p>
+        ) : null}
       </div>
-
-      <form
-        className="card space-y-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (file) uploadMutation.mutate();
-        }}
-      >
-        <h2 className="text-base font-semibold text-ink">Upload a document</h2>
-        <div>
-          <label htmlFor="doc-file" className="block text-sm font-medium text-ink mb-1">
-            File
-          </label>
-          <input
-            id="doc-file"
-            ref={fileInput}
-            type="file"
-            className="block w-full text-sm text-muted file:mr-3 file:rounded-md file:border-0 file:bg-primary-50 file:px-3 file:py-1.5 file:text-sm file:text-primary hover:file:bg-primary-100"
-            onChange={(e) => {
-              const f = e.target.files?.[0] ?? null;
-              setFile(f);
-              if (f && !label) setLabel(f.name.replace(/\.[^.]+$/, ''));
-            }}
-          />
-          <p className="mt-1 text-xs text-muted">Up to 50 MB.</p>
-        </div>
-        <Input label="Label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Medical certificate, March" />
-        <DocumentCategoryField id="doc-category" profileId={profile.id} value={category} onChange={setCategory} />
-        <div>
-          <label htmlFor="doc-condition" className="block text-sm font-medium text-ink mb-1">What is it for</label>
-          <select
-            id="doc-condition"
-            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-            value={docConditionId}
-            onChange={(e) => setDocConditionId(e.target.value)}
-          >
-            <option value="">Not for a particular condition</option>
-            {uploadConditions.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-          <span className="block text-xs text-muted mt-1">
-            Files it under that condition's tracking as well as here.
-          </span>
-        </div>
-        <div>
-          <span className="block text-sm font-medium text-ink mb-1">Who can see it</span>
-          <label className="flex items-center gap-2 text-sm text-ink">
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-              checked={restrictedRoles.length > 0}
-              onChange={(e) => setRestrictedRoles(e.target.checked ? ['family'] : [])}
-            />
-            Restrict to selected roles
-          </label>
-          {restrictedRoles.length > 0 ? (
-            <div className="mt-2 space-y-1 pl-6">
-              {CIRCLE_ROLES.map(({ value, label: roleLabel }) => (
-                <label key={value} className="flex items-center gap-2 text-sm text-ink">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                    checked={restrictedRoles.includes(value)}
-                    onChange={(e) =>
-                      setRestrictedRoles((prev) =>
-                        e.target.checked ? [...prev, value] : prev.filter((r) => r !== value)
-                      )
-                    }
-                  />
-                  {roleLabel}
-                </label>
-              ))}
-              <p className="text-xs text-muted">The profile owner always has access.</p>
-            </div>
-          ) : (
-            <p className="mt-1 text-xs text-muted pl-6">Everyone in the care circle can see it.</p>
-          )}
-        </div>
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        <Button type="submit" className="w-full" loading={uploadMutation.isPending} disabled={!file}>
-          Upload
-        </Button>
-      </form>
 
       <Modal open={deleting !== null} onClose={() => setDeleting(null)} title="Delete document">
         <p className="text-sm text-muted mb-4">
@@ -468,6 +421,23 @@ export function DocumentsPage() {
           }}
         />
       ) : null}
+      {uploading ? (
+        <UploadDocumentModal
+          profileId={profile.id}
+          members={members}
+          initialFile={uploading.file}
+          onClose={() => setUploading(null)}
+          onUploaded={(doc) => {
+            setUploading(null);
+            invalidate();
+            // Newest first, so the new document is at the top where its row lights up.
+            dv.setSearch('');
+            dv.setFilter('category', '');
+            dv.setSortKey('date');
+            setJustAdded(doc);
+          }}
+        />
+      ) : null}
       {ingesting ? <IngestModal profileId={profile.id} onClose={() => setIngesting(false)} /> : null}
       {editingCategories ? <EditCategoriesModal profileId={profile.id} onClose={() => setEditingCategories(false)} /> : null}
       {recategorising ? (
@@ -491,9 +461,7 @@ export function DocumentsPage() {
       {/* The secrets vault. It shows itself only to the account owner, and to
           a power of attorney once a date of death is recorded, so it renders
           nothing at all for everyone else. */}
-      <div className="2xl:col-span-2">
-        <SecretsSection profileId={profile.id} careName={profile.preferred_name || profile.full_name} />
-      </div>
+      <SecretsSection profileId={profile.id} careName={profile.preferred_name || profile.full_name} />
     </div>
   );
 }
@@ -662,17 +630,245 @@ function DocumentViewerModal({
   );
 }
 
+/**
+ * The details every document carries: its name, category and who can see
+ * it. Upload and Edit share these, so the two forms never drift apart.
+ * Anything only one of them asks, such as the condition a new file is for,
+ * comes in as children and sits after the category.
+ */
+function DocumentDetailsFields({
+  idPrefix,
+  profileId,
+  members,
+  label,
+  onLabel,
+  category,
+  onCategory,
+  restricted,
+  onRestricted,
+  roles,
+  onRoles,
+  children,
+}: {
+  idPrefix: string;
+  profileId: string;
+  members: CircleMember[];
+  label: string;
+  onLabel: (v: string) => void;
+  category: string;
+  onCategory: (v: string) => void;
+  restricted: boolean;
+  onRestricted: (v: boolean) => void;
+  roles: string[];
+  onRoles: (update: (prev: string[]) => string[]) => void;
+  children?: ReactNode;
+}) {
+  // Standard roles plus any custom roles already in use in this circle.
+  const knownRoles = [...new Set([...CIRCLE_ROLES.map((r) => r.value), ...members.map((m) => m.role)])];
+  const addableRoles = knownRoles.filter((r) => !roles.includes(r));
+  const everyoneNames = members.map(memberName);
+
+  return (
+    <>
+      <Input label="Label" value={label} onChange={(e) => onLabel(e.target.value)} placeholder="e.g. Medical certificate, March" required />
+      <DocumentCategoryField id={`${idPrefix}-category`} profileId={profileId} value={category} onChange={onCategory} />
+      {children}
+      <div>
+        <span className="block text-sm font-medium text-ink mb-1">Who can see it</span>
+        <label className="flex items-center gap-2 text-sm text-ink">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+            checked={restricted}
+            onChange={(e) => {
+              onRestricted(e.target.checked);
+              if (!e.target.checked) onRoles(() => []);
+            }}
+          />
+          Restrict to selected roles
+        </label>
+        {restricted ? (
+          <div className="mt-2 space-y-2 pl-6">
+            {roles.length > 0 ? (
+              <ul className="space-y-1">
+                {roles.map((role) => {
+                  const names = membersWithRole(members, role).map(memberName);
+                  return (
+                    <li key={role} className="flex items-start justify-between gap-2 rounded-md border border-border px-3 py-2">
+                      <div className="min-w-0">
+                        <span className="text-sm text-ink">{circleRoleLabel(role)}</span>
+                        <p className="text-xs text-muted break-words">
+                          {names.length > 0 ? names.join(', ') : 'Nobody in the care circle has this role yet.'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label={`Remove access for ${circleRoleLabel(role)}`}
+                        title={`Remove access for ${circleRoleLabel(role)}`}
+                        className="text-muted hover:text-red-600 text-sm px-1 shrink-0"
+                        onClick={() => onRoles((prev) => prev.filter((r) => r !== role))}
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="text-xs text-red-600">
+                No roles selected: only the profile owner would keep access, which is not supported yet. Add a role, or untick the box to let everyone in the circle see it.
+              </p>
+            )}
+            {addableRoles.length > 0 ? (
+              <select
+                aria-label="Add a role"
+                className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                value=""
+                onChange={(e) => {
+                  const role = e.target.value;
+                  if (role) onRoles((prev) => [...prev, role]);
+                }}
+              >
+                <option value="">Add a role…</option>
+                {addableRoles.map((r) => (
+                  <option key={r} value={r}>{circleRoleLabel(r)}</option>
+                ))}
+              </select>
+            ) : null}
+            <p className="text-xs text-muted">The profile owner always has access.</p>
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-muted pl-6">
+            {everyoneNames.length > 0
+              ? `Everyone in the care circle can see it: the profile owner and ${everyoneNames.join(', ')}.`
+              : 'Everyone in the care circle can see it. Right now that is only the profile owner.'}
+          </p>
+        )}
+      </div>
+    </>
+  );
+}
+
+const withoutExtension = (name: string) => name.replace(/\.[^.]+$/, '');
+
+/**
+ * Adds one document. Opens from the Upload button with nothing picked, or
+ * from a file dropped onto the list with that file ready to go and its
+ * name already filled in as the label.
+ */
+function UploadDocumentModal({
+  profileId,
+  members,
+  initialFile,
+  onClose,
+  onUploaded,
+}: {
+  profileId: string;
+  members: CircleMember[];
+  initialFile: File | null;
+  onClose: () => void;
+  onUploaded: (doc: CareDocument) => void;
+}) {
+  const [file, setFile] = useState<File | null>(initialFile);
+  const [label, setLabel] = useState(initialFile ? withoutExtension(initialFile.name) : '');
+  // A category name; one not on the list yet is added when the file is saved.
+  const [category, setCategory] = useState('');
+  // File this document against a condition, so a scan report joins the
+  // tracking thread of the ankle it was taken for.
+  const [conditionId, setConditionId] = useState('');
+  const [restricted, setRestricted] = useState(false);
+  const [roles, setRoles] = useState<string[]>([]);
+  const [uploadError, setUploadError] = useState('');
+
+  const { data: conditionData } = useQuery({
+    queryKey: ['conditions', profileId],
+    queryFn: () => api.get<{ conditions: { id: string; name: string }[] }>(`/care-profiles/${profileId}/conditions`),
+  });
+  const conditions = conditionData?.conditions ?? [];
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const form = new FormData();
+      form.append('file', file!);
+      form.append('category', category);
+      form.append('label', label.trim() || file!.name);
+      if (conditionId) form.append('medical_condition_id', conditionId);
+      if (restricted) for (const role of roles) form.append('visible_to_roles', role);
+      return api.upload<{ document: CareDocument }>(`/care-profiles/${profileId}/documents`, form);
+    },
+    onSuccess: (res) => onUploaded(res.document),
+    onError: (err) =>
+      setUploadError(err instanceof Error ? err.message : 'The file did not upload. Check your connection and try again.'),
+  });
+
+  const canSave = !!file && !!label.trim() && (!restricted || roles.length > 0);
+
+  return (
+    <Modal open onClose={onClose} title="Upload a document">
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (canSave) mutation.mutate(); }}>
+        <div>
+          <label htmlFor="upload-doc-file" className="block text-sm font-medium text-ink mb-1">File</label>
+          {file && file === initialFile ? (
+            <p className="text-sm text-ink break-words">{file.name}</p>
+          ) : (
+            <input
+              id="upload-doc-file"
+              type="file"
+              className="block w-full text-sm text-muted file:mr-3 file:rounded-md file:border-0 file:bg-primary-50 file:px-3 file:py-1.5 file:text-sm file:text-primary hover:file:bg-primary-100"
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                setFile(f);
+                if (f && !label) setLabel(withoutExtension(f.name));
+              }}
+            />
+          )}
+          <p className="mt-1 text-xs text-muted">Up to 50 MB.</p>
+        </div>
+        <DocumentDetailsFields
+          idPrefix="upload-doc"
+          profileId={profileId}
+          members={members}
+          label={label}
+          onLabel={setLabel}
+          category={category}
+          onCategory={setCategory}
+          restricted={restricted}
+          onRestricted={setRestricted}
+          roles={roles}
+          onRoles={setRoles}
+        >
+          <div>
+            <label htmlFor="upload-doc-condition" className="block text-sm font-medium text-ink mb-1">What is it for</label>
+            <select
+              id="upload-doc-condition"
+              className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              value={conditionId}
+              onChange={(e) => setConditionId(e.target.value)}
+            >
+              <option value="">Not for a particular condition</option>
+              {conditions.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            <span className="block text-xs text-muted mt-1">Files it under that condition's tracking as well as here.</span>
+          </div>
+        </DocumentDetailsFields>
+        {uploadError ? <p className="text-sm text-red-600">{uploadError}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={mutation.isPending} disabled={!canSave}>Upload</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function EditDocumentModal({ profileId, doc, members, onClose, onSaved }: { profileId: string; doc: CareDocument; members: CircleMember[]; onClose: () => void; onSaved: () => void }) {
   const [editLabel, setEditLabel] = useState(doc.label);
   const [editCategory, setEditCategory] = useState(categoryNameOf(doc));
   const [restricted, setRestricted] = useState((doc.visible_to_roles?.length ?? 0) > 0);
   const [roles, setRoles] = useState<string[]>(doc.visible_to_roles ?? []);
   const [editError, setEditError] = useState('');
-
-  // Standard roles plus any custom roles already in use in this circle.
-  const knownRoles = [...new Set([...CIRCLE_ROLES.map((r) => r.value), ...members.map((m) => m.role)])];
-  const addableRoles = knownRoles.filter((r) => !roles.includes(r));
-  const everyoneNames = members.map(memberName);
 
   const mutation = useMutation({
     mutationFn: () => api.patch(`/care-profiles/${profileId}/documents/${doc.id}`, {
@@ -689,80 +885,19 @@ function EditDocumentModal({ profileId, doc, members, onClose, onSaved }: { prof
   return (
     <Modal open onClose={onClose} title="Edit document">
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (canSave) mutation.mutate(); }}>
-        <Input label="Label" value={editLabel} onChange={(e) => setEditLabel(e.target.value)} required />
-        <DocumentCategoryField id="edit-doc-category" profileId={profileId} value={editCategory} onChange={setEditCategory} />
-        <div>
-          <span className="block text-sm font-medium text-ink mb-1">Who can see it</span>
-          <label className="flex items-center gap-2 text-sm text-ink">
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-              checked={restricted}
-              onChange={(e) => {
-                setRestricted(e.target.checked);
-                if (!e.target.checked) setRoles([]);
-              }}
-            />
-            Restrict to selected roles
-          </label>
-          {restricted ? (
-            <div className="mt-2 space-y-2 pl-6">
-              {roles.length > 0 ? (
-                <ul className="space-y-1">
-                  {roles.map((role) => {
-                    const names = membersWithRole(members, role).map(memberName);
-                    return (
-                      <li key={role} className="flex items-start justify-between gap-2 rounded-md border border-border px-3 py-2">
-                        <div className="min-w-0">
-                          <span className="text-sm text-ink">{circleRoleLabel(role)}</span>
-                          <p className="text-xs text-muted break-words">
-                            {names.length > 0 ? names.join(', ') : 'Nobody in the care circle has this role yet.'}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          aria-label={`Remove access for ${circleRoleLabel(role)}`}
-                          title={`Remove access for ${circleRoleLabel(role)}`}
-                          className="text-muted hover:text-red-600 text-sm px-1 shrink-0"
-                          onClick={() => setRoles((prev) => prev.filter((r) => r !== role))}
-                        >
-                          ✕
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : (
-                <p className="text-xs text-red-600">
-                  No roles selected: only the profile owner would keep access, which is not supported yet. Add a role, or untick the box to let everyone in the circle see it.
-                </p>
-              )}
-              {addableRoles.length > 0 ? (
-                <select
-                  aria-label="Add a role"
-                  className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                  value=""
-                  onChange={(e) => {
-                    const role = e.target.value;
-                    if (role) setRoles((prev) => [...prev, role]);
-                  }}
-                >
-                  <option value="">Add a role…</option>
-                  {addableRoles.map((r) => (
-                    <option key={r} value={r}>{circleRoleLabel(r)}</option>
-                  ))}
-                </select>
-              ) : null}
-              <p className="text-xs text-muted">The profile owner always has access.</p>
-            </div>
-          ) : (
-            <p className="mt-1 text-xs text-muted pl-6">
-              {everyoneNames.length > 0
-                ? `Everyone in the care circle can see it: the profile owner and ${everyoneNames.join(', ')}.`
-                : 'Everyone in the care circle can see it. Right now that is only the profile owner.'}
-            </p>
-          )}
-        </div>
+        <DocumentDetailsFields
+          idPrefix="edit-doc"
+          profileId={profileId}
+          members={members}
+          label={editLabel}
+          onLabel={setEditLabel}
+          category={editCategory}
+          onCategory={setEditCategory}
+          restricted={restricted}
+          onRestricted={setRestricted}
+          roles={roles}
+          onRoles={setRoles}
+        />
         {editError ? <p className="text-sm text-red-600">{editError}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
