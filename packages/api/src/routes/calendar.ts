@@ -3,6 +3,8 @@ import { db } from '../config/database';
 import { env } from '../config/env';
 import { requireAuth } from '../middleware/auth';
 import type { CareProfile, Reminder } from '../types';
+import { dateInZone, isValidTimeZone, parseZonedTime } from '../lib/timezone';
+import { coveredTimes, doseAnchor } from '../lib/doseSlots';
 
 // Authenticated, per-profile calendar endpoints
 export const calendarRouter = Router({ mergeParams: true });
@@ -18,7 +20,11 @@ calendarRouter.get('/', requireAuth, async (req, res) => {
     .whereBetween('next_due_at', [from, to])
     .orderBy('next_due_at', 'asc');
 
-  const medEvents = await expandMedicationEvents(String(req.params['id']), from, to);
+  // Medication times are wall-clock times where the person lives, so they are
+  // placed in the viewer's zone (sent by the browser), else the account's.
+  const tzParam = req.query['tz'] ? String(req.query['tz']) : null;
+  const tz = isValidTimeZone(tzParam) ? tzParam : (req.account as { timezone?: string | null } | undefined)?.timezone ?? null;
+  const medEvents = await expandMedicationEvents(String(req.params['id']), from, to, tz);
   const birthdayEvents = await expandBirthdayEvents(String(req.params['id']), from, to);
   const healthEvents = await expandHealthStatusEvents(String(req.params['id']), from, to);
   const appointmentEvents = await expandAppointmentEvents(String(req.params['id']), from, to);
@@ -99,8 +105,15 @@ async function expandAppointmentEvents(profileId: string, from: Date, to: Date):
 }
 
 // Expand each active medication's scheduled times across the date range into
-// calendar events, marking a slot done if a dose was recorded that day.
-async function expandMedicationEvents(profileId: string, from: Date, to: Date): Promise<CalendarEvent[]> {
+// calendar events. Each time is its own dose: a dose recorded against a time
+// covers that time, and any other dose recorded that day covers the earliest
+// time still open. So two of three doses recorded leaves one still to give.
+async function expandMedicationEvents(
+  profileId: string,
+  from: Date,
+  to: Date,
+  timeZone: string | null = null
+): Promise<CalendarEvent[]> {
   const meds = await db('medications as m')
     .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
     .where({ 'm.care_profile_id': profileId, 'm.active': true })
@@ -108,27 +121,52 @@ async function expandMedicationEvents(profileId: string, from: Date, to: Date): 
   const withTimes = meds.filter((m) => Array.isArray(m.schedule_times) && m.schedule_times.length > 0);
   if (withTimes.length === 0) return [];
 
+  const zone = isValidTimeZone(timeZone) ? timeZone : 'UTC';
+  const slotAt = (day: string, hm: string) => parseZonedTime(`${day}T${hm}:00`, zone) ?? new Date(`${day}T${hm}:00Z`);
+
+  // Doses a day either side of the range, since a local day can straddle it.
+  const pad = 24 * 3600 * 1000;
   const admins = await db('medication_administrations')
     .where({ care_profile_id: profileId })
-    .whereBetween('administered_at', [from, to])
-    .select('medication_id', 'administered_at');
-  const doneByMedDay = new Set(
-    admins.map((a) => `${a.medication_id}|${new Date(a.administered_at).toISOString().slice(0, 10)}`)
-  );
+    .whereIn('medication_id', withTimes.map((m) => m.id))
+    .where((qb) =>
+      qb
+        .whereBetween('administered_at', [new Date(from.getTime() - pad), new Date(to.getTime() + pad)])
+        .orWhereBetween('scheduled_for', [new Date(from.getTime() - pad), new Date(to.getTime() + pad)])
+    )
+    .select('medication_id', 'administered_at', 'scheduled_for');
+
+  // Doses grouped by medication and the local day they belong to.
+  const dosesByMedDay = new Map<string, typeof admins>();
+  for (const a of admins) {
+    const key = `${a.medication_id}|${dateInZone(doseAnchor(a), zone)}`;
+    const list = dosesByMedDay.get(key) ?? [];
+    list.push(a);
+    dosesByMedDay.set(key, list);
+  }
+
+  const days: string[] = [];
+  const last = dateInZone(to, zone);
+  for (let d = dateInZone(from, zone), guard = 0; d <= last && guard < 400; guard++) {
+    days.push(d);
+    const next = new Date(`${d}T12:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    d = next.toISOString().slice(0, 10);
+  }
 
   const events: CalendarEvent[] = [];
-  const dayCursor = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
-  for (; dayCursor <= to && events.length < 1000; dayCursor.setUTCDate(dayCursor.getUTCDate() + 1)) {
-    const dayStr = dayCursor.toISOString().slice(0, 10);
+  for (const day of days) {
     for (const med of withTimes) {
-      for (const t of med.schedule_times as string[]) {
-        const when = new Date(`${dayStr}T${t}:00Z`);
-        if (when < from || when > to) continue;
+      const times = [...new Set(med.schedule_times as string[])].sort();
+      const covered = coveredTimes(times, dosesByMedDay.get(`${med.id}|${day}`) ?? [], zone);
+      for (const t of times) {
+        const when = slotAt(day, t);
+        if (when < from || when > to || events.length >= 1000) continue;
         events.push({
-          id: `med-${med.id}-${dayStr}-${t}`,
+          id: `med-${med.id}-${day}-${t}`,
           title: `💊 ${med.name}${med.dose ? ` ${med.dose}` : ''}`,
           next_due_at: when.toISOString(),
-          completed: doneByMedDay.has(`${med.id}|${dayStr}`),
+          completed: covered.has(t),
           kind: 'medication',
           medication_id: med.id,
         });
@@ -335,7 +373,14 @@ icsRouter.get('/:token.ics', async (req, res) => {
   }
 
   // Medication schedule for the next ~60 days.
-  const medEvents = await expandMedicationEvents(profile.id, since, new Date(Date.now() + 60 * 24 * 3600 * 1000));
+  // Times are the owner's wall-clock times, so place them in the owner's zone.
+  const owner = await db('accounts').where({ id: profile.account_id }).first('timezone');
+  const medEvents = await expandMedicationEvents(
+    profile.id,
+    since,
+    new Date(Date.now() + 60 * 24 * 3600 * 1000),
+    (owner?.timezone as string | null | undefined) ?? null
+  );
   for (const e of medEvents) {
     const start = new Date(e.next_due_at);
     const end = new Date(start.getTime() + 15 * 60 * 1000);

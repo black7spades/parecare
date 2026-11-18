@@ -1,5 +1,6 @@
 import { db } from '../config/database';
 import { dateInZone, hmInZone, startOfDayInZone } from '../lib/timezone';
+import { coveredTimes, doseAnchor } from '../lib/doseSlots';
 import type { Account } from '../types';
 
 /**
@@ -135,12 +136,16 @@ export async function gatherNotifications(
       .whereIn('m.care_profile_id', profileIds)
       .where('m.active', true)
       .select('m.id', 'm.care_profile_id', 'm.supply', 'm.supply_remaining', 'm.packs_on_hand', 'm.schedule_times', 'm.critical', 'm.updated_at', 'c.name'),
+    // Yesterday onward, since a dose given for this morning may have been
+    // recorded late last night or early, and is placed by the time it was for.
     db('medication_administrations')
       .whereIn('care_profile_id', profileIds)
-      .where('administered_at', '>=', startOfDay)
-      .groupBy('medication_id')
-      .select('medication_id')
-      .count('id as count'),
+      .where((qb) =>
+        qb
+          .where('administered_at', '>=', new Date(startOfDay.getTime() - 24 * 60 * 60 * 1000))
+          .orWhere('scheduled_for', '>=', startOfDay)
+      )
+      .select('medication_id', 'scheduled_for', 'administered_at'),
     db('notification_reads').where({ account_id: account.id }).select('item_key'),
     // Care plan generation this account started that has since finished with a
     // new version. Only the latest run per profile matters, so the newest is
@@ -156,7 +161,16 @@ export async function gatherNotifications(
   ]);
 
   const read = new Set(readRows.map((r) => (r as { item_key: string }).item_key));
-  const adminCounts = new Map(adminRows.map((r) => [String(r.medication_id), Number(r.count)]));
+  // Today's doses per medication, each placed on the day it was due.
+  const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
+  const dosesToday = new Map<string, Array<{ scheduled_for: Date | null; administered_at: Date }>>();
+  for (const r of adminRows as Array<{ medication_id: string; scheduled_for: Date | null; administered_at: Date }>) {
+    const at = doseAnchor(r);
+    if (at < startOfDay || at >= endOfDay) continue;
+    const list = dosesToday.get(String(r.medication_id)) ?? [];
+    list.push(r);
+    dosesToday.set(String(r.medication_id), list);
+  }
   const items: NotificationItem[] = [];
 
   for (const row of auditRows) {
@@ -244,9 +258,9 @@ export async function gatherNotifications(
     if (prefs.dose_overdue) {
       const times = Array.isArray(m.schedule_times) ? (m.schedule_times as string[]) : [];
       const passed = times.filter((t) => typeof t === 'string' && t <= nowHm).sort();
-      const recorded = adminCounts.get(String(m.id)) ?? 0;
-      if (passed.length > 0 && recorded < passed.length) {
-        const missed = passed.length - recorded;
+      const covered = coveredTimes(times, dosesToday.get(String(m.id)) ?? [], tz);
+      const missed = passed.filter((t) => !covered.has(t)).length;
+      if (missed > 0) {
         // Keyed by day and by how many times have passed, so each further
         // missed time raises the alert again even if the last one was read.
         const key = `dose_overdue:${m.id}:${today}:${passed.length}`;

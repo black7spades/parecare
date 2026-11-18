@@ -20,6 +20,14 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.37.1',
+    date: '2026-11-18',
+    summary: 'Each dose counts on its own, medication times show in your own time, and the bell clears itself.',
+    groups: [
+      { heading: 'Fixed', items: ['Each dose counts on its own. Recording one dose of a medication taken three times a day no longer marks all three as given. Medications today, the calendar and the overdue dose alert now agree on what is still to give.', 'Medication times show in your own time. The calendar placed scheduled doses at the wrong hour for anyone outside UTC. An 8am dose now shows at 8am.', 'The bell clears itself. An alert to record a dose goes away the moment the dose is recorded, whether on the medication chart, the medications page or through Pare.'] },
+    ],
+  },
+  {
     version: '0.37.0',
     date: '2026-11-18',
     summary: 'What matters today at the top of the overview, and cards with news come first.',

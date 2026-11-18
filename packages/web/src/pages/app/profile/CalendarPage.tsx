@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { browserTimeZone } from '../../../lib/datetime';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -88,7 +89,7 @@ export function CalendarPage() {
     queryKey: ['calendar-events', profile.id, month.toISOString()],
     queryFn: () =>
       api.get<{ events: CalendarEvent[] }>(
-        `/care-profiles/${profile.id}/calendar?from=${gridStart.toISOString()}&to=${gridEnd.toISOString()}`
+        `/care-profiles/${profile.id}/calendar?from=${gridStart.toISOString()}&to=${gridEnd.toISOString()}&tz=${encodeURIComponent(browserTimeZone() ?? '')}`
       ),
   });
   const allEvents = data?.events ?? [];
