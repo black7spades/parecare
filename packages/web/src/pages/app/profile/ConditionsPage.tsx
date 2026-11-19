@@ -32,6 +32,11 @@ import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 
 
 const fmtDate = (d: string | null | undefined) => (d ? format(new Date(d), 'd MMM yyyy') : '');
+const todayIso = () => format(new Date(), 'yyyy-MM-dd');
+
+/** Over and done with: marked resolved, or its resolution date has passed. */
+const isResolved = (c: MedicalCondition): boolean =>
+  c.status === 'resolved' || (!!c.resolved_on && c.resolved_on <= todayIso());
 
 const severityRank = (c: MedicalCondition): number =>
   CONDITION_SEVERITIES.findIndex((s) => s.value === c.severity);
@@ -104,10 +109,34 @@ export function ConditionsPage() {
     });
   };
 
+  // Marking resolved moves conditions off the list at once, with Undo for a
+  // few seconds, the same way a delete does.
+  const markResolved = (items: MedicalCondition[]) => {
+    const open = items.filter((c) => !isResolved(c));
+    if (open.length === 0) return;
+    deferDelete({
+      message: open.length === 1 ? `Marked ${open[0].name} resolved.` : `Marked ${open.length} conditions resolved.`,
+      ids: open.map((c) => c.id),
+      commit: () =>
+        Promise.all(
+          open.map((c) =>
+            // No date is filled in: resolving means "stop tracking it", and
+            // nobody should have to work out the day a cold cleared up.
+            api.patch(`/care-profiles/${profile.id}/conditions/${c.id}`, { status: 'resolved' })
+          )
+        ),
+      onCommitted: invalidate,
+    });
+  };
+
+  // Resolved conditions stay on record but off the list until asked for.
+  const [showResolved, setShowResolved] = useState(false);
   const visible = conditions.filter((c) => !hidden.has(c.id));
+  const resolvedCount = visible.filter(isResolved).length;
+  const listed = showResolved ? visible : visible.filter((c) => !isResolved(c));
   const panel = useRecordPanel(visible, (c) => c.id);
   const dv = useDataView<MedicalCondition>({
-    rows: visible,
+    rows: listed,
     getId: (c) => c.id,
     searchText: (c) =>
       [
@@ -138,6 +167,14 @@ export function ConditionsPage() {
             if (queue.length === 0) return;
             setBulkEditQueue(queue.slice(1));
             setEditing(queue[0]);
+          },
+        },
+        {
+          key: 'resolve',
+          label: 'Mark resolved',
+          onRun: () => {
+            markResolved(visible.filter((c) => dv.selected.has(c.id)));
+            dv.clearSelection();
           },
         },
         {
@@ -184,7 +221,11 @@ export function ConditionsPage() {
         onSort={dv.setSortKey}
         filters={[CATEGORY_FILTER, TYPE_FILTER, STATUS_FILTER].map((f) => ({ key: f.key, label: f.label, options: f.options }))}
         filterValues={dv.filterValues}
-        onFilter={dv.setFilter}
+        onFilter={(key, value) => {
+          // Asking for resolved conditions brings them back into the list.
+          if (key === 'status' && value === 'resolved') setShowResolved(true);
+          dv.setFilter(key, value);
+        }}
         selectedCount={dv.selected.size}
         bulkActions={bulkActions}
         onClearSelection={dv.clearSelection}
@@ -203,8 +244,13 @@ export function ConditionsPage() {
           <p className="text-sm text-muted">
             {conditions.length === 0
               ? `No conditions recorded for ${careName} yet.`
-              : 'No conditions match your search or filters.'}
+              : listed.length === 0
+                ? `No current conditions for ${careName}.`
+                : 'No conditions match your search or filters.'}
           </p>
+          {conditions.length === 0 && canEdit ? (
+            <Button size="sm" className="mt-3" onClick={() => setAdding(true)}>Add condition</Button>
+          ) : null}
         </div>
       ) : (
         <div className="card p-0 overflow-x-auto">
@@ -232,7 +278,7 @@ export function ConditionsPage() {
                 ];
                 const treatmentCount = allTreatments.length;
                 return (
-                  <tr key={c.id} {...panel.rowProps(c.id)} className={`border-b border-border last:border-0 align-top ${RECORD_ROW_CLASS}`}>
+                  <tr key={c.id} {...panel.rowProps(c.id)} className={`border-b border-border last:border-0 align-top ${isResolved(c) ? 'opacity-60' : ''} ${RECORD_ROW_CLASS}`}>
                     {canEdit ? (
                       <td className="px-3 py-2">
                         <input
@@ -300,6 +346,14 @@ export function ConditionsPage() {
           </table>
         </div>
       )}
+
+      {resolvedCount > 0 ? (
+        <Button size="xs" variant="ghost" onClick={() => setShowResolved((v) => !v)}>
+          {showResolved
+            ? 'Hide resolved conditions'
+            : `Show ${resolvedCount} resolved ${resolvedCount === 1 ? 'condition' : 'conditions'}`}
+        </Button>
+      ) : null}
 
       {adding ? (
         <ConditionEditor
@@ -406,6 +460,17 @@ export function ConditionsPage() {
             ]}
             links={links}
             onEdit={() => setEditing(c)}
+            done={
+              isResolved(c)
+                ? null
+                : {
+                    label: 'Mark resolved',
+                    onRun: () => {
+                      markResolved([c]);
+                      panel.close();
+                    },
+                  }
+            }
             onDelete={() => {
               deleteConditions([c]);
               panel.close();
