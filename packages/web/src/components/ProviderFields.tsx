@@ -43,17 +43,20 @@ export function ProviderTypeField({
   value,
   onChange,
   kind = 'person',
+  label = 'Type',
 }: {
   id: string;
   value: string;
   onChange: (value: string) => void;
+  /** The field's label, e.g. "What they do" where Type would be unclear. */
+  label?: string;
   /** Which list of types to offer: kinds of professional, kinds of organisation, or both. */
   kind?: ProviderKind | 'any';
 }) {
   const hint = TYPE_HINTS[kind];
   return (
     <div>
-      <label htmlFor={id} className="block text-sm font-medium text-ink mb-1">Type</label>
+      <label htmlFor={id} className="block text-sm font-medium text-ink mb-1">{label}</label>
       <CatalogueCombo
         key={kind}
         id={id}

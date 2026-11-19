@@ -70,6 +70,8 @@ interface Moved {
   links_moved: string[];
   links_removed: Record<string, unknown>[];
   appointments: string[];
+  /** Next steps, such as referrals, pointing at the duplicate. Missing on merges made before they could. */
+  next_steps?: string[];
   contact_profiles: string[];
   residence_profiles: string[];
   based_here: string[];
@@ -113,6 +115,7 @@ export async function mergeProviders(
     }
 
     moved.appointments = ids(await trx('appointments').where({ provider_id: removeId }).update({ provider_id: keepId }).returning('id'));
+    moved.next_steps = ids(await trx('reminders').where({ provider_id: removeId }).update({ provider_id: keepId }).returning('id'));
     moved.contact_profiles = ids(await trx('care_profiles').where({ contact_provider_id: removeId }).update({ contact_provider_id: keepId }).returning('id'));
     moved.residence_profiles = ids(await trx('care_profiles').where({ residence_provider_id: removeId }).update({ residence_provider_id: keepId }).returning('id'));
     moved.based_here = ids(
@@ -201,6 +204,7 @@ export async function undoMerge(mergeId: string, accountId: string | null): Prom
     if (moved.links_moved.length) await trx('care_profile_providers').whereIn('id', moved.links_moved).update({ provider_id: merge.removed_id });
     if (moved.links_removed.length) await trx('care_profile_providers').insert(moved.links_removed);
     if (moved.appointments.length) await trx('appointments').whereIn('id', moved.appointments).update({ provider_id: merge.removed_id });
+    if (moved.next_steps?.length) await trx('reminders').whereIn('id', moved.next_steps).update({ provider_id: merge.removed_id });
     if (moved.contact_profiles.length) await trx('care_profiles').whereIn('id', moved.contact_profiles).update({ contact_provider_id: merge.removed_id });
     if (moved.residence_profiles.length) await trx('care_profiles').whereIn('id', moved.residence_profiles).update({ residence_provider_id: merge.removed_id });
     if (moved.based_here.length) await trx('providers').whereIn('id', moved.based_here).update({ practice_id: merge.removed_id });

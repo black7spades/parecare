@@ -35,6 +35,10 @@ export interface NextStep {
   /** The built-in kind, e.g. prescription, or null for one the account added. */
   type_key: string | null;
   books: boolean;
+  /** Who it is with, such as who a referral is to, from Contacts. */
+  provider_id?: string | null;
+  provider_name?: string | null;
+  provider_type?: string | null;
   /** The appointment booked to carry it out, if any. */
   led_to: { id: string; title: string; starts_at: string; status: string } | null;
 }
@@ -68,7 +72,7 @@ export const QUICK_STEP_KEYS = [
 
 /** What to ask for in the details box, by kind, so people know what to write. */
 export const DETAIL_HINTS: Record<string, string> = {
-  referral: 'Who to, e.g. Dr Patel, cardiologist',
+  referral: 'Anything to remember, e.g. Urgent, within six weeks',
   follow_up: 'What for, e.g. Review blood pressure',
   prescription: 'Which medication, e.g. Amoxicillin',
   medication_change: 'What changed, e.g. Metformin up to 1000 mg',

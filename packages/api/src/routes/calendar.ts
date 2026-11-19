@@ -75,19 +75,22 @@ async function expandAppointmentEvents(profileId: string, from: Date, to: Date):
       'a.starts_at',
       'a.status',
       'a.location',
+      'a.directions_link',
       'a.medical_condition_id',
       'mc.name as medical_condition_name',
       'p.name as provider_name',
       'p.directions_link as provider_directions_link'
     );
   return appointments.map((a) => {
-    // A directions link comes from the provider's saved map link, or from the
-    // appointment's own location when that was entered as a URL.
-    const directions = isUrl(a.provider_directions_link)
-      ? a.provider_directions_link
-      : isUrl(a.location)
-        ? a.location
-        : null;
+    // A directions link comes from the appointment's own map link first, then
+    // the provider's saved one, then a location entered as a URL.
+    const directions = isUrl(a.directions_link)
+      ? a.directions_link
+      : isUrl(a.provider_directions_link)
+        ? a.provider_directions_link
+        : isUrl(a.location)
+          ? a.location
+          : null;
     return {
       id: `appt-${a.id}`,
       title: `🩺 ${a.title}${a.provider_name ? ` with ${a.provider_name}` : ''}`,

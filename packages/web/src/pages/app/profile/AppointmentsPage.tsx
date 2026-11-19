@@ -22,6 +22,7 @@ import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/use
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { useProfile } from './ProfileLayout';
 import { useHealthConfig } from '../../../lib/appConfig';
+import { AddressFields, addressFrom, addressPayload, emptyAddress, hasAddress, type AddressValue } from '../../../components/AddressFields';
 
 const inputClass =
   'w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -36,7 +37,16 @@ export interface Appointment {
   provider_organisation: string | null;
   provider_address: string | null;
   provider_directions_link: string | null;
+  /** One line for display, kept in step with the address parts below. */
   location: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  address_suburb?: string | null;
+  address_state?: string | null;
+  address_postcode?: string | null;
+  address_country?: string | null;
+  /** Its own map link, if one was given. */
+  directions_link?: string | null;
   starts_at: string;
   ends_at: string | null;
   status: string;
@@ -433,8 +443,8 @@ export function AppointmentsPage() {
             ...(panel.current.provider_id && panel.current.provider_name
               ? [{ label: 'Provider', value: panel.current.provider_name, to: `/app/${profile.id}/providers?record=${panel.current.provider_id}` }]
               : []),
-            ...(panel.current.provider_directions_link
-              ? [{ label: 'Directions', value: 'Open map', href: panel.current.provider_directions_link }]
+            ...((panel.current.directions_link || panel.current.provider_directions_link)
+              ? [{ label: 'Directions', value: 'Open map', href: (panel.current.directions_link || panel.current.provider_directions_link)! }]
               : []),
             ...(panel.current.next_steps ?? []).map((st) => ({
               label: st.completed ? 'Next step, done' : 'Next step',
@@ -523,7 +533,7 @@ export function AppointmentsPage() {
           appointment={null}
           initialTitle={booking.step.title}
           initialType={kindForStep(booking.step.type_name)}
-          initialProviderId={booking.step.type_key === 'follow_up' ? booking.from.provider_id ?? '' : ''}
+          initialProviderId={booking.step.provider_id ?? (booking.step.type_key === 'follow_up' ? booking.from.provider_id ?? '' : '')}
           initialConditionId={booking.from.medical_condition_id ?? ''}
           fromReminderId={booking.step.id}
           onClose={() => setBooking(null)}
@@ -608,6 +618,12 @@ interface ProviderFull {
   provider_type: string;
   organisation: string | null;
   address: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  address_suburb?: string | null;
+  address_state?: string | null;
+  address_postcode?: string | null;
+  address_country?: string | null;
   directions_link: string | null;
   phone: string | null;
   email: string | null;
@@ -622,8 +638,15 @@ export interface AppointmentDraft {
   title: string;
   type: string;
   providerId: string;
+  /** A new name typed for who it is with: filed in Contacts on save. */
+  newProviderName: string;
+  /** What that new person does, when known, e.g. from a referral. */
+  newProviderType: string;
   conditionId: string;
-  location: string;
+  /** Where it is, found with the same address finder as everywhere else. */
+  address: AddressValue;
+  /** Its own map link, if the place has one. */
+  directionsLink: string;
   startDate: string;
   startTime: string;
   endTime: string;
@@ -638,8 +661,11 @@ export function newAppointmentDraft(init: Partial<AppointmentDraft> = {}): Appoi
     title: '',
     type: 'consultation',
     providerId: '',
+    newProviderName: '',
+    newProviderType: '',
     conditionId: '',
-    location: '',
+    address: emptyAddress,
+    directionsLink: '',
     startDate: '',
     startTime: '09:00',
     endTime: '',
@@ -660,8 +686,11 @@ function draftFromAppointment(a: Appointment): AppointmentDraft {
     title: a.title,
     type: a.appointment_type,
     providerId: a.provider_id ?? '',
+    newProviderName: '',
+    newProviderType: '',
     conditionId: a.medical_condition_id ?? '',
-    location: a.location ?? '',
+    address: addressFrom(a),
+    directionsLink: a.directions_link ?? '',
     startDate: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
     startTime: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
     endTime: e ? `${pad(e.getHours())}:${pad(e.getMinutes())}` : '',
@@ -683,8 +712,12 @@ export function appointmentBody(d: AppointmentDraft, fromReminderId?: string) {
     title: d.title.trim(),
     appointment_type: d.type,
     provider_id: d.providerId || null,
+    ...(!d.providerId && d.newProviderName.trim()
+      ? { provider_name: d.newProviderName.trim(), provider_type: d.newProviderType.trim() || null }
+      : {}),
     medical_condition_id: d.conditionId || null,
-    location: d.location.trim() || null,
+    ...addressPayload(d.address),
+    directions_link: d.directionsLink.trim() || null,
     starts_at: startsAt,
     ends_at: endsAt,
     status: d.status,
@@ -722,10 +755,7 @@ export function AppointmentFields({
   /** Keeps labels unique when more than one form is on screen. */
   idPrefix?: string;
 }) {
-  const queryClient = useQueryClient();
   const health = useHealthConfig();
-  const [providerName, setProviderName] = useState('');
-  const [showSaveProvider, setShowSaveProvider] = useState(false);
   const set = (patch: Partial<AppointmentDraft>) => onChange({ ...value, ...patch });
 
   const { data: providersData } = useQuery({
@@ -742,38 +772,37 @@ export function AppointmentFields({
   });
   const conditions = conditionData?.conditions ?? [];
 
+  // Where they are is where it is: picking who it is with fills the address
+  // and map link from Contacts, the same parts the address finder fills.
+  const placeFrom = (provider: ProviderFull | undefined): Partial<AppointmentDraft> => {
+    if (!provider) return {};
+    const address = addressFrom(provider);
+    return {
+      ...(hasAddress(address) ? { address } : {}),
+      ...(provider.directions_link ? { directionsLink: provider.directions_link } : {}),
+    };
+  };
   const handleProviderChange = (newProviderId: string) => {
-    setShowSaveProvider(false);
     const provider = newProviderId ? providers.find((p) => p.id === newProviderId) : undefined;
-    const where = provider?.directions_link || provider?.address;
-    set({ providerId: newProviderId, ...(where ? { location: where } : {}) });
+    set({ providerId: newProviderId, newProviderName: '', ...placeFrom(provider) });
   };
 
+  // Someone chosen before Contacts loaded (a follow-up, a health alert's GP)
+  // still brings their address once it arrives, unless one is already set.
+  useEffect(() => {
+    if (!value.providerId || hasAddress(value.address) || value.directionsLink) return;
+    const patch = placeFrom(providers.find((p) => p.id === value.providerId));
+    if (Object.keys(patch).length) onChange({ ...value, ...patch });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providers, value.providerId]);
+
+  // A typed name that is already in Contacts is simply picked.
   const handleProviderNameBlur = () => {
-    if (providerName.trim() && !value.providerId) {
-      const match = providers.find((p) => p.name.toLowerCase() === providerName.trim().toLowerCase());
-      if (match) {
-        handleProviderChange(match.id);
-      } else {
-        setShowSaveProvider(true);
-      }
-    }
+    const typed = value.newProviderName.trim().toLowerCase();
+    if (!typed || value.providerId) return;
+    const match = providers.find((p) => p.name.toLowerCase() === typed);
+    if (match) handleProviderChange(match.id);
   };
-
-  const saveProviderMutation = useMutation({
-    mutationFn: () =>
-      api.post<{ provider: ProviderFull }>(`/care-profiles/${profileId}/providers`, {
-        name: providerName.trim(),
-        provider_type: 'other',
-        address: value.location.trim() || null,
-      }),
-    onSuccess: (res) => {
-      set({ providerId: res.provider.id });
-      setShowSaveProvider(false);
-      setProviderName('');
-      void queryClient.invalidateQueries({ queryKey: ['providers', profileId] });
-    },
-  });
 
   return (
     <div className="space-y-4">
@@ -815,40 +844,23 @@ export function AppointmentFields({
               ))}
             </select>
           </label>
-          {!value.providerId && providers.length > 0 ? (
+          {!value.providerId ? (
             <div className="mt-1">
               <input
                 type="text"
                 aria-label="Or type a new name"
                 className={inputClass}
                 placeholder="Or type a new name"
-                value={providerName}
-                onChange={(e) => { setProviderName(e.target.value); setShowSaveProvider(false); }}
+                value={value.newProviderName}
+                onChange={(e) => set({ newProviderName: e.target.value })}
                 onBlur={handleProviderNameBlur}
               />
-              {showSaveProvider && providerName.trim() ? (
-                <div className="mt-1">
-                  <Button
-                    size="xs"
-                    variant="secondary"
-                    loading={saveProviderMutation.isPending}
-                    onClick={() => saveProviderMutation.mutate()}
-                  >
-                    Save "{providerName.trim()}" to Providers
-                  </Button>
-                </div>
+              {value.newProviderName.trim() ? (
+                <p className="mt-1 text-xs text-muted">New to Contacts. Filed there when you save.</p>
               ) : null}
             </div>
           ) : null}
         </div>
-        <Input
-          id={`${idPrefix}-location`}
-          label="Location"
-          placeholder="e.g. Suite 4, 12 High St or a map link"
-          value={value.location}
-          onChange={(e) => set({ location: e.target.value })}
-          hint={value.providerId ? 'Filled in from who it is with. Edit if different.' : undefined}
-        />
         <Input
           id={`${idPrefix}-date`}
           label="Start date"
@@ -879,6 +891,23 @@ export function AppointmentFields({
             ))}
           </select>
         </label>
+      </div>
+      <div>
+        <p className="text-sm font-medium text-ink mb-1">Where</p>
+        {value.providerId && (hasAddress(value.address) || value.directionsLink) ? (
+          <p className="text-xs text-muted mb-2">Filled in from who it is with. Change it if it is somewhere else.</p>
+        ) : null}
+        <AddressFields value={value.address} onChange={(address) => set({ address })} findLabel="Find where it is" />
+        <div className="mt-3">
+          <Input
+            id={`${idPrefix}-map`}
+            label="Map link, optional"
+            type="url"
+            placeholder="e.g. a Google Maps link"
+            value={value.directionsLink}
+            onChange={(e) => set({ directionsLink: e.target.value })}
+          />
+        </div>
       </div>
       <Textarea id={`${idPrefix}-notes`} label="Notes" rows={2} value={value.notes} onChange={(e) => set({ notes: e.target.value })} />
       <div className="grid sm:grid-cols-2 gap-3">

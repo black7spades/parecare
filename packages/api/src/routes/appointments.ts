@@ -7,6 +7,7 @@ import { accountIdForProfile } from '../services/documentCategories';
 import { resolveNextStepTypeByName, stepBooks } from '../services/nextStepTypes';
 import { isValidTimeZone, parseZonedTime } from '../lib/timezone';
 import { createForwards, deliverForwards, forwardItemSchema, forwardsSentFor, takeBackForward } from '../services/noteForwards';
+import { appointmentPlaceColumns, ensureProfessional } from '../services/professionals';
 
 /**
  * Appointments are a first-class record: who is being seen, what for,
@@ -34,7 +35,19 @@ const appointmentSchema = z.object({
   // The condition this appointment arose from, so an x-ray booked for a sore
   // ankle stays tied to the ankle in the record and on the calendar.
   medical_condition_id: z.string().uuid().optional().nullable(),
+  // Where it is: the same segmented address as everywhere else, its own map
+  // link, and (from older callers) one line of text, which is split for them.
   location: z.string().max(255).optional().nullable(),
+  address_line1: z.string().max(255).optional().nullable(),
+  address_line2: z.string().max(255).optional().nullable(),
+  address_suburb: z.string().max(120).optional().nullable(),
+  address_state: z.string().max(120).optional().nullable(),
+  address_postcode: z.string().max(20).optional().nullable(),
+  address_country: z.string().max(120).optional().nullable(),
+  directions_link: z.string().max(2000).optional().nullable(),
+  // A new name typed for who it is with: filed in Contacts automatically.
+  provider_name: z.string().max(255).optional().nullable(),
+  provider_type: z.string().max(100).optional().nullable(),
   starts_at: z.string().datetime(),
   ends_at: z.string().datetime().optional().nullable(),
   status: z.enum(APPOINTMENT_STATUSES).default('scheduled'),
@@ -87,6 +100,33 @@ export async function syncAppointmentSpend(
     .merge({ amount, status, spent_on: spentOn, updated_at: db.fn.now() });
 }
 
+const PLACE_KEYS = ['location', 'address_line1', 'address_line2', 'address_suburb', 'address_state', 'address_postcode', 'address_country', 'directions_link'] as const;
+
+/**
+ * The columns an appointment write stores: the place split into its parts
+ * with the one-line location kept in step, and a new name for who it is with
+ * filed in Contacts and linked.
+ */
+async function appointmentColumns(
+  profileId: string,
+  data: Record<string, unknown> & { provider_id?: string | null; provider_name?: string | null; provider_type?: string | null }
+): Promise<Record<string, unknown>> {
+  const { provider_name, provider_type, ...fields } = data;
+  const place: Record<string, string | null | undefined> = {};
+  for (const k of PLACE_KEYS) {
+    if (k in fields) {
+      place[k] = fields[k] as string | null | undefined;
+      delete fields[k];
+    }
+  }
+  const out: Record<string, unknown> = { ...fields, ...(Object.keys(place).length ? appointmentPlaceColumns(place) : {}) };
+  if (!data.provider_id && provider_name?.trim()) {
+    const pro = await ensureProfessional(db, { profileId, name: provider_name, providerType: provider_type });
+    if (pro) out['provider_id'] = pro.id;
+  }
+  return out;
+}
+
 const appointmentSelect = (profileId: string) =>
   db('appointments as a')
     .leftJoin('providers as p', 'a.provider_id', 'p.id')
@@ -121,9 +161,11 @@ export async function nextStepsFor(appointmentIds: string[]) {
     .leftJoin('next_step_types as t', 'r.next_step_type_id', 't.id')
     .whereIn('r.appointment_id', appointmentIds)
     .orderBy('r.created_at', 'asc')
+    .leftJoin('providers as p', 'r.provider_id', 'p.id')
     .select(
       'r.id', 'r.appointment_id', 'r.title', 'r.next_due_at', 'r.completed', 'r.completed_at',
-      't.id as type_id', 't.name as type_name', 't.system_key as type_key'
+      't.id as type_id', 't.name as type_name', 't.system_key as type_key',
+      'r.provider_id', 'p.name as provider_name', 'p.provider_type as provider_type'
     );
   const ledTo = rows.length
     ? await db('appointments')
@@ -144,6 +186,9 @@ export async function nextStepsFor(appointmentIds: string[]) {
       type_name: r.type_name ?? 'Other',
       type_key: r.type_key ?? null,
       books: stepBooks(r.type_key),
+      provider_id: r.provider_id ?? null,
+      provider_name: r.provider_name ?? null,
+      provider_type: r.provider_type ?? null,
       led_to: ledToByTask.get(r.id) ?? null,
     });
     byAppointment.set(r.appointment_id, list);
@@ -176,6 +221,11 @@ const outcomeSchema = z.object({
         type: z.string().trim().max(100),
         details: z.string().trim().max(255).optional().nullable(),
         due_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+        // Who the step is with, such as who a referral is to: someone in
+        // Contacts, or a new name, filed there automatically.
+        provider_id: z.string().uuid().optional().nullable(),
+        provider_name: z.string().trim().max(255).optional().nullable(),
+        provider_type: z.string().trim().max(100).optional().nullable(),
         // Pieces of this visit to send with the step, such as what happened
         // for the specialist a referral is to. They land when it is booked.
         forward: z.array(forwardItemSchema).max(50).default([]),
@@ -185,6 +235,13 @@ const outcomeSchema = z.object({
     .default([]),
   tz: z.string().max(64).optional().nullable(),
 });
+
+/** A stored provider type in words: built-in codes read as plain names. */
+const BUILT_IN_TYPE_WORDS: Record<string, string> = {
+  gp: 'GP', specialist: 'specialist', psychologist: 'psychologist', allied_health: 'allied health',
+  social_worker: 'social worker', legal: 'lawyer', financial: 'financial adviser',
+};
+const providerTypeWords = (t: string) => BUILT_IN_TYPE_WORDS[t] ?? t.toLowerCase();
 
 /** A week from today, for a next step given no date. */
 const inAWeek = (): string => new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
@@ -200,18 +257,44 @@ export async function addNextSteps(
     appointmentId: string;
     actorId: string;
     timeZone: string | null;
-    steps: Array<{ type: string; details?: string | null; due_on?: string | null }>;
+    steps: Array<{
+      type: string;
+      details?: string | null;
+      due_on?: string | null;
+      provider_id?: string | null;
+      provider_name?: string | null;
+      provider_type?: string | null;
+    }>;
     source?: 'person' | 'pare';
   }
-): Promise<Array<{ id: string; title: string; type_name: string }>> {
+): Promise<Array<{ id: string; title: string; type_name: string; provider_id: string | null }>> {
   const accountId = (await accountIdForProfile(opts.profileId, trx))!;
-  const out: Array<{ id: string; title: string; type_name: string }> = [];
+  const out: Array<{ id: string; title: string; type_name: string; provider_id: string | null }> = [];
   for (const step of opts.steps) {
     const typeId = await resolveNextStepTypeByName(accountId, step.type || 'Other', trx);
     const typeName = ((await trx('next_step_types').where({ id: typeId }).first('name')) as { name: string }).name;
     const dueOn = step.due_on || inAWeek();
     const due = parseZonedTime(`${dueOn}T09:00:00`, opts.timeZone) ?? new Date(`${dueOn}T09:00:00Z`);
-    const title = step.details?.trim() || typeName;
+    // Who it is with goes into Contacts, linked to this person, so the
+    // referral's specialist is there to pick when it is booked.
+    let provider: { id: string; name: string } | null = null;
+    if (step.provider_id) {
+      const linked = await trx('providers').where({ id: step.provider_id, account_id: accountId }).first('id', 'name');
+      if (linked) {
+        provider = linked as { id: string; name: string };
+        await trx('care_profile_providers')
+          .insert({ care_profile_id: opts.profileId, provider_id: provider.id })
+          .onConflict(['care_profile_id', 'provider_id'])
+          .ignore();
+      }
+    } else if (step.provider_name?.trim()) {
+      provider = await ensureProfessional(trx, { profileId: opts.profileId, name: step.provider_name, providerType: step.provider_type });
+    }
+    const providerType = provider
+      ? ((await trx('providers').where({ id: provider.id }).first('provider_type')) as { provider_type: string | null } | undefined)?.provider_type
+      : null;
+    const who = provider ? `${provider.name}${providerType && providerType !== 'other' ? `, ${providerTypeWords(providerType)}` : ''}` : '';
+    const title = step.details?.trim() || (who ? `See ${who}` : typeName);
     const [task] = await trx('reminders')
       .insert({
         care_profile_id: opts.profileId,
@@ -220,10 +303,11 @@ export async function addNextSteps(
         next_due_at: due,
         appointment_id: opts.appointmentId,
         next_step_type_id: typeId,
+        provider_id: provider?.id ?? null,
       })
       .returning('id');
     const taskId = (task as { id: string }).id;
-    out.push({ id: taskId, title, type_name: typeName });
+    out.push({ id: taskId, title, type_name: typeName, provider_id: provider?.id ?? null });
     await trx('audit_log').insert({
       care_profile_id: opts.profileId,
       actor_account_id: opts.actorId,
@@ -309,6 +393,8 @@ appointmentsRouter.put('/:appointmentId/outcome', requireAuth, async (req, res) 
       forwarded: forwarded.get(appointment.id) ?? [],
     },
     created: created.map((c) => c.id),
+    // Who each new step is with, so a booking made straight away starts there.
+    created_steps: created.map((c) => ({ id: c.id, provider_id: c.provider_id })),
   });
 });
 
@@ -318,7 +404,8 @@ appointmentsRouter.post('/', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
     return;
   }
-  const { cost_estimate, cost_actual, ...appointmentFields } = parsed.data;
+  const { cost_estimate, cost_actual, ...rest } = parsed.data;
+  const appointmentFields = await appointmentColumns(String(req.params['id']), rest);
   const [appointment] = await db('appointments')
     .insert({
       care_profile_id: req.params['id'],
@@ -356,7 +443,8 @@ appointmentsRouter.patch('/:appointmentId', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
-  const { cost_estimate, cost_actual, ...appointmentFields } = parsed.data;
+  const { cost_estimate, cost_actual, ...rest } = parsed.data;
+  const appointmentFields = await appointmentColumns(String(req.params['id']), rest);
   const [appointment] = await db('appointments')
     .where({ id: req.params['appointmentId'], care_profile_id: req.params['id'] })
     .update({ ...appointmentFields, updated_at: db.fn.now() })
