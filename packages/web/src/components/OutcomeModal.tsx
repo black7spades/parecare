@@ -16,8 +16,10 @@ import { addressFrom } from './AddressFields';
 import {
   AppointmentFields,
   appointmentBody,
+  appointmentDraftErrors,
   draftIsBookable,
   kindForStep,
+  missingSentence,
   newAppointmentDraft,
   type AppointmentDraft,
 } from '../pages/app/profile/AppointmentsPage';
@@ -102,6 +104,8 @@ export function OutcomeModal({
   const [comboKey, setComboKey] = useState(0);
   const [editingList, setEditingList] = useState(false);
   const [error, setError] = useState('');
+  // What still needs filling in, named once Save has been tried.
+  const [tried, setTried] = useState(false);
   const existing = appointment.next_steps ?? [];
   const candidates = useForwardCandidates(profileId, appointment, outcome);
 
@@ -150,7 +154,33 @@ export function OutcomeModal({
     });
   const picksFor = (d: DraftStep): PickState =>
     Object.fromEntries(candidates.map((c) => [c.key, d.send[c.key] ?? { on: d.sendDefault }]));
-  const unfinishedBooking = drafts.some((d) => d.booking && !draftIsBookable(d.booking));
+  const unfinished = drafts.filter((d) => d.booking && !draftIsBookable(d.booking));
+  const nothingToSave = !outcome.trim() && drafts.length === 0 && !(appointment.outcome ?? '');
+  // Every reason Save cannot go yet, in words, so nobody is left guessing.
+  const problems = [
+    ...unfinished.map((d) =>
+      `${missingSentence(appointmentDraftErrors(d.booking!), `The booking for ${d.who.name.trim() || d.type}`)} Add it, or choose Not now to book it later.`
+    ),
+    ...(nothingToSave ? ['Write what happened, or add a next step, then save.'] : []),
+  ];
+  const trySave = () => {
+    setTried(true);
+    setError('');
+    if (problems.length === 0) {
+      save.mutate();
+      return;
+    }
+    // Take them to the first box that needs filling.
+    const first = unfinished[0];
+    if (first?.booking) {
+      const missing = appointmentDraftErrors(first.booking);
+      const el = document.getElementById(`book-${first.key}-${missing.title ? 'title' : 'date'}`);
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el?.focus({ preventScroll: true });
+    } else if (nothingToSave) {
+      document.getElementById('outcome-what-happened')?.focus();
+    }
+  };
   const updateDraft = (key: number, patch: Partial<DraftStep>) =>
     setDrafts((d) => d.map((s) => (s.key === key ? { ...s, ...patch } : s)));
 
@@ -187,8 +217,9 @@ export function OutcomeModal({
         if (!d.booking || !stepId) continue;
         try {
           await api.post(`/care-profiles/${profileId}/appointments`, appointmentBody(d.booking, stepId));
-        } catch {
-          failed.push(d.booking.title.trim() || d.type);
+        } catch (err) {
+          const why = err instanceof Error && err.message ? ` (${err.message.replace(/\.$/, '')})` : '';
+          failed.push(`${d.booking.title.trim() || d.type}${why}`);
         }
       }
       return failed;
@@ -226,6 +257,7 @@ export function OutcomeModal({
         </p>
 
         <Textarea
+          id="outcome-what-happened"
           label="What happened"
           placeholder="e.g. Ankle is sprained, not broken. Rest for two weeks."
           rows={3}
@@ -367,6 +399,7 @@ export function OutcomeModal({
                               idPrefix={`book-${d.key}`}
                               value={d.booking}
                               onChange={(next) => updateDraft(d.key, { booking: next })}
+                              errors={tried ? appointmentDraftErrors(d.booking) : {}}
                             />
                           </div>
                         ) : (
@@ -397,8 +430,12 @@ export function OutcomeModal({
         ) : null}
 
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        {unfinishedBooking ? (
-          <p className="text-sm text-muted">Give each booking what it is for and a date, or choose Not now.</p>
+        {tried && problems.length > 0 ? (
+          <div className="rounded-md border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800 px-3 py-2" role="alert">
+            {problems.map((p) => (
+              <p key={p} className="text-sm text-red-700 dark:text-red-300">{p}</p>
+            ))}
+          </div>
         ) : null}
 
         <div className="flex justify-end gap-2">
@@ -406,8 +443,7 @@ export function OutcomeModal({
           {canEdit ? (
             <Button
               loading={save.isPending}
-              disabled={unfinishedBooking || (!outcome.trim() && drafts.length === 0 && !(appointment.outcome ?? ''))}
-              onClick={() => save.mutate()}
+              onClick={trySave}
             >
               Save
             </Button>

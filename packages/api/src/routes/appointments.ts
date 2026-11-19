@@ -8,6 +8,7 @@ import { resolveNextStepTypeByName, stepBooks } from '../services/nextStepTypes'
 import { isValidTimeZone, parseZonedTime } from '../lib/timezone';
 import { createForwards, deliverForwards, forwardItemSchema, forwardsSentFor, takeBackForward } from '../services/noteForwards';
 import { appointmentPlaceColumns, ensureProfessional } from '../services/professionals';
+import { APPOINTMENT_FIELD_LABELS, OUTCOME_FIELD_LABELS, plainValidationError } from '../lib/plainValidation';
 
 /**
  * Appointments are a first-class record: who is being seen, what for,
@@ -330,7 +331,7 @@ export async function addNextSteps(
 appointmentsRouter.put('/:appointmentId/outcome', requireAuth, async (req, res) => {
   const parsed = outcomeSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
+    res.status(400).json({ error: plainValidationError(parsed.error, OUTCOME_FIELD_LABELS, 'How it went did not save. Check each box and try again.'), code: 'VALIDATION_ERROR' });
     return;
   }
   const profileId = String(req.params['id']);
@@ -401,7 +402,7 @@ appointmentsRouter.put('/:appointmentId/outcome', requireAuth, async (req, res) 
 appointmentsRouter.post('/', requireAuth, async (req, res) => {
   const parsed = appointmentSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
+    res.status(400).json({ error: plainValidationError(parsed.error, APPOINTMENT_FIELD_LABELS, 'The appointment did not save. Check each box and try again.'), code: 'VALIDATION_ERROR' });
     return;
   }
   const { cost_estimate, cost_actual, ...rest } = parsed.data;
@@ -440,7 +441,7 @@ appointmentsRouter.post('/', requireAuth, async (req, res) => {
 appointmentsRouter.patch('/:appointmentId', requireAuth, async (req, res) => {
   const parsed = appointmentSchema.partial().safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    res.status(400).json({ error: plainValidationError(parsed.error, APPOINTMENT_FIELD_LABELS, 'The appointment did not save. Check each box and try again.'), code: 'VALIDATION_ERROR' });
     return;
   }
   const { cost_estimate, cost_actual, ...rest } = parsed.data;

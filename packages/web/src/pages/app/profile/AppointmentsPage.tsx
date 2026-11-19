@@ -701,8 +701,27 @@ function draftFromAppointment(a: Appointment): AppointmentDraft {
   };
 }
 
+/** What a booking still needs, box by box, in the words shown next to it. */
+export interface AppointmentDraftErrors {
+  title?: string;
+  startDate?: string;
+}
+
+export function appointmentDraftErrors(d: AppointmentDraft): AppointmentDraftErrors {
+  const errors: AppointmentDraftErrors = {};
+  if (!d.title.trim()) errors.title = 'Say what it is for, e.g. Neurology appointment.';
+  if (!d.startDate) errors.startDate = 'Pick the day it is on.';
+  return errors;
+}
+
 /** Ready to book: it says what it is for and when. */
-export const draftIsBookable = (d: AppointmentDraft) => !!d.title.trim() && !!d.startDate;
+export const draftIsBookable = (d: AppointmentDraft) => Object.keys(appointmentDraftErrors(d)).length === 0;
+
+/** One sentence naming what is missing, for beside the Save button. */
+export function missingSentence(errors: AppointmentDraftErrors, what = 'This appointment'): string {
+  const parts = [errors.title ? 'what it is for' : null, errors.startDate ? 'a start date' : null].filter(Boolean);
+  return parts.length ? `${what} needs ${parts.join(' and ')}.` : '';
+}
 
 /** The draft as the appointments API takes it. */
 export function appointmentBody(d: AppointmentDraft, fromReminderId?: string) {
@@ -748,12 +767,15 @@ export function AppointmentFields({
   value,
   onChange,
   idPrefix = 'appt',
+  errors = {},
 }: {
   profileId: string;
   value: AppointmentDraft;
   onChange: (next: AppointmentDraft) => void;
   /** Keeps labels unique when more than one form is on screen. */
   idPrefix?: string;
+  /** What is missing, shown in red under each box once Save has been tried. */
+  errors?: AppointmentDraftErrors;
 }) {
   const health = useHealthConfig();
   const set = (patch: Partial<AppointmentDraft>) => onChange({ ...value, ...patch });
@@ -813,6 +835,7 @@ export function AppointmentFields({
           placeholder="e.g. Cardiology check-up"
           value={value.title}
           onChange={(e) => set({ title: e.target.value })}
+          error={errors.title}
         />
         <label className="block">
           <span className="block text-sm font-medium text-ink mb-1">Kind</span>
@@ -867,6 +890,7 @@ export function AppointmentFields({
           type="date"
           value={value.startDate}
           onChange={(e) => set({ startDate: e.target.value })}
+          error={errors.startDate}
         />
         <Input
           id={`${idPrefix}-start`}
@@ -970,6 +994,9 @@ export function AppointmentEditor({
       : newAppointmentDraft({ title: initialTitle, type: initialType, providerId: initialProviderId, conditionId: initialConditionId })
   );
   const [error, setError] = useState('');
+  // Errors show once Save has been tried, never while someone is still typing.
+  const [tried, setTried] = useState(false);
+  const errors = tried ? appointmentDraftErrors(draft) : {};
 
   useEffect(() => {
     if (appointment) setDraft(draftFromAppointment(appointment));
@@ -989,14 +1016,23 @@ export function AppointmentEditor({
   return (
     <Modal open onClose={onClose} title={isNew ? 'Add appointment' : `Edit ${appointment.title}`} wide>
       <div className="space-y-4">
-        <AppointmentFields profileId={profileId} value={draft} onChange={setDraft} />
+        <AppointmentFields profileId={profileId} value={draft} onChange={setDraft} errors={errors} />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        {tried && !draftIsBookable(draft) ? (
+          <p className="text-sm text-red-600">{missingSentence(appointmentDraftErrors(draft))}</p>
+        ) : null}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button
             loading={saveMutation.isPending}
-            disabled={!draftIsBookable(draft)}
-            onClick={() => saveMutation.mutate()}
+            onClick={() => {
+              setTried(true);
+              setError('');
+              const missing = appointmentDraftErrors(draft);
+              if (missing.title) document.getElementById('appt-title')?.focus();
+              else if (missing.startDate) document.getElementById('appt-date')?.focus();
+              if (Object.keys(missing).length === 0) saveMutation.mutate();
+            }}
           >
             Save
           </Button>
