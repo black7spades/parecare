@@ -20,6 +20,17 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.45.1',
+    date: '2026-11-20',
+    summary: 'Save always says what is missing.',
+    groups: [
+      { heading: 'Fixed', items: [
+        'Save always says what is missing. In How did it go and the appointment form, Save no longer greys out without a word. Press it and anything still needed is named in red under its box, the form takes you there, and a sentence by the button says what to add or that Not now books it later.',
+        'A refused save names the box. When an appointment or How did it go cannot save, the message now says which box to check instead of "Invalid request". A booking that does not go through says why.',
+      ] },
+    ],
+  },
+  {
     version: '0.45.0',
     date: '2026-11-20',
     summary: 'Referrals file the specialist in Contacts, and appointment addresses use the address finder.',
