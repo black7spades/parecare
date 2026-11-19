@@ -688,7 +688,7 @@ export function TasksPage() {
               t.completed
                 ? { label: 'Reopen', onRun: () => setDone.mutate({ id: t.id, completed: false }), pending: setDone.isPending }
                 : t.to_book_appointment_id
-                  ? { label: 'Add the date', onRun: () => startCompleting(t) }
+                  ? { label: 'Book it', onRun: () => startCompleting(t) }
                   : { label: 'Mark done', onRun: () => startCompleting(t) }
             }
             extra={extra}

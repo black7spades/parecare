@@ -276,22 +276,28 @@ export function OutcomeModal({
             <ul className="divide-y divide-border rounded-md border border-border">
               {existing.map((s) => (
                 <li key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+                  {/* The words themselves book it, wherever they appear. */}
                   <div className="min-w-0 flex-1">
                     <p className={`text-sm text-ink break-words ${s.completed ? 'line-through' : ''}`}>{s.title}</p>
                     <p className="text-xs text-muted">{s.type_name}</p>
                   </div>
+                  {s.led_to && !s.led_to.starts_at && canEdit && !s.completed ? (
+                    <Button size="xs" variant="ghost" className="whitespace-nowrap" onClick={() => onAddDate(s.led_to!.id)}>
+                      Not booked yet, book it
+                    </Button>
+                  ) : null}
                   <span className="text-xs text-muted whitespace-nowrap">
                     {s.led_to
                       ? s.led_to.starts_at
                         ? `Booked for ${format(new Date(s.led_to.starts_at), 'd MMM')}`
-                        : 'Details saved, not booked yet'
+                        : null
                       : s.completed
                         ? `Done${s.completed_at ? ` ${format(new Date(s.completed_at), 'd MMM')}` : ''}`
                         : `Due ${format(new Date(s.next_due_at), 'd MMM')}`}
                   </span>
                   {canEdit && !s.completed && s.led_to && !s.led_to.starts_at ? (
                     <span className="flex gap-1">
-                      <Button size="xs" variant="secondary" onClick={() => onAddDate(s.led_to!.id)}>Add the date</Button>
+                      <Button size="xs" variant="secondary" onClick={() => onAddDate(s.led_to!.id)}>Book it</Button>
                     </span>
                   ) : canEdit && !s.completed ? (
                     <span className="flex gap-1">

@@ -233,8 +233,12 @@ export function ConditionTracking({
                 <div className="flex flex-wrap items-center gap-2">
                   <Link to={`/app/${profileId}/appointments?outcome=${a.id}`} className="text-ink font-medium hover:underline">{a.title}</Link>
                   {a.provider_name ? <span className="text-xs text-muted">with {a.provider_name}</span> : null}
-                  <span className="text-xs text-muted">{a.starts_at ? format(new Date(a.starts_at), 'd MMM yyyy, HH:mm') : 'Not booked yet'}</span>
-                  <span className="badge bg-surface-2 text-muted text-[10px] capitalize">{a.status}</span>
+                  {a.starts_at ? (
+                    <span className="text-xs text-muted">{format(new Date(a.starts_at), 'd MMM yyyy, HH:mm')}</span>
+                  ) : (
+                    <Link to={`/app/${profileId}/appointments?book=${a.id}`} className="text-xs text-primary hover:underline">Not booked yet, book it</Link>
+                  )}
+                  {a.starts_at ? <span className="badge bg-surface-2 text-muted text-[10px] capitalize">{a.status}</span> : null}
                 </div>
                 {a.outcome ? <p className="text-sm text-ink mt-0.5 whitespace-pre-wrap">Outcome: {a.outcome}</p> : null}
                 {(a.next_steps ?? []).length > 0 ? (
@@ -243,13 +247,19 @@ export function ConditionTracking({
                       <li key={s.id} className="flex flex-wrap items-center gap-2 text-xs">
                         <span className={`text-ink ${s.completed ? 'line-through' : ''}`}>{s.title}</span>
                         <span className="text-muted">{s.type_name}</span>
-                        <span className="text-muted">
-                          {s.led_to
-                            ? `led to ${s.led_to.title}, ${s.led_to.starts_at ? format(new Date(s.led_to.starts_at), 'd MMM') : 'not booked yet'}`
-                            : s.completed
-                              ? 'done'
-                              : `due ${format(new Date(s.next_due_at), 'd MMM')}`}
-                        </span>
+                        {s.led_to && !s.led_to.starts_at ? (
+                          <Link to={`/app/${profileId}/appointments?book=${s.led_to.id}`} className="text-primary hover:underline">
+                            {s.led_to.title}, not booked yet, book it
+                          </Link>
+                        ) : (
+                          <span className="text-muted">
+                            {s.led_to
+                              ? `led to ${s.led_to.title}, ${format(new Date(s.led_to.starts_at!), 'd MMM')}`
+                              : s.completed
+                                ? 'done'
+                                : `due ${format(new Date(s.next_due_at), 'd MMM')}`}
+                          </span>
+                        )}
                       </li>
                     ))}
                   </ul>
