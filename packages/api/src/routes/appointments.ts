@@ -27,7 +27,8 @@ export const APPOINTMENT_TYPES = [
   'vaccination',
   'other',
 ] as const;
-export const APPOINTMENT_STATUSES = ['scheduled', 'completed', 'cancelled', 'missed'] as const;
+// to_book: everything is known except the date; it waits on a to-do.
+export const APPOINTMENT_STATUSES = ['scheduled', 'completed', 'cancelled', 'missed', 'to_book'] as const;
 
 const appointmentSchema = z.object({
   title: z.string().min(1).max(255),
@@ -49,7 +50,8 @@ const appointmentSchema = z.object({
   // A new name typed for who it is with: filed in Contacts automatically.
   provider_name: z.string().max(255).optional().nullable(),
   provider_type: z.string().max(100).optional().nullable(),
-  starts_at: z.string().datetime(),
+  // Left out when it is not booked yet: the appointment waits as to_book.
+  starts_at: z.string().datetime().optional().nullable(),
   ends_at: z.string().datetime().optional().nullable(),
   status: z.enum(APPOINTMENT_STATUSES).default('scheduled'),
   notes: z.string().max(4000).optional().nullable(),
@@ -72,10 +74,11 @@ export async function syncAppointmentSpend(
   appointmentId: string,
   profileId: string,
   accountId: string,
-  startsAt: string | Date,
+  startsAt: string | Date | null,
   cost: { estimate?: number | null; actual?: number | null }
 ): Promise<void> {
-  const spentOn = new Date(startsAt).toISOString().slice(0, 10);
+  // Not booked yet: dated today until the appointment has its own date.
+  const spentOn = new Date(startsAt ?? Date.now()).toISOString().slice(0, 10);
   const hasActual = cost.actual != null;
   const hasEstimate = cost.estimate != null;
   if (!hasActual && !hasEstimate) {
@@ -99,6 +102,32 @@ export async function syncAppointmentSpend(
     })
     .onConflict('appointment_id')
     .merge({ amount, status, spent_on: spentOn, updated_at: db.fn.now() });
+}
+
+/**
+ * The to-do that keeps an appointment that is not booked yet in view. It is
+ * ticked off when the appointment is given its date.
+ */
+export async function addBookingTodo(profileId: string, title: string, actorId: string, conn: Knex | Knex.Transaction = db): Promise<string> {
+  const [task] = await conn('reminders')
+    .insert({
+      care_profile_id: profileId,
+      title: `Book ${title}`.slice(0, 255),
+      reminder_type: 'once',
+      next_due_at: new Date(Date.now() + 7 * 24 * 3600 * 1000),
+    })
+    .returning('id');
+  const taskId = (task as { id: string }).id;
+  await conn('audit_log').insert({
+    care_profile_id: profileId,
+    actor_account_id: actorId,
+    action: 'created',
+    entity_type: 'reminders',
+    entity_id: taskId,
+    summary: `Book ${title}`.slice(0, 255),
+    source: 'person',
+  });
+  return taskId;
 }
 
 const PLACE_KEYS = ['location', 'address_line1', 'address_line2', 'address_suburb', 'address_state', 'address_postcode', 'address_country', 'directions_link'] as const;
@@ -406,7 +435,17 @@ appointmentsRouter.post('/', requireAuth, async (req, res) => {
     return;
   }
   const { cost_estimate, cost_actual, ...rest } = parsed.data;
-  const appointmentFields = await appointmentColumns(String(req.params['id']), rest);
+  const profileId = String(req.params['id']);
+  const appointmentFields = await appointmentColumns(profileId, rest);
+  const dated = !!parsed.data.starts_at;
+  if (!dated) {
+    appointmentFields['starts_at'] = null;
+    appointmentFields['status'] = 'to_book';
+    // Not booked yet and not from a next step: a to-do keeps it in view.
+    if (!parsed.data.from_reminder_id) {
+      appointmentFields['from_reminder_id'] = await addBookingTodo(profileId, parsed.data.title, req.account!.id);
+    }
+  }
   const [appointment] = await db('appointments')
     .insert({
       care_profile_id: req.params['id'],
@@ -415,14 +454,17 @@ appointmentsRouter.post('/', requireAuth, async (req, res) => {
     })
     .returning('*');
   const appointmentId = (appointment as { id: string }).id;
-  // Booking the appointment a next step called for ticks that step off, and
-  // anything forwarded to the step lands on the new appointment.
+  // Booking the appointment a next step called for ticks that step off once
+  // it has a date. Anything forwarded to the step lands on it straight away,
+  // so the notes travel with the details even before it is booked.
   if (parsed.data.from_reminder_id) {
-    await db('reminders')
-      .where({ id: parsed.data.from_reminder_id, care_profile_id: req.params['id'], completed: false })
-      .update({ completed: true, completed_at: db.fn.now(), completed_by_account_id: req.account!.id });
+    if (dated) {
+      await db('reminders')
+        .where({ id: parsed.data.from_reminder_id, care_profile_id: req.params['id'], completed: false })
+        .update({ completed: true, completed_at: db.fn.now(), completed_by_account_id: req.account!.id });
+    }
     await deliverForwards(db, {
-      profileId: String(req.params['id']),
+      profileId,
       reminderId: parsed.data.from_reminder_id,
       appointmentId,
     });
@@ -431,7 +473,7 @@ appointmentsRouter.post('/', requireAuth, async (req, res) => {
     appointmentId,
     String(req.params['id']),
     req.account!.id,
-    parsed.data.starts_at,
+    parsed.data.starts_at ?? null,
     { estimate: cost_estimate, actual: cost_actual }
   );
   const enriched = await appointmentSelect(String(req.params['id'])).andWhere('a.id', appointmentId).first();
@@ -445,14 +487,39 @@ appointmentsRouter.patch('/:appointmentId', requireAuth, async (req, res) => {
     return;
   }
   const { cost_estimate, cost_actual, ...rest } = parsed.data;
-  const appointmentFields = await appointmentColumns(String(req.params['id']), rest);
-  const [appointment] = await db('appointments')
+  const before = (await db('appointments')
     .where({ id: req.params['appointmentId'], care_profile_id: req.params['id'] })
-    .update({ ...appointmentFields, updated_at: db.fn.now() })
-    .returning('*');
-  if (!appointment) {
+    .first('id', 'starts_at', 'status', 'from_reminder_id')) as
+    | { id: string; starts_at: Date | null; status: string; from_reminder_id: string | null }
+    | undefined;
+  if (!before) {
     res.status(404).json({ error: 'Appointment not found', code: 'NOT_FOUND' });
     return;
+  }
+  if (parsed.data.starts_at === null && before.starts_at) {
+    res.status(400).json({ error: 'A booked appointment keeps its date. Change the date, or cancel the appointment.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const appointmentFields = await appointmentColumns(String(req.params['id']), rest);
+  // Given its date, an appointment that was not booked yet is booked now.
+  const nowBooked = !before.starts_at && !!parsed.data.starts_at;
+  if (nowBooked && (!parsed.data.status || parsed.data.status === 'to_book')) appointmentFields['status'] = 'scheduled';
+  if (!before.starts_at && !parsed.data.starts_at && parsed.data.status === undefined) appointmentFields['status'] = before.status;
+  const [appointment] = await db('appointments')
+    .where({ id: before.id })
+    .update({ ...appointmentFields, updated_at: db.fn.now() })
+    .returning('*');
+  // Its to-do is done: the appointment is booked.
+  if (nowBooked && before.from_reminder_id) {
+    await db('reminders')
+      .where({ id: before.from_reminder_id, care_profile_id: req.params['id'], completed: false })
+      .update({ completed: true, completed_at: db.fn.now(), completed_by_account_id: req.account!.id });
+  }
+  // A cost already on the ledger moves to the appointment's new day.
+  if (parsed.data.starts_at && cost_estimate === undefined && cost_actual === undefined) {
+    await db('health_spend_entries')
+      .where({ appointment_id: before.id })
+      .update({ spent_on: new Date(parsed.data.starts_at).toISOString().slice(0, 10), updated_at: db.fn.now() });
   }
   // Update the spend entry when a cost was sent, dated to the appointment day.
   if (cost_estimate !== undefined || cost_actual !== undefined) {

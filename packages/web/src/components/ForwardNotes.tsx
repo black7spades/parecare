@@ -42,7 +42,7 @@ export interface ForwardedFrom {
 export interface ForwardSource {
   id: string;
   title: string;
-  starts_at: string;
+  starts_at: string | null;
   provider_name: string | null;
   outcome?: string | null;
   notes: string | null;
@@ -264,7 +264,7 @@ export function ForwardedText({
 
 const stepLabel = (s: NextStep) => (s.title === s.type_name ? s.type_name : `${s.type_name}: ${s.title}`);
 const appointmentLabel = (a: ForwardSource) =>
-  `${a.provider_name ? `${a.title} with ${a.provider_name}` : a.title}, ${format(new Date(a.starts_at), 'd MMM yyyy')}`;
+  `${a.provider_name ? `${a.title} with ${a.provider_name}` : a.title}, ${a.starts_at ? format(new Date(a.starts_at), 'd MMM yyyy') : 'not booked yet'}`;
 
 /**
  * Forward all or some of an appointment's notes: to an appointment already
@@ -306,7 +306,8 @@ export function ForwardNotesModal({
     () =>
       appointments
         .filter((a) => a.id !== source.id)
-        .sort((a, b) => new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime()),
+        // Not booked yet first, then newest first.
+        .sort((a, b) => (b.starts_at ? new Date(b.starts_at).getTime() : Infinity) - (a.starts_at ? new Date(a.starts_at).getTime() : Infinity)),
     [appointments, source.id]
   );
   const [target, setTarget] = useState(() => (waitingSteps[0] ? `step:${waitingSteps[0].id}` : ''));

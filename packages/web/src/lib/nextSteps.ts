@@ -40,7 +40,8 @@ export interface NextStep {
   provider_name?: string | null;
   provider_type?: string | null;
   /** The appointment booked to carry it out, if any. */
-  led_to: { id: string; title: string; starts_at: string; status: string } | null;
+  /** Empty starts_at: the details are saved but it is not booked yet. */
+  led_to: { id: string; title: string; starts_at: string | null; status: string } | null;
 }
 
 export const nextStepTypesKey = (profileId: string) => ['next-step-types', profileId];

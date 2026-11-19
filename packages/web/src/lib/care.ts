@@ -511,6 +511,9 @@ export interface Task {
   appointment_title?: string | null;
   appointment_starts_at?: string | null;
   next_step_type_name?: string | null;
+  /** An appointment waiting on this to-do for its date: doing it means adding the date. */
+  to_book_appointment_id?: string | null;
+  to_book_title?: string | null;
 }
 
 export const COMPLETION_REASONS = [
@@ -596,7 +599,8 @@ export interface ConditionAppointment {
   id: string;
   title: string;
   appointment_type: string;
-  starts_at: string;
+  /** Empty while it is not booked yet. */
+  starts_at: string | null;
   status: string;
   location: string | null;
   provider_name: string | null;
@@ -611,7 +615,7 @@ export interface ConditionAppointment {
     type_name: string;
     completed: boolean;
     next_due_at: string;
-    led_to: { id: string; title: string; starts_at: string } | null;
+    led_to: { id: string; title: string; starts_at: string | null } | null;
   }>;
 }
 

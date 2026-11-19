@@ -20,6 +20,22 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.46.0',
+    date: '2026-11-20',
+    summary: 'Save an appointment before it is booked, and add the date later.',
+    groups: [
+      { heading: 'Added', items: [
+        'Save an appointment before it is booked. Fill in who it is with, where, what for and any notes, and leave the date blank. It saves as Not booked yet, with a to-do to book it. Book it now in How did it go works the same way.',
+        'Add the date when it is booked. Not booked yet appointments sit at the top of Appointments with an Add the date button. Adding the date books the appointment and ticks its to-do off. Ticking that to-do on the Tasks page takes you straight to adding the date.',
+        'Pare saves appointments that are not booked yet. Tell Pare about an appointment you still need to book and it keeps the details with a to-do. Give Pare the date later and it books it.',
+      ] },
+      { heading: 'Fixed', items: [
+        'The panel that slides in from the right closes every time. Opening another record from inside it, or clicking a row twice, no longer leaves Close and the background unable to shut it.',
+        'On a phone, the Add PareCare to your home screen bar no longer sits on top of an open record and blocks what is underneath it.',
+      ] },
+    ],
+  },
+  {
     version: '0.45.1',
     date: '2026-11-20',
     summary: 'Save always says what is missing.',

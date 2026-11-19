@@ -39,7 +39,7 @@ export function InstallPrompt() {
   };
 
   return (
-    <div className="fixed inset-x-3 bottom-3 z-40 md:left-auto md:right-4 md:w-80 rounded-lg border border-border bg-card shadow-lg p-3 flex items-center gap-3">
+    <div className="fixed inset-x-3 bottom-3 z-30 md:left-auto md:right-4 md:w-80 rounded-lg border border-border bg-card shadow-lg p-3 flex items-center gap-3">
       <span className="text-sm text-ink flex-1">Add PareCare to your home screen for one tap access.</span>
       <Button
         size="sm"

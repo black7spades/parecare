@@ -15,7 +15,7 @@ import { SUBSTANCE_STATUSES, SUBSTANCE_ROUTES } from '../routes/substanceUse';
 import { resolveSymptomCatalogueId } from '../routes/symptomCatalogue';
 import { resolveNeurotypeAttributeCatalogueId, ATTRIBUTE_KINDS } from '../routes/neurotypeAttributeCatalogue';
 import { linkAddressToProfile, syncProfileResidence, RESIDENCE_KIND } from './addresses';
-import { APPOINTMENT_TYPES, APPOINTMENT_STATUSES, addNextSteps, syncAppointmentSpend } from '../routes/appointments';
+import { APPOINTMENT_TYPES, APPOINTMENT_STATUSES, addBookingTodo, addNextSteps, syncAppointmentSpend } from '../routes/appointments';
 import { createForwards, deliverForwards, type ForwardItem } from './noteForwards';
 import { addCirclePerson, findCircleMemberByName, isAddedPerson } from './circlePeople';
 import { appointmentPlaceColumns, ensureProfessional } from './professionals';
@@ -441,7 +441,9 @@ const bookAppointmentSchema = z.object({
   appointment_type: z.enum(APPOINTMENT_TYPES).default('consultation'),
   provider_name: z.string().max(255).optional().nullable(),
   location: z.string().max(255).optional().nullable(),
-  starts_at: z.string(),
+  // Left out when it is not booked yet: the details are kept and a to-do
+  // waits for the date.
+  starts_at: z.string().optional().nullable(),
   ends_at: z.string().optional().nullable(),
   notes: z.string().max(4000).optional().nullable(),
   cost_estimate: z.number().min(0).max(1e9).optional().nullable(),
@@ -1900,8 +1902,9 @@ async function executeOne(
       return `Updated the profile details.${ownerNote}`;
     }
     case 'book_appointment': {
-      const startsAt = parseFutureWhen(action.starts_at, timeZone);
-      if (!startsAt) {
+      const dateless = !action.starts_at?.trim();
+      const startsAt = dateless ? null : parseFutureWhen(action.starts_at, timeZone);
+      if (!dateless && !startsAt) {
         return `${CLARIFY_MARK} I did not book "${action.title}": the date and time were unclear. When is it?`;
       }
       const endsAt = parseFutureWhen(action.ends_at, timeZone);
@@ -1913,25 +1916,41 @@ async function executeOne(
       const providerNote = resolved.note;
       // Booking a referral with no name given is with whoever it is to.
       const providerId = resolved.providerId ?? step?.provider_id ?? null;
-      const [appointment] = await db('appointments')
-        .insert({
-          care_profile_id: profileId,
-          title: action.title,
-          appointment_type: action.appointment_type,
-          provider_id: providerId,
-          ...appointmentPlaceColumns({ location: action.location ?? null }),
-          starts_at: startsAt,
-          ends_at: endsAt,
-          status: 'scheduled',
-          notes: action.notes ?? null,
-          from_reminder_id: step?.id ?? null,
-          created_by_account_id: account.id,
-        })
-        .returning('*');
+      // Details already saved for this step, not booked yet: give them the date.
+      const waiting = step
+        ? ((await db('appointments').where({ care_profile_id: profileId, from_reminder_id: step.id }).whereNull('starts_at').first()) as
+            | { id: string; title: string }
+            | undefined)
+        : undefined;
+      const fields = {
+        title: action.title,
+        appointment_type: action.appointment_type,
+        ...(providerId ? { provider_id: providerId } : {}),
+        ...(action.location !== undefined && action.location !== null ? appointmentPlaceColumns({ location: action.location }) : {}),
+        starts_at: startsAt,
+        ends_at: endsAt,
+        status: startsAt ? 'scheduled' : 'to_book',
+        ...(action.notes ? { notes: action.notes } : {}),
+      };
+      const [appointment] = waiting
+        ? await db('appointments').where({ id: waiting.id }).update({ ...fields, updated_at: db.fn.now() }).returning('*')
+        : await db('appointments')
+            .insert({
+              care_profile_id: profileId,
+              ...fields,
+              provider_id: providerId,
+              from_reminder_id: step?.id ?? (startsAt ? null : await addBookingTodo(profileId, action.title, account.id)),
+              created_by_account_id: account.id,
+            })
+            .returning('*');
       // The cost is a ledger entry dated to the appointment day, never a
       // field on the appointment, exactly as the booking form does it.
       if (action.cost_estimate != null) {
         await syncAppointmentSpend(appointment.id, profileId, account.id, startsAt, { estimate: action.cost_estimate });
+      }
+      if (!startsAt) {
+        await audit(profileId, account.id, 'appointments', `${action.title}, not booked yet`);
+        return `Saved "${action.title}" as not booked yet, with a to-do to book it. Tell me the date when it is booked.${providerNote}`;
       }
       // Booking a next step ticks it off, and notes forwarded to it land here.
       let stepNote = '';
@@ -1965,6 +1984,18 @@ async function executeOne(
       if (action.appointment_type) fields['appointment_type'] = action.appointment_type;
       if (action.location !== undefined) Object.assign(fields, appointmentPlaceColumns({ location: action.location }));
       if (action.status) fields['status'] = action.status;
+      // Given its date, an appointment that was not booked yet is booked now,
+      // and the to-do waiting on it is done.
+      const wasWaiting = !(appointment as { starts_at: unknown }).starts_at;
+      if (startsAt && wasWaiting) {
+        if (!action.status) fields['status'] = 'scheduled';
+        const full = (await db('appointments').where({ id: appointment.id }).first('from_reminder_id')) as { from_reminder_id: string | null };
+        if (full.from_reminder_id) {
+          await db('reminders')
+            .where({ id: full.from_reminder_id, care_profile_id: profileId, completed: false })
+            .update({ completed: true, completed_at: db.fn.now(), completed_by_account_id: account.id });
+        }
+      }
       if (action.notes !== undefined) fields['notes'] = action.notes;
       let providerNote = '';
       if (action.provider_name !== undefined) {
@@ -2128,6 +2159,14 @@ async function executeOne(
       const task = await findOpenTaskByTitle(action.title, profileId);
       if (!task) {
         return `${CLARIFY_MARK} I could not find an open task called "${action.title}". Which one did you mean?`;
+      }
+      // Doing this to-do means booking the appointment waiting on it.
+      const waitingAppt = (await db('appointments')
+        .where({ care_profile_id: profileId, from_reminder_id: task.id })
+        .whereNull('starts_at')
+        .first('title')) as { title: string } | undefined;
+      if (waitingAppt) {
+        return `${CLARIFY_MARK} "${waitingAppt.title}" is waiting for its date. When is it booked for? I will add it and tick this off.`;
       }
       await db('reminders').where({ id: task.id, care_profile_id: profileId }).update({
         completed: true,
