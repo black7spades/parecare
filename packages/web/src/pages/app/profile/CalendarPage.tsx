@@ -18,6 +18,7 @@ import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { useProfile } from './ProfileLayout';
+import { AppointmentEditor } from './AppointmentsPage';
 import type { Task } from '../../../lib/care';
 
 type CalendarEvent = Task & {
@@ -61,19 +62,6 @@ function eventKindClass(e: CalendarEvent): string {
   if (e.kind === 'medication') return MED_STATUS_CLASSES[medicationStatus(e)];
   return e.completed ? 'bg-surface-2 text-muted line-through' : 'bg-primary-50 text-primary';
 }
-
-const APPOINTMENT_TYPES = [
-  { value: 'consultation', label: 'Consultation' },
-  { value: 'test', label: 'Test' },
-  { value: 'procedure', label: 'Procedure' },
-  { value: 'therapy', label: 'Therapy session' },
-  { value: 'review', label: 'Review' },
-  { value: 'vaccination', label: 'Vaccination' },
-  { value: 'other', label: 'Other' },
-] as const;
-
-const inputClass =
-  'w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
 export function CalendarPage() {
   const { profile, canEdit } = useProfile();
@@ -299,8 +287,9 @@ export function CalendarPage() {
       </div>
 
       {showAppointmentModal ? (
-        <AddAppointmentModal
+        <AppointmentEditor
           profileId={profile.id}
+          appointment={null}
           onClose={() => setShowAppointmentModal(false)}
           onSaved={() => {
             setShowAppointmentModal(false);
@@ -403,120 +392,6 @@ function DayEventsModal({ day, events, onClose }: { day: Date; events: CalendarE
           })}
         </ul>
       )}
-    </Modal>
-  );
-}
-
-function AddAppointmentModal({
-  profileId,
-  onClose,
-  onSaved,
-}: {
-  profileId: string;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [title, setTitle] = useState('');
-  const [type, setType] = useState('consultation');
-  const [providerId, setProviderId] = useState('');
-  const [location, setLocation] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [startTime, setStartTime] = useState('09:00');
-  const [notes, setNotes] = useState('');
-  const [error, setError] = useState('');
-
-  const { data: providersData } = useQuery({
-    queryKey: ['providers', profileId],
-    queryFn: () => api.get<{ providers: Array<{ id: string; name: string; address: string | null; directions_link: string | null }> }>(
-      `/care-profiles/${profileId}/providers`
-    ),
-  });
-  const providers = providersData?.providers ?? [];
-
-  const handleProviderChange = (newId: string) => {
-    setProviderId(newId);
-    if (newId) {
-      const p = providers.find((pr) => pr.id === newId);
-      if (p) {
-        if (p.directions_link) setLocation(p.directions_link);
-        else if (p.address) setLocation(p.address);
-      }
-    }
-  };
-
-  const mutation = useMutation({
-    mutationFn: () =>
-      api.post(`/care-profiles/${profileId}/appointments`, {
-        title: title.trim(),
-        appointment_type: type,
-        provider_id: providerId || null,
-        location: location.trim() || null,
-        starts_at: new Date(`${startDate}T${startTime}`).toISOString(),
-        notes: notes.trim() || null,
-      }),
-    onSuccess: onSaved,
-    onError: (err) => setError(err instanceof Error ? err.message : 'Failed to add appointment'),
-  });
-
-  return (
-    <Modal open onClose={onClose} title="Add appointment" wide>
-      <div className="space-y-4">
-        <div className="grid sm:grid-cols-2 gap-3">
-          <Input
-            label="What for"
-            placeholder="e.g. Cardiology check-up"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-          <label className="block">
-            <span className="block text-sm font-medium text-ink mb-1">Kind</span>
-            <select className={inputClass} value={type} onChange={(e) => setType(e.target.value)}>
-              {APPOINTMENT_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block">
-            <span className="block text-sm font-medium text-ink mb-1">With</span>
-            <select className={inputClass} value={providerId} onChange={(e) => handleProviderChange(e.target.value)}>
-              <option value="">Nobody linked</option>
-              {providers.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </label>
-          <Input
-            label="Location"
-            placeholder="e.g. Suite 4, 12 High St"
-            value={location}
-            onChange={(e) => setLocation(e.target.value)}
-          />
-          <Input
-            label="Date"
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-          />
-          <Input
-            label="Time"
-            type="time"
-            value={startTime}
-            onChange={(e) => setStartTime(e.target.value)}
-          />
-        </div>
-        <Textarea label="Notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button
-            loading={mutation.isPending}
-            disabled={!title.trim() || !startDate}
-            onClick={() => mutation.mutate()}
-          >
-            Save
-          </Button>
-        </div>
-      </div>
     </Modal>
   );
 }

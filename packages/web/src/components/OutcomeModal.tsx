@@ -10,6 +10,9 @@ import { Button } from './ui/Button';
 import { Input, Textarea } from './ui/Input';
 import { Modal } from './ui/Modal';
 import { NotePicker, pickedItems, useForwardCandidates, type PickState, type SentForward } from './ForwardNotes';
+import { ProfessionalPicker, type PickedProfessional } from './ProfessionalPicker';
+import { ProviderTypeField } from './ProviderFields';
+import { addressFrom } from './AddressFields';
 import {
   AppointmentFields,
   appointmentBody,
@@ -26,6 +29,13 @@ export interface OutcomeAppointment {
   provider_name: string | null;
   provider_id: string | null;
   location: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  address_suburb?: string | null;
+  address_state?: string | null;
+  address_postcode?: string | null;
+  address_country?: string | null;
+  directions_link?: string | null;
   medical_condition_id: string | null;
   notes: string | null;
   outcome?: string | null;
@@ -41,6 +51,8 @@ interface DraftStep {
   books: boolean;
   details: string;
   dueOn: string;
+  /** Who it is with, such as who a referral is to: from Contacts, or a new name filed there. */
+  who: PickedProfessional;
   /** Booking it now, right here, with the same fields as Add appointment. */
   booking: AppointmentDraft | null;
   /** Pieces of this visit to send with it. */
@@ -107,6 +119,11 @@ export function OutcomeModal({
         books: !!t?.books,
         details: '',
         dueOn: inDays(7),
+        // A follow-up is usually with the same person.
+        who:
+          t?.system_key === 'follow_up' && appointment.provider_id
+            ? { providerId: appointment.provider_id, name: appointment.provider_name ?? '', providerType: '' }
+            : { providerId: '', name: '', providerType: '' },
         booking: null,
         send: {},
         sendDefault: sendAll,
@@ -115,15 +132,19 @@ export function OutcomeModal({
     setNextKey((k) => k + 1);
   };
 
-  // A follow-up is usually with the same person, at the same place.
+  // Booking starts with who the step is with; a follow-up with the same
+  // person also starts at the same place.
   const startBooking = (d: DraftStep) =>
     updateDraft(d.key, {
       booking: newAppointmentDraft({
-        title: d.details.trim() || d.type,
+        title: d.details.trim() || (d.who.name.trim() ? `See ${d.who.name.trim()}` : d.type),
         type: kindForStep(d.type),
         conditionId: appointment.medical_condition_id ?? '',
-        ...(d.systemKey === 'follow_up'
-          ? { providerId: appointment.provider_id ?? '', location: appointment.location ?? '' }
+        providerId: d.who.providerId,
+        newProviderName: d.who.providerId ? '' : d.who.name.trim(),
+        newProviderType: d.who.providerId ? '' : d.who.providerType,
+        ...(d.systemKey === 'follow_up' && d.who.providerId === (appointment.provider_id ?? '')
+          ? { address: addressFrom(appointment), directionsLink: appointment.directions_link ?? '' }
           : {}),
       }),
     });
@@ -148,6 +169,11 @@ export function OutcomeModal({
           type: d.type,
           details: d.details.trim() || null,
           due_on: d.dueOn || null,
+          ...(d.books && d.who.providerId
+            ? { provider_id: d.who.providerId }
+            : d.books && d.who.name.trim()
+              ? { provider_name: d.who.name.trim(), provider_type: d.who.providerType || null }
+              : {}),
           forward: d.books ? pickedItems(candidates, picksFor(d)) : [],
         })),
         tz: browserTimeZone() ?? null,
@@ -291,6 +317,25 @@ export function OutcomeModal({
                         ✕
                       </Button>
                     </div>
+                    {d.books ? (
+                      <div className="grid gap-3 sm:grid-cols-2 mb-3">
+                        <ProfessionalPicker
+                          id={`who-${d.key}`}
+                          label={d.systemKey === 'referral' ? 'Who to' : 'Who with'}
+                          value={d.who}
+                          onChange={(who) => updateDraft(d.key, { who })}
+                        />
+                        {d.who.providerId ? null : (
+                          <ProviderTypeField
+                            key={`type-${d.key}-${d.who.providerId}`}
+                            id={`what-${d.key}`}
+                            label="What they do"
+                            value={d.who.providerType}
+                            onChange={(providerType) => updateDraft(d.key, { who: { ...d.who, providerType } })}
+                          />
+                        )}
+                      </div>
+                    ) : null}
                     <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_11rem]">
                       <Input
                         label="Details"

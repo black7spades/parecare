@@ -6,6 +6,29 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.45.0] - 2026-11-20
+
+### Added
+
+- **Referrals go straight into Contacts.** A referral in How did it go now
+  asks who it is to and what they do, as two separate boxes. Pick someone
+  already in Contacts, or type a new name and they are filed there for you,
+  linked to the person you care for. Booking the referral later starts with
+  them already chosen.
+- **New names are filed for you.** Typing a new name for who an appointment
+  is with now adds them to Contacts when the appointment is saved. There is
+  no separate button to press. Pare does the same when it books.
+
+### Changed
+
+- **Appointment addresses use the address finder.** Where an appointment is
+  now works the same as every other address: start typing, pick the place,
+  and each part fills its own box. Picking who it is with fills in their
+  address. A map link has its own box. Existing locations have moved into
+  the first address line, ready to tidy.
+- **One appointment form everywhere.** Adding an appointment from the
+  Calendar now opens the same form as the Appointments page.
+
 ## [0.44.0] - 2026-11-20
 
 ### Added

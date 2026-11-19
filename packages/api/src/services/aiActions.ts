@@ -18,6 +18,7 @@ import { linkAddressToProfile, syncProfileResidence, RESIDENCE_KIND } from './ad
 import { APPOINTMENT_TYPES, APPOINTMENT_STATUSES, addNextSteps, syncAppointmentSpend } from '../routes/appointments';
 import { createForwards, deliverForwards, type ForwardItem } from './noteForwards';
 import { addCirclePerson, findCircleMemberByName, isAddedPerson } from './circlePeople';
+import { appointmentPlaceColumns, ensureProfessional } from './professionals';
 import { OBSERVATION_STATUSES } from '../routes/treatments';
 import { FUNDING_SOURCES, CLAIM_STATUSES } from './healthSpend';
 import { addPracticeMember, syncPracticeMembers, whereNamed } from './providerPractices';
@@ -534,6 +535,10 @@ const recordAppointmentOutcomeSchema = z.object({
         kind: z.string().min(1).max(100),
         details: z.string().max(255).optional().nullable(),
         due_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+        // Who it is with, such as who a referral is to, and what they do.
+        // Filed in Contacts automatically.
+        to_name: z.string().max(255).optional().nullable(),
+        to_type: z.string().max(100).optional().nullable(),
       })
     )
     .max(20)
@@ -1156,18 +1161,11 @@ async function resolveProviderForAppointment(
   profileId: string
 ): Promise<{ providerId: string | null; note: string }> {
   if (!name?.trim()) return { providerId: null, note: '' };
-  const profile = await db('care_profiles').where({ id: profileId }).select('account_id').first();
-  if (!profile) return { providerId: null, note: '' };
-  const provider = await db('providers')
-    .where({ account_id: profile.account_id })
-    .where((w) => whereNamed(w as unknown as Knex.QueryBuilder, name.trim()))
-    .select('id', 'name')
-    .first();
-  if (provider) return { providerId: provider.id, note: '' };
-  return {
-    providerId: null,
-    note: ` There is no provider called "${name.trim()}" in the directory yet, so it is not linked to one.`,
-  };
+  // Someone named for an appointment is someone this person sees: a name
+  // already in Contacts is linked, a new one is filed there as a professional.
+  const pro = await ensureProfessional(db, { profileId, name });
+  if (!pro) return { providerId: null, note: '' };
+  return { providerId: pro.id, note: pro.created ? ` Added ${pro.name} to Contacts.` : '' };
 }
 
 /**
@@ -1235,20 +1233,28 @@ async function findOpenTaskByTitle(
 async function findOpenNextStep(
   name: string,
   profileId: string
-): Promise<{ id: string; title: string } | undefined> {
+): Promise<{ id: string; title: string; provider_id: string | null } | undefined> {
   const needle = name.trim().toLowerCase();
   if (!needle) return undefined;
   const rows = (await db('reminders as r')
     .leftJoin('next_step_types as t', 'r.next_step_type_id', 't.id')
+    .leftJoin('providers as p', 'r.provider_id', 'p.id')
     .where({ 'r.care_profile_id': profileId, 'r.completed': false })
     .whereNotNull('r.appointment_id')
     .orderBy('r.created_at', 'desc')
-    .select('r.id', 'r.title', 't.name as type_name')) as Array<{ id: string; title: string; type_name: string | null }>;
+    .select('r.id', 'r.title', 'r.provider_id', 't.name as type_name', 'p.name as provider_name')) as Array<{
+    id: string;
+    title: string;
+    provider_id: string | null;
+    type_name: string | null;
+    provider_name: string | null;
+  }>;
   const hit =
     rows.find((r) => r.title.toLowerCase() === needle) ??
+    rows.find((r) => (r.provider_name ?? '').toLowerCase() === needle) ??
     rows.find((r) => (r.type_name ?? '').toLowerCase() === needle) ??
     rows.find((r) => r.title.toLowerCase().includes(needle) || needle.includes(r.title.toLowerCase()));
-  return hit ? { id: hit.id, title: hit.title } : undefined;
+  return hit ? { id: hit.id, title: hit.title, provider_id: hit.provider_id } : undefined;
 }
 
 async function executeOne(
@@ -1903,14 +1909,17 @@ async function executeOne(
       if (action.for_next_step && !step) {
         return `${CLARIFY_MARK} I did not book "${action.title}": I could not find an open next step called "${action.for_next_step}". Which one is it for?`;
       }
-      const { providerId, note: providerNote } = await resolveProviderForAppointment(action.provider_name, profileId);
+      const resolved = await resolveProviderForAppointment(action.provider_name, profileId);
+      const providerNote = resolved.note;
+      // Booking a referral with no name given is with whoever it is to.
+      const providerId = resolved.providerId ?? step?.provider_id ?? null;
       const [appointment] = await db('appointments')
         .insert({
           care_profile_id: profileId,
           title: action.title,
           appointment_type: action.appointment_type,
           provider_id: providerId,
-          location: action.location ?? null,
+          ...appointmentPlaceColumns({ location: action.location ?? null }),
           starts_at: startsAt,
           ends_at: endsAt,
           status: 'scheduled',
@@ -1954,7 +1963,7 @@ async function executeOne(
       if (action.ends_at !== undefined) fields['ends_at'] = parseFutureWhen(action.ends_at, timeZone);
       if (action.new_title) fields['title'] = action.new_title;
       if (action.appointment_type) fields['appointment_type'] = action.appointment_type;
-      if (action.location !== undefined) fields['location'] = action.location;
+      if (action.location !== undefined) Object.assign(fields, appointmentPlaceColumns({ location: action.location }));
       if (action.status) fields['status'] = action.status;
       if (action.notes !== undefined) fields['notes'] = action.notes;
       let providerNote = '';
@@ -2001,7 +2010,13 @@ async function executeOne(
           appointmentId: appointment.id,
           actorId: account.id,
           timeZone: timeZone ?? null,
-          steps: action.next_steps.map((s) => ({ type: s.kind, details: s.details ?? null, due_on: s.due_on ?? null })),
+          steps: action.next_steps.map((s) => ({
+            type: s.kind,
+            details: s.details ?? null,
+            due_on: s.due_on ?? null,
+            provider_name: s.to_name ?? null,
+            provider_type: s.to_type ?? null,
+          })),
           source: 'pare',
         });
       });
