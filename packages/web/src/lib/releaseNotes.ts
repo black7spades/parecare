@@ -20,6 +20,17 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.46.2',
+    date: '2026-11-20',
+    summary: 'New contacts keep everything you entered, and you can see they were added.',
+    groups: [
+      { heading: 'Fixed', items: [
+        'New contacts keep everything you entered. Someone added to Contacts from a referral or a booking now gets the address and map link typed for their appointment, not just their name. Edit them in Contacts and it is all there. A later booking fills in anything Contacts is still missing, and never overwrites what is already saved. People already added with only a name pick up their address from their appointment.',
+        'You can see they were added. Saving now says who was added to Contacts, with a link to open them, and each referral in How did it go shows who it is with, linked to their entry in Contacts.',
+      ] },
+    ],
+  },
+  {
     version: '0.46.1',
     date: '2026-11-20',
     summary: 'Click Not booked yet anywhere to book it.',

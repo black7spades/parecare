@@ -13,6 +13,8 @@ import { NotePicker, pickedItems, useForwardCandidates, type PickState, type Sen
 import { ProfessionalPicker, type PickedProfessional } from './ProfessionalPicker';
 import { ProviderTypeField } from './ProviderFields';
 import { addressFrom } from './AddressFields';
+import { Link } from 'react-router-dom';
+import { noticeFiled, refreshContacts } from '../stores/notice';
 import {
   AppointmentFields,
   appointmentBody,
@@ -193,11 +195,12 @@ export function OutcomeModal({
     void queryClient.invalidateQueries({ queryKey: ['tasks', profileId] });
     void queryClient.invalidateQueries({ queryKey: ['notifications'] });
     void queryClient.invalidateQueries({ queryKey: ['next-step-types', profileId] });
+    refreshContacts(queryClient);
   };
 
   const save = useMutation({
     mutationFn: async () => {
-      const res = await api.put<{ created: string[] }>(`/care-profiles/${profileId}/appointments/${appointment.id}/outcome`, {
+      const res = await api.put<{ created: string[]; filed?: Array<{ id: string; name: string }> }>(`/care-profiles/${profileId}/appointments/${appointment.id}/outcome`, {
         outcome: outcome.trim() || null,
         next_steps: drafts.map((d) => ({
           type: d.type,
@@ -215,17 +218,20 @@ export function OutcomeModal({
       // Book what was booked here. Each booking ticks its step off and
       // brings the notes sent with it.
       const failed: string[] = [];
+      const filed = [...(res.filed ?? [])];
       for (let i = 0; i < drafts.length; i++) {
         const d = drafts[i];
         const stepId = res.created[i];
         if (!d.booking || !stepId) continue;
         try {
-          await api.post(`/care-profiles/${profileId}/appointments`, appointmentBody(d.booking, stepId));
+          const booked = await api.post<{ filed?: Array<{ id: string; name: string }> }>(`/care-profiles/${profileId}/appointments`, appointmentBody(d.booking, stepId));
+          for (const f of booked.filed ?? []) if (!filed.some((x) => x.id === f.id)) filed.push(f);
         } catch (err) {
           const why = err instanceof Error && err.message ? ` (${err.message.replace(/\.$/, '')})` : '';
           failed.push(`${d.booking.title.trim() || d.type}${why}`);
         }
       }
+      noticeFiled(profileId, filed);
       return failed;
     },
     onSuccess: (failed) => {
@@ -279,7 +285,18 @@ export function OutcomeModal({
                   {/* The words themselves book it, wherever they appear. */}
                   <div className="min-w-0 flex-1">
                     <p className={`text-sm text-ink break-words ${s.completed ? 'line-through' : ''}`}>{s.title}</p>
-                    <p className="text-xs text-muted">{s.type_name}</p>
+                    <p className="text-xs text-muted">
+                      {s.type_name}
+                      {s.provider_id && s.provider_name ? (
+                        <>
+                          {', with '}
+                          <Link to={`/app/${profileId}/providers?record=${s.provider_id}`} className="text-primary hover:underline">
+                            {s.provider_name}
+                          </Link>
+                          {' in Contacts'}
+                        </>
+                      ) : null}
+                    </p>
                   </div>
                   {s.led_to && !s.led_to.starts_at && canEdit && !s.completed ? (
                     <Button size="xs" variant="ghost" className="whitespace-nowrap" onClick={() => onAddDate(s.led_to!.id)}>

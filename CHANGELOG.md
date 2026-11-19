@@ -6,6 +6,20 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.46.2] - 2026-11-20
+
+### Fixed
+
+- **New contacts keep everything you entered.** Someone added to Contacts
+  from a referral or a booking now gets the address and map link typed for
+  their appointment, not just their name. Edit them in Contacts and it is
+  all there. A later booking fills in anything Contacts is still missing,
+  and never overwrites what is already saved. People already added with
+  only a name pick up their address from their appointment.
+- **You can see they were added.** Saving now says who was added to
+  Contacts, with a link to open them, and each referral in How did it go
+  shows who it is with, linked to their entry in Contacts.
+
 ## [0.46.1] - 2026-11-20
 
 ### Changed

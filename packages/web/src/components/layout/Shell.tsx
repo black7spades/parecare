@@ -12,6 +12,7 @@ import { ProfileSwitcher } from './ProfileSwitcher';
 import { useAssistantStore } from '../../stores/assistant';
 import { NotificationsBell } from './NotificationsBell';
 import { UndoBar } from '../UndoBar';
+import { NoticeBar } from '../NoticeBar';
 import { AvatarMenu } from './AvatarMenu';
 import { PareStatus } from './PareStatus';
 import { Clock } from './Clock';
@@ -702,6 +703,7 @@ export function Shell() {
 
       <AssistantWidget />
       <UndoBar />
+      <NoticeBar />
       <CaptureSheet />
       <InstallPrompt />
       <UpgradePrompt />
