@@ -62,6 +62,13 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
       `Record how this appointment went and track every next step it set off, such as referrals, tests, samples or scripts to fill: ${a}`,
   },
   {
+    name: 'forward',
+    hint: 'which notes and where they go',
+    description: "Forward an appointment's notes, e.g. /forward today's notes to the neurologist referral",
+    expand: (a) =>
+      `Forward notes from one appointment to another appointment, or to a next step that is not booked yet so they land when it is booked: ${a}`,
+  },
+  {
     name: 'cost',
     hint: 'the amount and what it was for',
     description: 'Record a care cost, e.g. /cost $42 at the chemist today',

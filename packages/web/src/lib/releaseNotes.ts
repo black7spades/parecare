@@ -20,6 +20,24 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.43.0',
+    date: '2026-11-19',
+    summary: 'Book the next appointment from How did it go, and forward notes from one appointment to another.',
+    groups: [
+      { heading: 'Added', items: [
+        'Book the next appointment while recording how it went. Add a referral or follow-up in How did it go and choose Book it now. The same appointment form opens right there, with the condition already filled in, and a follow-up starts with the same doctor and place. No date yet? Leave it and the step stays on your tasks until it is booked.',
+        'Forward notes to another appointment. Choose Forward notes on an appointment, or Forward on a single note, tick all or some of what was noted, trim the text if only part of it matters, and pick where it goes. The original turns grey with "Forwarded to" and the name and date. The copy at the other end says who it is from and when.',
+        'Send notes with a referral before it is booked. When a referral is added in How did it go, everything noted at that visit is ticked to go with it. The notes wait on the referral and land on the appointment the moment it is booked, whether that is now or weeks later.',
+        'Take back a forward. Take back removes the copy from the other appointment, with a few seconds to Undo.',
+        "Pare forwards notes too. Ask Pare to send today's notes to the neurologist, or use the new forward command. Booking a referral through Pare also brings the notes waiting on it.",
+      ] },
+      { heading: 'Changed', items: [
+        'Appointments list newest first. The most recent appointment is at the top.',
+        'Tables remember your order. Every list keeps the order you last sorted it by, on this device, so it is the same the next time you come back.',
+      ] },
+    ],
+  },
+  {
     version: '0.42.0',
     date: '2026-11-19',
     summary: 'Record when, why and how a condition resolved, all optional.',

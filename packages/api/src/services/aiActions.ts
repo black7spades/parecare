@@ -16,6 +16,7 @@ import { resolveSymptomCatalogueId } from '../routes/symptomCatalogue';
 import { resolveNeurotypeAttributeCatalogueId, ATTRIBUTE_KINDS } from '../routes/neurotypeAttributeCatalogue';
 import { linkAddressToProfile, syncProfileResidence, RESIDENCE_KIND } from './addresses';
 import { APPOINTMENT_TYPES, APPOINTMENT_STATUSES, addNextSteps, syncAppointmentSpend } from '../routes/appointments';
+import { createForwards, deliverForwards, type ForwardItem } from './noteForwards';
 import { OBSERVATION_STATUSES } from '../routes/treatments';
 import { FUNDING_SOURCES, CLAIM_STATUSES } from './healthSpend';
 import { addPracticeMember, syncPracticeMembers, whereNamed } from './providerPractices';
@@ -442,6 +443,25 @@ const bookAppointmentSchema = z.object({
   ends_at: z.string().optional().nullable(),
   notes: z.string().max(4000).optional().nullable(),
   cost_estimate: z.number().min(0).max(1e9).optional().nullable(),
+  // The open next step this booking carries out, such as "Referral" or
+  // "Dr Patel, neurologist". Booking it ticks the step off and anything
+  // forwarded to it lands on this appointment.
+  for_next_step: z.string().max(255).optional().nullable(),
+});
+
+/**
+ * Pass on what was noted at one appointment to another, or to a next step not
+ * booked yet (it lands when booked), exactly as the Forward notes form does.
+ * include picks the pieces: outcome (what happened), details (the
+ * appointment's notes box), added_notes (every note added to it). All by
+ * default.
+ */
+const forwardAppointmentNotesSchema = z.object({
+  type: z.literal('forward_appointment_notes'),
+  from_appointment_title: z.string().max(255).optional().nullable(),
+  to_appointment_title: z.string().max(255).optional().nullable(),
+  to_next_step: z.string().max(255).optional().nullable(),
+  include: z.array(z.enum(['outcome', 'details', 'added_notes'])).max(3).optional().nullable(),
 });
 
 /**
@@ -590,6 +610,7 @@ export const actionSchema = z.discriminatedUnion('type', [
   bookAppointmentSchema,
   updateAppointmentSchema,
   recordAppointmentOutcomeSchema,
+  forwardAppointmentNotesSchema,
   completeTaskSchema,
   rescheduleTaskSchema,
   recordCostSchema,
@@ -1172,6 +1193,26 @@ async function findOpenTaskByTitle(
     rows.find((r) => String(r.title).toLowerCase() === needle) ??
     rows.find((r) => String(r.title).toLowerCase().includes(needle))
   );
+}
+
+/** An open next step an appointment set off, found by its title or its kind. */
+async function findOpenNextStep(
+  name: string,
+  profileId: string
+): Promise<{ id: string; title: string } | undefined> {
+  const needle = name.trim().toLowerCase();
+  if (!needle) return undefined;
+  const rows = (await db('reminders as r')
+    .leftJoin('next_step_types as t', 'r.next_step_type_id', 't.id')
+    .where({ 'r.care_profile_id': profileId, 'r.completed': false })
+    .whereNotNull('r.appointment_id')
+    .orderBy('r.created_at', 'desc')
+    .select('r.id', 'r.title', 't.name as type_name')) as Array<{ id: string; title: string; type_name: string | null }>;
+  const hit =
+    rows.find((r) => r.title.toLowerCase() === needle) ??
+    rows.find((r) => (r.type_name ?? '').toLowerCase() === needle) ??
+    rows.find((r) => r.title.toLowerCase().includes(needle) || needle.includes(r.title.toLowerCase()));
+  return hit ? { id: hit.id, title: hit.title } : undefined;
 }
 
 async function executeOne(
@@ -1822,6 +1863,10 @@ async function executeOne(
         return `${CLARIFY_MARK} I did not book "${action.title}": the date and time were unclear. When is it?`;
       }
       const endsAt = parseFutureWhen(action.ends_at, timeZone);
+      const step = action.for_next_step ? await findOpenNextStep(action.for_next_step, profileId) : undefined;
+      if (action.for_next_step && !step) {
+        return `${CLARIFY_MARK} I did not book "${action.title}": I could not find an open next step called "${action.for_next_step}". Which one is it for?`;
+      }
       const { providerId, note: providerNote } = await resolveProviderForAppointment(action.provider_name, profileId);
       const [appointment] = await db('appointments')
         .insert({
@@ -1834,6 +1879,7 @@ async function executeOne(
           ends_at: endsAt,
           status: 'scheduled',
           notes: action.notes ?? null,
+          from_reminder_id: step?.id ?? null,
           created_by_account_id: account.id,
         })
         .returning('*');
@@ -1842,9 +1888,18 @@ async function executeOne(
       if (action.cost_estimate != null) {
         await syncAppointmentSpend(appointment.id, profileId, account.id, startsAt, { estimate: action.cost_estimate });
       }
+      // Booking a next step ticks it off, and notes forwarded to it land here.
+      let stepNote = '';
+      if (step) {
+        await db('reminders')
+          .where({ id: step.id, care_profile_id: profileId, completed: false })
+          .update({ completed: true, completed_at: db.fn.now(), completed_by_account_id: account.id });
+        const landed = await deliverForwards(db, { profileId, reminderId: step.id, appointmentId: appointment.id });
+        stepNote = ` Ticked off "${step.title}".${landed ? ` ${landed === 1 ? 'A forwarded note is' : `${landed} forwarded notes are`} on it.` : ''}`;
+      }
       await audit(profileId, account.id, 'appointments', action.title);
       const costNote = action.cost_estimate != null ? ` Estimated cost ${action.cost_estimate} added to the spend ledger.` : '';
-      return `Booked "${action.title}" for ${formatInZone(startsAt, timeZone)}. It is on the calendar.${providerNote}${costNote}`;
+      return `Booked "${action.title}" for ${formatInZone(startsAt, timeZone)}. It is on the calendar.${providerNote}${costNote}${stepNote}`;
     }
     case 'update_appointment': {
       const appointment = await findAppointmentByTitle(action.title, profileId);
@@ -1921,6 +1976,48 @@ async function executeOne(
         parts.push(`Added ${steps.length === 1 ? 'a next step' : `${steps.length} next steps`} to track: ${steps.map((s) => (s.title === s.type_name ? s.title : `${s.title} (${s.type_name})`)).join(', ')}.`);
       }
       return parts.join(' ') || `Marked "${appointment.title}" as attended.`;
+    }
+    case 'forward_appointment_notes': {
+      const source = await findPastAppointment(action.from_appointment_title ?? '', profileId);
+      if (!source) {
+        return `${CLARIFY_MARK} I could not find the appointment to forward notes from. Which one was it?`;
+      }
+      let to: { appointment_id?: string; reminder_id?: string } = {};
+      if (action.to_next_step) {
+        const step = await findOpenNextStep(action.to_next_step, profileId);
+        if (!step) return `${CLARIFY_MARK} I could not find an open next step called "${action.to_next_step}". Which one should the notes go to?`;
+        to = { reminder_id: step.id };
+      } else if (action.to_appointment_title) {
+        const target = await findAppointmentByTitle(action.to_appointment_title, profileId);
+        if (!target) return `${CLARIFY_MARK} I could not find an appointment called "${action.to_appointment_title}". Which one should the notes go to?`;
+        to = { appointment_id: target.id };
+      } else {
+        return `${CLARIFY_MARK} Where should the notes from "${source.title}" go?`;
+      }
+      const include = new Set(action.include?.length ? action.include : ['outcome', 'details', 'added_notes']);
+      const full = (await db('appointments').where({ id: source.id }).first('outcome', 'notes')) as { outcome: string | null; notes: string | null };
+      const items: ForwardItem[] = [];
+      if (include.has('outcome') && full.outcome?.trim()) items.push({ part: 'outcome', body: full.outcome.trim() });
+      if (include.has('details') && full.notes?.trim()) items.push({ part: 'details', body: full.notes.trim() });
+      if (include.has('added_notes')) {
+        const added = (await db('record_notes')
+          .where({ care_profile_id: profileId, entity_type: 'appointments', entity_id: source.id })
+          .whereNull('forward_id')
+          .orderBy('created_at', 'asc')
+          .select('id', 'body')) as Array<{ id: string; body: string }>;
+        for (const n of added) items.push({ part: 'note', note_id: n.id, body: n.body });
+      }
+      if (items.length === 0) return `"${source.title}" has no notes to forward yet.`;
+      const result = await db.transaction((trx) =>
+        createForwards(trx, { profileId, sourceAppointmentId: source.id, actorId: account.id, items, to })
+      );
+      if ('error' in result) return `${CLARIFY_MARK} ${result.error}`;
+      await audit(profileId, account.id, 'appointments', `forwarded notes from ${source.title}`);
+      const one = result.sent === 1;
+      const what = one ? 'one note' : `${result.sent} notes`;
+      return result.landed
+        ? `Forwarded ${what} from "${source.title}". ${one ? 'It is' : 'They are'} on the other appointment now.`
+        : `Forwarded ${what} from "${source.title}". ${one ? 'It' : 'They'} will land on the appointment as soon as it is booked.`;
     }
     case 'complete_task': {
       const task = await findOpenTaskByTitle(action.title, profileId);
