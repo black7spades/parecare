@@ -21,11 +21,13 @@ import {
   functionDomainLabel,
   temporalPatternLabel,
   LIMITATION_LEVELS,
+  resolutionReasonLabel,
   type MedicalCondition,
 } from '../../../lib/care';
 import { PagePurpose } from '../../../components/PagePurpose';
 import { useProfile } from './ProfileLayout';
 import { ConditionEditor } from './conditions/ConditionEditor';
+import { ResolveConditionModal, type ResolutionDetails } from './conditions/ResolveConditionModal';
 import { RecordPanel, type RecordLink } from '../../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
@@ -55,6 +57,11 @@ const SORTS: DataSort<MedicalCondition>[] = [
   { key: 'status', label: 'Status', compare: (a, b) => byText(a.status, b.status) },
   { key: 'started_on', label: 'Started', defaultDir: 'desc', compare: (a, b) => byText(a.started_on, b.started_on) },
   { key: 'resolved_on', label: 'Resolved', defaultDir: 'desc', compare: (a, b) => byText(a.resolved_on, b.resolved_on) },
+  {
+    key: 'resolution_reason',
+    label: 'Why it resolved',
+    compare: (a, b) => byText(resolutionReasonLabel(a.resolution_reason), resolutionReasonLabel(b.resolution_reason)),
+  },
   { key: 'codes', label: 'Codes', defaultDir: 'desc', compare: (a, b) => (a.codes?.length ?? 0) - (b.codes?.length ?? 0) },
   { key: 'treatments', label: 'Treatments', defaultDir: 'desc', compare: (a, b) => treatmentCount(a) - treatmentCount(b) },
 ];
@@ -87,6 +94,8 @@ export function ConditionsPage() {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<MedicalCondition | null>(null);
   const [bulkEditQueue, setBulkEditQueue] = useState<MedicalCondition[]>([]);
+  // Conditions waiting on the Resolve step, and whether to close the open record after.
+  const [resolving, setResolving] = useState<{ items: MedicalCondition[]; fromPanel: boolean } | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['conditions', profile.id],
@@ -111,7 +120,7 @@ export function ConditionsPage() {
 
   // Marking resolved moves conditions off the list at once, with Undo for a
   // few seconds, the same way a delete does.
-  const markResolved = (items: MedicalCondition[]) => {
+  const markResolved = (items: MedicalCondition[], details: ResolutionDetails) => {
     const open = items.filter((c) => !isResolved(c));
     if (open.length === 0) return;
     deferDelete({
@@ -120,9 +129,10 @@ export function ConditionsPage() {
       commit: () =>
         Promise.all(
           open.map((c) =>
-            // No date is filled in: resolving means "stop tracking it", and
-            // nobody should have to work out the day a cold cleared up.
-            api.patch(`/care-profiles/${profile.id}/conditions/${c.id}`, { status: 'resolved' })
+            // Only what was given is sent. No date is guessed: resolving can
+            // mean "stop tracking it", and nobody should have to work out the
+            // day a cold cleared up. A date already on record is kept.
+            api.patch(`/care-profiles/${profile.id}/conditions/${c.id}`, { status: 'resolved', ...details })
           )
         ),
       onCommitted: invalidate,
@@ -147,6 +157,8 @@ export function ConditionsPage() {
         conditionStatusLabel(c.status),
         ...(c.codes ?? []).map((code) => code.code),
         c.notes,
+        resolutionReasonLabel(c.resolution_reason),
+        c.resolution_notes,
       ]
         .filter(Boolean)
         .join(' '),
@@ -173,8 +185,8 @@ export function ConditionsPage() {
           key: 'resolve',
           label: 'Mark resolved',
           onRun: () => {
-            markResolved(visible.filter((c) => dv.selected.has(c.id)));
-            dv.clearSelection();
+            const items = visible.filter((c) => dv.selected.has(c.id) && !isResolved(c));
+            if (items.length > 0) setResolving({ items, fromPanel: false });
           },
         },
         {
@@ -265,6 +277,7 @@ export function ConditionsPage() {
                 <SortableTh label="Status" sortKey="status" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Started" sortKey="started_on" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Resolved" sortKey="resolved_on" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="hidden md:table-cell" />
+                <SortableTh label="Why it resolved" sortKey="resolution_reason" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="hidden lg:table-cell" />
                 <SortableTh label="Codes" sortKey="codes" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="hidden lg:table-cell" />
                 <SortableTh label="Treatments" sortKey="treatments" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="hidden lg:table-cell" />
                 {canEdit ? <th className="px-3 py-2 text-right">Actions</th> : null}
@@ -310,6 +323,7 @@ export function ConditionsPage() {
                     <td className="px-3 py-2 text-ink">{conditionStatusLabel(c.status)}</td>
                     <td className="px-3 py-2 text-ink whitespace-nowrap">{fmtDate(c.started_on)}</td>
                     <td className="px-3 py-2 text-ink whitespace-nowrap hidden md:table-cell">{fmtDate(c.resolved_on)}</td>
+                    <td className="px-3 py-2 text-ink hidden lg:table-cell">{resolutionReasonLabel(c.resolution_reason)}</td>
                     <td className="px-3 py-2 hidden lg:table-cell">
                       {(c.codes ?? []).map((code) => (
                         <span key={code.id} className="badge bg-surface-2 text-ink text-xs mr-1 mb-1" title={codeSystemLabel(code.system)}>
@@ -384,6 +398,19 @@ export function ConditionsPage() {
         />
       ) : null}
 
+      {resolving ? (
+        <ResolveConditionModal
+          names={resolving.items.map((c) => c.name)}
+          onClose={() => setResolving(null)}
+          onConfirm={(details) => {
+            markResolved(resolving.items, details);
+            if (resolving.fromPanel) panel.close();
+            else dv.clearSelection();
+            setResolving(null);
+          }}
+        />
+      ) : null}
+
       {panel.current ? (() => {
         const c = panel.current;
         const yes = (v: boolean | null | undefined) => (v ? 'Yes' : null);
@@ -427,6 +454,8 @@ export function ConditionsPage() {
               { label: 'Status', value: conditionStatusLabel(c.status) },
               { label: 'Started', value: fmtDate(c.started_on) },
               { label: 'Resolved', value: fmtDate(c.resolved_on) },
+              { label: 'Why it resolved', value: resolutionReasonLabel(c.resolution_reason) },
+              { label: 'What happened', value: c.resolution_notes },
               { label: 'Expected duration', value: expectedDurationLabel(c.expected_duration) },
               { label: 'Permanent', value: yes(c.is_permanent) },
               { label: 'Contagious', value: yes(c.is_contagious) },
@@ -465,10 +494,7 @@ export function ConditionsPage() {
                 ? null
                 : {
                     label: 'Mark resolved',
-                    onRun: () => {
-                      markResolved([c]);
-                      panel.close();
-                    },
+                    onRun: () => setResolving({ items: [c], fromPanel: true }),
                   }
             }
             onDelete={() => {

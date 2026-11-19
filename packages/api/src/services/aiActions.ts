@@ -9,6 +9,7 @@ import { matchProfileNames, type NameCandidate } from '../lib/nameMatch';
 import { drawDownOnHand, perDoseDrawdown } from './medicationSupply';
 import { resolveSupplierId } from '../routes/medications';
 import { resolveConditionCatalogueId } from '../routes/conditionCatalogue';
+import { CONDITION_RESOLUTION_REASONS } from '../lib/conditionResolution';
 import { resolveSubstanceCatalogueId, SUBSTANCE_CLASSES } from '../routes/substanceCatalogue';
 import { SUBSTANCE_STATUSES, SUBSTANCE_ROUTES } from '../routes/substanceUse';
 import { resolveSymptomCatalogueId } from '../routes/symptomCatalogue';
@@ -209,7 +210,11 @@ const removeConditionSchema = z.object({
 const resolveConditionSchema = z.object({
   type: z.literal('resolve_condition'),
   name: z.string().min(1).max(255),
+  // Only when the user says when. Never guessed: resolving can simply mean
+  // the user has stopped tracking it.
   resolved_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  resolution_reason: z.enum(CONDITION_RESOLUTION_REASONS).optional().nullable(),
+  resolution_notes: z.string().max(2000).optional().nullable(),
 });
 
 const addSubstanceSchema = z.object({
@@ -1406,15 +1411,22 @@ async function executeOne(
       return `Added that to the tracking log for ${condition.name}.`;
     }
     case 'resolve_condition': {
-      const resolvedOn = action.resolved_on ?? new Date().toISOString().slice(0, 10);
+      // Only what was said is written; a missing date or reason stays empty
+      // rather than overwriting one already recorded.
       const [row] = await db('medical_conditions')
         .where({ care_profile_id: profileId })
         .whereRaw('lower(name) = lower(?)', [action.name.trim()])
-        .update({ status: 'resolved', resolved_on: resolvedOn, updated_at: db.fn.now() })
+        .update({
+          status: 'resolved',
+          ...(action.resolved_on ? { resolved_on: action.resolved_on } : {}),
+          ...(action.resolution_reason ? { resolution_reason: action.resolution_reason } : {}),
+          ...(action.resolution_notes ? { resolution_notes: action.resolution_notes } : {}),
+          updated_at: db.fn.now(),
+        })
         .returning('name');
       if (!row) return `No condition called "${action.name}" was on the record.`;
       await audit(profileId, account.id, 'conditions', `resolved ${action.name}`);
-      return `Marked ${row.name} as resolved on ${resolvedOn}.`;
+      return action.resolved_on ? `Marked ${row.name} as resolved on ${action.resolved_on}.` : `Marked ${row.name} as resolved.`;
     }
     case 'add_substance': {
       const name = action.substance.trim();

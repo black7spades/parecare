@@ -6,6 +6,29 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.42.0] - 2026-11-19
+
+### Added
+
+- **Say why a condition resolved.** Mark resolved now offers three optional
+  boxes: when it resolved, why it resolved and what happened. Fill in as much
+  or as little as you like. Leave them blank and the condition simply stops
+  being tracked.
+- **Why it resolved on the list.** The Conditions page has a Why it resolved
+  column, and the reason and what happened show on each condition and in
+  reports. Edit a resolved condition to add or change the detail later.
+
+### Changed
+
+- **Pare no longer guesses the date.** Telling Pare a condition has cleared
+  up no longer records today as the day it resolved. Pare records a date and
+  a reason only when you give them.
+
+### Fixed
+
+- A condition marked resolved without a date no longer counts toward how
+  unwell someone looks on their profile.
+
 ## [0.41.0] - 2026-11-19
 
 ### Changed

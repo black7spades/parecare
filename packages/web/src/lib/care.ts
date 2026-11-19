@@ -724,6 +724,24 @@ export const conditionStatusLabel = (s: string) =>
   CONDITION_STATUSES.find((x) => x.value === s)?.label ?? s;
 
 /**
+ * Why a condition resolved. Optional, like the date: resolving can simply mean
+ * "stop tracking it". Kept in step with packages/api/src/lib/conditionResolution.ts.
+ */
+export const CONDITION_RESOLUTION_REASONS = [
+  { value: 'recovered', label: 'Got better' },
+  { value: 'treatment', label: 'Treatment worked' },
+  { value: 'surgery', label: 'Surgery fixed it' },
+  { value: 'outgrown', label: 'Grew out of it' },
+  { value: 'ruled_out', label: 'Ruled out' },
+  { value: 'wrong_diagnosis', label: 'Wrong diagnosis' },
+  { value: 'not_tracking', label: 'No longer tracking' },
+  { value: 'other', label: 'Other' },
+] as const;
+
+export const resolutionReasonLabel = (s: string | null | undefined) =>
+  s ? CONDITION_RESOLUTION_REASONS.find((x) => x.value === s)?.label ?? s : '';
+
+/**
  * Substance use: which substances a person takes (legal or illegal), how,
  * how much, how often, and where each sits in a lifecycle. Each fact is its
  * own field. The substance and its class come from the shared catalogue.
@@ -797,6 +815,10 @@ export interface MedicalCondition {
   status: string;
   started_on: string | null;
   resolved_on: string | null;
+  /** Why it resolved, from CONDITION_RESOLUTION_REASONS. */
+  resolution_reason: string | null;
+  /** What happened, in the carer's words. */
+  resolution_notes: string | null;
   condition_type: string | null;
   severity: string | null;
   /** The person's normal level on the 1 to 10 symptom scale for this condition;

@@ -169,6 +169,7 @@ async function buildSection(profileId: string, section: FactualSection): Promise
           status: r.status ?? null,
           started_on: dateOnly(r.started_on),
           resolved_on: dateOnly(r.resolved_on),
+          resolution_reason: r.resolution_reason ?? null,
         },
       }));
     }
@@ -354,6 +355,7 @@ export interface NarrativeSources {
     condition_type: string | null;
     started_on: string | null;
     resolved_on: string | null;
+    resolution_reason: string | null;
     contagious: boolean;
     /** For neurotype conditions: the formal diagnosis facts, never invented. */
     neurotype: string | null;
@@ -475,6 +477,7 @@ export async function gatherNarrativeSources(profileId: string): Promise<Narrati
       condition_type: c.condition_type ?? null,
       started_on: dateOnly(c.started_on),
       resolved_on: dateOnly(c.resolved_on),
+      resolution_reason: c.resolution_reason ?? null,
       contagious: !!c.is_contagious,
       neurotype: c.neurotype ?? null,
       diagnosis_status: c.diagnosis_status ?? null,
