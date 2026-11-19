@@ -14,9 +14,35 @@ type Conn = Knex | Knex.Transaction;
  * Used wherever someone is named who will be seen: a referral, a booking
  * with a new name, Pare.
  */
+/** Where someone is, as already typed elsewhere: carried into Contacts with them. */
+export type KnownPlace = AddressParts & { directions_link?: string | null };
+
+/**
+ * Fill in what Contacts does not know yet about a professional from what was
+ * typed elsewhere, such as the address of their appointment. Only empty
+ * details are filled: nothing already in Contacts is ever overwritten, and
+ * someone who shares their practice's address keeps sharing it.
+ */
+export async function fillProfessionalGaps(conn: Conn, providerId: string, place: KnownPlace | null | undefined): Promise<void> {
+  if (!place) return;
+  const p = (await conn('providers').where({ id: providerId }).first()) as Record<string, unknown> | undefined;
+  if (!p) return;
+  const fields: Record<string, unknown> = {};
+  const hasOwnAddress = ADDRESS_PART_KEYS.some((k) => String(p[k] ?? '').trim() !== '');
+  const sharesPractice = !!p['practice_id'] && p['uses_practice_address'] !== false;
+  if (!hasOwnAddress && !sharesPractice && hasAnyPart(place)) {
+    for (const k of ADDRESS_PART_KEYS) fields[k] = (place[k] ?? '').trim() || null;
+    fields['address'] = composeFormatted(place) || null;
+  }
+  if (!String(p['directions_link'] ?? '').trim() && place.directions_link?.trim()) {
+    fields['directions_link'] = place.directions_link.trim();
+  }
+  if (Object.keys(fields).length) await conn('providers').where({ id: providerId }).update(fields);
+}
+
 export async function ensureProfessional(
   conn: Conn,
-  opts: { profileId: string; name: string; providerType?: string | null }
+  opts: { profileId: string; name: string; providerType?: string | null; place?: KnownPlace | null }
 ): Promise<{ id: string; name: string; created: boolean } | null> {
   const name = opts.name.trim();
   if (!name) return null;
@@ -52,6 +78,8 @@ export async function ensureProfessional(
     .insert({ care_profile_id: opts.profileId, provider_id: provider.id })
     .onConflict(['care_profile_id', 'provider_id'])
     .ignore();
+  // Everything already typed about them goes into Contacts too.
+  await fillProfessionalGaps(conn, provider.id, opts.place);
   return { ...provider, created };
 }
 

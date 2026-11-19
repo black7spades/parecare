@@ -18,7 +18,7 @@ import { linkAddressToProfile, syncProfileResidence, RESIDENCE_KIND } from './ad
 import { APPOINTMENT_TYPES, APPOINTMENT_STATUSES, addBookingTodo, addNextSteps, syncAppointmentSpend } from '../routes/appointments';
 import { createForwards, deliverForwards, type ForwardItem } from './noteForwards';
 import { addCirclePerson, findCircleMemberByName, isAddedPerson } from './circlePeople';
-import { appointmentPlaceColumns, ensureProfessional } from './professionals';
+import { appointmentPlaceColumns, ensureProfessional, type KnownPlace } from './professionals';
 import { OBSERVATION_STATUSES } from '../routes/treatments';
 import { FUNDING_SOURCES, CLAIM_STATUSES } from './healthSpend';
 import { addPracticeMember, syncPracticeMembers, whereNamed } from './providerPractices';
@@ -1160,12 +1160,15 @@ async function recordOneMedication(
  */
 async function resolveProviderForAppointment(
   name: string | null | undefined,
-  profileId: string
+  profileId: string,
+  /** Where the appointment is, carried into Contacts where it knows nothing yet. */
+  location?: string | null
 ): Promise<{ providerId: string | null; note: string }> {
   if (!name?.trim()) return { providerId: null, note: '' };
   // Someone named for an appointment is someone this person sees: a name
   // already in Contacts is linked, a new one is filed there as a professional.
-  const pro = await ensureProfessional(db, { profileId, name });
+  const place = location?.trim() ? (appointmentPlaceColumns({ location }) as KnownPlace) : null;
+  const pro = await ensureProfessional(db, { profileId, name, place });
   if (!pro) return { providerId: null, note: '' };
   return { providerId: pro.id, note: pro.created ? ` Added ${pro.name} to Contacts.` : '' };
 }
@@ -1912,7 +1915,7 @@ async function executeOne(
       if (action.for_next_step && !step) {
         return `${CLARIFY_MARK} I did not book "${action.title}": I could not find an open next step called "${action.for_next_step}". Which one is it for?`;
       }
-      const resolved = await resolveProviderForAppointment(action.provider_name, profileId);
+      const resolved = await resolveProviderForAppointment(action.provider_name, profileId, action.location);
       const providerNote = resolved.note;
       // Booking a referral with no name given is with whoever it is to.
       const providerId = resolved.providerId ?? step?.provider_id ?? null;
@@ -1999,7 +2002,7 @@ async function executeOne(
       if (action.notes !== undefined) fields['notes'] = action.notes;
       let providerNote = '';
       if (action.provider_name !== undefined) {
-        const resolved = await resolveProviderForAppointment(action.provider_name, profileId);
+        const resolved = await resolveProviderForAppointment(action.provider_name, profileId, action.location);
         fields['provider_id'] = resolved.providerId;
         providerNote = resolved.note;
       }

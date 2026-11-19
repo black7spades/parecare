@@ -22,6 +22,7 @@ import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/use
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { useProfile } from './ProfileLayout';
 import { useHealthConfig } from '../../../lib/appConfig';
+import { noticeFiled, refreshContacts } from '../../../stores/notice';
 import { AddressFields, addressFrom, addressPayload, emptyAddress, hasAddress, type AddressValue } from '../../../components/AddressFields';
 
 const inputClass =
@@ -1054,6 +1055,7 @@ export function AppointmentEditor({
   onSaved: (saved?: { id: string }) => void;
 }) {
   const isNew = appointment === null;
+  const queryClient = useQueryClient();
   const [draft, setDraft] = useState<AppointmentDraft>(() =>
     appointment
       ? draftFromAppointment(appointment)
@@ -1080,11 +1082,16 @@ export function AppointmentEditor({
   const saveMutation = useMutation({
     mutationFn: () => {
       const body = appointmentBody(draft, isNew && fromReminderId ? fromReminderId : undefined);
+      type Saved = { appointment: { id: string }; filed?: Array<{ id: string; name: string }> };
       return isNew
-        ? api.post<{ appointment: { id: string } }>(`/care-profiles/${profileId}/appointments`, body)
-        : api.patch<{ appointment: { id: string } }>(`/care-profiles/${profileId}/appointments/${appointment.id}`, body);
+        ? api.post<Saved>(`/care-profiles/${profileId}/appointments`, body)
+        : api.patch<Saved>(`/care-profiles/${profileId}/appointments/${appointment.id}`, body);
     },
-    onSuccess: (res) => onSaved(res?.appointment),
+    onSuccess: (res) => {
+      noticeFiled(profileId, res?.filed);
+      refreshContacts(queryClient);
+      onSaved(res?.appointment);
+    },
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not save the appointment.'),
   });
 
