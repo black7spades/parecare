@@ -81,7 +81,11 @@ export async function buildProfileContext(
       .where('next_due_at', '<=', soon)
       .orderBy('next_due_at', 'asc')
       .limit(MAX_LIST),
-    db('care_circle_members').where({ care_profile_id: profileId, invite_accepted: true }),
+    // Everyone who logs in, plus people added by name only (pending invites
+    // are left out until accepted).
+    db('care_circle_members')
+      .where({ care_profile_id: profileId })
+      .where((qb) => qb.where('invite_accepted', true).orWhere((q2) => q2.whereNull('account_id').whereNull('invitation_id'))),
     db('care_profile_providers as cpp')
       .join('providers as p', 'cpp.provider_id', 'p.id')
       .where({ 'cpp.care_profile_id': profileId })
@@ -383,7 +387,15 @@ export async function buildProfileContext(
         circle
           .map(
             (m) =>
-              `- ${m.display_name}: ${line([m.role, m.relationship ? `their ${m.relationship}` : null, m.permission === 'viewer' ? 'view-only' : null, m.poa_type ? `holds ${m.poa_type} power of attorney${m.poa_activated ? ' (activated)' : ''}` : null])}`
+              `- ${m.display_name}: ${line([
+                m.role,
+                m.relationship ? `their ${m.relationship}` : null,
+                m.invite_accepted ? (m.permission === 'viewer' ? 'view-only' : null) : 'added by name, no login',
+                m.role_description ?? null,
+                m.phone ? `phone ${m.phone}` : null,
+                !m.invite_accepted && m.email ? `email ${m.email}` : null,
+                m.poa_type ? `holds ${m.poa_type} power of attorney${m.poa_activated ? ' (activated)' : ''}` : null,
+              ])}`
           )
           .join('\n')
     );

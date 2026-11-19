@@ -6,6 +6,34 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.44.0] - 2026-11-20
+
+### Added
+
+- **Add people to the care circle without inviting them.** Choose Add
+  someone, type their name and pick who they are. A neighbour, a friend who
+  drives or a support worker joins the circle with their phone and email if
+  you have them. They do not need an account, nobody is emailed, and they
+  cannot see anything.
+- **Doctors and other professionals in the circle.** Pick GP, Specialist,
+  Psychologist, Allied health or Social worker and they are filed in
+  Contacts too, so the same person is ready for appointments and referrals.
+  Everyone in Contacts now shows in the circle under Professionals, and
+  names already on file are offered so nobody is entered twice.
+- **Invite to log in, any time.** Anyone added by name can be invited later
+  with one button. They keep their place in the circle.
+- **Pare knows your circle.** Ask Pare to add, change or remove someone in
+  the care circle, or use the new circle command. Pare also knows who
+  everyone is and how to reach them.
+
+### Changed
+
+- **Removing someone added by name has Undo.** Nothing is lost by removing
+  them, so it happens straight away with a few seconds to Undo. Removing
+  someone who logs in still asks first.
+- **People added by name do not count toward your plan's circle limit.**
+  Only people who log in or have an invite on the way count.
+
 ## [0.43.0] - 2026-11-19
 
 ### Added

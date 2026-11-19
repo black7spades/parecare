@@ -275,6 +275,11 @@ export const CIRCLE_ROLES = [
 export const circleRoleLabel = (role: string) =>
   CIRCLE_ROLES.find((r) => r.value === role)?.label ?? role.charAt(0).toUpperCase() + role.slice(1);
 
+export type CircleStatus = 'active' | 'invited' | 'added';
+
+export const circleStatusLabel = (m: { status?: CircleStatus; invite_accepted: boolean }) =>
+  m.status === 'added' ? 'No login' : m.invite_accepted ? 'Active' : 'Invite pending';
+
 export interface CircleMember {
   id: string;
   account_id: string | null;
@@ -290,6 +295,11 @@ export interface CircleMember {
   can_edit_profile: boolean;
   invite_accepted: boolean;
   permission: CirclePermission;
+  /** Phone for anyone; email for someone added by name, who has no login. */
+  phone?: string | null;
+  email?: string | null;
+  /** active: logs in. invited: invite not yet accepted. added: added by name, no login. */
+  status?: CircleStatus;
   created_at: string;
   /** Present for owners and admins while an invite is pending. */
   invite_status?: 'pending' | 'accepted' | 'revoked' | 'expired';

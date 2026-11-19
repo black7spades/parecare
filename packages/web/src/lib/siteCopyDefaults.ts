@@ -26,7 +26,7 @@ export const SITE_COPY_DEFAULTS: Record<string, string> = {
   'account.connected.subheader': 'Use PareCare from the assistant you already chat with. Connect it once, then ask it to file things in PareCare.',
 
   // Profile-level pages (use {name} placeholder)
-  'profile.circle.subheader': "The family members, friends and organisations involved in {name}'s care.",
+  'profile.circle.subheader': "Everyone around {name}: family, friends, neighbours and the professionals involved in their care.",
   'profile.medications.subheader': "{name}'s current regimen. Add, edit and organise medications here; log and review doses in the record below.",
   'profile.mar.subheader': 'Log each dose against {name} and review the history. Doses colour instantly as you record them.',
   'profile.appointments.subheader': 'Everything booked for {name}. Each appointment shows on the Calendar and in the upcoming events on the Overview.',

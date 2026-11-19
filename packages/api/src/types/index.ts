@@ -172,6 +172,9 @@ export interface CareCircleMember {
   can_edit_profile: boolean;
   invitation_id: string | null;
   invite_accepted: boolean;
+  /** Contact details for someone added without an invite. */
+  phone: string | null;
+  email: string | null;
   created_at: string | Date;
 }
 
