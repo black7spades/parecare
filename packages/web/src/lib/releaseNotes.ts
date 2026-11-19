@@ -20,6 +20,17 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.41.0',
+    date: '2026-11-19',
+    summary: 'Resolved conditions leave the Conditions page, and old ones are quick to clear.',
+    groups: [
+      { heading: 'Changed', items: [
+        'Resolved conditions leave the list. Conditions that are over drop off the Conditions page and stay on record. Show resolved conditions brings them back whenever they are needed.',
+        'Mark conditions resolved in one go. Tick the ones that are over and choose Mark resolved, or open one and press Mark resolved. No date is needed, and Undo brings them back for a few seconds.',
+      ] },
+    ],
+  },
+  {
     version: '0.40.0',
     date: '2026-11-18',
     summary: 'Click any line in any list to open it, with the same buttons on every record, and delete with Undo.',

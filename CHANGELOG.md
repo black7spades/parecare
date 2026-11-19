@@ -6,6 +6,17 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.41.0] - 2026-11-19
+
+### Changed
+
+- **Resolved conditions leave the list.** Conditions that are over drop off
+  the Conditions page and stay on record. Show resolved conditions brings
+  them back whenever they are needed.
+- **Mark conditions resolved in one go.** Tick the ones that are over and
+  choose Mark resolved, or open one and press Mark resolved. No date is
+  needed, and Undo brings them back for a few seconds.
+
 ## [0.40.0] - 2026-11-18
 
 ### Added
