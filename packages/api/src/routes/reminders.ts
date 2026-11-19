@@ -28,10 +28,16 @@ remindersRouter.get('/', requireAuth, async (req, res) => {
     // A next step knows its kind and the appointment it came out of.
     .leftJoin('next_step_types as nst', 'r.next_step_type_id', 'nst.id')
     .leftJoin('appointments as ap', 'r.appointment_id', 'ap.id')
+    // An appointment waiting on this to-do for its date: doing the to-do
+    // means adding that date.
+    .leftJoin('appointments as tb', function () {
+      this.on('tb.from_reminder_id', '=', 'r.id').andOnNull('tb.starts_at');
+    })
     .where('r.care_profile_id', req.params['id'])
     .select(
       'r.*', 'a.display_name as completed_by_name', 'cl.display_name as claimed_by_name',
-      'nst.name as next_step_type_name', 'ap.title as appointment_title', 'ap.starts_at as appointment_starts_at'
+      'nst.name as next_step_type_name', 'ap.title as appointment_title', 'ap.starts_at as appointment_starts_at',
+      'tb.id as to_book_appointment_id', 'tb.title as to_book_title'
     );
   if (status === 'open') query.where('r.completed', false);
   else if (status === 'done') query.where('r.completed', true);

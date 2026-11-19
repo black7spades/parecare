@@ -47,7 +47,8 @@ export interface Appointment {
   address_country?: string | null;
   /** Its own map link, if one was given. */
   directions_link?: string | null;
-  starts_at: string;
+  /** Empty while it is not booked yet: every other detail can be filled in. */
+  starts_at: string | null;
   ends_at: string | null;
   status: string;
   notes: string | null;
@@ -78,6 +79,7 @@ const APPOINTMENT_STATUSES = [
   { value: 'completed', label: 'Completed' },
   { value: 'cancelled', label: 'Cancelled' },
   { value: 'missed', label: 'Missed' },
+  { value: 'to_book', label: 'Not booked yet' },
 ] as const;
 
 const typeLabel = (v: string) => APPOINTMENT_TYPES.find((t) => t.value === v)?.label ?? v;
@@ -86,8 +88,11 @@ const statusLabel = (v: string) => APPOINTMENT_STATUSES.find((s) => s.value === 
 const openSteps = (a: Appointment) => (a.next_steps ?? []).filter((s) => !s.completed).length;
 const byText = (x: string | null | undefined, y: string | null | undefined) => (x ?? '').localeCompare(y ?? '');
 
+const whenValue = (a: Appointment) => (a.starts_at ? new Date(a.starts_at).getTime() : Number.MAX_SAFE_INTEGER);
+
 const SORTS: DataSort<Appointment>[] = [
-  { key: 'when', label: 'By date', defaultDir: 'desc', compare: (a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime() },
+  // Not booked yet sorts as the latest, so it leads the newest-first list.
+  { key: 'when', label: 'By date', defaultDir: 'desc', compare: (a, b) => whenValue(a) - whenValue(b) },
   { key: 'title', label: 'By appointment', compare: (a, b) => a.title.localeCompare(b.title) },
   { key: 'kind', label: 'By kind', compare: (a, b) => typeLabel(a.appointment_type).localeCompare(typeLabel(b.appointment_type)) },
   { key: 'with', label: 'By who with', compare: (a, b) => byText(a.provider_name, b.provider_name) },
@@ -98,7 +103,7 @@ const SORTS: DataSort<Appointment>[] = [
 ];
 
 /** Finished, so it is time to ask how it went. */
-const isPast = (a: Appointment) => new Date(a.ends_at ?? a.starts_at).getTime() < Date.now();
+const isPast = (a: Appointment) => !!a.starts_at && new Date(a.ends_at ?? a.starts_at).getTime() < Date.now();
 
 const STATUS_FILTER: DataFilter<Appointment> = {
   key: 'status',
@@ -172,6 +177,22 @@ export function AppointmentsPage() {
     void queryClient.invalidateQueries({ queryKey: ['calendar', profile.id] });
     void queryClient.invalidateQueries({ queryKey: ['tasks', profile.id] });
   };
+
+  // ?book=<id> arrives from a to-do: give that appointment its date.
+  useEffect(() => {
+    const id = searchParams.get('book');
+    if (!id || appointments.length === 0) return;
+    const appt = appointments.find((a) => a.id === id);
+    if (appt) setEditing(appt);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('book');
+        return next;
+      },
+      { replace: true }
+    );
+  }, [searchParams, setSearchParams, appointments]);
 
   // ?outcome=<id> arrives from the bell or a task and opens how it went.
   useEffect(() => {
@@ -358,7 +379,13 @@ export function AppointmentsPage() {
                     </td>
                   ) : null}
                   <td className="px-3 py-2 text-ink whitespace-nowrap">
-                    {format(new Date(a.starts_at), 'EEE d MMM yyyy, HH:mm')}
+                    {a.starts_at ? (
+                      format(new Date(a.starts_at), 'EEE d MMM yyyy, HH:mm')
+                    ) : canEdit ? (
+                      <Button size="xs" variant="secondary" onClick={() => setEditing(a)}>Add the date</Button>
+                    ) : (
+                      <span className="text-muted">Not booked yet</span>
+                    )}
                   </td>
                   <td className="px-3 py-2 font-medium text-ink">{a.title}</td>
                   <td className="px-3 py-2 text-ink hidden xl:table-cell">{typeLabel(a.appointment_type)}</td>
@@ -404,13 +431,13 @@ export function AppointmentsPage() {
           key={panel.current.id}
           kindLabel="Appointment"
           title={panel.current.title}
-          subtitle={format(new Date(panel.current.starts_at), 'EEEE d MMMM yyyy, HH:mm')}
+          subtitle={panel.current.starts_at ? format(new Date(panel.current.starts_at), 'EEEE d MMMM yyyy, HH:mm') : 'Not booked yet'}
           kind="appointments"
           recordId={panel.current.id}
           profileId={profile.id}
           canEdit={canEdit}
           fields={[
-            { label: 'When', value: format(new Date(panel.current.starts_at), 'EEE d MMM yyyy, HH:mm') },
+            { label: 'When', value: panel.current.starts_at ? format(new Date(panel.current.starts_at), 'EEE d MMM yyyy, HH:mm') : 'Not booked yet' },
             { label: 'Ends', value: panel.current.ends_at ? format(new Date(panel.current.ends_at), 'HH:mm') : null },
             { label: 'Kind', value: typeLabel(panel.current.appointment_type) },
             { label: 'With', value: panel.current.provider_name },
@@ -454,12 +481,14 @@ export function AppointmentsPage() {
           ]}
           onEdit={() => setEditing(panel.current)}
           done={
-            panel.current.status === 'scheduled'
-              ? { label: 'Mark attended', onRun: () => markAttended.mutate(panel.current!), pending: markAttended.isPending }
-              : null
+            !panel.current.starts_at
+              ? { label: 'Add the date', onRun: () => setEditing(panel.current) }
+              : panel.current.status === 'scheduled'
+                ? { label: 'Mark attended', onRun: () => markAttended.mutate(panel.current!), pending: markAttended.isPending }
+                : null
           }
           extra={[
-            { label: 'How did it go?', onRun: () => setOutcomeFor(panel.current!.id) },
+            ...(panel.current.starts_at ? [{ label: 'How did it go?', onRun: () => setOutcomeFor(panel.current!.id) }] : []),
             { label: 'Forward notes', onRun: () => setForwarding({ sourceId: panel.current!.id, noteId: null }) },
           ]}
           onForwardNote={(noteId) => setForwarding({ sourceId: panel.current!.id, noteId })}
@@ -490,6 +519,13 @@ export function AppointmentsPage() {
           onUpload={(step) => {
             setUploadingFor({ step, from: outcomeAppointment });
             setOutcomeFor(null);
+          }}
+          onAddDate={(id) => {
+            const appt = appointments.find((a) => a.id === id);
+            if (appt) {
+              setEditing(appt);
+              setOutcomeFor(null);
+            }
           }}
         />
       ) : null}
@@ -680,7 +716,7 @@ export function newAppointmentDraft(init: Partial<AppointmentDraft> = {}): Appoi
 const pad = (n: number) => String(n).padStart(2, '0');
 
 function draftFromAppointment(a: Appointment): AppointmentDraft {
-  const d = new Date(a.starts_at);
+  const d = a.starts_at ? new Date(a.starts_at) : null;
   const e = a.ends_at ? new Date(a.ends_at) : null;
   return {
     title: a.title,
@@ -691,8 +727,8 @@ function draftFromAppointment(a: Appointment): AppointmentDraft {
     conditionId: a.medical_condition_id ?? '',
     address: addressFrom(a),
     directionsLink: a.directions_link ?? '',
-    startDate: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-    startTime: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+    startDate: d ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` : '',
+    startTime: d ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : '09:00',
     endTime: e ? `${pad(e.getHours())}:${pad(e.getMinutes())}` : '',
     status: a.status,
     notes: a.notes ?? '',
@@ -707,15 +743,20 @@ export interface AppointmentDraftErrors {
   startDate?: string;
 }
 
-export function appointmentDraftErrors(d: AppointmentDraft): AppointmentDraftErrors {
+/**
+ * What is missing. The date is only needed for an appointment that already
+ * had one: a new appointment can be saved without it, as Not booked yet.
+ */
+export function appointmentDraftErrors(d: AppointmentDraft, requireDate = false): AppointmentDraftErrors {
   const errors: AppointmentDraftErrors = {};
   if (!d.title.trim()) errors.title = 'Say what it is for, e.g. Neurology appointment.';
-  if (!d.startDate) errors.startDate = 'Pick the day it is on.';
+  if (requireDate && !d.startDate) errors.startDate = 'Pick the day it is on. A booked appointment keeps its date.';
   return errors;
 }
 
-/** Ready to book: it says what it is for and when. */
-export const draftIsBookable = (d: AppointmentDraft) => Object.keys(appointmentDraftErrors(d)).length === 0;
+/** Ready to save. */
+export const draftIsBookable = (d: AppointmentDraft, requireDate = false) =>
+  Object.keys(appointmentDraftErrors(d, requireDate)).length === 0;
 
 /** One sentence naming what is missing, for beside the Save button. */
 export function missingSentence(errors: AppointmentDraftErrors, what = 'This appointment'): string {
@@ -725,8 +766,9 @@ export function missingSentence(errors: AppointmentDraftErrors, what = 'This app
 
 /** The draft as the appointments API takes it. */
 export function appointmentBody(d: AppointmentDraft, fromReminderId?: string) {
-  const startsAt = new Date(`${d.startDate}T${d.startTime || '09:00'}`).toISOString();
-  const endsAt = d.endTime ? new Date(`${d.startDate}T${d.endTime}`).toISOString() : null;
+  // No date: saved as Not booked yet, waiting on a to-do.
+  const startsAt = d.startDate ? new Date(`${d.startDate}T${d.startTime || '09:00'}`).toISOString() : null;
+  const endsAt = d.startDate && d.endTime ? new Date(`${d.startDate}T${d.endTime}`).toISOString() : null;
   return {
     title: d.title.trim(),
     appointment_type: d.type,
@@ -768,6 +810,7 @@ export function AppointmentFields({
   onChange,
   idPrefix = 'appt',
   errors = {},
+  dateOptional = false,
 }: {
   profileId: string;
   value: AppointmentDraft;
@@ -776,6 +819,8 @@ export function AppointmentFields({
   idPrefix?: string;
   /** What is missing, shown in red under each box once Save has been tried. */
   errors?: AppointmentDraftErrors;
+  /** The date can be left blank: it saves as Not booked yet with a to-do. */
+  dateOptional?: boolean;
 }) {
   const health = useHealthConfig();
   const set = (patch: Partial<AppointmentDraft>) => onChange({ ...value, ...patch });
@@ -891,6 +936,7 @@ export function AppointmentFields({
           value={value.startDate}
           onChange={(e) => set({ startDate: e.target.value })}
           error={errors.startDate}
+          hint={dateOptional && !value.startDate ? 'No date yet? Leave it blank. It saves as Not booked yet, with a to-do to book it.' : undefined}
         />
         <Input
           id={`${idPrefix}-start`}
@@ -996,7 +1042,16 @@ export function AppointmentEditor({
   const [error, setError] = useState('');
   // Errors show once Save has been tried, never while someone is still typing.
   const [tried, setTried] = useState(false);
-  const errors = tried ? appointmentDraftErrors(draft) : {};
+  // A booked appointment keeps its date; a new one, or one not booked yet,
+  // can be saved without it.
+  const requireDate = !!appointment?.starts_at;
+  const errors = tried ? appointmentDraftErrors(draft, requireDate) : {};
+  // Opened to add the date: start there.
+  useEffect(() => {
+    if (appointment && !appointment.starts_at) {
+      window.setTimeout(() => document.getElementById('appt-date')?.focus(), 50);
+    }
+  }, [appointment]);
 
   useEffect(() => {
     if (appointment) setDraft(draftFromAppointment(appointment));
@@ -1014,12 +1069,12 @@ export function AppointmentEditor({
   });
 
   return (
-    <Modal open onClose={onClose} title={isNew ? 'Add appointment' : `Edit ${appointment.title}`} wide>
+    <Modal open onClose={onClose} title={isNew ? 'Add appointment' : appointment.starts_at ? `Edit ${appointment.title}` : `Book ${appointment.title}`} wide>
       <div className="space-y-4">
-        <AppointmentFields profileId={profileId} value={draft} onChange={setDraft} errors={errors} />
+        <AppointmentFields profileId={profileId} value={draft} onChange={setDraft} errors={errors} dateOptional={!requireDate} />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        {tried && !draftIsBookable(draft) ? (
-          <p className="text-sm text-red-600">{missingSentence(appointmentDraftErrors(draft))}</p>
+        {tried && !draftIsBookable(draft, requireDate) ? (
+          <p className="text-sm text-red-600">{missingSentence(appointmentDraftErrors(draft, requireDate))}</p>
         ) : null}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -1028,7 +1083,7 @@ export function AppointmentEditor({
             onClick={() => {
               setTried(true);
               setError('');
-              const missing = appointmentDraftErrors(draft);
+              const missing = appointmentDraftErrors(draft, requireDate);
               if (missing.title) document.getElementById('appt-title')?.focus();
               else if (missing.startDate) document.getElementById('appt-date')?.focus();
               if (Object.keys(missing).length === 0) saveMutation.mutate();

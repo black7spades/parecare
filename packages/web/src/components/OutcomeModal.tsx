@@ -27,7 +27,7 @@ import {
 export interface OutcomeAppointment {
   id: string;
   title: string;
-  starts_at: string;
+  starts_at: string | null;
   provider_name: string | null;
   provider_id: string | null;
   location: string | null;
@@ -80,6 +80,7 @@ export function OutcomeModal({
   onBook,
   onAddMedication,
   onUpload,
+  onAddDate,
 }: {
   profileId: string;
   appointment: OutcomeAppointment;
@@ -92,6 +93,8 @@ export function OutcomeModal({
   onAddMedication: (step: NextStep) => void;
   /** Upload the document a next step is about. */
   onUpload: (step: NextStep) => void;
+  /** Give a saved, not-yet-booked appointment its date. */
+  onAddDate: (appointmentId: string) => void;
 }) {
   const queryClient = useQueryClient();
   const { data } = useNextStepTypes(profileId);
@@ -154,12 +157,13 @@ export function OutcomeModal({
     });
   const picksFor = (d: DraftStep): PickState =>
     Object.fromEntries(candidates.map((c) => [c.key, d.send[c.key] ?? { on: d.sendDefault }]));
-  const unfinished = drafts.filter((d) => d.booking && !draftIsBookable(d.booking));
+  // A booking here can wait for its date, so only what it is for is needed.
+  const unfinished = drafts.filter((d) => d.booking && !draftIsBookable(d.booking, false));
   const nothingToSave = !outcome.trim() && drafts.length === 0 && !(appointment.outcome ?? '');
   // Every reason Save cannot go yet, in words, so nobody is left guessing.
   const problems = [
     ...unfinished.map((d) =>
-      `${missingSentence(appointmentDraftErrors(d.booking!), `The booking for ${d.who.name.trim() || d.type}`)} Add it, or choose Not now to book it later.`
+      `${missingSentence(appointmentDraftErrors(d.booking!, false), `The booking for ${d.who.name.trim() || d.type}`)} Add it, or choose Not now.`
     ),
     ...(nothingToSave ? ['Write what happened, or add a next step, then save.'] : []),
   ];
@@ -173,7 +177,7 @@ export function OutcomeModal({
     // Take them to the first box that needs filling.
     const first = unfinished[0];
     if (first?.booking) {
-      const missing = appointmentDraftErrors(first.booking);
+      const missing = appointmentDraftErrors(first.booking, false);
       const el = document.getElementById(`book-${first.key}-${missing.title ? 'title' : 'date'}`);
       el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
       el?.focus({ preventScroll: true });
@@ -253,7 +257,7 @@ export function OutcomeModal({
     <Modal open onClose={onClose} title="How did it go?" wide>
       <div className="space-y-5">
         <p className="text-sm text-muted">
-          {heading}, {format(new Date(appointment.starts_at), 'EEE d MMM yyyy, HH:mm')}
+          {heading}{appointment.starts_at ? `, ${format(new Date(appointment.starts_at), 'EEE d MMM yyyy, HH:mm')}` : ''}
         </p>
 
         <Textarea
@@ -278,12 +282,18 @@ export function OutcomeModal({
                   </div>
                   <span className="text-xs text-muted whitespace-nowrap">
                     {s.led_to
-                      ? `Booked for ${format(new Date(s.led_to.starts_at), 'd MMM')}`
+                      ? s.led_to.starts_at
+                        ? `Booked for ${format(new Date(s.led_to.starts_at), 'd MMM')}`
+                        : 'Details saved, not booked yet'
                       : s.completed
                         ? `Done${s.completed_at ? ` ${format(new Date(s.completed_at), 'd MMM')}` : ''}`
                         : `Due ${format(new Date(s.next_due_at), 'd MMM')}`}
                   </span>
-                  {canEdit && !s.completed ? (
+                  {canEdit && !s.completed && s.led_to && !s.led_to.starts_at ? (
+                    <span className="flex gap-1">
+                      <Button size="xs" variant="secondary" onClick={() => onAddDate(s.led_to!.id)}>Add the date</Button>
+                    </span>
+                  ) : canEdit && !s.completed ? (
                     <span className="flex gap-1">
                       {s.books ? (
                         <Button size="xs" variant="secondary" onClick={() => onBook(s)}>Book it</Button>
@@ -399,13 +409,14 @@ export function OutcomeModal({
                               idPrefix={`book-${d.key}`}
                               value={d.booking}
                               onChange={(next) => updateDraft(d.key, { booking: next })}
-                              errors={tried ? appointmentDraftErrors(d.booking) : {}}
+                              errors={tried ? appointmentDraftErrors(d.booking, false) : {}}
+                              dateOptional
                             />
                           </div>
                         ) : (
                           <div className="flex flex-wrap items-center gap-2">
                             <Button size="xs" variant="secondary" onClick={() => startBooking(d)}>Book it now</Button>
-                            <span className="text-xs text-muted">No date yet? Leave it and it stays on your tasks until it is booked.</span>
+                            <span className="text-xs text-muted">Add who, where and the rest now. The date can wait: it stays on your to-do list until it is booked.</span>
                           </div>
                         )}
                         <div>

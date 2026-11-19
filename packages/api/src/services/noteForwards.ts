@@ -24,7 +24,7 @@ async function appointmentWithProvider(conn: Conn, profileId: string, appointmen
     .leftJoin('providers as p', 'a.provider_id', 'p.id')
     .where({ 'a.id': appointmentId, 'a.care_profile_id': profileId })
     .first('a.id', 'a.title', 'a.starts_at', 'p.name as provider_name') as Promise<
-    { id: string; title: string; starts_at: Date; provider_name: string | null } | undefined
+    { id: string; title: string; starts_at: Date | null; provider_name: string | null } | undefined
   >;
 }
 
@@ -138,7 +138,8 @@ export async function createForwards(
         source_note_id: item.part === 'note' ? item.note_id ?? null : null,
         body: item.body,
         from_label: appointmentLabel(source),
-        from_on: source.starts_at,
+        // Not booked yet: dated the day it was sent.
+        from_on: source.starts_at ?? new Date(),
         target_reminder_id: reminderId,
         to_label: toLabel,
         forwarded_by_account_id: opts.actorId,

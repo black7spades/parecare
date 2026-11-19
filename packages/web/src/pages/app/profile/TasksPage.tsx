@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
@@ -172,6 +172,13 @@ export function TasksPage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [note, setNote] = useState('');
   const [completingTask, setCompletingTask] = useState<Task | null>(null);
+  const navigate = useNavigate();
+  // A to-do with an appointment waiting on it is done by giving that
+  // appointment its date, which ticks the to-do off.
+  const startCompleting = (t: Task) => {
+    if (t.to_book_appointment_id) navigate(`/app/${profile.id}/appointments?book=${t.to_book_appointment_id}`);
+    else setCompletingTask(t);
+  };
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
@@ -347,7 +354,7 @@ export function TasksPage() {
     if (t.completed) {
       setDone.mutate({ id: t.id, completed: false });
     } else {
-      setCompletingTask(t);
+      startCompleting(t);
     }
   };
 
@@ -680,7 +687,9 @@ export function TasksPage() {
             done={
               t.completed
                 ? { label: 'Reopen', onRun: () => setDone.mutate({ id: t.id, completed: false }), pending: setDone.isPending }
-                : { label: 'Mark done', onRun: () => setCompletingTask(t) }
+                : t.to_book_appointment_id
+                  ? { label: 'Add the date', onRun: () => startCompleting(t) }
+                  : { label: 'Mark done', onRun: () => startCompleting(t) }
             }
             extra={extra}
             onDelete={() => {

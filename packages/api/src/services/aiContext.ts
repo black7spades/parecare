@@ -331,6 +331,24 @@ export async function buildProfileContext(
     );
   }
 
+  // Appointments with every detail but the date, so Pare can book them.
+  const toBook = (await db('appointments as ap')
+    .leftJoin('providers as p', 'ap.provider_id', 'p.id')
+    .where('ap.care_profile_id', profileId)
+    .whereNull('ap.starts_at')
+    .whereNot('ap.status', 'cancelled')
+    .orderBy('ap.created_at', 'asc')
+    .limit(10)
+    .select('ap.title', 'ap.location', 'p.name as provider_name')) as Array<{ title: string; location: string | null; provider_name: string | null }>;
+  if (toBook.length) {
+    sections.push(
+      `## Not booked yet, waiting for a date\n` +
+        toBook
+          .map((a) => `- ${a.title}${a.provider_name ? ` with ${a.provider_name}` : ''}${a.location ? ` at ${a.location}` : ''}`)
+          .join('\n')
+    );
+  }
+
   // Recent appointments and what came of them, so Pare can ask how one went
   // and knows which next steps are still open.
   const recentAppts = (await db('appointments as ap')

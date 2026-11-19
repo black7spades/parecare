@@ -15,26 +15,36 @@ const INTERACTIVE = 'button, a, input, select, textarea, label, summary, [role="
 export function useRecordPanel<T>(rows: T[], getId: (row: T) => string) {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
-  const openedHere = useRef(false);
+  // Where in the browser's history the list was when this panel opened it,
+  // so closing only steps back when that lands on the list itself.
+  const openedAt = useRef<number | null>(null);
   const openId = params.get('record');
   const current = openId ? rows.find((r) => getId(r) === openId) ?? null : null;
 
   const open = useCallback(
     (id: string) => {
-      openedHere.current = true;
+      // Already open (a second click): swap the record in place rather than
+      // stacking another step that Close would have to undo.
+      const alreadyOpen = new URLSearchParams(window.location.search).has('record');
+      if (!alreadyOpen) openedAt.current = historyIndex();
       setParams((prev) => {
         const next = new URLSearchParams(prev);
         next.set('record', id);
         return next;
-      });
+      }, { replace: alreadyOpen });
     },
     [setParams]
   );
 
   const close = useCallback(() => {
-    // Opened from this list: step back, so Back after closing leaves the page.
-    if (openedHere.current) {
-      openedHere.current = false;
+    // Opened from this list and nothing has happened since: step back, so
+    // Back after closing leaves the page. If anything else was opened from
+    // inside the panel, stepping back would only reopen a record, so the
+    // panel is closed where it stands instead.
+    const at = openedAt.current;
+    openedAt.current = null;
+    const now = historyIndex();
+    if (at !== null && now !== null && now === at + 1) {
       navigate(-1);
       return;
     }
@@ -65,6 +75,12 @@ export function useRecordPanel<T>(rows: T[], getId: (row: T) => string) {
   );
 
   return { current, openId, open, close, rowProps };
+}
+
+/** React Router's position in the browser history, when it is known. */
+function historyIndex(): number | null {
+  const idx = (window.history.state as { idx?: unknown } | null)?.idx;
+  return typeof idx === 'number' ? idx : null;
 }
 
 /** The class a clickable row gets, so it reads as something to open. */

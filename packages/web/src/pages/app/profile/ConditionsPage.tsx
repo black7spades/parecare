@@ -418,7 +418,7 @@ export function ConditionsPage() {
         const links: RecordLink[] = [
           ...(c.appointments ?? []).map((a) => ({
             label: 'Appointment',
-            value: `${a.title}, ${format(new Date(a.starts_at), 'd MMM yyyy')}`,
+            value: `${a.title}, ${a.starts_at ? format(new Date(a.starts_at), 'd MMM yyyy') : 'not booked yet'}`,
             to: `/app/${profile.id}/appointments?record=${a.id}`,
           })),
           ...(c.medications ?? []).map((m) => ({

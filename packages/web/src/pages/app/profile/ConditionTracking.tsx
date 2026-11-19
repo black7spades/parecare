@@ -228,12 +228,12 @@ export function ConditionTracking({
           </p>
         ) : (
           <ol className="space-y-3 border-l-2 border-border pl-3">
-            {[...appointments].sort((x, y) => new Date(x.starts_at).getTime() - new Date(y.starts_at).getTime()).map((a) => (
+            {[...appointments].sort((x, y) => (x.starts_at ? new Date(x.starts_at).getTime() : Infinity) - (y.starts_at ? new Date(y.starts_at).getTime() : Infinity)).map((a) => (
               <li key={a.id} className="text-sm">
                 <div className="flex flex-wrap items-center gap-2">
                   <Link to={`/app/${profileId}/appointments?outcome=${a.id}`} className="text-ink font-medium hover:underline">{a.title}</Link>
                   {a.provider_name ? <span className="text-xs text-muted">with {a.provider_name}</span> : null}
-                  <span className="text-xs text-muted">{format(new Date(a.starts_at), 'd MMM yyyy, HH:mm')}</span>
+                  <span className="text-xs text-muted">{a.starts_at ? format(new Date(a.starts_at), 'd MMM yyyy, HH:mm') : 'Not booked yet'}</span>
                   <span className="badge bg-surface-2 text-muted text-[10px] capitalize">{a.status}</span>
                 </div>
                 {a.outcome ? <p className="text-sm text-ink mt-0.5 whitespace-pre-wrap">Outcome: {a.outcome}</p> : null}
@@ -245,7 +245,7 @@ export function ConditionTracking({
                         <span className="text-muted">{s.type_name}</span>
                         <span className="text-muted">
                           {s.led_to
-                            ? `led to ${s.led_to.title}, ${format(new Date(s.led_to.starts_at), 'd MMM')}`
+                            ? `led to ${s.led_to.title}, ${s.led_to.starts_at ? format(new Date(s.led_to.starts_at), 'd MMM') : 'not booked yet'}`
                             : s.completed
                               ? 'done'
                               : `due ${format(new Date(s.next_due_at), 'd MMM')}`}
