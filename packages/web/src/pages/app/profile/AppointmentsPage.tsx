@@ -382,7 +382,7 @@ export function AppointmentsPage() {
                     {a.starts_at ? (
                       format(new Date(a.starts_at), 'EEE d MMM yyyy, HH:mm')
                     ) : canEdit ? (
-                      <Button size="xs" variant="secondary" onClick={() => setEditing(a)}>Add the date</Button>
+                      <Button size="xs" variant="secondary" onClick={() => setEditing(a)}>Book it</Button>
                     ) : (
                       <span className="text-muted">Not booked yet</span>
                     )}
@@ -391,7 +391,15 @@ export function AppointmentsPage() {
                   <td className="px-3 py-2 text-ink hidden xl:table-cell">{typeLabel(a.appointment_type)}</td>
                   <td className="px-3 py-2 text-ink hidden lg:table-cell">{a.provider_name ?? ''}</td>
                   <td className="px-3 py-2 text-muted hidden 2xl:table-cell">{a.location ?? ''}</td>
-                  <td className="px-3 py-2 text-ink">{statusLabel(a.status)}</td>
+                  <td className="px-3 py-2 text-ink">
+                    {!a.starts_at && canEdit ? (
+                      <Button size="xs" variant="ghost" className="whitespace-nowrap" aria-label={`Book ${a.title}`} onClick={() => setEditing(a)}>
+                        Not booked yet, book it
+                      </Button>
+                    ) : (
+                      statusLabel(a.status)
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-ink max-w-xs">
                     {a.outcome ? (
                       <span className="line-clamp-2 break-words">{a.outcome}</span>
@@ -437,13 +445,25 @@ export function AppointmentsPage() {
           profileId={profile.id}
           canEdit={canEdit}
           fields={[
-            { label: 'When', value: panel.current.starts_at ? format(new Date(panel.current.starts_at), 'EEE d MMM yyyy, HH:mm') : 'Not booked yet' },
+            {
+              label: 'When',
+              value: panel.current.starts_at
+                ? format(new Date(panel.current.starts_at), 'EEE d MMM yyyy, HH:mm')
+                : canEdit
+                  ? <Button size="xs" variant="ghost" onClick={() => setEditing(panel.current)}>Not booked yet, book it</Button>
+                  : 'Not booked yet',
+            },
             { label: 'Ends', value: panel.current.ends_at ? format(new Date(panel.current.ends_at), 'HH:mm') : null },
             { label: 'Kind', value: typeLabel(panel.current.appointment_type) },
             { label: 'With', value: panel.current.provider_name },
             { label: 'Practice', value: panel.current.provider_organisation },
             { label: 'Location', value: panel.current.location ?? panel.current.provider_address },
-            { label: 'Status', value: statusLabel(panel.current.status) },
+            {
+              label: 'Status',
+              value: !panel.current.starts_at && canEdit
+                ? <Button size="xs" variant="ghost" onClick={() => setEditing(panel.current)}>Not booked yet, book it</Button>
+                : statusLabel(panel.current.status),
+            },
             { label: 'Outcome', value: panel.current.outcome ? (
               <ForwardedText
                 profileId={profile.id}
@@ -482,7 +502,7 @@ export function AppointmentsPage() {
           onEdit={() => setEditing(panel.current)}
           done={
             !panel.current.starts_at
-              ? { label: 'Add the date', onRun: () => setEditing(panel.current) }
+              ? { label: 'Book it', onRun: () => setEditing(panel.current) }
               : panel.current.status === 'scheduled'
                 ? { label: 'Mark attended', onRun: () => markAttended.mutate(panel.current!), pending: markAttended.isPending }
                 : null

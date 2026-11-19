@@ -6,6 +6,15 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.46.1] - 2026-11-20
+
+### Changed
+
+- **Not booked yet books it, wherever it appears.** Clicking Not booked yet
+  in Appointments, on the appointment itself, in How did it go, in
+  condition tracking or on a condition opens the booking straight away.
+  The buttons that do it now say Book it.
+
 ## [0.46.0] - 2026-11-20
 
 ### Added

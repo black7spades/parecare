@@ -20,6 +20,16 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.46.1',
+    date: '2026-11-20',
+    summary: 'Click Not booked yet anywhere to book it.',
+    groups: [
+      { heading: 'Changed', items: [
+        'Not booked yet books it, wherever it appears. Clicking Not booked yet in Appointments, on the appointment itself, in How did it go, in condition tracking or on a condition opens the booking straight away. The buttons that do it now say Book it.',
+      ] },
+    ],
+  },
+  {
     version: '0.46.0',
     date: '2026-11-20',
     summary: 'Save an appointment before it is booked, and add the date later.',
