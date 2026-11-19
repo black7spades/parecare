@@ -9,22 +9,44 @@ import { EditNextStepsModal } from './EditNextStepsModal';
 import { Button } from './ui/Button';
 import { Input, Textarea } from './ui/Input';
 import { Modal } from './ui/Modal';
+import { NotePicker, pickedItems, useForwardCandidates, type PickState, type SentForward } from './ForwardNotes';
+import {
+  AppointmentFields,
+  appointmentBody,
+  draftIsBookable,
+  kindForStep,
+  newAppointmentDraft,
+  type AppointmentDraft,
+} from '../pages/app/profile/AppointmentsPage';
 
 export interface OutcomeAppointment {
   id: string;
   title: string;
   starts_at: string;
   provider_name: string | null;
+  provider_id: string | null;
+  location: string | null;
+  medical_condition_id: string | null;
+  notes: string | null;
   outcome?: string | null;
   next_steps?: NextStep[];
+  forwarded?: SentForward[];
 }
 
 interface DraftStep {
   key: number;
   type: string;
   systemKey: string | null;
+  /** Done by booking another appointment, so it can be booked and sent notes here. */
+  books: boolean;
   details: string;
   dueOn: string;
+  /** Booking it now, right here, with the same fields as Add appointment. */
+  booking: AppointmentDraft | null;
+  /** Pieces of this visit to send with it. */
+  send: PickState;
+  /** Whether a piece nobody has ticked or unticked yet goes: yes for a referral. */
+  sendDefault: boolean;
 }
 
 const inDays = (n: number) => format(new Date(Date.now() + n * 24 * 3600 * 1000), 'yyyy-MM-dd');
@@ -69,12 +91,45 @@ export function OutcomeModal({
   const [editingList, setEditingList] = useState(false);
   const [error, setError] = useState('');
   const existing = appointment.next_steps ?? [];
+  const candidates = useForwardCandidates(profileId, appointment, outcome);
 
   const addDraft = (name: string) => {
     const t = types.find((x) => x.name.toLowerCase() === name.trim().toLowerCase());
-    setDrafts((d) => [...d, { key: nextKey, type: t?.name ?? name.trim(), systemKey: t?.system_key ?? null, details: '', dueOn: inDays(7) }]);
+    // A referral goes to someone new, so everything noted today goes with it
+    // unless unticked. Other steps send nothing unless ticked.
+    const sendAll = t?.system_key === 'referral';
+    setDrafts((d) => [
+      ...d,
+      {
+        key: nextKey,
+        type: t?.name ?? name.trim(),
+        systemKey: t?.system_key ?? null,
+        books: !!t?.books,
+        details: '',
+        dueOn: inDays(7),
+        booking: null,
+        send: {},
+        sendDefault: sendAll,
+      },
+    ]);
     setNextKey((k) => k + 1);
   };
+
+  // A follow-up is usually with the same person, at the same place.
+  const startBooking = (d: DraftStep) =>
+    updateDraft(d.key, {
+      booking: newAppointmentDraft({
+        title: d.details.trim() || d.type,
+        type: kindForStep(d.type),
+        conditionId: appointment.medical_condition_id ?? '',
+        ...(d.systemKey === 'follow_up'
+          ? { providerId: appointment.provider_id ?? '', location: appointment.location ?? '' }
+          : {}),
+      }),
+    });
+  const picksFor = (d: DraftStep): PickState =>
+    Object.fromEntries(candidates.map((c) => [c.key, d.send[c.key] ?? { on: d.sendDefault }]));
+  const unfinishedBooking = drafts.some((d) => d.booking && !draftIsBookable(d.booking));
   const updateDraft = (key: number, patch: Partial<DraftStep>) =>
     setDrafts((d) => d.map((s) => (s.key === key ? { ...s, ...patch } : s)));
 
@@ -86,13 +141,46 @@ export function OutcomeModal({
   };
 
   const save = useMutation({
-    mutationFn: () =>
-      api.put(`/care-profiles/${profileId}/appointments/${appointment.id}/outcome`, {
+    mutationFn: async () => {
+      const res = await api.put<{ created: string[] }>(`/care-profiles/${profileId}/appointments/${appointment.id}/outcome`, {
         outcome: outcome.trim() || null,
-        next_steps: drafts.map((d) => ({ type: d.type, details: d.details.trim() || null, due_on: d.dueOn || null })),
+        next_steps: drafts.map((d) => ({
+          type: d.type,
+          details: d.details.trim() || null,
+          due_on: d.dueOn || null,
+          forward: d.books ? pickedItems(candidates, picksFor(d)) : [],
+        })),
         tz: browserTimeZone() ?? null,
-      }),
-    onSuccess: () => { refresh(); onClose(); },
+      });
+      // Book what was booked here. Each booking ticks its step off and
+      // brings the notes sent with it.
+      const failed: string[] = [];
+      for (let i = 0; i < drafts.length; i++) {
+        const d = drafts[i];
+        const stepId = res.created[i];
+        if (!d.booking || !stepId) continue;
+        try {
+          await api.post(`/care-profiles/${profileId}/appointments`, appointmentBody(d.booking, stepId));
+        } catch {
+          failed.push(d.booking.title.trim() || d.type);
+        }
+      }
+      return failed;
+    },
+    onSuccess: (failed) => {
+      refresh();
+      void queryClient.invalidateQueries({ queryKey: ['calendar', profileId] });
+      void queryClient.invalidateQueries({ queryKey: ['record-extras', profileId] });
+      if (failed.length === 0) {
+        onClose();
+        return;
+      }
+      // How it went is saved; only the booking needs another go.
+      setDrafts([]);
+      setError(
+        `How it went is saved, but booking ${failed.join(' and ')} did not go through. Use Book it next to it below to try again. Any notes sent with it are waiting there.`
+      );
+    },
     onError: (err) => setError(err instanceof Error ? err.message : 'The outcome did not save. Check your connection and try again.'),
   });
 
@@ -211,13 +299,51 @@ export function OutcomeModal({
                         value={d.details}
                         onChange={(e) => updateDraft(d.key, { details: e.target.value })}
                       />
-                      <Input
-                        label="Do by"
-                        type="date"
-                        value={d.dueOn}
-                        onChange={(e) => updateDraft(d.key, { dueOn: e.target.value })}
-                      />
+                      {d.booking ? null : (
+                        <Input
+                          label="Do by"
+                          type="date"
+                          value={d.dueOn}
+                          onChange={(e) => updateDraft(d.key, { dueOn: e.target.value })}
+                        />
+                      )}
                     </div>
+
+                    {d.books ? (
+                      <div className="mt-3 space-y-3">
+                        {d.booking ? (
+                          <div className="rounded-md border border-border p-3">
+                            <div className="flex items-center gap-2 mb-3">
+                              <p className="text-sm font-medium text-ink flex-1">Book it now</p>
+                              <Button size="xs" variant="ghost" onClick={() => updateDraft(d.key, { booking: null })}>Not now</Button>
+                            </div>
+                            <AppointmentFields
+                              profileId={profileId}
+                              idPrefix={`book-${d.key}`}
+                              value={d.booking}
+                              onChange={(next) => updateDraft(d.key, { booking: next })}
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button size="xs" variant="secondary" onClick={() => startBooking(d)}>Book it now</Button>
+                            <span className="text-xs text-muted">No date yet? Leave it and it stays on your tasks until it is booked.</span>
+                          </div>
+                        )}
+                        <div>
+                          <p className="text-sm font-medium text-ink mb-1">Send notes with it</p>
+                          <p className="text-xs text-muted mb-2">
+                            Ticked notes go onto the appointment {d.booking ? 'when it is saved' : 'as soon as it is booked'}, marked as from this visit.
+                          </p>
+                          <NotePicker
+                            candidates={candidates}
+                            picks={picksFor(d)}
+                            onChange={(next) => updateDraft(d.key, { send: next })}
+                            idPrefix={`send-${d.key}`}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -226,13 +352,16 @@ export function OutcomeModal({
         ) : null}
 
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        {unfinishedBooking ? (
+          <p className="text-sm text-muted">Give each booking what it is for and a date, or choose Not now.</p>
+        ) : null}
 
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>{canEdit ? 'Cancel' : 'Close'}</Button>
           {canEdit ? (
             <Button
               loading={save.isPending}
-              disabled={!outcome.trim() && drafts.length === 0 && !(appointment.outcome ?? '')}
+              disabled={unfinishedBooking || (!outcome.trim() && drafts.length === 0 && !(appointment.outcome ?? ''))}
               onClick={() => save.mutate()}
             >
               Save

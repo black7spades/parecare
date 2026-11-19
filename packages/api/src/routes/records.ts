@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth';
 import { canSeeDocument } from './documents';
 import { withCategory } from '../services/documentCategories';
 import type { Document } from '../types';
+import { forwardInfoForNotes } from '../services/noteForwards';
 
 /**
  * What every record's own view shows beyond its fields: notes people have
@@ -37,7 +38,7 @@ recordsRouter.get('/:kind/:recordId', requireAuth, async (req, res) => {
       .leftJoin('accounts as a', 'n.author_account_id', 'a.id')
       .where({ 'n.care_profile_id': profileId, 'n.entity_type': t.kind, 'n.entity_id': t.id })
       .orderBy('n.created_at', 'desc')
-      .select('n.id', 'n.body', 'n.created_at', 'n.author_account_id', 'a.display_name as author_name'),
+      .select('n.id', 'n.body', 'n.created_at', 'n.author_account_id', 'n.forward_id', 'a.display_name as author_name'),
     withCategory(db('documents'))
       .join('document_links as l', 'l.document_id', 'documents.id')
       .where({ 'documents.care_profile_id': profileId, 'l.entity_type': t.kind, 'l.entity_id': t.id })
@@ -49,8 +50,12 @@ recordsRouter.get('/:kind/:recordId', requireAuth, async (req, res) => {
       .limit(50)
       .select('l.id', 'l.action', 'l.summary', 'l.source', 'l.created_at', 'a.display_name as actor_name'),
   ]);
+  // A note passed on to another appointment shows where it went; a copy
+  // that arrived from one shows who it is from.
+  const typedNotes = notes as Array<Record<string, unknown> & { id: string; forward_id: string | null }>;
+  const info = await forwardInfoForNotes(typedNotes);
   res.json({
-    notes,
+    notes: typedNotes.map((n) => ({ ...n, ...info(n.id, n.forward_id) })),
     documents: (docs as Document[]).filter((d) => canSeeDocument(req, d)),
     history,
   });
@@ -88,7 +93,11 @@ recordsRouter.delete('/notes/:noteId', requireAuth, async (req, res) => {
     res.status(403).json({ error: 'Only the person who wrote a note, or the owner, can remove it.', code: 'FORBIDDEN' });
     return;
   }
-  await db('record_notes').where({ id: note.id }).delete();
+  await db.transaction(async (trx) => {
+    await trx('record_notes').where({ id: note.id }).delete();
+    // A forwarded copy removed here means the original is no longer forwarded.
+    if (note.forward_id) await trx('note_forwards').where({ id: note.forward_id }).delete();
+  });
   res.json({ note });
 });
 

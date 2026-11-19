@@ -10,6 +10,7 @@ import { UploadDocumentModal } from '../../pages/app/profile/DocumentsPage';
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import { TrashIcon } from '../ui/icons';
+import { ForwardedFromTag, ForwardTags, type ForwardedFrom, type SentForward } from '../ForwardNotes';
 
 export interface RecordField {
   label: string;
@@ -37,7 +38,17 @@ export interface RecordAction {
 }
 
 interface RecordExtras {
-  notes: Array<{ id: string; body: string; created_at: string; author_account_id: string | null; author_name: string | null }>;
+  notes: Array<{
+    id: string;
+    body: string;
+    created_at: string;
+    author_account_id: string | null;
+    author_name: string | null;
+    /** Where this note was forwarded to, on an appointment. */
+    forwarded_to?: SentForward[];
+    /** Who this note came from, when it is a forwarded copy. */
+    forwarded_from?: ForwardedFrom | null;
+  }>;
   documents: CareDocument[];
   history: Array<{ id: string; action: string; summary: string | null; source: string | null; created_at: string; actor_name: string | null }>;
 }
@@ -72,6 +83,7 @@ export function RecordPanel({
   onDelete,
   deleteLabel = 'Delete',
   onClose,
+  onForwardNote,
   children,
 }: {
   /** What this is, in a word or two: "Appointment", "Medication". */
@@ -95,6 +107,8 @@ export function RecordPanel({
   /** "Remove" where the record is only unlinked from this person, not destroyed. */
   deleteLabel?: 'Delete' | 'Remove';
   onClose: () => void;
+  /** Offers Forward on each note, for records whose notes can be passed on. */
+  onForwardNote?: (noteId: string) => void;
   children?: ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -321,16 +335,26 @@ export function RecordPanel({
                     {extras!.notes.map((n) => (
                       <li key={n.id} className="rounded-md border border-border px-3 py-2">
                         <div className="flex items-start gap-2">
-                          <p className="flex-1 text-sm text-ink whitespace-pre-wrap break-words">{n.body}</p>
+                          <p className={`flex-1 text-sm whitespace-pre-wrap break-words ${(n.forwarded_to ?? []).length ? 'text-muted' : 'text-ink'}`}>{n.body}</p>
+                          {canEdit && onForwardNote ? (
+                            <Button size="xs" variant="ghost" onClick={() => onForwardNote(n.id)}>Forward</Button>
+                          ) : null}
                           {canEdit && n.author_account_id === myId ? (
                             <Button size="xs" variant="ghost-danger" aria-label="Remove this note" title="Remove" onClick={() => removeNote.mutate(n.id)}>
                               <TrashIcon />
                             </Button>
                           ) : null}
                         </div>
-                        <p className="text-xs text-muted">
-                          {n.author_name ?? 'Someone'}, {format(new Date(n.created_at), 'd MMM yyyy, HH:mm')}
-                        </p>
+                        {n.forwarded_from && profileId ? (
+                          <ForwardedFromTag profileId={profileId} from={n.forwarded_from} />
+                        ) : (
+                          <p className="text-xs text-muted">
+                            {n.author_name ?? 'Someone'}, {format(new Date(n.created_at), 'd MMM yyyy, HH:mm')}
+                          </p>
+                        )}
+                        {profileId && (n.forwarded_to ?? []).length ? (
+                          <ForwardTags profileId={profileId} forwards={n.forwarded_to!} canEdit={canEdit} />
+                        ) : null}
                       </li>
                     ))}
                   </ul>

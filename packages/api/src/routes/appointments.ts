@@ -6,6 +6,7 @@ import { requireAuth } from '../middleware/auth';
 import { accountIdForProfile } from '../services/documentCategories';
 import { resolveNextStepTypeByName, stepBooks } from '../services/nextStepTypes';
 import { isValidTimeZone, parseZonedTime } from '../lib/timezone';
+import { createForwards, deliverForwards, forwardItemSchema, forwardsSentFor, takeBackForward } from '../services/noteForwards';
 
 /**
  * Appointments are a first-class record: who is being seen, what for,
@@ -155,11 +156,13 @@ appointmentsRouter.get('/', requireAuth, async (req, res) => {
   if (req.query['from']) query.where('a.starts_at', '>=', new Date(String(req.query['from'])));
   if (req.query['to']) query.where('a.starts_at', '<=', new Date(String(req.query['to'])));
   const appointments = await query.orderBy('a.starts_at', 'asc');
-  const steps = await nextStepsFor(appointments.map((a: { id: string }) => a.id));
+  const ids = appointments.map((a: { id: string }) => a.id);
+  const [steps, forwarded] = await Promise.all([nextStepsFor(ids), forwardsSentFor(ids)]);
   res.json({
     appointments: appointments.map((a: Record<string, unknown>) => ({
       ...serializeAppointment(a),
       next_steps: steps.get(a['id'] as string) ?? [],
+      forwarded: forwarded.get(a['id'] as string) ?? [],
     })),
   });
 });
@@ -173,6 +176,9 @@ const outcomeSchema = z.object({
         type: z.string().trim().max(100),
         details: z.string().trim().max(255).optional().nullable(),
         due_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+        // Pieces of this visit to send with the step, such as what happened
+        // for the specialist a referral is to. They land when it is booked.
+        forward: z.array(forwardItemSchema).max(50).default([]),
       })
     )
     .max(30)
@@ -265,19 +271,43 @@ appointmentsRouter.put('/:appointmentId/outcome', requireAuth, async (req, res) 
       fields['status'] = 'completed';
     }
     await trx('appointments').where({ id: appointment.id }).update(fields);
-    return addNextSteps(trx, {
+    const added = await addNextSteps(trx, {
       profileId,
       appointmentId: appointment.id,
       actorId: req.account!.id,
       timeZone: tz,
       steps: parsed.data.next_steps,
     });
+    for (let i = 0; i < added.length; i++) {
+      const items = parsed.data.next_steps[i]?.forward ?? [];
+      if (items.length === 0) continue;
+      const result = await createForwards(trx, {
+        profileId,
+        sourceAppointmentId: appointment.id,
+        actorId: req.account!.id,
+        items,
+        to: { reminder_id: added[i]!.id },
+      });
+      if ('error' in result) throw Object.assign(new Error(result.error), { status: 400 });
+    }
+    return added;
+  }).catch((err: Error & { status?: number }) => {
+    if (err.status === 400) {
+      res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
+      return null;
+    }
+    throw err;
   });
+  if (!created) return;
 
   const enriched = await appointmentSelect(profileId).andWhere('a.id', appointment.id).first();
-  const steps = await nextStepsFor([appointment.id]);
+  const [steps, forwarded] = await Promise.all([nextStepsFor([appointment.id]), forwardsSentFor([appointment.id])]);
   res.json({
-    appointment: { ...serializeAppointment(enriched), next_steps: steps.get(appointment.id) ?? [] },
+    appointment: {
+      ...serializeAppointment(enriched),
+      next_steps: steps.get(appointment.id) ?? [],
+      forwarded: forwarded.get(appointment.id) ?? [],
+    },
     created: created.map((c) => c.id),
   });
 });
@@ -297,11 +327,17 @@ appointmentsRouter.post('/', requireAuth, async (req, res) => {
     })
     .returning('*');
   const appointmentId = (appointment as { id: string }).id;
-  // Booking the appointment a next step called for ticks that step off.
+  // Booking the appointment a next step called for ticks that step off, and
+  // anything forwarded to the step lands on the new appointment.
   if (parsed.data.from_reminder_id) {
     await db('reminders')
       .where({ id: parsed.data.from_reminder_id, care_profile_id: req.params['id'], completed: false })
       .update({ completed: true, completed_at: db.fn.now(), completed_by_account_id: req.account!.id });
+    await deliverForwards(db, {
+      profileId: String(req.params['id']),
+      reminderId: parsed.data.from_reminder_id,
+      appointmentId,
+    });
   }
   await syncAppointmentSpend(
     appointmentId,
@@ -341,6 +377,54 @@ appointmentsRouter.patch('/:appointmentId', requireAuth, async (req, res) => {
   }
   const enriched = await appointmentSelect(String(req.params['id'])).andWhere('a.id', req.params['appointmentId']!).first();
   res.json({ appointment: serializeAppointment(enriched) });
+});
+
+const forwardSchema = z.object({
+  items: z.array(forwardItemSchema).min(1).max(50),
+  to_appointment_id: z.string().uuid().optional().nullable(),
+  to_reminder_id: z.string().uuid().optional().nullable(),
+});
+
+/**
+ * Forward some or all of what was noted at this appointment to another one,
+ * or to a next step not booked yet. Each piece becomes a note on the other
+ * appointment saying who it is from; the original shows where it went.
+ */
+appointmentsRouter.post('/:appointmentId/forward', requireAuth, async (req, res) => {
+  const parsed = forwardSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Pick at least one note to forward, and where it goes.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const result = await db.transaction((trx) =>
+    createForwards(trx, {
+      profileId: String(req.params['id']),
+      sourceAppointmentId: String(req.params['appointmentId']),
+      actorId: req.account!.id,
+      items: parsed.data.items,
+      to: { appointment_id: parsed.data.to_appointment_id, reminder_id: parsed.data.to_reminder_id },
+    })
+  );
+  if ('error' in result) {
+    res.status(400).json({ error: result.error, code: 'VALIDATION_ERROR' });
+    return;
+  }
+  res.status(201).json(result);
+});
+
+/** Take a forward back: its copy on the other appointment goes too. */
+appointmentsRouter.delete('/forwards/:forwardId', requireAuth, async (req, res) => {
+  const forwardId = z.string().uuid().safeParse(req.params['forwardId']);
+  if (!forwardId.success) {
+    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const done = await db.transaction((trx) => takeBackForward(trx, String(req.params['id']), forwardId.data));
+  if (!done) {
+    res.status(404).json({ error: 'That forward could not be found. It may already have been taken back.', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ taken_back: true });
 });
 
 // Update several appointments at once, scoped to this profile.

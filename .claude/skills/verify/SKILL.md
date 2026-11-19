@@ -5,6 +5,42 @@ description: Build, run and drive the PareCare stack in a sandbox without Docker
 
 # Verifying PareCare changes without Docker
 
+## On the owner's Windows machine (check first)
+
+If the platform is win32, the Linux recipe below does not apply. There is no
+native Postgres or Redis, and Docker Desktop is off on purpose: starting it
+wakes the owner's other containers. Ask once before starting anything, then:
+
+1. In a fresh folder in the scratchpad: `npm init -y` and
+   `npm install embedded-postgres@16.14.0-beta.17` (plain `@16` has no
+   matching version). Copy `windows-stack.mjs` from this skill folder into
+   it and run `node windows-stack.mjs` in the background. It starts a
+   portable Postgres on 5433 (user and password `parecare`, database
+   `parecare`, data kept in `pgdata` next to the script) and a tiny Redis
+   stand-in on 6380 that answers the few commands the API uses.
+2. API in `packages/api`, node_modules already installed:
+   `DATABASE_URL=postgres://parecare:parecare@127.0.0.1:5433/parecare`,
+   `REDIS_URL=redis://127.0.0.1:6380`, any 16+ character `JWT_SECRET`,
+   `SELF_HOSTED=true`, `PORT=3001`. Run `npm run migrate`, then
+   `npx ts-node-dev --transpile-only src/index.ts` in the background.
+   Health check: `/api/v1/health`.
+3. Web: the Vite proxy targets `http://api:3001`. Instead of editing the
+   hosts file, run `npx vite --config <path>/vite.verify.config.ts` from
+   `packages/web`. Copy that file from this skill folder first, and fix the
+   repo path inside it if the checkout has moved. Vite then answers on
+   `http://localhost:5173`; 127.0.0.1 does not work, because it listens on
+   IPv6 only. Drive the browser with the Playwright MCP tools, not a fresh
+   Playwright install.
+4. Git Bash on this machine chokes on long heredocs that contain
+   apostrophes or backticks. Write patch scripts to a scratchpad file and
+   run them, rather than inlining them.
+5. Stop everything afterwards: the API, Vite, and the stack script.
+   Stopping the background shell does not kill the node servers here. Find
+   whatever still listens on 3001, 5173, 5433 and 6380 (Get-NetTCPConnection
+   in PowerShell), check the command line is ours, and stop it. The
+   Playwright MCP tools write snapshots to `.playwright-mcp` in the repo
+   root; delete that folder before committing.
+
 The container has no Docker daemon, but Postgres 16 and Redis binaries are
 installed natively, and Chromium lives at `/opt/pw-browsers/chromium`.
 

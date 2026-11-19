@@ -29,6 +29,38 @@ export interface DataFilter<T> {
   match: (row: T, value: string) => boolean;
 }
 
+/**
+ * Every table remembers the order it was last put in, on this device, so a
+ * list sorted newest first stays newest first next time. Keyed by the page
+ * (with record ids taken out, so it holds for everyone in your care) and the
+ * table's own sort choices, so two tables on one page do not share.
+ */
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+function sortMemoryKey(sortKeys: string[]): string | null {
+  if (sortKeys.length === 0 || typeof window === 'undefined') return null;
+  return `pc-sort:${window.location.pathname.replace(UUID, ':id')}:${sortKeys.join(',')}`;
+}
+function readSort(key: string | null): { key: string; dir: 'asc' | 'desc' } | null {
+  if (!key) return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as { key?: unknown; dir?: unknown };
+    if (typeof v.key === 'string' && (v.dir === 'asc' || v.dir === 'desc')) return { key: v.key, dir: v.dir };
+  } catch {
+    // Storage blocked or unreadable: fall back to the table's default.
+  }
+  return null;
+}
+function writeSort(key: string | null, value: { key: string; dir: 'asc' | 'desc' }) {
+  if (!key) return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Storage blocked: the order simply is not remembered.
+  }
+}
+
 export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 
 interface UseDataViewOptions<T> {
@@ -42,8 +74,14 @@ interface UseDataViewOptions<T> {
 
 export function useDataView<T>({ rows, getId, searchText, sorts = [], filters = [], defaultPageSize = 10 }: UseDataViewOptions<T>) {
   const [search, setSearch] = useState('');
-  const [sortKey, setSortKey] = useState(sorts[0]?.key ?? '');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(sorts[0]?.defaultDir ?? 'asc');
+  const memoryKey = useMemo(() => sortMemoryKey(sorts.map((s) => s.key)), [sorts]);
+  const [remembered] = useState(() => {
+    const r = readSort(memoryKey);
+    return r && sorts.some((s) => s.key === r.key) ? r : null;
+  });
+  const [sortKey, setSortKey] = useState(remembered?.key ?? sorts[0]?.key ?? '');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(remembered?.dir ?? sorts[0]?.defaultDir ?? 'asc');
+
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
@@ -86,14 +124,20 @@ export function useDataView<T>({ rows, getId, searchText, sorts = [], filters = 
 
   // Choosing a sort (from a dropdown) starts at its natural direction;
   // clicking the same column header again flips it.
+  // Only a choice someone made is remembered, never the default.
   const handleSetSortKey = (key: string) => {
+    const dir = sorts.find((s) => s.key === key)?.defaultDir ?? 'asc';
     setSortKey(key);
-    setSortDir(sorts.find((s) => s.key === key)?.defaultDir ?? 'asc');
+    setSortDir(dir);
+    writeSort(memoryKey, { key, dir });
   };
 
   const toggleSort = (key: string) => {
-    if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else handleSetSortKey(key);
+    if (key === sortKey) {
+      const dir = sortDir === 'asc' ? 'desc' : 'asc';
+      setSortDir(dir);
+      writeSort(memoryKey, { key, dir });
+    } else handleSetSortKey(key);
   };
 
   const handleSetPageSize = (size: number) => {
