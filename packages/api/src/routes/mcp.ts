@@ -106,7 +106,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   add_condition: 'Record a health condition or diagnosis for a person.',
   log_condition: 'Log how a condition is going today for a person.',
   remove_condition: 'Remove a condition recorded in error.',
-  resolve_condition: 'Mark a person\'s condition as resolved.',
+  resolve_condition: 'Mark a person\'s condition as resolved, with when, why and what happened if the user says.',
   add_substance: 'Record substance use for a person, such as alcohol or nicotine.',
   update_substance: 'Change a substance use record for a person.',
   remove_substance: 'Remove a substance use record.',

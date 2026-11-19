@@ -11,6 +11,7 @@ import { ManagedWithSection, persistManagedRows, type ManagedRow } from '../Mana
 import { SymptomsSection } from '../ConditionSymptoms';
 import { CodesSection } from './CodesSection';
 import { FunctionsSection } from './FunctionsSection';
+import { ResolutionFields } from './ResolveConditionModal';
 import type { MedicalCondition } from '../../../../lib/care';
 
 export function ConditionEditor({
@@ -36,6 +37,8 @@ export function ConditionEditor({
   const [status, setStatus] = useState(condition?.status ?? 'active');
   const [startedOn, setStartedOn] = useState(condition?.started_on ?? '');
   const [resolvedOn, setResolvedOn] = useState(condition?.resolved_on ?? '');
+  const [resolutionReason, setResolutionReason] = useState(condition?.resolution_reason ?? '');
+  const [resolutionNotes, setResolutionNotes] = useState(condition?.resolution_notes ?? '');
   const [expectedDuration, setExpectedDuration] = useState(condition?.expected_duration ?? '');
   const [isPermanent, setIsPermanent] = useState(condition?.is_permanent ?? false);
   const [isContagious, setIsContagious] = useState(condition?.is_contagious ?? false);
@@ -54,6 +57,8 @@ export function ConditionEditor({
     setStatus(condition.status);
     setStartedOn(condition.started_on ?? '');
     setResolvedOn(condition.resolved_on ?? '');
+    setResolutionReason(condition.resolution_reason ?? '');
+    setResolutionNotes(condition.resolution_notes ?? '');
     setExpectedDuration(condition.expected_duration ?? '');
     setIsPermanent(condition.is_permanent ?? false);
     setIsContagious(condition.is_contagious ?? false);
@@ -75,6 +80,8 @@ export function ConditionEditor({
         status,
         started_on: startedOn || null,
         resolved_on: resolvedOn || null,
+        resolution_reason: resolutionReason || null,
+        resolution_notes: resolutionNotes.trim() || null,
         expected_duration: expectedDuration || null,
         is_permanent: conditionType === 'disability' ? isPermanent : null,
         is_contagious: isContagious,
@@ -176,9 +183,21 @@ export function ConditionEditor({
             label="Resolved"
             type="date"
             value={resolvedOn}
-            onChange={(e) => setResolvedOn(e.target.value)}
-            hint="Filling this marks the condition resolved."
+            onChange={(e) => {
+              // A resolution date means it is over, so the status follows.
+              if (e.target.value && !resolvedOn) setStatus('resolved');
+              setResolvedOn(e.target.value);
+            }}
+            hint="Filling this marks the condition resolved. Leave blank if you are not sure when."
           />
+          {status === 'resolved' || resolvedOn ? (
+            <ResolutionFields
+              reason={resolutionReason}
+              onReason={setResolutionReason}
+              notes={resolutionNotes}
+              onNotes={setResolutionNotes}
+            />
+          ) : null}
           <label className="block">
             <span className="block text-sm font-medium text-ink mb-1">Expected duration</span>
             <select className={inputClass} value={expectedDuration} onChange={(e) => setExpectedDuration(e.target.value)}>

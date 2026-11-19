@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { resolveConditionCatalogueId } from './conditionCatalogue';
+import { CONDITION_RESOLUTION_REASONS } from '../lib/conditionResolution';
 import { resolveOptions } from './optionCatalogue';
 import { nextStepsFor } from './appointments';
 import {
@@ -278,6 +279,9 @@ const conditionSchema = z.object({
   status: z.enum(['active', 'improving', 'managed', 'resolved']).optional(),
   started_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   resolved_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  // Why it resolved and what happened. Both optional, like the date.
+  resolution_reason: z.enum(CONDITION_RESOLUTION_REASONS).optional().nullable(),
+  resolution_notes: z.string().max(2000).optional().nullable(),
   condition_type: z.enum(['chronic', 'acute', 'disability', 'other']).optional().nullable(),
   severity: z.enum(['mild', 'moderate', 'severe', 'profound']).optional().nullable(),
   // The person's normal level on the 1 to 10 symptom scale for a long-term
@@ -313,7 +317,8 @@ function classifyCondition(data: Partial<z.infer<typeof conditionSchema>>): Part
     }
   }
   // A resolution date means the condition is resolved unless told otherwise.
-  if (out.resolved_on && out.status === undefined) out.status = 'resolved';
+  // So does a reason for resolving.
+  if ((out.resolved_on || out.resolution_reason) && out.status === undefined) out.status = 'resolved';
   // A lifelong condition is not a temporary one, and vice versa.
   if (out.expected_duration && out.is_temporary === undefined) {
     out.is_temporary = out.expected_duration === 'self_limiting' || out.expected_duration === 'short_term';

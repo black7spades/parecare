@@ -171,6 +171,11 @@ registerSection({
       { key: 'is_temporary', label: 'Temporary', type: 'boolean' },
       { key: 'started_on', label: 'Started', type: 'date' },
       { key: 'resolved_on', label: 'Resolved', type: 'date' },
+      {
+        key: 'resolution_reason', label: 'Why it resolved', type: 'enum',
+        enumValues: ['recovered', 'treatment', 'surgery', 'outgrown', 'ruled_out', 'wrong_diagnosis', 'not_tracking', 'other'],
+      },
+      { key: 'resolution_notes', label: 'What happened', type: 'text' },
       { key: 'notes', label: 'Notes', type: 'text' },
     ],
     filters: [
@@ -211,6 +216,8 @@ registerSection({
       is_temporary: r.is_temporary,
       started_on: r.started_on,
       resolved_on: r.resolved_on,
+      resolution_reason: r.resolution_reason,
+      resolution_notes: r.resolution_notes,
       notes: r.notes,
     }));
   },

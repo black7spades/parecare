@@ -63,6 +63,8 @@ export async function buildSituation(profile: CareProfile): Promise<Situation> {
   const conds = await db('medical_conditions')
     .where({ care_profile_id: profile.id })
     .whereNull('resolved_on')
+    // Resolved without a date is still resolved.
+    .where((qb) => qb.whereNull('status').orWhereNot('status', 'resolved'))
     .select('status', 'is_permanent', 'is_temporary', 'condition_type', 'expected_duration', 'category', 'severity');
   const current = conds.filter((c) => isCurrentHealthCondition(c));
   let acuity: Situation['acuity'] = 'settled';

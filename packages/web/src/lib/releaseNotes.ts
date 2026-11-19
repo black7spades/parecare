@@ -20,6 +20,23 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.42.0',
+    date: '2026-11-19',
+    summary: 'Record when, why and how a condition resolved, all optional.',
+    groups: [
+      { heading: 'Added', items: [
+        'Say why a condition resolved. Mark resolved now offers three optional boxes: when it resolved, why it resolved and what happened. Fill in as much or as little as you like. Leave them blank and the condition simply stops being tracked.',
+        'Why it resolved on the list. The Conditions page has a Why it resolved column, and the reason and what happened show on each condition and in reports. Edit a resolved condition to add or change the detail later.',
+      ] },
+      { heading: 'Changed', items: [
+        'Pare no longer guesses the date. Telling Pare a condition has cleared up no longer records today as the day it resolved. Pare records a date and a reason only when you give them.',
+      ] },
+      { heading: 'Fixed', items: [
+        'A condition marked resolved without a date no longer counts toward how unwell someone looks on their profile.',
+      ] },
+    ],
+  },
+  {
     version: '0.41.0',
     date: '2026-11-19',
     summary: 'Resolved conditions leave the Conditions page, and old ones are quick to clear.',
