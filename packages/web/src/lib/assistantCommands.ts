@@ -137,6 +137,13 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
     expand: (a) => `Add this contact, as a professional or as an organisation, whichever it is: ${a}`,
   },
   {
+    name: 'circle',
+    hint: 'who they are and how to reach them',
+    description: 'Add someone to the care circle without an invite, e.g. /circle Joan next door, checks in most mornings, 0400 111 222',
+    expand: (a) =>
+      `Add this person to the care circle by name, with no invite and no login. If they are a doctor or other professional, add them as a contact instead: ${a}`,
+  },
+  {
     name: 'practice',
     hint: 'who, and the practice they work at',
     description: 'File someone at their practice, e.g. /practice Dr Carly Examplename at Health Hub Morayfield',

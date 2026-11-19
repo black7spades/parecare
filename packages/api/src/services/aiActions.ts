@@ -17,6 +17,7 @@ import { resolveNeurotypeAttributeCatalogueId, ATTRIBUTE_KINDS } from '../routes
 import { linkAddressToProfile, syncProfileResidence, RESIDENCE_KIND } from './addresses';
 import { APPOINTMENT_TYPES, APPOINTMENT_STATUSES, addNextSteps, syncAppointmentSpend } from '../routes/appointments';
 import { createForwards, deliverForwards, type ForwardItem } from './noteForwards';
+import { addCirclePerson, findCircleMemberByName, isAddedPerson } from './circlePeople';
 import { OBSERVATION_STATUSES } from '../routes/treatments';
 import { FUNDING_SOURCES, CLAIM_STATUSES } from './healthSpend';
 import { addPracticeMember, syncPracticeMembers, whereNamed } from './providerPractices';
@@ -465,6 +466,38 @@ const forwardAppointmentNotesSchema = z.object({
 });
 
 /**
+ * The people around someone who were added rather than invited: a neighbour,
+ * a friend who drives, a support worker. No login, no email invite. A doctor,
+ * psychologist or any other professional is add_provider instead, so the
+ * same person is linked to appointments.
+ */
+const addCirclePersonSchema = z.object({
+  type: z.literal('add_circle_person'),
+  name: z.string().min(1).max(255),
+  role: z.enum(['family', 'friend', 'carer', 'organisation', 'legal', 'other']).default('other'),
+  relationship: z.string().max(100).optional().nullable(),
+  description: z.string().max(2000).optional().nullable(),
+  phone: z.string().max(50).optional().nullable(),
+  email: z.string().email().max(255).optional().nullable(),
+});
+
+const updateCirclePersonSchema = z.object({
+  type: z.literal('update_circle_person'),
+  name: z.string().min(1).max(255),
+  new_name: z.string().max(255).optional().nullable(),
+  role: z.enum(['family', 'friend', 'carer', 'organisation', 'legal', 'other']).optional(),
+  relationship: z.string().max(100).optional().nullable(),
+  description: z.string().max(2000).optional().nullable(),
+  phone: z.string().max(50).optional().nullable(),
+  email: z.string().email().max(255).optional().nullable(),
+});
+
+const removeCirclePersonSchema = z.object({
+  type: z.literal('remove_circle_person'),
+  name: z.string().min(1).max(255),
+});
+
+/**
  * Change an appointment already on the calendar: move it (starts_at),
  * cancel it or mark it attended (status), or confirm what it actually cost
  * (cost_actual). Found by title among this profile's appointments.
@@ -611,6 +644,9 @@ export const actionSchema = z.discriminatedUnion('type', [
   updateAppointmentSchema,
   recordAppointmentOutcomeSchema,
   forwardAppointmentNotesSchema,
+  addCirclePersonSchema,
+  updateCirclePersonSchema,
+  removeCirclePersonSchema,
   completeTaskSchema,
   rescheduleTaskSchema,
   recordCostSchema,
@@ -2018,6 +2054,60 @@ async function executeOne(
       return result.landed
         ? `Forwarded ${what} from "${source.title}". ${one ? 'It is' : 'They are'} on the other appointment now.`
         : `Forwarded ${what} from "${source.title}". ${one ? 'It' : 'They'} will land on the appointment as soon as it is booked.`;
+    }
+    case 'add_circle_person':
+    case 'update_circle_person':
+    case 'remove_circle_person': {
+      // Who is in the circle is the owner's to decide, as on the Care circle page.
+      if (access.level !== 'owner' && access.level !== 'admin') {
+        return `No change to the care circle: only the profile owner can change who is in it.`;
+      }
+      if (action.type === 'add_circle_person') {
+        const already = await findCircleMemberByName(profileId, action.name);
+        if (already && already.display_name.toLowerCase() === action.name.trim().toLowerCase()) {
+          return `${already.display_name} is already in the care circle.`;
+        }
+        const member = await addCirclePerson(profileId, {
+          display_name: action.name,
+          role: action.role,
+          relationship: action.relationship ?? null,
+          role_description: action.description ?? null,
+          phone: action.phone ?? null,
+          email: action.email ?? null,
+        });
+        await audit(profileId, account.id, 'care_circle_members', `added ${member.display_name} to the circle`);
+        return `Added ${member.display_name} to the care circle. No invite was sent; they do not need to log in.`;
+      }
+      const member = await findCircleMemberByName(profileId, action.name);
+      if (!member) {
+        return `${CLARIFY_MARK} I could not find anyone called "${action.name}" in the care circle. Who did you mean?`;
+      }
+      if (action.type === 'remove_circle_person') {
+        // Taking away someone's login is done on the Care circle page, where
+        // it asks first.
+        if (!isAddedPerson(member)) {
+          return `${member.display_name} has a login or an invite on the way, so removing them ends their access. Do that from the Care circle page, where it asks first.`;
+        }
+        await db('care_circle_members').where({ id: member.id, care_profile_id: profileId }).delete();
+        await audit(profileId, account.id, 'care_circle_members', `removed ${member.display_name} from the circle`);
+        return `Removed ${member.display_name} from the care circle.`;
+      }
+      const added = isAddedPerson(member);
+      const fields: Record<string, unknown> = {};
+      if (action.role) fields['role'] = action.role;
+      if (action.relationship !== undefined) fields['relationship'] = action.relationship?.trim() || null;
+      if (action.description !== undefined) fields['role_description'] = action.description?.trim() || null;
+      if (action.phone !== undefined) fields['phone'] = action.phone?.trim() || null;
+      if (added && action.new_name?.trim()) fields['display_name'] = action.new_name.trim();
+      if (added && action.email !== undefined) fields['email'] = action.email?.trim() || null;
+      if (Object.keys(fields).length === 0) {
+        return added
+          ? `Nothing to change for ${member.display_name}.`
+          : `${member.display_name} has a login or an invite on the way, so their name and email come from their own account.`;
+      }
+      await db('care_circle_members').where({ id: member.id, care_profile_id: profileId }).update(fields);
+      await audit(profileId, account.id, 'care_circle_members', `updated ${member.display_name}`);
+      return `Updated ${String(fields['display_name'] ?? member.display_name)} in the care circle.`;
     }
     case 'complete_task': {
       const task = await findOpenTaskByTitle(action.title, profileId);

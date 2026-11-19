@@ -8,6 +8,7 @@ import { requireProfileOwner } from '../middleware/permissions';
 import { createInvitation, resendInvitation, revokeInvitation, inviteUrl, effectiveStatus, InviteError } from '../services/invitations';
 import { env } from '../config/env';
 import type { CareCircleMember, Invitation } from '../types';
+import { addCirclePerson, circlePersonSchema, isAddedPerson } from '../services/circlePeople';
 
 export const careCircleRouter = Router({ mergeParams: true });
 
@@ -48,6 +49,9 @@ careCircleRouter.get('/', requireAuth, async (req, res) => {
       const inv = m.invitation_id ? invitationById.get(m.invitation_id) : undefined;
       return {
         ...m,
+        // active: logs in. invited: invite sent, not yet accepted. added: in
+        // the circle by name only, with no login.
+        status: m.invite_accepted ? 'active' : isAddedPerson(m) ? 'added' : 'invited',
         ...(inv
           ? {
               invite_status: effectiveStatus(inv),
@@ -115,6 +119,7 @@ careCircleRouter.post(
   requireCountBelow('care_circle_members', async (req) => {
     const result = await db('care_circle_members')
       .where({ care_profile_id: req.params['id'] })
+      .where((qb) => qb.whereNotNull('account_id').orWhereNotNull('invitation_id'))
       .count('id as count')
       .first();
     return Number(result?.count ?? 0);
@@ -145,6 +150,83 @@ careCircleRouter.post(
         ],
       });
       res.status(201).json({ member: result.members[0], invite_url: result.invite_url });
+    } catch (err) {
+      if (err instanceof InviteError) {
+        res.status(err.status).json({ error: err.message, code: err.code });
+        return;
+      }
+      throw err;
+    }
+  }
+);
+
+/**
+ * Add someone to the circle by name, with no invite and no login: a
+ * neighbour, a friend, a support worker. Phone and email are optional.
+ */
+careCircleRouter.post('/people', requireAuth, requireProfileOwner, async (req, res) => {
+  const parsed = circlePersonSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Give them a name to add them. Check the email looks right if you gave one.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const member = await addCirclePerson(String(req.params['id']), parsed.data);
+  res.status(201).json({ member: { ...member, status: 'added' } });
+});
+
+/**
+ * Invite someone who was added by name to log in. The invitation carries
+ * over who they are; their added entry becomes the invite.
+ */
+careCircleRouter.post(
+  '/:memberId/invite',
+  requireAuth,
+  requireAccountRight('can_invite_members'),
+  requireProfileOwner,
+  async (req, res) => {
+    const parsed = z
+      .object({ email: z.string().trim().email(), permission: z.enum(['viewer', 'contributor']).default('contributor') })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Add an email address to send the invite to.', code: 'VALIDATION_ERROR' });
+      return;
+    }
+    const member = await db<CareCircleMember>('care_circle_members')
+      .where({ id: req.params['memberId'], care_profile_id: req.params['id'] })
+      .first();
+    if (!member) {
+      res.status(404).json({ error: 'That person is no longer in the circle.', code: 'NOT_FOUND' });
+      return;
+    }
+    if (!isAddedPerson(member)) {
+      res.status(409).json({ error: 'They already have a login or an invite on the way.', code: 'ALREADY_INVITED' });
+      return;
+    }
+    try {
+      const result = await createInvitation({
+        email: parsed.data.email,
+        display_name: member.display_name,
+        invitedBy: req.account!,
+        onConflict: 'error',
+        assignments: [
+          {
+            care_profile_id: req.params['id']!,
+            role: member.role,
+            permission: parsed.data.permission,
+            relationship: member.relationship ?? null,
+            role_description: member.role_description ?? null,
+            poa_type: member.poa_type ?? null,
+            can_edit_profile: false,
+          },
+        ],
+      });
+      // The invite replaces the added entry, keeping their phone with them.
+      const invited = result.members[0] as { id: string } | undefined;
+      if (invited && member.phone) {
+        await db('care_circle_members').where({ id: invited.id }).update({ phone: member.phone });
+      }
+      await db('care_circle_members').where({ id: member.id }).delete();
+      res.status(201).json({ member: invited, invite_url: result.invite_url });
     } catch (err) {
       if (err instanceof InviteError) {
         res.status(err.status).json({ error: err.message, code: err.code });
@@ -214,22 +296,43 @@ careCircleRouter.patch('/:memberId', requireAuth, requireProfileOwner, async (re
     permission: z.enum(['viewer', 'contributor']).optional(),
     relationship: z.string().max(100).optional().nullable(),
     can_edit_profile: z.boolean().optional(),
+    // Only for someone added by name: their own name and how to reach them.
+    // Anyone with a login keeps the name and email of their account.
+    display_name: z.string().trim().min(1).max(255).optional(),
+    phone: z.string().trim().max(50).optional().nullable(),
+    email: z.string().trim().email().max(255).optional().nullable().or(z.literal('').transform(() => null)),
   });
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    res.status(400).json({ error: 'Check the details. The email needs to look like an email address.', code: 'VALIDATION_ERROR' });
     return;
   }
 
-  const [updated] = await db<CareCircleMember>('care_circle_members')
+  const existing = await db<CareCircleMember>('care_circle_members')
     .where({ id: req.params['memberId'], care_profile_id: req.params['id'] })
-    .update(parsed.data)
-    .returning('*');
-
-  if (!updated) {
+    .first();
+  if (!existing) {
     res.status(404).json({ error: 'Member not found', code: 'NOT_FOUND' });
     return;
   }
+  const { display_name, phone, email, ...rest } = parsed.data;
+  const fields: Record<string, unknown> = { ...rest };
+  if (isAddedPerson(existing)) {
+    if (display_name !== undefined) fields['display_name'] = display_name;
+    if (phone !== undefined) fields['phone'] = phone?.trim() || null;
+    if (email !== undefined) fields['email'] = email?.trim() || null;
+  } else if (phone !== undefined) {
+    fields['phone'] = phone?.trim() || null;
+  }
+
+  if (Object.keys(fields).length === 0) {
+    res.json({ member: existing });
+    return;
+  }
+  const [updated] = await db<CareCircleMember>('care_circle_members')
+    .where({ id: existing.id })
+    .update(fields)
+    .returning('*');
   res.json({ member: updated });
 });
 
