@@ -10,8 +10,9 @@ record of updates stays traceable to source. Versions follow
 
 ### Fixed
 
-- **Attached to opens the record.** On a document, each record under
-  Attached to is a link that opens it, the same as in the documents list.
+- **Attached to looks like links.** On a document, each record under
+  Attached to now shows as an underlined link in the same green as phone
+  numbers and emails, so it is clear that tapping one opens that record.
 - **A letter lists the medicines it changed.** When a medicine change, stop
   or start says it came from a letter, the letter now lists that medicine
   under Attached to. Changes already recorded are linked too.

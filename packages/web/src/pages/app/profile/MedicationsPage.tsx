@@ -157,6 +157,9 @@ export function MedicationsPage() {
     void queryClient.invalidateQueries({ queryKey: ['med-chart', profile.id] });
     void queryClient.invalidateQueries({ queryKey: ['med-log', profile.id] });
     void queryClient.invalidateQueries({ queryKey: ['calendar-events', profile.id] });
+    // A change citing a letter changes what that letter is attached to.
+    void queryClient.invalidateQueries({ queryKey: ['documents', profile.id] });
+    void queryClient.invalidateQueries({ queryKey: ['record-extras', profile.id] });
   };
 
   // Managing the medication list (add/edit/delete/import, incl. bulk delete) is
