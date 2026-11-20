@@ -7,7 +7,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { browserTimeZone } from '../../lib/datetime';
 import { AdministerModal } from './profile/medications/AdministerModal';
-import type { MedicationRecord } from '../../lib/care';
+import { ALLERGY_CHIP, reactionWords, type MedicationRecord } from '../../lib/care';
 
 interface RoundDose {
   profile_id: string;
@@ -162,8 +162,11 @@ export function MedicineRoundPage() {
                   <Link to={`/app/${p.profile_id}/mar`} className="text-primary hover:underline">{p.profile_name}</Link>
                 </h2>
                 {p.allergies.length ? (
-                  <span className="rounded px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">
-                    Allergies: {p.allergies.map((a) => (a.reaction ? `${a.substance}, ${a.reaction}` : a.substance)).join('. ')}
+                  <span className="flex flex-wrap items-center gap-1">
+                    <span className="text-xs font-medium text-red-700 dark:text-red-300">Allergic to</span>
+                    {p.allergies.map((a, i) => (
+                      <span key={i} className={ALLERGY_CHIP}><span className="font-semibold">{a.substance}</span>{reactionWords(a.reaction) ? <span>: {reactionWords(a.reaction)}</span> : null}</span>
+                    ))}
                   </span>
                 ) : (
                   <span className="rounded px-2 py-0.5 text-xs bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">Allergies not recorded yet</span>

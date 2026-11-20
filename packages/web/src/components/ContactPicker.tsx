@@ -15,6 +15,8 @@ export interface PickedContact {
   providerType: string;
   /** Their phone, for a new name or one with no number yet. */
   phone: string;
+  /** Chosen as a new contact with Add new, where the picker asks for that. */
+  isNew?: boolean;
 }
 
 export const emptyContact: PickedContact = { providerId: '', name: '', providerType: '', phone: '' };
@@ -35,6 +37,7 @@ export function ContactPicker({
   placeholder = 'Search Contacts or type a new name',
   hint,
   defaultType,
+  confirmNew = false,
 }: {
   id: string;
   label?: string;
@@ -47,6 +50,11 @@ export function ContactPicker({
   hint?: string;
   /** What a new name is filed as when "What they do" is left empty. */
   defaultType?: string;
+  /**
+   * Typing never files anyone on its own: the matches are offered first,
+   * and only "Add ... as a new contact" makes a new one.
+   */
+  confirmNew?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const q = value.name.trim();
@@ -59,7 +67,7 @@ export function ContactPicker({
   const { data } = useQuery({
     queryKey: ['provider-search', kind ?? 'any', q],
     queryFn: () => api.get<{ providers: Provider[] }>(`/providers/search?${kind ? `kind=${kind}&` : ''}q=${encodeURIComponent(q)}`),
-    enabled: open && !value.providerId && q.length >= 2,
+    enabled: (open || confirmNew) && !value.providerId && q.length >= 2,
   });
   const lower = q.toLowerCase();
   const linkedMatches = q ? linked.filter((p) => p.name.toLowerCase().includes(lower) || providerTypeLabel(p.provider_type).toLowerCase().includes(lower)) : linked;
@@ -70,7 +78,11 @@ export function ContactPicker({
   const others = (data?.providers ?? []).filter((p) => !linked.some((l) => l.id === p.id));
   const matches = [...current, ...others, ...past].slice(0, 8);
   const firstPast = matches.findIndex((p) => !!p.ended_on);
-  const offering = open && !value.providerId && matches.length > 0;
+  // Where a new contact must be chosen on purpose, the matches stay on show
+  // until one is picked or Add new is chosen, so they are never missed.
+  const offering = (open || (confirmNew && !!q)) && !value.providerId && !value.isNew && matches.length > 0;
+  // A new name is only new once someone says so, where the picker asks.
+  const newChosen = !confirmNew || !!value.isNew;
   const picked = value.providerId ? linked.find((p) => p.id === value.providerId) ?? (data?.providers ?? []).find((p) => p.id === value.providerId) : undefined;
 
   return (
@@ -85,16 +97,22 @@ export function ContactPicker({
         onBlur={() => window.setTimeout(() => setOpen(false), 150)}
         onChange={(e) => {
           setOpen(true);
-          onChange({ ...value, providerId: '', name: e.target.value });
+          onChange({ ...value, providerId: '', isNew: false, name: e.target.value });
         }}
         hint={
           value.providerId
             ? 'From Contacts.'
             : offering
-              ? 'Already in Contacts? Pick them below.'
-              : q
+              ? confirmNew
+                ? 'Pick them below, or add them as a new contact.'
+                : 'Already in Contacts? Pick them below.'
+              : q && newChosen
                 ? 'New to Contacts. Filed there when you save.'
-                : hint
+                : q && confirmNew && matches.length > 0
+                  ? 'Pick them below, or add them as a new contact.'
+                  : q
+                    ? 'Not in Contacts yet. Add them as a new contact to file them.'
+                    : hint
         }
       />
       {offering ? (
@@ -109,7 +127,7 @@ export function ContactPicker({
                 className="w-full !justify-start text-left"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
-                  onChange({ providerId: p.id, name: p.name, providerType: p.provider_type, phone: '' });
+                  onChange({ providerId: p.id, name: p.name, providerType: p.provider_type, phone: '', isNew: false });
                   setOpen(false);
                 }}
               >
@@ -131,7 +149,21 @@ export function ContactPicker({
       {value.providerId && picked && !picked.phone ? (
         <Input id={`${id}-phone`} label="Their phone" value={value.phone} onChange={(e) => onChange({ ...value, phone: e.target.value })} placeholder="e.g. 03 9345 6677" />
       ) : null}
-      {!value.providerId && q ? (
+      {confirmNew && !value.providerId && q && !value.isNew ? (
+        <Button
+          type="button"
+          size="xs"
+          variant="secondary"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            onChange({ ...value, providerId: '', isNew: true });
+            setOpen(false);
+          }}
+        >
+          Add {q} as a new contact
+        </Button>
+      ) : null}
+      {!value.providerId && q && newChosen ? (
         <div className="grid gap-3 sm:grid-cols-2">
           <ProviderTypeField
             id={`${id}-type`}

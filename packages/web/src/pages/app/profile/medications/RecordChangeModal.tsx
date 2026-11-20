@@ -34,8 +34,8 @@ export function RecordChangeModal({ profileId, med, onClose, onSaved }: { profil
         change_reason: why.trim(),
         // Who said so: a contact picked, or a new name filed in Contacts.
         ...(saidBy.providerId
-          ? { change_source_provider_id: saidBy.providerId }
-          : saidBy.name.trim()
+          ? { change_source_provider_id: saidBy.providerId, ...(saidBy.phone.trim() ? { change_source_provider_phone: saidBy.phone.trim() } : {}) }
+          : saidBy.name.trim() && saidBy.isNew
             ? { change_source_provider_name: saidBy.name.trim(), change_source_provider_type: saidBy.providerType.trim() || null, change_source_provider_phone: saidBy.phone.trim() || null }
             : {}),
       }),
@@ -47,6 +47,12 @@ export function RecordChangeModal({ profileId, med, onClose, onSaved }: { profil
     if (!doseMoved && !timesMoved) {
       setError('Change the dose amount, the measure or a time, then save the change.');
       document.getElementById('change-amount')?.focus();
+      return;
+    }
+    // A part of a name never files a contact on its own.
+    if (saidBy.name.trim() && !saidBy.providerId && !saidBy.isNew) {
+      setError(`Pick who said so from the list, or choose Add ${saidBy.name.trim()} as a new contact.`);
+      document.getElementById('change-said-by')?.focus();
       return;
     }
     if (!why.trim()) {
@@ -83,7 +89,7 @@ export function RecordChangeModal({ profileId, med, onClose, onSaved }: { profil
           </div>
         ) : null}
         <Textarea id="change-why" label="Why did it change?" value={why} onChange={(e) => setWhy(e.target.value)} rows={2} placeholder="e.g. Dr Zhang lowered it at the GP round" />
-        <ContactPicker id="change-said-by" label="Who said so?" profileId={profileId} value={saidBy} onChange={setSaidBy} defaultType="gp" hint="The doctor or pharmacist who asked for it, if there was one." />
+        <ContactPicker id="change-said-by" label="Who said so?" profileId={profileId} value={saidBy} onChange={setSaidBy} defaultType="gp" hint="The doctor or pharmacist who asked for it, if there was one." confirmNew />
         {error ? <p className="text-sm text-red-600" role="alert">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>

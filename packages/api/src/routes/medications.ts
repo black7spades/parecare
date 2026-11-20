@@ -796,6 +796,14 @@ medicationsRouter.patch('/:medId', requireAuth, async (req, res) => {
       ('with_food' in parsed.data && !!parsed.data.with_food !== !!med.with_food));
   // Who said so: picked from Contacts, or a new name filed there.
   let saidBy = parsed.data.change_source_provider_id ?? null;
+  if (saidBy && parsed.data.change_source_provider_phone) {
+    // A number typed for a picked contact with none fills their empty phone.
+    const who = await resolveContactInput(db, req.params['id']!, { id: saidBy, phone: parsed.data.change_source_provider_phone }, 'gp');
+    if ('error' in who) {
+      res.status(400).json({ error: who.error, code: 'VALIDATION_ERROR' });
+      return;
+    }
+  }
   if (!saidBy && parsed.data.change_source_provider_name) {
     const who = await resolveContactInput(
       db,

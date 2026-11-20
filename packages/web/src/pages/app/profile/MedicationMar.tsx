@@ -9,7 +9,7 @@ import { Button } from '../../../components/ui/Button';
 import { PencilIcon, CrossIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
-import { MED_STATUSES, asNeededLine, medStatusDescription, type Allergy, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
+import { ALLERGY_CHIP, MED_STATUSES, reactionWords, asNeededLine, medStatusDescription, type Allergy, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
 import { AdministerModal, lastGivenLine } from './medications/AdministerModal';
 import { coverMedDay } from '../../../lib/marCoverage';
 import { C64_PALETTE, contrastText } from '../../../components/ui/Avatar';
@@ -110,12 +110,12 @@ export function AllergyBanner({ profileId }: { profileId: string }) {
       </div>
     );
   }
-  const one = (a: Allergy) => (a.reaction ? `${a.substance}, ${a.reaction}` : a.substance);
   return (
-    <div className="rounded-md border-l-4 border-red-500 bg-red-50 dark:bg-red-900/10 px-3 py-2 text-sm font-medium text-red-700 dark:text-red-300" role="alert">
-      {list.length === 1
-        ? `Allergic to ${list[0]!.substance}${list[0]!.reaction ? `: ${list[0]!.reaction}` : ''}.`
-        : `Allergies: ${list.map(one).join('. ')}.`}
+    <div className="flex flex-wrap items-center gap-2 rounded-md border-l-4 border-red-500 bg-red-50 dark:bg-red-900/10 px-3 py-2 text-sm font-medium text-red-700 dark:text-red-300" role="alert">
+      <span>Allergic to</span>
+      {list.map((a) => (
+        <span key={a.id} className={ALLERGY_CHIP}><span className="font-semibold">{a.substance}</span>{reactionWords(a.reaction) ? <span>: {reactionWords(a.reaction)}</span> : null}</span>
+      ))}
     </div>
   );
 }
@@ -192,14 +192,28 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
   // Adherence summary — only shows a denominator when there are scheduled doses.
   const summary = useMemo(() => {
     let expected = 0;
-    for (const m of meds) for (const day of days) for (const t of m.schedule_times ?? []) {
+    // An as-needed medicine has no due times, even if old ones are still saved.
+    for (const m of meds) if (!m.as_needed) for (const day of days) for (const t of m.schedule_times ?? []) {
       if (new Date(`${format(day, 'yyyy-MM-dd')}T${t}:00`) <= now) expected += 1;
     }
-    const by: Record<string, number> = {};
-    for (const a of admins) by[a.status] = (by[a.status] ?? 0) + 1;
-    const given = (by['given'] ?? 0) + (by['self_administered'] ?? 0);
-    const exceptions = (by['refused'] ?? 0) + (by['omitted'] ?? 0) + (by['held'] ?? 0);
-    return { expected, given, exceptions, missed: expected > 0 ? Math.max(0, expected - admins.length) : 0 };
+    // Scheduled doses are counted against their times. An as-needed dose is
+    // never scheduled, so it has a line of its own, and so does any other
+    // dose with no time to count against: a medicine with no set times, or
+    // one stopped since. Every dose not given still counts as an exception.
+    const byId = new Map(meds.map((m) => [m.id, m]));
+    const kindOf = (medId: string): 'scheduled' | 'as_needed' | 'other' => {
+      const m = byId.get(medId);
+      if (!m) return 'other';
+      if (m.as_needed) return 'as_needed';
+      return (m.schedule_times ?? []).length ? 'scheduled' : 'other';
+    };
+    const isGivenStatus = (s: string) => s === 'given' || s === 'self_administered';
+    const scheduledAdmins = admins.filter((a) => kindOf(a.medication_id) === 'scheduled');
+    const given = scheduledAdmins.filter((a) => isGivenStatus(a.status)).length;
+    const exceptions = admins.filter((a) => !isGivenStatus(a.status)).length;
+    const asNeededGiven = admins.filter((a) => kindOf(a.medication_id) === 'as_needed' && isGivenStatus(a.status)).length;
+    const otherGiven = admins.filter((a) => kindOf(a.medication_id) === 'other' && isGivenStatus(a.status)).length;
+    return { expected, given, exceptions, asNeededGiven, otherGiven, missed: expected > 0 ? Math.max(0, expected - scheduledAdmins.length) : 0 };
   }, [meds, admins, days]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const label = period === 'day' ? format(anchor, 'EEEE d MMMM yyyy')
@@ -253,7 +267,17 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
         </span>
         {summary.exceptions > 0 ? <span style={{ color: C64.orange }}>{summary.exceptions} exception{summary.exceptions === 1 ? '' : 's'}</span> : null}
         {summary.expected > 0 && summary.missed > 0 ? <span style={{ color: C64.red }}>{summary.missed} missed</span> : null}
-        {summary.expected > 0 ? <span className="text-muted">· {Math.round((summary.given / summary.expected) * 100)}% adherence</span> : null}
+        {summary.expected > 0 ? <span className="text-muted">· {Math.round((Math.min(summary.given, summary.expected) / summary.expected) * 100)}% adherence</span> : null}
+        {summary.asNeededGiven > 0 ? (
+          <span className="basis-full text-muted">
+            <span className="font-semibold text-ink">{summary.asNeededGiven}</span> as-needed {summary.asNeededGiven === 1 ? 'dose' : 'doses'} given
+          </span>
+        ) : null}
+        {summary.otherGiven > 0 ? (
+          <span className="basis-full text-muted">
+            <span className="font-semibold text-ink">{summary.otherGiven}</span> other {summary.otherGiven === 1 ? 'dose' : 'doses'} given, with no set time
+          </span>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
