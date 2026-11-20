@@ -179,15 +179,8 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
   }
 
   const next = () => {
-    // Finish always answers: someone named needs a phone to be any use.
-    if (step === 'emergency') {
-      const needsPhone = (emIsMe ? !me?.phone : !!emName.trim()) && !emPhone.trim();
-      if (needsPhone) {
-        setError(emIsMe ? 'Add your phone, so you can be called, then finish.' : `Add ${emName.trim()}'s phone, then finish.`);
-        document.getElementById('onboarding-em-phone')?.focus();
-        return;
-      }
-    }
+    // A phone is welcome but never required: who to call is saved either
+    // way, and the emergency contacts list offers Add their phone later.
     setError('');
     if (isLast) void saveAll();
     else setStepIndex((i) => i + 1);

@@ -348,7 +348,19 @@ careCircleRouter.patch('/:memberId', requireAuth, requireProfileOwner("change so
     if (phone !== undefined) fields['phone'] = phone?.trim() || null;
     if (email !== undefined) fields['email'] = email?.trim() || null;
   } else if (phone !== undefined) {
-    fields['phone'] = phone?.trim() || null;
+    // Someone with a login keeps their phone on their account, which shows
+    // in place of this row's. Saving here would never show, so say so.
+    const own = existing.account_id
+      ? ((await db('accounts').where({ id: existing.account_id }).first('phone')) as { phone: string | null } | undefined)?.phone?.trim()
+      : null;
+    if (own && (phone?.trim() || null) !== own) {
+      res.status(400).json({
+        error: `${existing.display_name} keeps their phone on their own account and changes it in Settings, or from their own row here.`,
+        code: 'OWN_PHONE',
+      });
+      return;
+    }
+    if (!own) fields['phone'] = phone?.trim() || null;
   }
 
   if (Object.keys(fields).length === 0) {

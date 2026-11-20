@@ -110,9 +110,10 @@ export async function up(knex: Knex): Promise<void> {
   await knex.raw(`
     UPDATE care_profile_providers cpp SET is_main = true
       FROM (
-        SELECT DISTINCT ON (c.care_profile_id, lower(p.provider_type)) c.id
+        SELECT DISTINCT ON (c.care_profile_id, k.kind) c.id
           FROM care_profile_providers c JOIN providers p ON p.id = c.provider_id
-         ORDER BY c.care_profile_id, lower(p.provider_type), c.created_at ASC, c.id
+          CROSS JOIN LATERAL (SELECT CASE WHEN lower(p.provider_type) IN ('pharmacy', 'pharmacist') THEN 'pharmacy' ELSE lower(p.provider_type) END AS kind) k
+         ORDER BY c.care_profile_id, k.kind, c.created_at ASC, c.id
       ) first_link
      WHERE cpp.id = first_link.id
   `);
@@ -199,10 +200,14 @@ export async function up(knex: Knex): Promise<void> {
   for (const plan of plans) {
     const list = Array.isArray(plan.emergency_contacts) ? (plan.emergency_contacts as Array<Record<string, unknown>>) : [];
     if (list.length === 0) continue;
-    const members = (await knex('care_circle_members').where({ care_profile_id: plan.care_profile_id }).select('id', 'display_name', 'phone')) as Array<{
+    const members = (await knex('care_circle_members')
+      .where({ care_profile_id: plan.care_profile_id })
+      .select('id', 'display_name', 'phone', 'account_id', 'invite_accepted')) as Array<{
       id: string;
       display_name: string;
       phone: string | null;
+      account_id: string | null;
+      invite_accepted: boolean;
     }>;
     const linked = (await knex('care_profile_providers as cpp')
       .join('providers as p', 'p.id', 'cpp.provider_id')
@@ -218,7 +223,10 @@ export async function up(knex: Knex): Promise<void> {
       const row: Record<string, unknown> = { care_profile_id: plan.care_profile_id, sort_order: order, relationship: relationship?.slice(0, 100) ?? null };
       const member = members.find((m) => norm(m.display_name) === norm(name));
       const contact = member ? undefined : linked.find((p) => norm(p.name) === norm(name));
-      if (member) {
+      if (member && member.account_id && member.invite_accepted) {
+        // Someone with a login is listed by their account, as the app does.
+        row['account_id'] = member.account_id;
+      } else if (member) {
         row['circle_member_id'] = member.id;
         if (phone && !String(member.phone ?? '').trim()) await knex('care_circle_members').where({ id: member.id }).update({ phone: phone.slice(0, 50) });
       } else if (contact) {

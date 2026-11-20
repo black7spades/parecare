@@ -149,35 +149,73 @@ export async function emergencyContactLines(profileId: string, conn: Conn = db):
 
 export class EmergencyContactError extends Error {}
 
-/** Save a phone on the person's own record, only where they have none. */
-async function savePhoneOnRecord(conn: Conn, ref: EmergencyRef, phone: string | null | undefined): Promise<void> {
-  const p = phone?.trim();
+const OWN_PHONE = 'They keep their phone on their own account and change it in Settings.';
+
+/**
+ * Save a phone on the person's own record. An account's phone is only ever
+ * written by that account's holder; someone else with a login who has no
+ * phone yet gets it on their circle row, which shows until they add their
+ * own. `replace` changes a number already there; otherwise only an empty one
+ * is filled.
+ */
+async function savePhoneOnRecord(
+  conn: Conn,
+  ref: EmergencyRef,
+  phone: string | null | undefined,
+  actorId: string | null,
+  replace = false
+): Promise<void> {
+  const p = phone?.trim().slice(0, 50);
   if (!p) return;
-  const empty = (w: Knex.QueryBuilder) => w.whereNull('phone').orWhereRaw("trim(phone) = ''");
+  const scope = (q: Knex.QueryBuilder) => (replace ? q : q.where((w) => w.whereNull('phone').orWhereRaw("trim(phone) = ''")));
+  const accountPhone = async (accountId: string) =>
+    ((await conn('accounts').where({ id: accountId }).first('phone')) as { phone: string | null } | undefined)?.phone?.trim() || null;
   if ('circle_member_id' in ref) {
     const m = (await conn('care_circle_members').where({ id: ref.circle_member_id }).first('account_id')) as { account_id: string | null } | undefined;
-    // Someone with a login keeps their number on their account.
-    if (m?.account_id) await conn('accounts').where({ id: m.account_id }).where(empty).update({ phone: p.slice(0, 50) });
-    else await conn('care_circle_members').where({ id: ref.circle_member_id }).where(empty).update({ phone: p.slice(0, 50) });
+    if (m?.account_id && m.account_id === actorId) {
+      await scope(conn('accounts').where({ id: m.account_id })).update({ phone: p });
+    } else if (m?.account_id && (await accountPhone(m.account_id))) {
+      if (replace) throw new EmergencyContactError(OWN_PHONE);
+    } else {
+      await scope(conn('care_circle_members').where({ id: ref.circle_member_id })).update({ phone: p });
+    }
   } else if ('account_id' in ref) {
-    await conn('accounts').where({ id: ref.account_id }).where(empty).update({ phone: p.slice(0, 50) });
+    if (ref.account_id === actorId) {
+      await scope(conn('accounts').where({ id: ref.account_id })).update({ phone: p });
+      return;
+    }
+    if (await accountPhone(ref.account_id)) {
+      if (replace) throw new EmergencyContactError(OWN_PHONE);
+      return;
+    }
+    // No phone of their own yet: keep it on the row where they are listed
+    // in this circle, so it shows until they add theirs.
+    const member = (await conn('care_circle_members').where({ account_id: ref.account_id }).first('id')) as { id: string } | undefined;
+    if (member) await scope(conn('care_circle_members').where({ id: member.id })).update({ phone: p });
+    else throw new EmergencyContactError(OWN_PHONE);
   } else if ('provider_id' in ref) {
-    await conn('providers').where({ id: ref.provider_id }).where(empty).update({ phone: p.slice(0, 50) });
+    await scope(conn('providers').where({ id: ref.provider_id })).update({ phone: p });
   }
 }
 
-/** Check a reference belongs with this person: their circle, their account holder, their contacts. */
+/** Check a reference belongs with this person: their circle, their account holder, their contacts, or who the profile names. */
 async function checkRef(conn: Conn, profileId: string, ref: EmergencyRef): Promise<void> {
+  const profile = (await conn('care_profiles').where({ id: profileId }).first('account_id', 'contact_account_id', 'contact_provider_id')) as
+    | { account_id: string; contact_account_id: string | null; contact_provider_id: string | null }
+    | undefined;
   if ('circle_member_id' in ref) {
     const m = await conn('care_circle_members').where({ id: ref.circle_member_id, care_profile_id: profileId }).first('id');
     if (!m) throw new EmergencyContactError('That person is not in this care circle.');
   } else if ('account_id' in ref) {
     const ok =
-      (await conn('care_profiles').where({ id: profileId, account_id: ref.account_id }).first('id')) ??
-      (await conn('care_circle_members').where({ care_profile_id: profileId, account_id: ref.account_id, invite_accepted: true }).first('id'));
+      profile?.account_id === ref.account_id ||
+      profile?.contact_account_id === ref.account_id ||
+      !!(await conn('care_circle_members').where({ care_profile_id: profileId, account_id: ref.account_id, invite_accepted: true }).first('id'));
     if (!ok) throw new EmergencyContactError('That person is not in this care circle.');
   } else if ('provider_id' in ref) {
-    const link = await conn('care_profile_providers').where({ care_profile_id: profileId, provider_id: ref.provider_id }).first('id');
+    const link =
+      profile?.contact_provider_id === ref.provider_id ||
+      !!(await conn('care_profile_providers').where({ care_profile_id: profileId, provider_id: ref.provider_id }).first('id'));
     if (!link) throw new EmergencyContactError("That contact is not in this person's contacts.");
   } else if (!ref.name?.trim()) {
     throw new EmergencyContactError('Write their name.');
@@ -188,7 +226,7 @@ async function checkRef(conn: Conn, profileId: string, ref: EmergencyRef): Promi
  * A member with a login is stored as their account, so the same person is
  * never in the list twice and their phone comes from one place.
  */
-async function canonicalRef(conn: Conn, ref: EmergencyRef): Promise<EmergencyRef> {
+export async function canonicalRef(conn: Conn, ref: EmergencyRef): Promise<EmergencyRef> {
   if ('circle_member_id' in ref) {
     const m = (await conn('care_circle_members').where({ id: ref.circle_member_id }).first('account_id', 'invite_accepted')) as
       | { account_id: string | null; invite_accepted: boolean }
@@ -213,11 +251,12 @@ function refColumns(ref: EmergencyRef): Record<string, unknown> {
 export async function addEmergencyContact(
   conn: Conn,
   profileId: string,
-  input: { ref: EmergencyRef; relationship?: string | null; phone?: string | null; first?: boolean }
+  input: { ref: EmergencyRef; relationship?: string | null; phone?: string | null; first?: boolean },
+  actorId: string | null
 ): Promise<string> {
   await checkRef(conn, profileId, input.ref);
   const ref = await canonicalRef(conn, input.ref);
-  await savePhoneOnRecord(conn, ref, input.phone);
+  await savePhoneOnRecord(conn, ref, input.phone, actorId);
   const cols = refColumns(ref);
   const existing = 'name' in ref
     ? null
@@ -247,7 +286,8 @@ export async function updateEmergencyContact(
   conn: Conn,
   profileId: string,
   id: string,
-  input: { relationship?: string | null; phone?: string | null; name?: string | null }
+  input: { relationship?: string | null; phone?: string | null; name?: string | null },
+  actorId: string | null
 ): Promise<boolean> {
   const row = (await conn('emergency_contacts').where({ id, care_profile_id: profileId }).first()) as Record<string, string | null> | undefined;
   if (!row) return false;
@@ -264,21 +304,11 @@ export async function updateEmergencyContact(
         ? { account_id: row['account_id']! }
         : { provider_id: row['provider_id']! };
     // A changed number is the person's number: it changes everywhere.
-    const p = input.phone.trim().slice(0, 50);
-    if ('circle_member_id' in ref) {
-      const m = (await conn('care_circle_members').where({ id: ref.circle_member_id }).first('account_id')) as { account_id: string | null } | undefined;
-      if (m?.account_id) await conn('accounts').where({ id: m.account_id }).update({ phone: p });
-      else await conn('care_circle_members').where({ id: ref.circle_member_id }).update({ phone: p });
-    } else if ('account_id' in ref) {
-      await conn('accounts').where({ id: ref.account_id }).update({ phone: p });
-    } else {
-      await savePhoneOnRecord(conn, ref, p);
-    }
+    await savePhoneOnRecord(conn, ref, input.phone, actorId, true);
   }
   if (Object.keys(update).length) await conn('emergency_contacts').where({ id }).update({ ...update, updated_at: conn.fn.now() });
   return true;
 }
-
 export async function removeEmergencyContact(conn: Conn, profileId: string, id: string): Promise<boolean> {
   return (await conn('emergency_contacts').where({ id, care_profile_id: profileId }).delete()) > 0;
 }
@@ -288,4 +318,51 @@ export async function setEmergencyOrder(conn: Conn, profileId: string, ids: stri
   const all = ((await conn('emergency_contacts').where({ care_profile_id: profileId }).orderBy(['sort_order', 'created_at']).select('id')) as Array<{ id: string }>).map((r) => r.id);
   const ordered = [...ids.filter((id) => all.includes(id)), ...all.filter((id) => !ids.includes(id))];
   for (let i = 0; i < ordered.length; i++) await conn('emergency_contacts').where({ id: ordered[i] }).update({ sort_order: i });
+}
+
+/**
+ * The first person to call for each of many people at once, for lists such
+ * as the home cards: one query for the chosen ones, and the worked-out
+ * account holder for anyone with none chosen.
+ */
+export async function firstEmergencyContacts(
+  profileIds: string[],
+  conn: Conn = db
+): Promise<Map<string, { name: string; phone: string | null; relationship: string | null }>> {
+  const out = new Map<string, { name: string; phone: string | null; relationship: string | null }>();
+  if (profileIds.length === 0) return out;
+  const rows = (await conn.raw(
+    `SELECT DISTINCT ON (e.care_profile_id) e.care_profile_id, e.relationship,
+            coalesce(m.display_name, a.display_name, p.name, e.name) AS name,
+            coalesce(nullif(trim(a.phone), ''), nullif(trim(ma.phone), ''), nullif(trim(m.phone), ''),
+                     nullif(trim(p.phone), ''), nullif(trim(pr.phone), ''), nullif(trim(e.phone), '')) AS phone
+       FROM emergency_contacts e
+       LEFT JOIN care_circle_members m ON m.id = e.circle_member_id
+       LEFT JOIN accounts ma ON ma.id = m.account_id
+       LEFT JOIN accounts a ON a.id = e.account_id
+       LEFT JOIN providers p ON p.id = e.provider_id
+       LEFT JOIN providers pr ON pr.id = p.practice_id
+      WHERE e.care_profile_id = ANY(?)
+      ORDER BY e.care_profile_id, e.sort_order, e.created_at`,
+    [profileIds]
+  )) as { rows: Array<{ care_profile_id: string; relationship: string | null; name: string; phone: string | null }> };
+  for (const r of rows.rows) out.set(r.care_profile_id, { name: r.name, phone: r.phone, relationship: r.relationship });
+  const rest = profileIds.filter((id) => !out.has(id));
+  if (rest.length) {
+    const holders = (await conn('care_profiles as cp')
+      .join('accounts as a', 'a.id', 'cp.account_id')
+      .whereIn('cp.id', rest)
+      .select('cp.id', 'cp.kind', 'cp.owner_relationship', 'a.display_name', 'a.email', 'a.phone', 'a.gender')) as Array<{
+      id: string; kind: string; owner_relationship: string | null; display_name: string | null; email: string; phone: string | null; gender: string | null;
+    }>;
+    for (const h of holders) {
+      if (h.kind === 'pet' || isSelfRelationship(h.owner_relationship)) continue;
+      out.set(h.id, {
+        name: h.display_name || h.email,
+        phone: h.phone?.trim() || null,
+        relationship: tidyRelationship(inverseRelationship(h.owner_relationship, h.gender)),
+      });
+    }
+  }
+  return out;
 }

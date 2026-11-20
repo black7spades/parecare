@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { mainContact } from '../services/professionals';
-import { emergencyContactsFor, isSelfRelationship, type EmergencyContact } from '../services/emergencyContacts';
+import { contactSummaries } from '../services/professionals';
+import { firstEmergencyContacts, isSelfRelationship } from '../services/emergencyContacts';
 import { providerTypeLabel } from '../lib/providerTypes';
 import multer from 'multer';
 import path from 'path';
@@ -270,10 +270,17 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
 
   const [pins, gps, emergency, owners, poa, activity, events, journeyRows, healthRows] = await Promise.all([
     db('care_profile_pins').where({ account_id: accountId }).whereIn('care_profile_id', ids).select('care_profile_id'),
-    // Their main GP, shown on its own labelled row.
-    Promise.all(ids.map(async (id) => [id, await mainContact(db, id, 'gp')] as const)),
+    // Their main GP, shown on its own labelled row: the one marked main,
+    // else the first linked, never one they no longer see.
+    db.raw(
+      `SELECT DISTINCT ON (cpp.care_profile_id) cpp.care_profile_id, cpp.provider_id
+         FROM care_profile_providers cpp JOIN providers p ON p.id = cpp.provider_id
+        WHERE cpp.care_profile_id = ANY(?) AND lower(p.provider_type) = 'gp' AND cpp.ended_on IS NULL
+        ORDER BY cpp.care_profile_id, cpp.is_main DESC, cpp.created_at ASC, cpp.id`,
+      [ids]
+    ),
     // Who to call when the person has no contact of their own on file.
-    Promise.all(ids.map(async (id) => [id, (await emergencyContactsFor(id))[0] ?? null] as const)),
+    firstEmergencyContacts(ids),
     // The account holder's own phone, for someone managing their own health.
     db('care_profiles as cp').join('accounts as a', 'a.id', 'cp.account_id').whereIn('cp.id', ids).select('cp.id', 'a.phone'),
     // Power of attorney can be held by a person in the care circle or by an
@@ -360,8 +367,10 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
   const contactProfileMap = new Map(contactProfiles.map((p) => [p.id, p]));
 
   const pinSet = new Set(pins.map((p: { care_profile_id: string }) => p.care_profile_id));
-  const gpMap = new Map(gps);
-  const emergencyMap = new Map(emergency);
+  const gpRows = (gps as { rows: Array<{ care_profile_id: string; provider_id: string }> }).rows;
+  const gpSummaries = await contactSummaries(db, gpRows.map((g) => g.provider_id));
+  const gpMap = new Map(gpRows.map((g) => [g.care_profile_id, gpSummaries.get(g.provider_id) ?? null] as const));
+  const emergencyMap = emergency;
   const ownerPhoneMap = new Map((owners as Array<{ id: string; phone: string | null }>).map((o) => [o.id, o.phone?.trim() || null]));
   const poaMap = new Map<string, Array<Record<string, unknown>>>();
   for (const m of poa as Array<{ care_profile_id: string }>) {
@@ -459,7 +468,7 @@ function whosePhone(o: {
   carerProfile?: { full_name: string; contact_phone: string | null };
   linked?: { display_name: string | null; phone?: string | null };
   ownerPhone: string | null;
-  emergency: EmergencyContact | null;
+  emergency: { name: string; phone: string | null; relationship: string | null } | null;
 }): { phone: string | null; owner: { name: string; label: string } | null } {
   const cp = o.profile;
   const said = (v: string | null | undefined) => (v && v.trim() ? v.trim() : null);

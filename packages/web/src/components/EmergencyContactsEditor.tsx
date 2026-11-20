@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { TrashIcon } from './ui/icons';
+import { useHiddenIds, useUndoStore } from '../stores/undo';
 import { PhoneLink } from './cards/profile/links';
 import { usePickablePeople } from './PersonPicker';
 import { useDataView, type DataSort } from './data/useDataView';
@@ -98,7 +99,7 @@ export function EmergencyContactAdd({
     if (value.startsWith('p:')) {
       const person = people.find((p) => personKey(p.ref) === value.slice(2));
       if (person?.label === 'You') setRelationship(inverseRelationship(ownerRelationship, me?.gender) ?? '');
-      else setRelationship(inverseRelationship(person?.label ?? null) ?? '');
+      else setRelationship(inverseRelationship(person?.relationship ?? null) ?? '');
     } else if (value.startsWith('c:')) {
       const provider = contacts.find((p) => p.id === value.slice(2));
       setRelationship(provider ? providerTypeLabel(provider.provider_type) : '');
@@ -254,7 +255,10 @@ export function EmergencyContactsEditor({
   const queryClient = useQueryClient();
   const { data, isLoading } = useEmergencyContacts(profileId);
   const contacts = data?.contacts ?? [];
-  const chosen = contacts.filter((c) => !c.inferred);
+  // Removing waits a few seconds with Undo, never a "sure?" box.
+  const deferDelete = useUndoStore((st) => st.deferDelete);
+  const hidden = useHiddenIds();
+  const chosen = contacts.filter((c) => !c.inferred && !(c.row_id && hidden.has(c.row_id)));
   const inferred = contacts.find((c) => c.inferred) ?? null;
   const [adding, setAdding] = useState(false);
   const [phoneFor, setPhoneFor] = useState<string | null>(null);
@@ -268,11 +272,13 @@ export function EmergencyContactsEditor({
   };
   const failed = (err: unknown) => setError(err instanceof Error ? err.message : 'That change was not saved. Try again.');
 
-  const remove = useMutation({
-    mutationFn: (rowId: string) => api.delete(`/care-profiles/${profileId}/emergency-contacts/${rowId}`),
-    onSuccess: () => { setError(''); refresh(); },
-    onError: failed,
-  });
+  const removeContact = (c: EmergencyContact) =>
+    deferDelete({
+      message: `Removed ${c.name} from who to call.`,
+      ids: [c.row_id!],
+      commit: () => api.delete(`/care-profiles/${profileId}/emergency-contacts/${c.row_id}`),
+      onCommitted: refresh,
+    });
   const reorder = useMutation({
     mutationFn: (ids: string[]) => api.patch(`/care-profiles/${profileId}/emergency-contacts/order`, { ids }),
     onSuccess: () => { setError(''); refresh(); },
@@ -405,7 +411,7 @@ export function EmergencyContactsEditor({
                         <td className="px-3 py-2 text-right whitespace-nowrap">
                           <Button size="xs" variant="ghost" aria-label={`Call ${c.name} earlier`} title="Call earlier" disabled={place <= 0} onClick={() => move(c.row_id!, -1)}>↑</Button>
                           <Button size="xs" variant="ghost" aria-label={`Call ${c.name} later`} title="Call later" disabled={place >= ordered.length - 1} onClick={() => move(c.row_id!, 1)}>↓</Button>
-                          <Button size="xs" variant="ghost-danger" aria-label={`Remove ${c.name}`} title="Remove" onClick={() => remove.mutate(c.row_id!)}><TrashIcon /></Button>
+                          <Button size="xs" variant="ghost-danger" aria-label={`Remove ${c.name}`} title="Remove" onClick={() => removeContact(c)}><TrashIcon /></Button>
                         </td>
                       ) : null}
                     </tr>

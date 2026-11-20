@@ -586,6 +586,8 @@ export interface PickablePerson {
   ref: { account_id: string } | { circle_member_id: string };
   name: string;
   label: string | null;
+  /** What the person in care is to them ("Mum"). */
+  relationship?: string | null;
   phone: string | null;
   email: string | null;
   has_login: boolean;

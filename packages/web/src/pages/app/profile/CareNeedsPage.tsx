@@ -246,9 +246,16 @@ function DirectiveUpload({ profileId }: { profileId: string }) {
         type="button"
         variant="secondary"
         size="sm"
-        disabled={!file}
         loading={uploadMutation.isPending}
-        onClick={() => uploadMutation.mutate()}
+        onClick={() => {
+          // Upload always answers: say what is missing.
+          if (!file) {
+            setError('Choose the directive file first, then upload it.');
+            return;
+          }
+          setError('');
+          uploadMutation.mutate();
+        }}
       >
         Upload directive
       </Button>

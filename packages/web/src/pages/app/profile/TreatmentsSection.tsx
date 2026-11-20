@@ -8,7 +8,7 @@ import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { RecordPanel } from '../../../components/record/RecordPanel';
 import { ContactStrip } from '../../../components/ContactStrip';
-import { ContactPicker, contactFieldsAs, pickedFrom, type PickedContact } from '../../../components/ContactPicker';
+import { ContactPicker, changedContactFieldsAs, pickedFrom, type PickedContact } from '../../../components/ContactPicker';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import {
@@ -514,7 +514,7 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved, onDelete }: {
         instructions: instructions.trim() || null,
         active,
         // Who provides it, picked or named.
-        ...contactFieldsAs('practitioner', practitioner),
+        ...changedContactFieldsAs('practitioner', pickedFrom(treatment?.practitioner ?? null), practitioner),
       };
       const cleanMetrics = metrics
         .map((m, i) => ({ ...m, name: m.name.trim(), unit: m.unit.trim(), sort_order: i }))

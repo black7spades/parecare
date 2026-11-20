@@ -4,7 +4,7 @@ import { providerWriteColumns } from '../routes/providers';
 import { whereNamed } from './providerPractices';
 import { ADDRESS_PART_KEYS, composeFormatted, hasAnyPart, type AddressParts } from './addresses';
 import { providerTypeLabel } from '../lib/providerTypes';
-import { effectiveMainSql } from '../lib/mainContact';
+import { effectiveMainSql, kindSql } from '../lib/mainContact';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -430,11 +430,12 @@ export async function setContactStanding(
       const sameKind = (await conn('care_profile_providers as c')
         .join('providers as p', 'p.id', 'c.provider_id')
         .where('c.care_profile_id', profileId)
-        .whereRaw('lower(p.provider_type) = lower(?)', [link.provider_type])
+        .whereRaw(`${kindSql('p.provider_type')} = ${kindSql('?')}`, [link.provider_type, link.provider_type])
         .select('c.id')) as Array<{ id: string }>;
       await conn('care_profile_providers').whereIn('id', sameKind.map((r) => r.id)).update({ is_main: false });
       updates['ended_on'] = updates['ended_on'] ?? null;
-      const label = providerTypeLabel(link.provider_type) ?? 'contact';
+      const typeWords = providerTypeLabel(link.provider_type) ?? 'contact';
+      const label = typeWords === 'GP' ? typeWords : typeWords.toLowerCase();
       said.push(`${link.name} is now the main ${label}.`);
     }
     updates['is_main'] = change.is_main;

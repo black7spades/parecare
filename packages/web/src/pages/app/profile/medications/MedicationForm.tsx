@@ -11,7 +11,7 @@ import { TimeField } from './TimeField';
 import { SupplierModal } from './SupplierModal';
 import type { MedicationRecord, Supplier } from '../../../../lib/care';
 import type { Appointment } from '../AppointmentsPage';
-import { ContactPicker, contactFieldsAs, pickedFrom, type PickedContact } from '../../../../components/ContactPicker';
+import { ContactPicker, changedContactFieldsAs, contactFieldsAs, pickedFrom, type PickedContact } from '../../../../components/ContactPicker';
 import { format } from 'date-fns';
 
 /**
@@ -161,7 +161,7 @@ export function MedicationForm({
           ? { supplier_id: supplierId }
           : { supplier_id: null, supplier: null, supplier_order_url: null }),
         // Who writes the script, picked or named; and the visit it started at.
-        ...contactFieldsAs('prescriber', prescriber),
+        ...(med ? changedContactFieldsAs('prescriber', pickedFrom(med.prescriber ?? null), prescriber) : contactFieldsAs('prescriber', prescriber)),
         source_appointment_id: sourceAppointmentId || null,
       };
       return med ? api.patch(`/care-profiles/${profileId}/medications/${med.id}`, body) : api.post(`/care-profiles/${profileId}/medications`, body);

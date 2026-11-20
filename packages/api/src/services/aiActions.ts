@@ -14,7 +14,7 @@ import { DOSE_AUDIT_ENTITY, doseSummary } from '../lib/doseOutcome';
 import { CIRCLE_ROLE_VALUES, roleMaySee } from '../lib/circleRoles';
 import { resolveAssetSupplier, resolveContactInput, setContactStanding } from './professionals';
 import { parseHoursList } from '../lib/openingHours';
-import { addEmergencyContact, EmergencyContactError, emergencyContactsFor, removeEmergencyContact, type EmergencyRef } from './emergencyContacts';
+import { addEmergencyContact, canonicalRef, EmergencyContactError, emergencyContactsFor, removeEmergencyContact, type EmergencyRef } from './emergencyContacts';
 import { resolveSubstanceCatalogueId, SUBSTANCE_CLASSES } from '../routes/substanceCatalogue';
 import { SUBSTANCE_STATUSES, SUBSTANCE_ROUTES } from '../routes/substanceUse';
 import { resolveSymptomCatalogueId } from '../routes/symptomCatalogue';
@@ -2211,10 +2211,16 @@ async function executeOne(
         }
       }
       if (action.remove) {
-        if (!ref) return `${name} is not one of their emergency contacts.`;
-        const list = await emergencyContactsFor(profileId);
-        const refId = Object.values(ref)[0];
-        const row = list.find((c) => !c.inferred && (c.id === refId || c.name.toLowerCase() === shown.toLowerCase()));
+        // Found by who they are (a login member is listed by their account),
+        // else by the name on the list, typed names included.
+        const list = (await emergencyContactsFor(profileId)).filter((c) => !c.inferred);
+        const canon = ref ? await canonicalRef(db, ref) : null;
+        const refId = canon && !('name' in canon) ? Object.values(canon)[0] : null;
+        const said = name.toLowerCase();
+        const row =
+          list.find((c) => refId && c.id === refId) ??
+          list.find((c) => c.name.toLowerCase() === said || c.name.toLowerCase() === shown.toLowerCase()) ??
+          list.find((c) => c.name.toLowerCase().split(/\s+/)[0] === said);
         if (!row?.row_id) return `${shown} is not one of their emergency contacts.`;
         await removeEmergencyContact(db, profileId, row.row_id);
         await audit(profileId, account.id, 'emergency_contacts', `removed ${shown} as an emergency contact`);
@@ -2228,7 +2234,7 @@ async function executeOne(
       }
       try {
         await db.transaction((trx) =>
-          addEmergencyContact(trx, profileId, { ref: ref!, relationship: action.relationship, phone: action.phone, first: action.first })
+          addEmergencyContact(trx, profileId, { ref: ref!, relationship: action.relationship, phone: action.phone, first: action.first }, account.id)
         );
       } catch (err) {
         if (err instanceof EmergencyContactError) return `Could not add ${shown}: ${err.message}`;

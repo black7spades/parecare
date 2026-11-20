@@ -60,6 +60,9 @@ export function CirclePage() {
   const [bulkEditQueue, setBulkEditQueue] = useState<CircleMember[]>([]);
   // Your own phone, kept on your account, added from your own row.
   const myId = useAuthStore((st) => st.account?.id ?? null);
+  // The person's own name, for "Dorothy is their mother": never the
+  // relationship word that careName can be for someone in the circle.
+  const personName = profile.preferred_name ?? profile.first_name ?? profile.full_name.split(' ')[0];
   const [addingPhone, setAddingPhone] = useState(false);
 
   const { data, isLoading } = useQuery({
@@ -236,7 +239,7 @@ export function CirclePage() {
                     </p>
                     {m.relationship ? (
                       <p className="text-xs text-muted">
-                        {careName} is their {m.relationship.toLowerCase()}
+                        {personName} is their {m.relationship.toLowerCase()}
                       </p>
                     ) : null}
                   </div>
@@ -427,7 +430,7 @@ export function CirclePage() {
             canEdit={canManageEditors}
             fields={[
               { label: 'Role', value: circleRoleLabel(m.role) },
-              { label: `${careName} is their`, value: m.relationship ? m.relationship.toLowerCase() : null },
+              { label: `${personName} is their`, value: m.relationship ? m.relationship.toLowerCase() : null },
               {
                 label: 'Access level',
                 value: isAdded(m)

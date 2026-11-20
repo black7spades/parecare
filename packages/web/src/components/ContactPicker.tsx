@@ -170,3 +170,13 @@ export function contactFieldsAs(prefix: string, v: PickedContact): Record<string
 /** A picked contact from a record's contact, ready to edit. */
 export const pickedFrom = (c: { id: string | null; name: string } | null | undefined): PickedContact =>
   c && c.id ? { providerId: c.id, name: c.name, providerType: '', phone: '' } : emptyContact;
+
+/**
+ * The same, but only when it changed from what the record already had, so
+ * saving an unrelated change never links a contact back that was removed
+ * from the person's contacts.
+ */
+export function changedContactFieldsAs(prefix: string, before: PickedContact, now: PickedContact): Record<string, string | null> {
+  const same = before.providerId === now.providerId && (now.providerId ? !now.phone.trim() : before.name.trim() === now.name.trim());
+  return same ? {} : contactFieldsAs(prefix, now);
+}

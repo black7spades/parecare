@@ -12,6 +12,8 @@ export interface PickablePerson {
   ref: { account_id: string } | { circle_member_id: string };
   name: string;
   label: string | null;
+  /** What the person in care is to them ("Mum"), as they gave it. */
+  relationship?: string | null;
   phone: string | null;
   email: string | null;
   has_login: boolean;
@@ -51,7 +53,10 @@ export async function pickablePeople(profileId: string, viewerAccountId: string 
     out.push({
       ref: { circle_member_id: m.id },
       name: m.display_name,
-      label: m.account_id && m.account_id === viewerAccountId ? 'You' : m.relationship?.trim() || ROLE_WORDS[m.role] || null,
+      // Their role, never the relationship word: that says what the person
+      // in care is to them, so "Jess Carter, Client" would read backwards.
+      label: m.account_id && m.account_id === viewerAccountId ? 'You' : ROLE_WORDS[m.role] || m.role || null,
+      relationship: m.relationship?.trim() || null,
       // Someone with a login keeps their phone on their account, once.
       phone: m.account_phone?.trim() || m.phone?.trim() || null,
       email: m.account_email ?? m.email,

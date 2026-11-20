@@ -57,7 +57,7 @@ emergencyContactsRouter.post('/', requireAuth, requireProfileOwner('choose who t
   }
   const profileId = req.params['id'] as string;
   try {
-    await db.transaction((trx) => addEmergencyContact(trx, profileId, { ...parsed.data, ref: parsed.data.ref as EmergencyRef }));
+    await db.transaction((trx) => addEmergencyContact(trx, profileId, { ...parsed.data, ref: parsed.data.ref as EmergencyRef }, req.account!.id));
   } catch (err) {
     if (err instanceof EmergencyContactError) {
       res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
@@ -86,7 +86,16 @@ emergencyContactsRouter.patch('/:contactId', requireAuth, requireProfileOwner('c
     return;
   }
   const profileId = req.params['id'] as string;
-  const ok = await updateEmergencyContact(db, profileId, req.params['contactId'] as string, parsed.data);
+  let ok: boolean;
+  try {
+    ok = await updateEmergencyContact(db, profileId, req.params['contactId'] as string, parsed.data, req.account!.id);
+  } catch (err) {
+    if (err instanceof EmergencyContactError) {
+      res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
+      return;
+    }
+    throw err;
+  }
   if (!ok) {
     res.status(404).json({ error: 'That emergency contact is not on file any more.', code: 'NOT_FOUND' });
     return;

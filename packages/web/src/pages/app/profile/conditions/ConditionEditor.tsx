@@ -13,7 +13,7 @@ import { CodesSection } from './CodesSection';
 import { FunctionsSection } from './FunctionsSection';
 import { ResolutionFields } from './ResolveConditionModal';
 import type { MedicalCondition } from '../../../../lib/care';
-import { ContactPicker, contactFieldsAs, pickedFrom, type PickedContact } from '../../../../components/ContactPicker';
+import { ContactPicker, changedContactFieldsAs, pickedFrom, type PickedContact } from '../../../../components/ContactPicker';
 
 export function ConditionEditor({
   profileId,
@@ -90,7 +90,7 @@ export function ConditionEditor({
         isolation_required: isolationRequired,
         region: region.trim() || null,
         // Who treats it, picked or named.
-        ...contactFieldsAs('treating', treating),
+        ...changedContactFieldsAs('treating', pickedFrom(condition?.treating ?? null), treating),
       };
       const res = isNew
         ? await api.post<{ condition: MedicalCondition }>(`/care-profiles/${profileId}/conditions`, body)
