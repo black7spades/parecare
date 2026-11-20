@@ -7,6 +7,7 @@ import { resolveConditionCatalogueId } from './conditionCatalogue';
 import { CONDITION_RESOLUTION_REASONS } from '../lib/conditionResolution';
 import { resolveOptions } from './optionCatalogue';
 import { nextStepsFor } from './appointments';
+import { ALLERGY_SEVERITIES, addAllergy, confirmNoAllergies, noKnownAllergies } from '../services/allergies';
 import {
   ATTRIBUTE_DOMAINS,
   ATTRIBUTE_KINDS,
@@ -24,16 +25,36 @@ import {
 export const allergiesRouter = Router({ mergeParams: true });
 
 allergiesRouter.get('/', requireAuth, async (req, res) => {
-  const allergies = await db('allergies')
-    .where({ care_profile_id: req.params['id'] })
-    .orderBy([{ column: 'sort_order', order: 'asc' }, { column: 'substance', order: 'asc' }]);
-  res.json({ allergies });
+  const profileId = String(req.params['id']);
+  const [allergies, no_known] = await Promise.all([
+    db('allergies')
+      .where({ care_profile_id: profileId })
+      .orderBy([{ column: 'sort_order', order: 'asc' }, { column: 'substance', order: 'asc' }]),
+    noKnownAllergies(profileId),
+  ]);
+  res.json({ allergies, no_known });
 });
 
 const allergySchema = z.object({
   substance: z.string().min(1).max(255),
   reaction: z.string().max(2000).optional().nullable(),
+  // How bad the reaction is.
+  severity: z.enum(ALLERGY_SEVERITIES).optional().nullable(),
   sort_order: z.number().int().optional(),
+});
+
+// Checked: no known allergies. Adding an allergy clears it.
+allergiesRouter.post('/none', requireAuth, async (req, res) => {
+  const profileId = String(req.params['id']);
+  const result = await confirmNoAllergies(db, profileId, req.account!.id);
+  if (!result.ok) {
+    res.status(409).json({
+      error: `${result.count === 1 ? 'An allergy is' : `${result.count} allergies are`} on the list, so it cannot say no known allergies. Delete ${result.count === 1 ? 'it' : 'them'} first if that is wrong.`,
+      code: 'HAS_ALLERGIES',
+    });
+    return;
+  }
+  res.json({ no_known: await noKnownAllergies(profileId) });
 });
 
 allergiesRouter.post('/', requireAuth, async (req, res) => {
@@ -42,9 +63,7 @@ allergiesRouter.post('/', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
-  const [allergy] = await db('allergies')
-    .insert({ care_profile_id: req.params['id'], ...parsed.data })
-    .returning('*');
+  const allergy = await addAllergy(db, String(req.params['id']), parsed.data);
   // The substance and reaction join the shared lists so they are offered
   // as suggestions to everyone from now on.
   await Promise.all([

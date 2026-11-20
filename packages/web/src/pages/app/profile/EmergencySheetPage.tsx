@@ -1,255 +1,147 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { Modal } from '../../../components/ui/Modal';
-import { PoaBadge } from '../../../components/PoaBadge';
 import { PagePurpose } from '../../../components/PagePurpose';
 import { AllergyModal } from '../../../components/AllergyModal';
 import { SetPoaForm } from '../../../components/SetPoaForm';
+import { IdentifiersForm } from '../../../components/IdentifiersForm';
+import { ShareLinkBox, type ShareLink } from '../../../components/ShareLinkBox';
+import { EmergencySheetView, type EmergencySheet, type SheetAdd } from '../../../components/EmergencySheetView';
 import { ConditionModal, EmergencyContactModal, GpModal, MedicationModal } from '../../../components/QuickAddModals';
 import { useProfile } from './ProfileLayout';
-import { useEmergencyContacts } from '../../../components/EmergencyContactsEditor';
-import { PhoneLink } from '../../../components/cards/profile/links';
-import { poaLabel, providerTypeLabel, residenceTypeLabel, roomAreaTypeLabel, type Allergy, type CarePlan, type CircleMember, type MedicalCondition, type MedicationRecord, type Provider } from '../../../lib/care';
-import { formatDateOnly } from '../../../lib/datetime';
 
-type SheetModal = 'allergy' | 'contact' | 'poa' | 'condition' | 'medication' | 'gp' | null;
+type SheetModal = 'ids' | 'allergy' | 'contact' | 'poa' | 'condition' | 'medication' | 'gp' | 'share' | null;
+
+/** Where the copy kept on this phone lives, and whether one was ever saved. */
+const storeKey = (id: string) => `parecare.emergency-sheet.${id}`;
+interface Kept {
+  saved_at: string;
+  sheet: EmergencySheet;
+}
+function readKept(id: string): Kept | null {
+  try {
+    const raw = window.localStorage.getItem(storeKey(id));
+    return raw ? (JSON.parse(raw) as Kept) : null;
+  } catch {
+    return null;
+  }
+}
+function writeKept(id: string, sheet: EmergencySheet): boolean {
+  try {
+    window.localStorage.setItem(storeKey(id), JSON.stringify({ saved_at: new Date().toISOString(), sheet }));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function EmergencySheetPage() {
   const { profile, canEdit } = useProfile();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [modal, setModal] = useState<SheetModal>(null);
-  const closeModal = () => setModal(null);
+  const [savedNote, setSavedNote] = useState('');
+  const [error, setError] = useState('');
 
-  const { data: planData } = useQuery({
-    queryKey: ['care-plan', profile.id],
-    queryFn: () => api.get<{ plan: CarePlan | null }>(`/care-profiles/${profile.id}/plan`),
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['emergency-sheet', profile.id],
+    queryFn: () => api.get<{ sheet: EmergencySheet; link: ShareLink | null }>(`/care-profiles/${profile.id}/emergency-sheet`),
   });
-  const { data: allergyData } = useQuery({
-    queryKey: ['allergies', profile.id],
-    queryFn: () => api.get<{ allergies: Allergy[] }>(`/care-profiles/${profile.id}/allergies`),
-  });
-  const { data: conditionData } = useQuery({
-    queryKey: ['conditions', profile.id],
-    queryFn: () => api.get<{ conditions: MedicalCondition[] }>(`/care-profiles/${profile.id}/conditions`),
-  });
-  const { data: circleData } = useQuery({
-    queryKey: ['circle', profile.id],
-    queryFn: () => api.get<{ members: CircleMember[] }>(`/care-profiles/${profile.id}/circle`),
-  });
-  const { data: providerData } = useQuery({
-    queryKey: ['providers', profile.id],
-    queryFn: () => api.get<{ providers: Provider[] }>(`/care-profiles/${profile.id}/providers`),
-  });
-  const { data: medData } = useQuery({
-    queryKey: ['medications', profile.id],
-    queryFn: () => api.get<{ medications: MedicationRecord[] }>(`/care-profiles/${profile.id}/medications`),
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ['emergency-sheet', profile.id] });
+  const closeModal = () => {
+    setModal(null);
+    refresh();
+  };
+
+  // A copy kept on this phone stays up to date each time the sheet opens.
+  const kept = readKept(profile.id);
+  useEffect(() => {
+    if (data?.sheet && readKept(profile.id)) writeKept(profile.id, data.sheet);
+  }, [data, profile.id]);
+  const offline = isError && !data && kept;
+  const sheet = data?.sheet ?? (offline ? kept.sheet : null);
+
+  const confirmNone = useMutation({
+    mutationFn: () => api.post(`/care-profiles/${profile.id}/allergies/none`, {}),
+    onSuccess: () => {
+      setError('');
+      refresh();
+      void queryClient.invalidateQueries({ queryKey: ['allergies', profile.id] });
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'That could not be saved. Try again in a moment.'),
   });
 
-  const plan = planData?.plan;
-  const providers = providerData?.providers ?? [];
-  const gps = providers.filter((p) => p.provider_type === 'gp');
-  // A power of attorney holder can be a person in the care circle or an
-  // organisation such as a law firm; paramedics need to see either.
-  const poaHolders: Array<{ key: string; name: string; poa_type: string | null; poa_activated: boolean; contact: string | null }> = [
-    ...(circleData?.members ?? [])
-      .filter((m) => m.poa_type)
-      .map((m) => ({ key: m.id, name: m.display_name, poa_type: m.poa_type, poa_activated: m.poa_activated, contact: m.invited_email })),
-    ...providers
-      .filter((p) => p.poa_type)
-      .map((p) => ({ key: p.id, name: p.name, poa_type: p.poa_type, poa_activated: p.poa_activated, contact: p.phone ?? p.email ?? null })),
-  ];
-  const asArray = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
-  const meds = (medData?.medications ?? []).filter((m) => m.active);
-  const allergies = allergyData?.allergies ?? [];
-  const conditions = conditionData?.conditions ?? [];
-  // Who to call, read live from each person's own record.
-  const { data: emergencyData } = useEmergencyContacts(profile.id);
-  const contacts = emergencyData?.contacts ?? [];
+  const onAdd = (what: SheetAdd) => {
+    if (what === 'no_allergies') confirmNone.mutate();
+    else if (what === 'needs' || what === 'directive') navigate(`/app/${profile.id}/care-needs`);
+    else setModal(what);
+  };
 
-  // Where the person is, for anyone stepping in: a facility with the room
-  // and a phone, or a private address.
-  const residenceText = (() => {
-    const kind = residenceTypeLabel(profile.residence_type);
-    if (profile.residence_provider) {
-      const fac = profile.residence_provider;
-      const spot = [
-        profile.room_number ? `Room ${profile.room_number}` : null,
-        profile.room_area_name ? `${profile.room_area_name}${profile.room_area_type ? ` ${roomAreaTypeLabel(profile.room_area_type)}` : ''}` : null,
-      ]
-        .filter(Boolean)
-        .join(', ');
-      return [fac.name, spot || null, kind || null, fac.phone ? `Phone: ${fac.phone}` : null].filter(Boolean).join(' · ');
+  const saveOnPhone = () => {
+    if (!sheet) return;
+    if (!writeKept(profile.id, sheet)) {
+      setSavedNote('This browser would not keep a copy. Print the sheet instead, or try another browser.');
+      return;
     }
-    const addr = [profile.address_line1, profile.address_line2, profile.address_suburb, profile.address_state, profile.address_postcode]
-      .filter(Boolean)
-      .join(', ');
-    return addr ? [addr, kind || null].filter(Boolean).join(' · ') : kind || '';
-  })();
+    // Ask the offline helper to keep the page itself too.
+    try {
+      navigator.serviceWorker?.controller?.postMessage({ type: 'keep-offline', urls: [window.location.pathname] });
+    } catch {
+      /* the saved copy still opens from this page */
+    }
+    setSavedNote('Saved on this phone. It opens without internet.');
+  };
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between print:hidden">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 print:hidden">
         <div className="flex items-center gap-2">
           <EditableSubheader copyKey="profile.emergency.subheader" />
           <PagePurpose kind="output" />
         </div>
-        <Button onClick={() => window.print()}>Print</Button>
-      </div>
-
-      <div className="print-sheet card space-y-5">
-        <div className="border-b border-border pb-3">
-          <h1 className="text-xl font-bold text-ink">Emergency information: {profile.full_name}</h1>
-          <p className="text-sm text-muted">
-            {[
-              profile.preferred_name ? `Known as ${profile.preferred_name}` : null,
-              profile.date_of_birth ? `DOB ${formatDateOnly(profile.date_of_birth, 'd MMM yyyy')}` : null,
-              profile.primary_language ? `Language: ${profile.primary_language}` : null,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={() => window.print()}>Print</Button>
+          {canEdit ? (
+            <Button variant="secondary" onClick={() => setModal('share')}>
+              Share a link
+            </Button>
+          ) : null}
+          <Button variant="secondary" onClick={saveOnPhone}>
+            Save on this phone
+          </Button>
         </div>
-
-        {residenceText ? (
-          <Section title="Where they are">
-            <p className="text-sm">{residenceText}</p>
-          </Section>
-        ) : null}
-
-        <Section title="Allergies, do not give">
-          {allergies.length === 0 ? (
-            <Empty
-              text="No known allergies recorded."
-              action="Add allergy"
-              canEdit={canEdit}
-              onAdd={() => setModal('allergy')}
-            />
-          ) : (
-            <table className="w-full text-sm">
-              <tbody>
-                {allergies.map((a) => (
-                  <tr key={a.id}>
-                    <td className="py-0.5 font-bold text-red-700">{a.substance}</td>
-                    <td className="py-0.5">{a.reaction ? <><span className="text-muted">Reaction: </span>{a.reaction}</> : ''}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Section>
-
-        <Section title="Emergency contacts">
-          {contacts.length === 0 ? (
-            <Empty text="No emergency contact chosen yet." action="Choose who to call" canEdit={canEdit} onAdd={() => setModal('contact')} />
-          ) : (
-            contacts.map((c) => (
-              <p key={c.row_id ?? c.name} className="text-sm flex flex-wrap items-center gap-x-2">
-                <span className="font-medium">{c.name}</span>
-                {c.relationship ? <span>{c.relationship}</span> : null}
-                {c.phone ? <PhoneLink phone={c.phone} /> : <span className="text-muted">No phone yet.</span>}
-                {c.inferred ? (
-                  <span className="text-xs text-muted print:hidden">
-                    Worked out from the profile.{' '}
-                    {canEdit ? (
-                      <Button size="xs" variant="ghost" onClick={() => setModal('contact')}>Change</Button>
-                    ) : null}
-                  </span>
-                ) : null}
-              </p>
-            ))
-          )}
-        </Section>
-
-        <Section title="Power of attorney">
-          {poaHolders.length === 0 ? (
-            <Empty action="Name a holder" canEdit={canEdit} onAdd={() => setModal('poa')} />
-          ) : (
-            poaHolders.map((h) => (
-              <p key={h.key} className="text-sm flex items-center gap-2">
-                <span className="font-medium">{h.name}</span>
-                <span>· {poaLabel(h.poa_type)}</span>
-                <PoaBadge type={h.poa_type} activated={h.poa_activated} />
-                {h.contact ? <span className="text-muted">{h.contact}</span> : null}
-              </p>
-            ))
-          )}
-        </Section>
-
-        <Section title="Medical conditions">
-          {conditions.length === 0 ? (
-            <Empty action="Add condition" canEdit={canEdit} onAdd={() => setModal('condition')} />
-          ) : (
-            <p className="text-sm">{conditions.map((c) => c.name).join(' · ')}</p>
-          )}
-        </Section>
-
-        <Section title="Current medications">
-          {meds.length === 0 ? (
-            <Empty action="Add medication" canEdit={canEdit} onAdd={() => setModal('medication')} />
-          ) : (
-            <table className="w-full text-sm">
-              <tbody>
-                {meds.map((m) => (
-                  <tr key={m.id}>
-                    <td className="py-0.5 font-medium">{m.name}</td>
-                    <td className="py-0.5">{m.dose ?? ''}</td>
-                    <td className="py-0.5">
-                      {m.as_needed ? 'As needed' : m.schedule_times?.length ? m.schedule_times.join(', ') : m.frequency ?? ''}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Section>
-
-        {plan?.advance_care_directive ? (
-          <Section title="Advance care directive">
-            <p className="text-sm">
-              In place.{plan.advance_care_directive_location ? ` Location: ${plan.advance_care_directive_location}` : ''}
-            </p>
-          </Section>
-        ) : null}
-
-        <Section title="GP">
-          {gps.length > 0 ? (
-            gps.map((gp) => (
-              <p key={gp.id} className="text-sm">
-                <span className="font-medium">{gp.name}</span>
-                {gp.organisation ? ` · ${gp.organisation}` : ''}
-                {gp.phone ? ` · ${gp.phone}` : ''}
-              </p>
-            ))
-          ) : (
-            <Empty action="Add GP" canEdit={canEdit} onAdd={() => setModal('gp')} />
-          )}
-        </Section>
-
-        {providers.filter((p) => p.provider_type !== 'gp').length > 0 ? (
-          <Section title="Other providers">
-            {providers.filter((p) => p.provider_type !== 'gp').slice(0, 6).map((p) => (
-              <p key={p.id} className="text-sm">
-                <span className="font-medium">{p.name}</span> ({providerTypeLabel(p.provider_type)})
-                {p.phone ? ` · ${p.phone}` : ''}
-              </p>
-            ))}
-          </Section>
-        ) : null}
-
-        {asArray<string>(plan?.communication_needs).length > 0 ? (
-          <Section title="Communication">
-            <p className="text-sm">{asArray<string>(plan?.communication_needs).join(' · ')}</p>
-          </Section>
-        ) : null}
-
-        <p className="text-xs text-muted border-t border-border pt-2">
-          Generated by PareCare on {format(new Date(), 'd MMM yyyy')}. Verify details before relying on them.
-        </p>
       </div>
+      {savedNote ? <p className="mb-3 text-sm text-ink print:hidden" role="status">{savedNote}</p> : null}
+      {error ? <p className="mb-3 text-sm text-red-600 print:hidden" role="alert">{error}</p> : null}
+      {offline ? (
+        <p className="mb-3 rounded-md border-l-4 border-l-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900/10 dark:text-amber-200 print:hidden" role="status">
+          No connection. This is the copy saved on this phone on {format(new Date(kept.saved_at), 'd MMM yyyy, HH:mm')}.
+        </p>
+      ) : null}
 
+      {isLoading ? (
+        <p className="text-sm text-muted">Putting the sheet together.</p>
+      ) : !sheet ? (
+        <p className="text-sm text-red-600" role="alert">
+          The sheet could not be loaded just now. Check the connection and try again. Once it opens, Save on this phone keeps a copy for next time.
+        </p>
+      ) : (
+        <EmergencySheetView
+          sheet={sheet}
+          editing={canEdit && !offline ? { onAdd, pending: confirmNone.isPending ? 'no_allergies' : null } : undefined}
+          documentHref={(docId) => `/app/${profile.id}/documents?doc=${docId}`}
+          onChangeContact={() => setModal('contact')}
+        />
+      )}
+
+      <Modal open={modal === 'ids'} onClose={closeModal} title="ID numbers" wide>
+        <IdentifiersForm profileId={profile.id} canEdit={canEdit} onSaved={closeModal} />
+      </Modal>
       <AllergyModal profileId={profile.id} open={modal === 'allergy'} onClose={closeModal} />
       <EmergencyContactModal profileId={profile.id} open={modal === 'contact'} onClose={closeModal} ownerRelationship={profile.owner_relationship ?? null} />
       <ConditionModal profileId={profile.id} open={modal === 'condition'} onClose={closeModal} />
@@ -258,43 +150,101 @@ export function EmergencySheetPage() {
       <Modal open={modal === 'poa'} onClose={closeModal} title="Name a power of attorney holder" wide>
         <SetPoaForm profileId={profile.id} onSaved={closeModal} />
       </Modal>
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted mb-1">{title}</h2>
-      {children}
+      {modal === 'share' ? <ShareSheetModal profileId={profile.id} link={data?.link ?? null} onClose={closeModal} /> : null}
     </div>
   );
 }
 
 /**
- * An empty section records the fact right here, in a dialog, instead of
- * sending the user to another page. The button stays off the printed
- * sheet, where it would be meaningless on paper.
+ * Share the emergency sheet: one link that opens with no login and keeps
+ * working until it is turned off. Opening the modal makes the link if there
+ * is none yet.
  */
-function Empty({
-  text = 'Not recorded.',
-  action,
-  canEdit,
-  onAdd,
-}: {
-  text?: string;
-  action: string;
-  canEdit: boolean;
-  onAdd: () => void;
-}) {
+function ShareSheetModal({ profileId, link, onClose }: { profileId: string; link: ShareLink | null; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [current, setCurrent] = useState<ShareLink | null>(link);
+  const [error, setError] = useState('');
+  const [offNote, setOffNote] = useState('');
+  const make = useMutation({
+    mutationFn: () => api.post<{ link: ShareLink }>(`/care-profiles/${profileId}/share-links`, { kind: 'emergency_sheet' }),
+    onSuccess: (res) => {
+      setCurrent(res.link);
+      setOffNote('');
+      setError('');
+      void queryClient.invalidateQueries({ queryKey: ['emergency-sheet', profileId] });
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'The link could not be made just now. Try again in a moment.'),
+  });
+  const [lastOff, setLastOff] = useState<ShareLink | null>(null);
+  const turnOff = useMutation({
+    mutationFn: (id: string) => api.delete(`/care-profiles/${profileId}/share-links/${id}`),
+    onSuccess: () => {
+      setLastOff(current);
+      setCurrent(null);
+      setOffNote('Turned off. Anyone with the old link now sees that it is turned off.');
+      void queryClient.invalidateQueries({ queryKey: ['emergency-sheet', profileId] });
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'The link could not be turned off just now. Try again in a moment.'),
+  });
+  // Turning off is never one click from lost: Undo brings the same link back.
+  const undoOff = useMutation({
+    mutationFn: (id: string) => api.post<{ link: ShareLink }>(`/care-profiles/${profileId}/share-links/${id}/restore`, {}),
+    onSuccess: (res) => {
+      setCurrent(res.link);
+      setLastOff(null);
+      setOffNote('');
+      void queryClient.invalidateQueries({ queryKey: ['emergency-sheet', profileId] });
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'The link could not be turned back on just now. Try again in a moment.'),
+  });
+  useEffect(() => {
+    if (!link && !make.isPending && !make.isSuccess && !offNote) make.mutate();
+    // Only on opening.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <p className="text-sm text-muted flex items-center gap-2">
-      {text}
-      {canEdit ? (
-        <Button size="xs" variant="secondary" className="print:hidden" onClick={onAdd}>
-          {action}
-        </Button>
-      ) : null}
-    </p>
+    <Modal open onClose={onClose} title="Share the emergency sheet">
+      <div className="space-y-4">
+        <p className="text-sm text-ink">Anyone with the link sees this sheet without logging in. It keeps working until you turn it off.</p>
+        {current ? (
+          <>
+            <ShareLinkBox url={current.url} />
+            <p className="text-xs text-muted">
+              {current.open_count === 0
+                ? 'Not opened yet.'
+                : `Opened ${current.open_count} ${current.open_count === 1 ? 'time' : 'times'}${current.last_opened_at ? `, last on ${format(new Date(current.last_opened_at), 'd MMM yyyy')}` : ''}.`}
+            </p>
+          </>
+        ) : make.isPending ? (
+          <p className="text-sm text-muted">Making the link.</p>
+        ) : null}
+        {offNote ? (
+          <p className="text-sm text-ink flex flex-wrap items-center gap-2" role="status">
+            {offNote}
+            {lastOff ? (
+              <Button size="xs" variant="ghost" loading={undoOff.isPending} onClick={() => undoOff.mutate(lastOff.id)}>
+                Undo
+              </Button>
+            ) : null}
+          </p>
+        ) : null}
+        {error ? <p className="text-sm text-red-600" role="alert">{error}</p> : null}
+        <div className="flex flex-wrap justify-end gap-2">
+          {current ? (
+            <Button variant="ghost-danger" loading={turnOff.isPending} onClick={() => turnOff.mutate(current.id)}>
+              Turn off
+            </Button>
+          ) : (
+            <Button variant="secondary" loading={make.isPending} onClick={() => make.mutate()}>
+              Make a new link
+            </Button>
+          )}
+          <Button variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

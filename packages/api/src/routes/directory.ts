@@ -24,6 +24,7 @@ import {
 import { addressColumns, ADDRESS_PART_KEYS, RESIDENCE_KIND, syncProfileResidence, syncResidenceForAddress, wifiColumns, withReadableWifi } from '../services/addresses';
 import { decryptSecret } from '../services/secretsCrypto';
 import { exportRecords, importRecords, type PortDescriptor, type PortFormat } from '../services/dataPort';
+import { phaseFrom, phaseLabel } from '../lib/phases';
 import type { AccountRole, CareProfile, Provider, ProfileKind } from '../types';
 
 export const directoryRouter = Router();
@@ -1279,10 +1280,6 @@ const portFullName = (full: string): { first_name: string | null; middle_name: s
 };
 const portReadFormat = (v: unknown): PortFormat => (String(v).toLowerCase() === 'json' ? 'json' : 'csv');
 
-const PORT_PHASES = new Set([
-  'early_concern', 'home_with_support', 'increased_dependency',
-  'transition_to_residential', 'residential_ongoing', 'end_of_life',
-]);
 
 // Any directory record carries the columns its list query selects.
 type AnyRow = Record<string, unknown>;
@@ -1498,10 +1495,11 @@ const personPort: PortDescriptor<AnyRow, PortRecord> = {
   columns: [
     { key: 'full_name', header: 'Name', aliases: ['full name', 'person'], toCell: (r) => cell(r['full_name']) },
     { key: 'preferred_name', header: 'Preferred name', aliases: ['known as'], toCell: (r) => cell(r['preferred_name']) },
-    { key: 'date_of_birth', header: 'Date of birth', aliases: ['dob', 'birthdate'], toCell: (r) => cell(r['date_of_birth']).slice(0, 10) },
+    { key: 'date_of_birth', header: 'Date of birth', aliases: ['dob', 'birthdate'], toCell: (r) => cellDate(r['date_of_birth']) },
     { key: 'pronouns', header: 'Pronouns', toCell: (r) => cell(r['pronouns']) },
     { key: 'primary_language', header: 'Language', aliases: ['primary language'], toCell: (r) => cell(r['primary_language']) },
-    { key: 'current_phase', header: 'Phase', toCell: (r) => cell(r['current_phase']) },
+    // The phase as the screens name it; a file read back in may carry either.
+    { key: 'current_phase', header: 'Phase', aliases: ['care phase'], toCell: (r) => phaseLabel(r['current_phase'] as string | null) },
     { key: 'owner_relationship', header: 'Relationship', aliases: ['relationship'], toCell: (r) => cell(r['owner_relationship']) },
     { key: 'room_number', header: 'Room', aliases: ['room number', 'room no', 'bed'], toCell: (r) => cell(r['room_number']) },
     { key: 'gp_name', header: 'GP name', aliases: ['gp', 'doctor', 'general practitioner'], toCell: (r) => cell(r['gp_name']) },
@@ -1528,7 +1526,7 @@ const personPort: PortDescriptor<AnyRow, PortRecord> = {
         date_of_birth: portDate(raw['date_of_birth']),
         pronouns: portBlank(raw['pronouns']),
         primary_language: portBlank(raw['primary_language']),
-        current_phase: PORT_PHASES.has(phase) ? phase : 'early_concern',
+        current_phase: phaseFrom(phase) ?? 'early_concern',
         owner_relationship: portBlank(raw['owner_relationship']),
         room_number: room,
         contact_kind: contactName ? 'contact' : null,
@@ -1552,7 +1550,7 @@ const petPort: PortDescriptor<AnyRow, PortRecord> = {
     { key: 'breed', header: 'Breed', toCell: (r) => cell(r['breed']) },
     { key: 'desexed', header: 'Desexed', aliases: ['neutered', 'spayed'], toCell: (r) => (r['desexed'] ? 'true' : 'false') },
     { key: 'microchip_number', header: 'Microchip', aliases: ['microchip number', 'chip'], toCell: (r) => cell(r['microchip_number']) },
-    { key: 'date_of_birth', header: 'Date of birth', aliases: ['dob'], toCell: (r) => cell(r['date_of_birth']).slice(0, 10) },
+    { key: 'date_of_birth', header: 'Date of birth', aliases: ['dob'], toCell: (r) => cellDate(r['date_of_birth']) },
     { key: 'owner_relationship', header: 'Relationship', aliases: ['relationship'], toCell: (r) => cell(r['owner_relationship']) },
     { key: 'contact_name', header: 'Contact name', toCell: (r) => cell(r['contact_name']) },
     { key: 'contact_phone', header: 'Contact phone', toCell: (r) => cell(r['contact_phone']) },

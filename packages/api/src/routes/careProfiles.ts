@@ -542,7 +542,7 @@ careProfilesRouter.get('/emergency-sheets', requireAuth, async (req, res) => {
       left_out += 1;
       continue;
     }
-    const sheet = await composeEmergencySheet(id);
+    const sheet = await composeEmergencySheet(id, { owner: access.level === 'owner', role: access.member?.role ?? null });
     if (sheet) sheets.push(sheet);
     else left_out += 1;
   }

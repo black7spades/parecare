@@ -6,6 +6,9 @@ import type { CareProfile, Reminder } from '../types';
 import { dateInZone, isValidTimeZone, parseZonedTime } from '../lib/timezone';
 import { coveredTimes, doseAnchor } from '../lib/doseSlots';
 import { ruleFor } from '../lib/repeat';
+import { enrichAppointments } from '../services/booking';
+import { allDayLines, appointmentEvent, calendarText, icsDate, icsEscape, openInApp } from '../services/ics';
+import type { ContactSummary } from '../services/professionals';
 
 // Authenticated, per-profile calendar endpoints
 export const calendarRouter = Router({ mergeParams: true });
@@ -277,22 +280,13 @@ calendarRouter.get('/feed', requireAuth, async (req, res) => {
   res.json({ url, webcal: url.replace(/^https?:\/\//, 'webcal://') });
 });
 
-// Public feed — authenticated by the unguessable per-profile token, so
-// Google Calendar / Outlook can subscribe to it without a login.
+// Public feed: authenticated by the unguessable per-profile token, so
+// Google Calendar or Outlook can subscribe to it without a login. What goes
+// out helps someone turn up: times, places, phones and what to bring, with a
+// link back into PareCare. Task notes and appointment notes never go.
 export const icsRouter = Router();
 
-function icsEscape(text: string): string {
-  return text.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
-}
-
-function icsDate(d: Date): string {
-  return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
-}
-
 const FREQ: Record<string, string> = { daily: 'DAILY', weekly: 'WEEKLY', monthly: 'MONTHLY' };
-
-/** Calendar files end every line with a carriage return and line feed. */
-const ICS_EOL = String.fromCharCode(13, 10);
 
 icsRouter.get('/:token.ics', async (req, res) => {
   const profile = await db<CareProfile & { ics_token: string }>('care_profiles')
@@ -302,123 +296,95 @@ icsRouter.get('/:token.ics', async (req, res) => {
     res.status(404).send('Not found');
     return;
   }
-
-  // Everything from the last 30 days onward, including completed one-offs
-  const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-  const reminders = await db<Reminder>('reminders')
-    .where({ care_profile_id: profile.id })
-    .where('next_due_at', '>=', since)
-    .orderBy('next_due_at', 'asc')
-    .limit(500);
-
-  const lines = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//PareCare//Care Calendar//EN',
-    'CALSCALE:GREGORIAN',
-    'METHOD:PUBLISH',
-    `X-WR-CALNAME:${icsEscape(`PareCare — ${profile.full_name}`)}`,
-  ];
+  const calName = `PareCare, ${profile.full_name}`;
+  res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+  res.setHeader('Content-Disposition', 'inline; filename="parecare.ics"');
 
   // Once a death is recorded the feed stops: an empty calendar clears every
   // event from the calendars subscribed to it. Clearing the date restores it.
   if (profile.died_on) {
-    lines.push('END:VCALENDAR');
-    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
-    res.setHeader('Content-Disposition', 'inline; filename="parecare.ics"');
-    res.send(lines.join(ICS_EOL) + ICS_EOL);
+    res.send(calendarText(calName, []));
     return;
   }
 
+  // Everything from the last 30 days onward, including finished one-offs.
+  // A task joined into another is not a task of its own any more.
+  const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+  const reminders = await db<Reminder>('reminders')
+    .where({ care_profile_id: profile.id })
+    .where('next_due_at', '>=', since)
+    .whereNull('merged_into_id')
+    .orderBy('next_due_at', 'asc')
+    .limit(500);
+
+  const lines: string[] = [];
   // A task due any time that day is a whole-day event in the owner's zone.
   const ownerZone = ((await db('accounts').where({ id: profile.account_id }).first('timezone')) as { timezone?: string | null } | undefined)?.timezone ?? null;
   for (const r of reminders) {
     const start = new Date(r.next_due_at);
     const end = new Date(start.getTime() + 30 * 60 * 1000);
-    const day = dateInZone(start, ownerZone);
-    const nextDay = new Date(`${day}T12:00:00Z`);
-    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
     lines.push(
       'BEGIN:VEVENT',
       `UID:${r.id}@parecare`,
       `DTSTAMP:${icsDate(new Date())}`,
-      ...(r.all_day
-        ? [`DTSTART;VALUE=DATE:${day.replace(/-/g, '')}`, `DTEND;VALUE=DATE:${nextDay.toISOString().slice(0, 10).replace(/-/g, '')}`]
-        : [`DTSTART:${icsDate(start)}`, `DTEND:${icsDate(end)}`]),
-      `SUMMARY:${icsEscape(r.title)}`
+      ...(r.all_day ? allDayLines(start, ownerZone) : [`DTSTART:${icsDate(start)}`, `DTEND:${icsDate(end)}`]),
+      // A finished task stays on the calendar, marked done, never cancelled.
+      `SUMMARY:${icsEscape(r.completed ? `Done: ${r.title}` : r.title)}`,
+      // Task notes stay in PareCare: only the way back in goes out.
+      `DESCRIPTION:${icsEscape(`Open in PareCare: ${openInApp(profile.id, 'tasks', r.id)}`)}`,
+      'STATUS:CONFIRMED'
     );
-    if (r.body) lines.push(`DESCRIPTION:${icsEscape(r.body)}`);
     // The stored rule is the truth, so every 2 weeks or every year repeats right.
     const rule = ruleFor(r);
     if (rule) lines.push(`RRULE:${rule}`);
     else if (r.reminder_type !== 'once' && FREQ[r.reminder_type]) lines.push(`RRULE:FREQ=${FREQ[r.reminder_type]}`);
-    if (r.completed) lines.push('STATUS:CANCELLED');
     lines.push('END:VEVENT');
   }
 
   // Birthday and health status events
   const icsBirthdays = await expandBirthdayEvents(profile.id, since, new Date(Date.now() + 365 * 24 * 3600 * 1000));
-  for (const e of icsBirthdays) {
-    const start = new Date(e.next_due_at);
-    const dayStr = start.toISOString().slice(0, 10).replace(/-/g, '');
-    lines.push(
-      'BEGIN:VEVENT',
-      `UID:${e.id}@parecare`,
-      `DTSTAMP:${icsDate(new Date())}`,
-      `DTSTART;VALUE=DATE:${dayStr}`,
-      `SUMMARY:${icsEscape(e.title)}`,
-      'END:VEVENT'
-    );
-  }
-
   const icsHealth = await expandHealthStatusEvents(profile.id, since, new Date(Date.now() + 90 * 24 * 3600 * 1000));
-  for (const e of icsHealth) {
-    const start = new Date(e.next_due_at);
-    const dayStr = start.toISOString().slice(0, 10).replace(/-/g, '');
-    lines.push(
-      'BEGIN:VEVENT',
-      `UID:${e.id}@parecare`,
-      `DTSTAMP:${icsDate(new Date())}`,
-      `DTSTART;VALUE=DATE:${dayStr}`,
-      `SUMMARY:${icsEscape(e.title)}`,
-      'END:VEVENT'
-    );
+  for (const e of [...icsBirthdays, ...icsHealth]) {
+    const dayStr = new Date(e.next_due_at).toISOString().slice(0, 10).replace(/-/g, '');
+    lines.push('BEGIN:VEVENT', `UID:${e.id}@parecare`, `DTSTAMP:${icsDate(new Date())}`, `DTSTART;VALUE=DATE:${dayStr}`, `SUMMARY:${icsEscape(e.title)}`, 'END:VEVENT');
   }
 
-  // Appointments, with their real start and end times and location.
-  const icsAppointments = await db('appointments as a')
-    .leftJoin('providers as p', 'a.provider_id', 'p.id')
-    .where('a.care_profile_id', profile.id)
-    .where('a.starts_at', '>=', since)
-    .whereNot('a.status', 'cancelled')
-    .orderBy('a.starts_at', 'asc')
-    .limit(500)
-    .select('a.*', 'p.name as provider_name');
-  for (const a of icsAppointments) {
-    const start = new Date(a.starts_at);
-    const end = a.ends_at ? new Date(a.ends_at) : new Date(start.getTime() + 30 * 60 * 1000);
+  // Appointments, with the place, who it is with and their phone, what to
+  // bring, how to get ready, and an alarm the day before and two hours before.
+  const icsAppointments = (await db('appointments')
+    .where({ care_profile_id: profile.id })
+    .whereNotNull('starts_at')
+    .where('starts_at', '>=', since)
+    .whereNot('status', 'cancelled')
+    .orderBy('starts_at', 'asc')
+    .limit(500)) as Array<Record<string, unknown> & { id: string }>;
+  const enriched = (await enrichAppointments(db, profile.id, icsAppointments)) as unknown as Array<
+    Record<string, unknown> & { id: string; provider: ContactSummary | null; bring_documents: Array<{ label: string }> }
+  >;
+  for (const a of enriched) {
     lines.push(
-      'BEGIN:VEVENT',
-      `UID:appt-${a.id}@parecare`,
-      `DTSTAMP:${icsDate(new Date())}`,
-      `DTSTART:${icsDate(start)}`,
-      `DTEND:${icsDate(end)}`,
-      `SUMMARY:${icsEscape(`🩺 ${a.title}${a.provider_name ? ` with ${a.provider_name}` : ''}`)}`
+      ...appointmentEvent(
+        {
+          id: a.id,
+          care_profile_id: profile.id,
+          title: String(a['title']),
+          starts_at: a['starts_at'] as Date,
+          ends_at: (a['ends_at'] as Date | null) ?? null,
+          all_day: !!a['all_day'],
+          location: (a['location'] as string | null) ?? null,
+          telehealth_link: (a['telehealth_link'] as string | null) ?? null,
+          preparation: (a['preparation'] as string | null) ?? null,
+          provider: a.provider ?? null,
+          bring: (a.bring_documents ?? []).map((d) => d.label),
+        },
+        ownerZone
+      )
     );
-    if (a.location) lines.push(`LOCATION:${icsEscape(a.location)}`);
-    if (a.notes) lines.push(`DESCRIPTION:${icsEscape(a.notes)}`);
-    lines.push('END:VEVENT');
   }
 
   // Medication schedule for the next ~60 days.
   // Times are the owner's wall-clock times, so place them in the owner's zone.
-  const owner = await db('accounts').where({ id: profile.account_id }).first('timezone');
-  const medEvents = await expandMedicationEvents(
-    profile.id,
-    since,
-    new Date(Date.now() + 60 * 24 * 3600 * 1000),
-    (owner?.timezone as string | null | undefined) ?? null
-  );
+  const medEvents = await expandMedicationEvents(profile.id, since, new Date(Date.now() + 60 * 24 * 3600 * 1000), ownerZone);
   for (const e of medEvents) {
     const start = new Date(e.next_due_at);
     const end = new Date(start.getTime() + 15 * 60 * 1000);
@@ -428,14 +394,11 @@ icsRouter.get('/:token.ics', async (req, res) => {
       `DTSTAMP:${icsDate(new Date())}`,
       `DTSTART:${icsDate(start)}`,
       `DTEND:${icsDate(end)}`,
-      `SUMMARY:${icsEscape(e.title)}`
+      `SUMMARY:${icsEscape(e.title)}`,
+      'STATUS:CONFIRMED',
+      'END:VEVENT'
     );
-    if (e.completed) lines.push('STATUS:CONFIRMED');
-    lines.push('END:VEVENT');
   }
 
-  lines.push('END:VCALENDAR');
-  res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
-  res.setHeader('Content-Disposition', 'inline; filename="parecare.ics"');
-  res.send(lines.join('\r\n') + '\r\n');
+  res.send(calendarText(calName, lines));
 });

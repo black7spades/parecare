@@ -72,6 +72,8 @@ import { shiftRouter } from './routes/shift';
 import { medicineRoundRouter } from './routes/medicineRound';
 import { navPinsRouter } from './routes/navPins';
 import { reportsRouter } from './routes/reports';
+import { identifiersRouter } from './routes/identifiers';
+import { emergencySheetRouter, shareLinksRouter, sharedRouter } from './routes/sharing';
 import { ensureSuperAdmin, runMigrations } from './services/bootstrap';
 import { loadSettings, seedSettingsFromEnv, subscribeSettingsInvalidation } from './config/settings';
 import { settingsRouter } from './routes/settings';
@@ -194,6 +196,11 @@ v1.use('/care-profiles/:id/plan', ...profileAccess, capturePlanEvents('plan'), c
 // Who to call in an emergency: feeds the care plan's emergency contacts.
 v1.use('/care-profiles/:id/emergency-contacts', ...profileAccess, capturePlanEvents('emergency_contacts'), emergencyContactsRouter);
 v1.use('/care-profiles/:id/checklists', ...profileAccess, checklistsRouter);
+// ID numbers, the emergency sheet as one composed page, and the links it,
+// an appointment or a report are shared through with no login.
+v1.use('/care-profiles/:id/identifiers', ...profileAccess, identifiersRouter);
+v1.use('/care-profiles/:id/emergency-sheet', ...profileAccess, emergencySheetRouter);
+v1.use('/care-profiles/:id/share-links', ...profileAccess, shareLinksRouter);
 v1.use('/care-profiles/:id/journeys', ...profileAccess, journeysRouter);
 v1.use('/care-profiles/:id/allergies', ...profileAccess, capturePlanEvents('allergies'), allergiesRouter);
 v1.use('/care-profiles/:id/conditions', ...profileAccess, capturePlanEvents('conditions'), conditionsRouter);
@@ -241,6 +248,9 @@ v1.use('/calendar', icsRouter);
 // Public: secure-link receiving end of care plan review invitations. The
 // token is the credential; every view, comment and approval is audited.
 v1.use('/plan-reviews', planReviewsRouter);
+// Public: an emergency sheet, an appointment or a report opened from a share
+// link with no login. The token is the credential; opens are counted.
+v1.use('/shared', sharedRouter);
 // Public: device-key-authenticated ingestion, so machines (CPAP units,
 // meter bridges) push their own readings straight into the observation log.
 v1.use('/device', deviceRouter);

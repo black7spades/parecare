@@ -44,6 +44,8 @@ const planSchema = z.object({
   dietary_requirements: z.array(z.string().min(1).max(255)).default([]),
   mobility_aids: z.array(z.string().min(1).max(255)).default([]),
   communication_needs: z.array(z.string().min(1).max(255)).default([]),
+  // What keeps eating and drinking safe. Left out, it stays as it was.
+  swallowing_needs: z.array(z.string().min(1).max(255)).optional(),
   advance_care_directive: z.boolean().default(false),
   advance_care_directive_location: z.string().max(255).optional().nullable(),
   emergency_contacts: z
@@ -132,6 +134,7 @@ carePlanRouter.put('/', requireAuth, async (req, res) => {
     dietary_requirements: parsed.data.dietary_requirements,
     mobility_aids: parsed.data.mobility_aids,
     communication_needs: db.raw('?::jsonb', [JSON.stringify(parsed.data.communication_needs)]),
+    ...(parsed.data.swallowing_needs !== undefined ? { swallowing_needs: db.raw('?::jsonb', [JSON.stringify(parsed.data.swallowing_needs)]) } : {}),
     // Emergency contacts are kept on their own list (/emergency-contacts),
     // pointing at each person, so they are no longer written here.
   };
@@ -156,6 +159,7 @@ carePlanRouter.put('/', requireAuth, async (req, res) => {
     resolveOptions('dietary_requirement', parsed.data.dietary_requirements, req.account!.id),
     resolveOptions('mobility_aid', parsed.data.mobility_aids, req.account!.id),
     resolveOptions('communication_need', parsed.data.communication_needs, req.account!.id),
+    resolveOptions('swallowing_need', parsed.data.swallowing_needs ?? [], req.account!.id),
     resolveOptions('directive_location', [parsed.data.advance_care_directive_location], req.account!.id),
   ]);
 

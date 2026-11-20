@@ -20,6 +20,7 @@ const EMPTY_PLAN: CarePlan = {
   dietary_requirements: [],
   mobility_aids: [],
   communication_needs: [],
+  swallowing_needs: [],
   advance_care_directive: false,
   advance_care_directive_location: null,
 };
@@ -43,6 +44,7 @@ export function CareNeedsPage() {
       dietary_requirements: asArray<string>(p.dietary_requirements),
       mobility_aids: asArray<string>(p.mobility_aids),
       communication_needs: asArray<string>(p.communication_needs),
+      swallowing_needs: asArray<string>(p.swallowing_needs),
     };
   }, [data]);
 
@@ -54,6 +56,7 @@ export function CareNeedsPage() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       void queryClient.invalidateQueries({ queryKey: ['care-plan', profile.id] });
+      void queryClient.invalidateQueries({ queryKey: ['emergency-sheet', profile.id] });
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
   });
@@ -95,6 +98,14 @@ export function CareNeedsPage() {
             onChange={(v) => savePlan({ dietary_requirements: v })}
             canEdit={canEdit}
             addLabel="Add, e.g. Low salt"
+          />
+          <OptionChips
+            label="Eating and drinking safely"
+            category="swallowing_need"
+            values={plan.swallowing_needs ?? []}
+            onChange={(v) => savePlan({ swallowing_needs: v })}
+            canEdit={canEdit}
+            addLabel="e.g. Sit upright to eat and drink"
           />
           <OptionChips
             label="Mobility aids"

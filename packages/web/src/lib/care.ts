@@ -891,7 +891,46 @@ export interface Allergy {
   id: string;
   substance: string;
   reaction: string | null;
+  /** How bad the reaction is. */
+  severity: AllergySeverity | null;
 }
+
+export const ALLERGY_SEVERITIES = [
+  { value: 'mild', label: 'Mild' },
+  { value: 'moderate', label: 'Moderate' },
+  { value: 'severe', label: 'Severe' },
+  { value: 'life_threatening', label: 'Life threatening' },
+] as const;
+export type AllergySeverity = (typeof ALLERGY_SEVERITIES)[number]['value'];
+export const severityLabel = (v: string | null | undefined): string | null => ALLERGY_SEVERITIES.find((s) => s.value === v)?.label ?? null;
+export const SEVERITY_RANK: Record<string, number> = { mild: 1, moderate: 2, severe: 3, life_threatening: 4 };
+
+/** Checked: no known allergies, with who checked and when. */
+export interface NoKnownAllergies {
+  on: string;
+  by_name: string | null;
+}
+
+/** A person's ID numbers, each its own field. */
+export interface Identifiers {
+  medicare_number: string | null;
+  medicare_irn: number | null;
+  /** The last day of the month on the card, YYYY-MM-DD. */
+  medicare_valid_to: string | null;
+  ihi_number: string | null;
+  dva_number: string | null;
+  dva_card_colour: 'gold' | 'white' | 'orange' | null;
+  ndis_number: string | null;
+  health_fund_name: string | null;
+  health_fund_member_number: string | null;
+  my_aged_care_number: string | null;
+}
+export type IdentifierField = keyof Identifiers;
+export const DVA_CARD_COLOURS = [
+  { value: 'gold', label: 'Gold' },
+  { value: 'white', label: 'White' },
+  { value: 'orange', label: 'Orange' },
+] as const;
 
 /**
  * How a condition stands right now, in plain language. Anyone can be
@@ -1837,6 +1876,8 @@ export interface CarePlan {
   dietary_requirements: string[];
   mobility_aids: string[];
   communication_needs: string[];
+  /** What keeps eating and drinking safe, such as "Sit upright to eat and drink". */
+  swallowing_needs?: string[];
   advance_care_directive: boolean;
   advance_care_directive_location: string | null;
   /** Read only: who to call, as lines. They are kept on their own list (/emergency-contacts). */

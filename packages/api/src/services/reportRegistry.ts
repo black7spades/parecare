@@ -1,8 +1,19 @@
 import { Knex } from 'knex';
-import { emergencyContactLines } from './emergencyContacts';
+import { emergencyContactsFor } from './emergencyContacts';
 import { summarizeSpend, toNum, type SpendCategory } from './healthSpend';
 import { BUILT_IN_PROVIDER_TYPES } from '../lib/providerTypes';
 import { repeatChoice, repeatLabel } from '../lib/repeat';
+import { roleMaySee } from '../lib/circleRoles';
+import { contactSummaries } from './professionals';
+import { SEVERITY_LABELS, type AllergySeverity } from './allergies';
+
+const APPOINTMENT_STATUS_WORDS: Record<string, string> = {
+  scheduled: 'Booked',
+  completed: 'Went',
+  cancelled: 'Cancelled',
+  missed: 'Missed',
+  to_book: 'Not booked yet',
+};
 
 export interface ReportField {
   key: string;
@@ -35,6 +46,12 @@ export interface SectionFetchOptions {
   filters: Record<string, unknown>;
   dateRange: { from: string; to: string } | null;
   db: Knex;
+  /**
+   * Who is reading, per person, for documents shared only with some roles.
+   * Left out, as for a report sent to someone outside, only documents shared
+   * with the whole circle are listed.
+   */
+  docAccess?: Map<string, { owner: boolean; role: string | null }>;
 }
 
 export interface SectionFetcher {
@@ -141,6 +158,7 @@ registerSection({
     fields: [
       { key: 'substance', label: 'Substance', type: 'text' },
       { key: 'reaction', label: 'Reaction', type: 'text' },
+      { key: 'severity', label: 'How bad', type: 'text' },
     ],
     filters: [],
     supportsDateRange: false,
@@ -157,6 +175,7 @@ registerSection({
       _profile_name: r._profile_name,
       substance: r.substance,
       reaction: r.reaction,
+      severity: r.severity ? SEVERITY_LABELS[r.severity as AllergySeverity] ?? r.severity : null,
     }));
   },
 });
@@ -861,9 +880,9 @@ registerSection({
       { key: 'dietary_requirements', label: 'Dietary requirements', type: 'text' },
       { key: 'mobility_aids', label: 'Mobility aids', type: 'text' },
       { key: 'communication_needs', label: 'Communication needs', type: 'text' },
+      { key: 'swallowing_needs', label: 'Eating and drinking safely', type: 'text' },
       { key: 'advance_care_directive', label: 'Advance care directive', type: 'boolean' },
       { key: 'advance_care_directive_location', label: 'Directive location', type: 'text' },
-      { key: 'emergency_contacts', label: 'Emergency contacts', type: 'text' },
     ],
     filters: [],
     supportsDateRange: false,
@@ -874,21 +893,44 @@ registerSection({
       .join('care_profiles', 'care_profiles.id', 'care_plans.care_profile_id')
       .whereIn('care_plans.care_profile_id', profileIds)
       .select('care_plans.*', 'care_profiles.full_name as _profile_name');
-    const contactsByProfile = new Map<string, Array<{ name: string; relationship: string | null; phone: string | null }>>();
-    for (const r of rows) contactsByProfile.set(r.care_profile_id, await emergencyContactLines(r.care_profile_id));
-    return rows.map((r) => {
-      const contacts = contactsByProfile.get(r.care_profile_id) ?? [];
-      return {
-        _profile_id: r.care_profile_id,
-        _profile_name: r._profile_name,
-        dietary_requirements: Array.isArray(r.dietary_requirements) ? r.dietary_requirements.join(', ') : '',
-        mobility_aids: Array.isArray(r.mobility_aids) ? r.mobility_aids.join(', ') : '',
-        communication_needs: Array.isArray(r.communication_needs) ? r.communication_needs.join(', ') : '',
-        advance_care_directive: r.advance_care_directive,
-        advance_care_directive_location: r.advance_care_directive_location,
-        emergency_contacts: contacts.map((c) => [c.name, c.relationship, c.phone].filter(Boolean).join(' - ')).join('; '),
-      };
-    });
+    return rows.map((r) => ({
+      _profile_id: r.care_profile_id,
+      _profile_name: r._profile_name,
+      dietary_requirements: Array.isArray(r.dietary_requirements) ? r.dietary_requirements.join(', ') : '',
+      mobility_aids: Array.isArray(r.mobility_aids) ? r.mobility_aids.join(', ') : '',
+      communication_needs: Array.isArray(r.communication_needs) ? r.communication_needs.join(', ') : '',
+      swallowing_needs: Array.isArray(r.swallowing_needs) ? r.swallowing_needs.join(', ') : '',
+      advance_care_directive: r.advance_care_directive,
+      advance_care_directive_location: r.advance_care_directive_location,
+    }));
+  },
+});
+
+registerSection({
+  meta: {
+    key: 'emergency_contacts',
+    label: 'Who to call in an emergency',
+    description: 'Emergency contacts in the order to call them, each detail in its own column',
+    category: 'care',
+    fields: [
+      { key: 'name', label: 'Name', type: 'text' },
+      { key: 'relationship', label: 'Relationship', type: 'text' },
+      { key: 'phone', label: 'Phone', type: 'text' },
+      { key: 'email', label: 'Email', type: 'text' },
+    ],
+    filters: [],
+    supportsDateRange: false,
+    crossProfileCapable: true,
+  },
+  async fetch({ profileIds, db }) {
+    const profiles = (await db('care_profiles').whereIn('id', profileIds).select('id', 'full_name')) as Array<{ id: string; full_name: string }>;
+    const out: Record<string, unknown>[] = [];
+    for (const p of profiles) {
+      for (const c of await emergencyContactsFor(p.id)) {
+        out.push({ _profile_id: p.id, _profile_name: p.full_name, name: c.name, relationship: c.relationship, phone: c.phone, email: c.email });
+      }
+    }
+    return out;
   },
 });
 
@@ -989,17 +1031,18 @@ registerSection({
 registerSection({
   meta: {
     key: 'providers',
-    label: 'Professionals and organisations',
-    description: 'The professionals and organisations linked to each person: doctors, specialists, lawyers, clinics, pharmacies, government departments',
+    label: 'GP and contacts',
+    description: 'Their GP first, then every professional and organisation they see: doctors, specialists, therapists, pharmacies, lawyers, government departments',
     category: 'admin',
     fields: [
       { key: 'name', label: 'Name', type: 'text' },
       { key: 'kind', label: 'Kind', type: 'text' },
       { key: 'provider_type', label: 'Type', type: 'text' },
-      { key: 'organisation', label: 'Based at', type: 'text' },
+      { key: 'organisation', label: 'Practice', type: 'text' },
       { key: 'phone', label: 'Phone', type: 'text' },
       { key: 'email', label: 'Email', type: 'text' },
       { key: 'address', label: 'Address', type: 'text' },
+      { key: 'is_main', label: 'Main contact of this type', type: 'boolean' },
     ],
     filters: [
       {
@@ -1019,24 +1062,139 @@ registerSection({
     let query = db('care_profile_providers as cpp')
       .join('providers as p', 'cpp.provider_id', 'p.id')
       .join('care_profiles as cp', 'cp.id', 'cpp.care_profile_id')
-      .whereIn('cpp.care_profile_id', profileIds);
+      .whereIn('cpp.care_profile_id', profileIds)
+      // Someone they no longer see is not who to call.
+      .whereNull('cpp.ended_on');
     if (Array.isArray(filters['provider_type']) && filters['provider_type'].length) {
       query = query.whereIn('p.provider_type', filters['provider_type'] as string[]);
     }
     if (Array.isArray(filters['kind']) && filters['kind'].length) {
       query = query.whereIn('p.kind', filters['kind'] as string[]);
     }
-    const rows = await query.select('p.*', 'cpp.care_profile_id', 'cp.full_name as _profile_name');
+    const rows = await query.select('p.id', 'p.name', 'p.kind', 'p.provider_type', 'cpp.care_profile_id', 'cpp.is_main', 'cp.full_name as _profile_name');
+    // Phone, email and address come from the practice when the person has none of their own.
+    const out: Record<string, unknown>[] = [];
+    for (const profileId of [...new Set(rows.map((r) => r.care_profile_id as string))]) {
+      const mine = rows.filter((r) => r.care_profile_id === profileId);
+      const summaries = await contactSummaries(db, mine.map((r) => r.id as string), profileId);
+      const gpFirst = (r: { provider_type: string | null }) => ((r.provider_type ?? '').toLowerCase() === 'gp' ? 0 : 1);
+      mine.sort((a, b) => gpFirst(a) - gpFirst(b) || Number(!!b.is_main) - Number(!!a.is_main) || String(a.name).localeCompare(String(b.name)));
+      for (const r of mine) {
+        const c = summaries.get(r.id as string);
+        out.push({
+          _profile_id: r.care_profile_id,
+          _profile_name: r._profile_name,
+          name: r.name,
+          kind: r.kind === 'organisation' ? 'Organisation' : 'Professional',
+          provider_type: BUILT_IN_PROVIDER_TYPES.find((t) => t.value === r.provider_type)?.label ?? r.provider_type,
+          organisation: c?.organisation?.name ?? null,
+          phone: c?.phone ?? null,
+          email: c?.email ?? null,
+          address: c?.address ?? null,
+          is_main: c?.is_main ?? !!r.is_main,
+        });
+      }
+    }
+    return out;
+  },
+});
+
+registerSection({
+  meta: {
+    key: 'appointments',
+    label: 'Appointments',
+    description: 'Appointments coming up and those in the last 12 months: when, who with and their phone, and where',
+    category: 'care',
+    fields: [
+      { key: 'title', label: 'What for', type: 'text' },
+      { key: 'starts_on', label: 'Date', type: 'date' },
+      { key: 'time', label: 'Time', type: 'text' },
+      { key: 'provider_name', label: 'With', type: 'text' },
+      { key: 'provider_type', label: 'Their role', type: 'text' },
+      { key: 'provider_phone', label: 'Their phone', type: 'text' },
+      { key: 'place', label: 'Where', type: 'text' },
+      { key: 'status', label: 'Status', type: 'text' },
+    ],
+    filters: [
+      { key: 'when', label: 'When', type: 'select', options: [{ value: 'upcoming', label: 'Coming up' }, { value: 'past', label: 'Last 12 months' }] },
+    ],
+    supportsDateRange: false,
+    crossProfileCapable: true,
+  },
+  async fetch({ profileIds, filters, db }) {
+    const now = new Date();
+    const yearAgo = new Date(now.getTime() - 365 * 24 * 3600 * 1000);
+    let query = db('appointments as a')
+      .join('care_profiles as cp', 'cp.id', 'a.care_profile_id')
+      .leftJoin('accounts as ac', 'ac.id', 'cp.account_id')
+      .whereIn('a.care_profile_id', profileIds)
+      .whereNotNull('a.starts_at')
+      .whereNot('a.status', 'cancelled');
+    if (filters['when'] === 'upcoming') query = query.where('a.starts_at', '>=', now);
+    else if (filters['when'] === 'past') query = query.whereBetween('a.starts_at', [yearAgo, now]);
+    else query = query.where('a.starts_at', '>=', yearAgo);
+    const rows = await query
+      .select('a.id', 'a.title', 'a.starts_at', 'a.all_day', 'a.status', 'a.location', 'a.telehealth_link', 'a.provider_id', 'a.care_profile_id', 'cp.full_name as _profile_name', 'ac.timezone')
+      .orderBy('a.starts_at', 'asc');
+    const out: Record<string, unknown>[] = [];
+    for (const profileId of [...new Set(rows.map((r) => r.care_profile_id as string))]) {
+      const mine = rows.filter((r) => r.care_profile_id === profileId);
+      const summaries = await contactSummaries(db, mine.map((r) => r.provider_id as string | null), profileId);
+      for (const r of mine) {
+        const c = r.provider_id ? summaries.get(r.provider_id as string) : undefined;
+        const zone = (r.timezone as string | null) ?? 'UTC';
+        const d = new Date(r.starts_at as string);
+        const day = new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+        const typedPlace = r.location && !/^\s*https?:\/\//i.test(r.location as string) ? (r.location as string) : null;
+        out.push({
+          _profile_id: r.care_profile_id,
+          _profile_name: r._profile_name,
+          title: r.title,
+          starts_on: day,
+          time: r.all_day ? 'Any time that day' : new Intl.DateTimeFormat('en-AU', { timeZone: zone, hour: '2-digit', minute: '2-digit', hour12: false }).format(d),
+          provider_name: c?.name ?? null,
+          provider_type: c?.role_label ?? null,
+          provider_phone: c?.phone ?? null,
+          place: typedPlace ?? c?.address ?? (r.telehealth_link ? 'Video call' : null),
+          status: r.status === 'scheduled' && d < now ? 'Not marked yet' : APPOINTMENT_STATUS_WORDS[r.status as string] ?? r.status,
+        });
+      }
+    }
+    return out;
+  },
+});
+
+registerSection({
+  meta: {
+    key: 'open_questions',
+    label: 'Open questions',
+    description: 'Questions still waiting for an answer, to bring to the next visit',
+    category: 'care',
+    fields: [
+      { key: 'title', label: 'Question', type: 'text' },
+      { key: 'body', label: 'Details', type: 'text' },
+      { key: 'raised_by', label: 'Asked by', type: 'text' },
+      { key: 'created_at', label: 'Asked on', type: 'date' },
+    ],
+    filters: [],
+    supportsDateRange: false,
+    crossProfileCapable: true,
+  },
+  async fetch({ profileIds, db }) {
+    const rows = await db('open_questions as q')
+      .join('care_profiles as cp', 'cp.id', 'q.care_profile_id')
+      .leftJoin('care_circle_members as m', 'm.id', 'q.raised_by')
+      .whereIn('q.care_profile_id', profileIds)
+      .where('q.status', 'open')
+      .orderBy('q.created_at', 'asc')
+      .select('q.*', 'm.display_name as raised_by_name', 'cp.full_name as _profile_name');
     return rows.map((r) => ({
       _profile_id: r.care_profile_id,
       _profile_name: r._profile_name,
-      name: r.name,
-      kind: r.kind === 'organisation' ? 'Organisation' : 'Professional',
-      provider_type: BUILT_IN_PROVIDER_TYPES.find((t) => t.value === r.provider_type)?.label ?? r.provider_type,
-      organisation: r.organisation,
-      phone: r.phone,
-      email: r.email,
-      address: r.address,
+      title: r.title,
+      body: r.body,
+      raised_by: r.raised_by_name ?? null,
+      created_at: r.created_at,
     }));
   },
 });
@@ -1135,7 +1293,7 @@ registerSection({
     supportsDateRange: true,
     crossProfileCapable: true,
   },
-  async fetch({ profileIds, dateRange, db }) {
+  async fetch({ profileIds, dateRange, db, docAccess }) {
     let query = db('documents')
       .join('care_profiles', 'care_profiles.id', 'documents.care_profile_id')
       .leftJoin('document_categories as dc', 'dc.id', 'documents.category_id')
@@ -1143,11 +1301,19 @@ registerSection({
     if (dateRange) {
       query = query.where('documents.created_at', '>=', dateRange.from).where('documents.created_at', '<=', dateRange.to);
     }
-    const rows = await query.select('documents.*', 'dc.name as category_name', 'care_profiles.full_name as _profile_name')
-      .orderBy('documents.created_at', 'desc');
+    const rows = (await query.select('documents.*', 'dc.name as category_name', 'care_profiles.full_name as _profile_name')
+      .orderBy('documents.created_at', 'desc'))
+      // A document shared only with some roles stays with those roles.
+      .filter((r) => {
+        const roles = Array.isArray(r.visible_to_roles) ? (r.visible_to_roles as string[]) : [];
+        if (roles.length === 0) return true;
+        const who = docAccess?.get(r.care_profile_id as string);
+        return !!who && (who.owner || roleMaySee(roles, who.role));
+      });
     return rows.map((r) => ({
       _profile_id: r.care_profile_id,
       _profile_name: r._profile_name,
+      _document_id: r.id,
       label: r.label,
       category: r.category_name ?? 'Other',
       mime_type: r.mime_type,

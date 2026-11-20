@@ -207,6 +207,8 @@ export interface CarePlan {
   dietary_requirements: string[];
   mobility_aids: string[];
   communication_needs: string[];
+  /** What keeps eating and drinking safe, such as "Sit upright to eat and drink". */
+  swallowing_needs: string[];
   advance_care_directive: boolean;
   advance_care_directive_location: string | null;
   emergency_contacts: Record<string, unknown>[];

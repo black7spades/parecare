@@ -2,6 +2,7 @@ import { db } from '../config/database';
 import { getSection, getAllSections, type ReportSectionMeta } from './reportRegistry';
 import { complete, isAiConfigured } from './aiProvider';
 import { TONE_CALIBRATION } from './aiTone';
+import { PHASE_LABELS } from '../lib/phases';
 
 export interface ReportSectionConfig {
   key: string;
@@ -15,6 +16,8 @@ export interface ReportRequest {
   dateRange: { from: string; to: string } | null;
   includeAiNarrative: boolean;
   aiPrompt?: string;
+  /** Who is reading, per person, for documents shared only with some roles. */
+  docAccess?: Map<string, { owner: boolean; role: string | null }>;
 }
 
 export interface ReportSectionResult {
@@ -46,6 +49,7 @@ export async function generateReport(req: ReportRequest): Promise<ReportResult> 
         filters: sectionCfg.filters,
         dateRange: section.meta.supportsDateRange ? req.dateRange : null,
         db,
+        docAccess: req.docAccess,
       });
     } catch (err) {
       console.error(`Report section "${sectionCfg.key}" failed:`, err);
@@ -86,7 +90,7 @@ async function generateNarrative(sections: ReportSectionResult[], customPrompt?:
     const tableRows = s.rows.slice(0, 100).map((r) => {
       return [
         String(r['_profile_name'] ?? ''),
-        ...s.fields.map((f) => formatValue(r[f.key])),
+        ...s.fields.map((f) => formatValue(r[f.key], f.type)),
       ];
     });
     const table = [headers.join(' | '), ...tableRows.map((row) => row.join(' | '))].join('\n');
@@ -121,11 +125,30 @@ async function generateNarrative(sections: ReportSectionResult[], customPrompt?:
   return result.text;
 }
 
-function formatValue(v: unknown): string {
+/** Codes as people read them on screen. */
+const CODE_LABELS: Record<string, string> = {
+  ...PHASE_LABELS,
+  person: 'Person',
+  pet: 'Pet',
+  viewer: 'Can view',
+  contributor: 'Can add and change',
+  active: 'Active',
+  completed: 'Completed',
+  abandoned: 'Stopped',
+  created: 'Created',
+  updated: 'Updated',
+  deleted: 'Deleted',
+};
+
+/** A cell for a file: dates as YYYY-MM-DD, codes as their screen labels. */
+function formatValue(v: unknown, type?: string): string {
   if (v === null || v === undefined) return '';
   if (typeof v === 'boolean') return v ? 'Yes' : 'No';
   if (v instanceof Date) return v.toISOString().slice(0, 10);
-  return String(v);
+  const s = String(v);
+  if (type === 'date' && /^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  if (type === 'enum') return CODE_LABELS[s] ?? (/^[a-z_]+$/.test(s) ? (s.charAt(0).toUpperCase() + s.slice(1)).replace(/_/g, ' ') : s);
+  return s;
 }
 
 export function getRegistry(): ReportSectionMeta[] {
@@ -153,7 +176,7 @@ export const SYSTEM_PRESETS: Omit<ReportPreset, 'id' | 'created_at' | 'updated_a
   {
     account_id: null,
     name: 'Health summary for doctor or vet visit',
-    description: 'Demographics, allergies, conditions, medications, and recent health events. Ideal for preparing a GP, specialist, or veterinary appointment.',
+    description: 'Demographics, allergies, conditions, medications, the GP and contacts, appointments, open questions and recent health events. Ideal for preparing a GP, specialist, or veterinary appointment.',
     is_system: true,
     config: {
       sections: [
@@ -163,6 +186,10 @@ export const SYSTEM_PRESETS: Omit<ReportPreset, 'id' | 'created_at' | 'updated_a
         { key: 'medications', fields: ['name', 'dose', 'route', 'frequency', 'schedule_times', 'instructions', 'critical'], filters: { active: true } },
         { key: 'health_statuses', fields: ['name', 'category', 'status', 'onset_date', 'duration_days', 'symptoms', 'is_contagious'], filters: { status: ['active', 'improving', 'managed'] } },
         { key: 'care_plan', fields: ['dietary_requirements', 'mobility_aids', 'communication_needs', 'advance_care_directive'], filters: {} },
+        { key: 'providers', fields: ['name', 'provider_type', 'organisation', 'phone', 'email'], filters: {} },
+        { key: 'emergency_contacts', fields: [], filters: {} },
+        { key: 'appointments', fields: [], filters: {} },
+        { key: 'open_questions', fields: [], filters: {} },
       ],
       dateRangePreset: '90d',
       includeAiNarrative: true,
@@ -236,6 +263,7 @@ export const SYSTEM_PRESETS: Omit<ReportPreset, 'id' | 'created_at' | 'updated_a
         { key: 'care_plan', fields: [], filters: {} },
         { key: 'treatments', fields: ['treatment_name', 'treatment_category', 'notes'], filters: {} },
         { key: 'care_circle', fields: ['display_name', 'role', 'relationship', 'permission'], filters: {} },
+        { key: 'emergency_contacts', fields: [], filters: {} },
         { key: 'providers', fields: ['name', 'provider_type', 'organisation', 'phone'], filters: {} },
       ],
       dateRangePreset: null,
@@ -277,7 +305,7 @@ export function toCsv(sections: ReportSectionResult[]): string {
     for (const row of section.rows) {
       const values = [
         String(row['_profile_name'] ?? ''),
-        ...section.fields.map((f) => formatValue(row[f.key])),
+        ...section.fields.map((f) => formatValue(row[f.key], f.type)),
       ];
       lines.push(values.map(csvEscape).join(','));
     }

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { addAllergy, confirmNoAllergies, severityFrom, SEVERITY_LABELS, type AllergySeverity } from './allergies';
+import { IDENTIFIER_LABELS, saveIdentifiers, type IdentifierInput } from './identifiers';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { accountIdForProfile, resolveCategoryByName, withCategory } from './documentCategories';
 import { db } from '../config/database';
@@ -235,6 +237,33 @@ const addAllergySchema = z.object({
   type: z.literal('add_allergy'),
   substance: z.string().min(1).max(255),
   reaction: z.string().optional().nullable(),
+  // How bad the reaction is: mild | moderate | severe | life_threatening, or plain words.
+  severity: z.string().max(40).optional().nullable(),
+});
+
+// Checked: they have no known allergies. Fails while any allergy is on file.
+const confirmNoAllergiesSchema = z.object({
+  type: z.literal('confirm_no_allergies'),
+});
+
+/**
+ * ID numbers read from a card or a letter, each its own field. A number that
+ * does not check out is not saved and the reply says what it should look like.
+ */
+const idField = z.union([z.string().max(60), z.number()]).optional().nullable();
+const setIdNumbersSchema = z.object({
+  type: z.literal('set_id_numbers'),
+  medicare_number: idField,
+  medicare_irn: idField,
+  // YYYY-MM, the month printed on the card.
+  medicare_valid_to: idField,
+  ihi_number: idField,
+  dva_number: idField,
+  dva_card_colour: idField,
+  ndis_number: idField,
+  health_fund_name: idField,
+  health_fund_member_number: idField,
+  my_aged_care_number: idField,
 });
 
 const removeAllergySchema = z.object({
@@ -558,6 +587,8 @@ const updateCarePlanSchema = z.object({
   // A list of discrete needs; the GP lives in providers (use the provider
   // actions to change it).
   communication_needs: z.array(z.string()).max(50).optional().nullable(),
+  // What keeps eating and drinking safe: "Sit upright to eat and drink", "Thickened fluids".
+  swallowing_needs: z.array(z.string()).max(50).optional().nullable(),
   advance_care_directive: z.boolean().optional().nullable(),
   advance_care_directive_location: z.string().optional().nullable(),
 });
@@ -796,6 +827,8 @@ export const actionSchema = z.discriminatedUnion('type', [
   restockMedicationSchema,
   addAllergySchema,
   removeAllergySchema,
+  confirmNoAllergiesSchema,
+  setIdNumbersSchema,
   addConditionSchema,
   updateConditionSchema,
   logConditionSchema,
@@ -1903,16 +1936,36 @@ async function executeOne(
       return `Updated ${med.name}'s supply: ${parts.join(' and ')} on hand.`;
     }
     case 'add_allergy': {
-      const [allergyRow] = await db('allergies')
-        .insert({
-          care_profile_id: profileId,
-          substance: action.substance.trim(),
-          reaction: action.reaction ?? null,
-        })
-        .returning('id');
-      await audit(profileId, account.id, 'allergies', `added allergy ${action.substance}`, allergyRow?.id);
-      await linkSource('allergies', allergyRow?.id);
-      return `Recorded an allergy to ${action.substance}${action.reaction ? ` (${action.reaction})` : ''}.`;
+      // The same write as the Allergies page: it clears "no known allergies".
+      const allergyRow = (await addAllergy(db, profileId, {
+        substance: action.substance,
+        reaction: action.reaction ?? null,
+        severity: severityFrom(action.severity),
+      })) as { id: string; severity: AllergySeverity | null };
+      await audit(profileId, account.id, 'allergies', `added allergy ${action.substance}`, allergyRow.id);
+      await linkSource('allergies', allergyRow.id);
+      const how = allergyRow.severity ? `, ${SEVERITY_LABELS[allergyRow.severity].toLowerCase()}` : '';
+      return `Recorded an allergy to ${action.substance}${action.reaction ? `: ${action.reaction}` : ''}${how}.`;
+    }
+    case 'confirm_no_allergies': {
+      const done = await confirmNoAllergies(db, profileId, account.id);
+      if (!done.ok) {
+        return `${CLARIFY_MARK} I did not record "no known allergies": ${done.count === 1 ? 'an allergy is' : `${done.count} allergies are`} already on the list. Should ${done.count === 1 ? 'it' : 'they'} come off?`;
+      }
+      await audit(profileId, account.id, 'care_profiles', 'checked: no known allergies');
+      return 'Recorded no known allergies, checked today.';
+    }
+    case 'set_id_numbers': {
+      const { type: _t, ...numbers } = action;
+      void _t;
+      const given = Object.fromEntries(Object.entries(numbers).filter(([, v]) => v !== undefined)) as IdentifierInput;
+      if (Object.keys(given).length === 0) return `${CLARIFY_MARK} Which ID number is it, and what is the number?`;
+      const result = await saveIdentifiers(profileId, account.id, given);
+      if (result.saved.length) await audit(profileId, account.id, 'profile_identifiers', `recorded ${result.saved.map((k) => IDENTIFIER_LABELS[k]).join(', ')}`);
+      const lines: string[] = [];
+      if (result.saved.length) lines.push(`Recorded the ${result.saved.map((k) => IDENTIFIER_LABELS[k]).join(', ')}.`);
+      for (const msg of Object.values(result.problems)) if (msg) lines.push(`${msg} It was not saved.`);
+      return lines.length ? lines : 'Nothing changed.';
     }
     case 'remove_allergy': {
       const n = await db('allergies')
@@ -2542,6 +2595,7 @@ async function executeOne(
       if (action.dietary_requirements !== undefined) fields['dietary_requirements'] = action.dietary_requirements ?? [];
       if (action.mobility_aids !== undefined) fields['mobility_aids'] = action.mobility_aids ?? [];
       if (action.communication_needs !== undefined) fields['communication_needs'] = JSON.stringify(action.communication_needs ?? []);
+      if (action.swallowing_needs !== undefined) fields['swallowing_needs'] = JSON.stringify(action.swallowing_needs ?? []);
       if (action.advance_care_directive !== undefined) fields['advance_care_directive'] = action.advance_care_directive ?? false;
       if (action.advance_care_directive_location !== undefined)
         fields['advance_care_directive_location'] = action.advance_care_directive_location;

@@ -13,7 +13,7 @@ import { getMarRetentionMonths } from '../config/settings';
 import { drawDownOnHand, perDoseDrawdown } from '../services/medicationSupply';
 import { ownerOnlyMessage } from '../middleware/permissions';
 import { contactSummaries, linkSupplierToContact, mainContact, resolveContactInput, supplierContacts } from '../services/professionals';
-import { STOP_REASONS, changesFor, recordMedicationChange, restartMedication, stopMedication, type ChangeSource } from '../services/medicationChanges';
+import { STOP_REASONS, STOP_REASON_LABELS, changesFor, recordMedicationChange, restartMedication, stopMedication, stopReasonFrom, type ChangeSource, type StopReason } from '../services/medicationChanges';
 import { COURSE_RUNNING_SQL } from '../lib/course';
 
 export const medicationsRouter = Router({ mergeParams: true });
@@ -220,6 +220,9 @@ interface MedRow {
   supplier: string | null;
   supplier_order_url: string | null;
   prescriber_name?: string | null;
+  prescriber_phone?: string | null;
+  critical?: boolean;
+  condition_name?: string | null;
   repeats_left?: number | null;
   course_ends_on?: string | null;
   stopped_on?: string | null;
@@ -243,11 +246,15 @@ interface MedInsert {
   frequency: string | null;
   schedule_times: string[];
   supply: number | null;
+  supply_remaining: number | null;
   packs_on_hand: number | null;
   repeats_due: string | null;
   supplier: string | null;
   supplier_order_url: string | null;
   prescriber_name: string | null;
+  prescriber_phone: string | null;
+  critical: boolean;
+  condition_name: string | null;
   repeats_left: number | null;
   course_ends_on: string | null;
   stopped_on: string | null;
@@ -329,25 +336,31 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
     { key: 'dose_unit', header: 'Dose measure', aliases: ['measure', 'dose unit'], toCell: (r) => r.dose_unit ?? '' },
     { key: 'form', header: 'Type', aliases: ['form'], toCell: (r) => r.form ?? '' },
     { key: 'route', header: 'Route', toCell: (r) => r.route ?? '' },
-    { key: 'with_food', header: 'With food', aliases: ['food'], toCell: (r) => (r.with_food ? 'true' : 'false') },
-    { key: 'as_needed', header: 'As needed', aliases: ['prn'], toCell: (r) => (r.as_needed ? 'true' : 'false') },
+    { key: 'with_food', header: 'With food', aliases: ['food'], toCell: (r) => (r.with_food ? 'Yes' : 'No') },
+    { key: 'as_needed', header: 'As needed', aliases: ['prn'], toCell: (r) => (r.as_needed ? 'Yes' : 'No') },
     { key: 'schedule_times', header: 'Times', aliases: ['schedule', 'schedule times', 'time'], toCell: (r) => (r.schedule_times ?? []).join('; ') },
+    { key: 'frequency', header: 'How often', aliases: ['frequency'], toCell: (r) => r.frequency ?? '' },
     { key: 'instructions', header: 'Instructions', aliases: ['directions', 'how to take'], toCell: (r) => r.instructions ?? '' },
+    // Missing a dose of a critical medicine is dangerous; alerts go sooner.
+    { key: 'critical', header: 'Critical', aliases: ['critical medicine', 'high risk'], toCell: (r) => (r.critical ? 'Yes' : 'No') },
+    { key: 'condition_name', header: 'Condition', aliases: ['for condition', 'treats', 'linked condition'], toCell: (r) => r.condition_name ?? '' },
     { key: 'as_needed_for', header: 'As needed for', aliases: ['prn for', 'what it is for'], toCell: (r) => r.as_needed_for ?? '' },
-    { key: 'min_hours_between_doses', header: 'Hours between doses', aliases: ['minimum hours', 'gap', 'hours apart'], toCell: (r) => (r.min_hours_between_doses == null ? '' : String(Number(r.min_hours_between_doses))) },
-    { key: 'max_doses_per_day', header: 'Most in 24 hours', aliases: ['max per day', 'maximum per day', 'most per day'], toCell: (r) => (r.max_doses_per_day == null ? '' : String(r.max_doses_per_day)) },
+    { key: 'min_hours_between_doses', header: 'Hours between doses', aliases: ['minimum hours', 'gap', 'hours apart', 'at least hours apart'], toCell: (r) => (r.min_hours_between_doses == null ? '' : String(Number(r.min_hours_between_doses))) },
+    { key: 'max_doses_per_day', header: 'Most in 24 hours', aliases: ['max per day', 'maximum per day', 'most per day', 'no more than per day'], toCell: (r) => (r.max_doses_per_day == null ? '' : String(r.max_doses_per_day)) },
     { key: 'supply', header: 'A full pack provides', aliases: ['supply', 'stock', 'quantity', 'on hand', 'supply in units', 'pack size'], toCell: (r) => (r.supply ?? '').toString() },
     { key: 'supply_remaining', header: 'Units left', aliases: ['remaining', 'supply remaining'], toCell: (r) => (r.supply_remaining ?? '').toString() },
     { key: 'packs_on_hand', header: 'Packs on hand', aliases: ['packs', 'packs left', 'unopened packs'], toCell: (r) => (r.packs_on_hand ?? '').toString() },
-    { key: 'repeats_due', header: 'Repeats due', aliases: ['repeat', 'repeat due'], toCell: (r) => r.repeats_due ?? '' },
+    { key: 'repeats_due', header: 'Repeats due', aliases: ['repeat', 'repeat due'], toCell: (r) => dayCell(r.repeats_due) ?? '' },
     { key: 'supplier', header: 'Supplier', aliases: ['pharmacy', 'supplied by'], toCell: (r) => r.supplier ?? '' },
     { key: 'supplier_order_url', header: 'Order link', aliases: ['order url', 'reorder link', 'order'], toCell: (r) => r.supplier_order_url ?? '' },
     { key: 'prescriber_name', header: 'Prescribed by', aliases: ['prescriber', 'prescribed by', 'doctor'], toCell: (r) => r.prescriber_name ?? '' },
+    { key: 'prescriber_phone', header: 'Prescriber phone', aliases: ['doctor phone', 'prescriber number'], toCell: (r) => r.prescriber_phone ?? '' },
     { key: 'repeats_left', header: 'Repeats left', aliases: ['repeats left on the script', 'repeats'], toCell: (r) => (r.repeats_left ?? '').toString() },
     { key: 'course_ends_on', header: 'Last day of the course', aliases: ['course ends', 'course end'], toCell: (r) => dayCell(r.course_ends_on) ?? '' },
-    { key: 'active', header: 'Active', aliases: ['status'], toCell: (r) => (r.active ? 'true' : 'false') },
+    { key: 'active', header: 'Active', aliases: ['status'], toCell: (r) => (r.active ? 'Yes' : 'No') },
     { key: 'stopped_on', header: 'Last day taken', aliases: ['stopped on', 'stopped'], toCell: (r) => dayCell(r.stopped_on) ?? '' },
-    { key: 'stop_reason', header: 'Why it stopped', aliases: ['stop reason'], toCell: (r) => r.stop_reason ?? '' },
+    // The reason as the screen names it; a file read back in may carry either.
+    { key: 'stop_reason', header: 'Why it stopped', aliases: ['stop reason'], toCell: (r) => (r.stop_reason ? STOP_REASON_LABELS[r.stop_reason as StopReason] ?? r.stop_reason : '') },
   ],
   coerce: (raw, rowNumber) => {
     const name = (raw['name'] ?? '').trim();
@@ -391,6 +404,10 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
           return Number.isFinite(n) && n > 0 && n <= 50 ? n : null;
         })(),
         supply: Number.isFinite(supplyNum) ? supplyNum : null,
+        supply_remaining: (() => {
+          const left = parseFloat(String(raw['supply_remaining'] ?? '').replace(/[^0-9.]/g, ''));
+          return Number.isFinite(left) ? left : null;
+        })(),
         packs_on_hand: (() => {
           const packsNum = parseFloat(String(raw['packs_on_hand'] ?? '').replace(/[^0-9.]/g, ''));
           return Number.isFinite(packsNum) ? packsNum : null;
@@ -402,16 +419,16 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
           return u && /^https?:\/\//i.test(u) ? u : null;
         })(),
         prescriber_name: blank(raw['prescriber_name']),
+        prescriber_phone: blank(raw['prescriber_phone']),
+        critical: ['true', 'yes', '1', 'y', 'critical'].includes((raw['critical'] ?? '').trim().toLowerCase()),
+        condition_name: blank(raw['condition_name']),
         repeats_left: (() => {
           const n = parseInt(String(raw['repeats_left'] ?? '').replace(/[^0-9]/g, ''), 10);
           return Number.isFinite(n) && n <= 99 ? n : null;
         })(),
         course_ends_on: dayCell(raw['course_ends_on']),
         stopped_on: dayCell(raw['stopped_on']),
-        stop_reason: (() => {
-          const v = (blank(raw['stop_reason']) ?? '').toLowerCase();
-          return (STOP_REASONS as readonly string[]).includes(v) ? v : null;
-        })(),
+        stop_reason: stopReasonFrom(blank(raw['stop_reason'])),
         active: parseActive(raw['active']),
       },
     };
@@ -441,8 +458,10 @@ medicationsRouter.get('/export', requireAuth, requireAccountRight('can_export_da
   const format = readFormat(req.query['format']);
   const meds = (await medSelect()
     .where('m.care_profile_id', req.params['id'])
-    .orderBy([{ column: 'm.active', order: 'desc' }, { column: 'c.name', order: 'asc' }])) as MedRow[];
-  const { body, contentType, filename } = exportRecords(medPort, meds, format);
+    .orderBy([{ column: 'm.active', order: 'desc' }, { column: 'c.name', order: 'asc' }])) as Array<MedRow & { prescriber_provider_id: string | null }>;
+  const prescribers = await contactSummaries(db, meds.map((m) => m.prescriber_provider_id), req.params['id'] as string);
+  const withPhones = meds.map((m) => ({ ...m, prescriber_phone: m.prescriber_provider_id ? prescribers.get(m.prescriber_provider_id)?.phone ?? null : null }));
+  const { body, contentType, filename } = exportRecords(medPort, withPhones, format);
   res.setHeader('Content-Type', contentType);
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.send(body);
@@ -484,9 +503,12 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner('import medic
     // creating one where the name is new, so imports track the same model.
     const supplierId = await resolveSupplierId(r.supplier, r.supplier_order_url, req.account!.id);
     // Who prescribes it, found in Contacts or filed there.
-    const prescriber = r.prescriber_name ? await resolveContactInput(db, req.params['id'] as string, { name: r.prescriber_name }, 'gp') : null;
+    const prescriber = r.prescriber_name ? await resolveContactInput(db, req.params['id'] as string, { name: r.prescriber_name, phone: r.prescriber_phone }, 'gp') : null;
+    const conditionId = r.condition_name ? await resolveConditionId(r.condition_name, req.params['id'] as string) : null;
     toInsert.push({
       prescriber_provider_id: prescriber && !('error' in prescriber) ? prescriber.id : null,
+      medical_condition_id: conditionId,
+      critical: r.critical,
       care_profile_id: req.params['id'],
       medication_catalogue_id: catalogueId,
       units_per_dose: r.units_per_dose,
@@ -503,7 +525,7 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner('import medic
       max_doses_per_day: r.as_needed ? r.max_doses_per_day ?? limitsFromText(r.instructions, r.units_per_dose).max_doses_per_day : null,
       frequency: r.frequency,
       supply: r.supply,
-      supply_remaining: r.supply,
+      supply_remaining: r.supply_remaining ?? r.supply,
       packs_on_hand: r.packs_on_hand,
       repeats_due: r.repeats_due,
       repeats_left: r.repeats_left,

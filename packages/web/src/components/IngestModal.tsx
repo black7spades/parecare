@@ -28,6 +28,7 @@ const ACTION_TITLE: Record<string, string> = {
   file_document: 'Document', add_asset: 'Equipment', add_provider: 'Contact', add_medication: 'New medicine', add_treatment: 'Treatment', add_task: 'Task', log_event: 'Note',
   record_appointment_outcome: 'How an appointment went', update_medication: 'Change to a medicine', stop_medication: 'Stop a medicine',
   book_appointment: 'Appointment', add_condition: 'Condition', add_allergy: 'Allergy', record_cost: 'Cost',
+  set_id_numbers: 'ID numbers',
 };
 const humanize = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/, (c) => c.toUpperCase());
 const inputClass = 'w-full rounded-md border border-border bg-card px-2 py-1 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -41,6 +42,9 @@ const FIELD_LABEL: Record<string, string> = {
   to_phone: 'Their phone', to_practice: 'Where they work', medication_name: 'Medicine', reason: 'Why it changed', changed_on: 'Changed on',
   stopped_on: 'Last day taken', stop_reason: 'Why it stopped', stop_notes: 'In their words', course_ends_on: 'Last day of the course',
   repeats_left: 'Repeats left on the script', starts_at: 'When', provider_name: 'Who with', with_phone: 'Their phone', with_type: 'What they do',
+  severity: 'How bad', medicare_number: 'Medicare number', medicare_irn: 'Position on the card', medicare_valid_to: 'Valid to',
+  ihi_number: 'Individual Healthcare Identifier', dva_number: 'DVA file number', dva_card_colour: 'DVA card colour', ndis_number: 'NDIS number',
+  health_fund_name: 'Health fund', health_fund_member_number: 'Member number', my_aged_care_number: 'My Aged Care number',
 };
 /** Lists inside a proposal, each item shown as its own editable row. */
 const LIST_LABEL: Record<string, string> = { next_steps: 'Next steps' };

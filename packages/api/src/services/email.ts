@@ -242,3 +242,33 @@ export async function sendOAuthReminderEmail(
     html: lines.map((l) => (l === '' ? '<br>' : `<p style="margin:0 0 8px">${l.trim()}</p>`)).join(''),
   });
 }
+
+const htmlEscape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/**
+ * Something sent out of PareCare to one person: a few plain lines, the link
+ * that opens it with no login, and any files to attach, such as a single
+ * calendar entry. Returns false when this server has no email set up, so the
+ * screen can hand over the link to send another way instead of saying
+ * nothing. A transport failure throws.
+ */
+export async function sendShareEmail(
+  toEmail: string,
+  subject: string,
+  lines: string[],
+  link: { text: string; url: string },
+  attachments: Array<{ filename: string; content: string; contentType: string }> = []
+): Promise<boolean> {
+  const cfg = getEmailConfig();
+  if (!cfg.smtpHost) return false;
+  const transport = getTransport();
+  await transport.sendMail({
+    from: cfg.from,
+    to: toEmail,
+    subject,
+    text: [...lines, '', `${link.text}: ${link.url}`].join('\n'),
+    html: `${lines.map((l) => (l ? `<p style="margin:0 0 6px">${htmlEscape(l)}</p>` : '<br>')).join('')}<p><a href="${htmlEscape(link.url)}">${htmlEscape(link.text)}</a></p>`,
+    attachments,
+  });
+  return true;
+}

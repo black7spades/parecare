@@ -121,9 +121,15 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
   },
   {
     name: 'allergy',
-    hint: 'the substance and reaction',
-    description: 'Record an allergy, e.g. /allergy penicillin causes a rash',
-    expand: (a) => `Record this allergy: ${a}`,
+    hint: 'the substance, reaction and how bad',
+    description: 'Record an allergy, e.g. /allergy penicillin causes a rash, severe',
+    expand: (a) => `Record this allergy, with how bad the reaction is when given: ${a}`,
+  },
+  {
+    name: 'ids',
+    hint: 'ID numbers from a card',
+    description: 'Record ID numbers, e.g. /ids Medicare 2123 45670 1, number 1 on the card, valid to 08/2027',
+    expand: (a) => `Record these ID numbers on their profile: ${a}`,
   },
   {
     name: 'substance',

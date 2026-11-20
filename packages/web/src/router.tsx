@@ -19,6 +19,7 @@ import { AchievementsPage, MemoryBookPage } from './pages/app/profile/MemoryBook
 import { AllergiesPage } from './pages/app/profile/AllergiesPage';
 import { CareNeedsPage } from './pages/app/profile/CareNeedsPage';
 import { PlanReviewPage } from './pages/PlanReviewPage';
+import { SharedPage } from './pages/SharedPage';
 import { AppointmentsPage } from './pages/app/profile/AppointmentsPage';
 import { EmergencySheetPage } from './pages/app/profile/EmergencySheetPage';
 import { QuestionsPage } from './pages/app/profile/QuestionsPage';
@@ -119,6 +120,8 @@ export const router = createBrowserRouter([
   { path: '/invite/:token', element: <InvitePage /> },
   // Public: the secure-link receiving end of a care plan review invitation.
   { path: '/plan-review/:token', element: <PlanReviewPage /> },
+  // An emergency sheet, an appointment or a report opened from a share link, with no login.
+  { path: '/shared/:token', element: <SharedPage /> },
   // An outside assistant (Claude, ChatGPT) asking to connect: the person
   // signs in if needed, then says yes or no.
   {
