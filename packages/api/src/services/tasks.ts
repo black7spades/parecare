@@ -256,9 +256,11 @@ export async function linkDocuments(conn: Conn, profileId: string, taskId: strin
 
 /** When a task is due, from a set time or a day, with whether any time that day will do. */
 export function resolveDue(input: Pick<TaskInput, 'next_due_at' | 'due_on' | 'all_day' | 'tz'>, fallbackZone?: string | null): { next_due_at: Date; all_day: boolean } | null {
-  const zone = isValidTimeZone(input.tz) ? input.tz : fallbackZone ?? null;
+  const zone = isValidTimeZone(input.tz) ? input.tz : isValidTimeZone(fallbackZone) ? fallbackZone : null;
   if (input.due_on) {
-    const at = parseZonedTime(`${input.due_on}T00:00:00`, zone) ?? new Date(`${input.due_on}T00:00:00Z`);
+    // Midnight that day where they live; with no zone known, midnight UTC,
+    // never the server's own clock.
+    const at = (zone ? parseZonedTime(`${input.due_on}T00:00:00`, zone) : null) ?? new Date(`${input.due_on}T00:00:00Z`);
     return { next_due_at: at, all_day: true };
   }
   if (input.next_due_at) return { next_due_at: new Date(input.next_due_at), all_day: input.all_day ?? false };
@@ -272,6 +274,13 @@ function repeatFrom(input: Pick<TaskInput, 'repeat' | 'reminder_type' | 'rrule'>
     return { reminder_type: cols.reminder_type, rrule: input.rrule ?? cols.rrule };
   }
   return null;
+}
+
+/** Where the person's account holder lives, for whole-day dates. */
+export async function ownerZone(conn: Conn, profileId: string, given?: string | null): Promise<string | null> {
+  if (isValidTimeZone(given)) return given;
+  const row = (await conn('care_profiles as cp').join('accounts as a', 'cp.account_id', 'a.id').where('cp.id', profileId).first('a.timezone')) as { timezone: string | null } | undefined;
+  return isValidTimeZone(row?.timezone) ? row!.timezone : null;
 }
 
 /** A contact named on a task must be linked to this person. */
@@ -321,7 +330,7 @@ export async function createTask(
 ): Promise<CreateTaskResult> {
   const { profileId, input } = opts;
   const accountId = (await accountIdForProfile(profileId, conn))!;
-  const due = resolveDue(input, opts.timeZone);
+  const due = resolveDue(input, await ownerZone(conn, profileId, opts.timeZone));
   if (!due) throw new TaskProblem('Pick the day it is due.');
   const problem = (await contactProblem(conn, profileId, input.provider_id)) ?? (await assigneeProblem(conn, profileId, input));
   if (problem) throw new TaskProblem(problem, 'PROVIDER_NOT_LINKED');
@@ -421,7 +430,7 @@ export async function updateTask(
   if (input.body !== undefined) update['body'] = input.body?.trim() || null;
   if (input.desired_outcome !== undefined) update['desired_outcome'] = input.desired_outcome?.trim() || null;
   if (input.due_on !== undefined || input.next_due_at !== undefined) {
-    const due = resolveDue(input, opts.timeZone);
+    const due = resolveDue(input, await ownerZone(conn, profileId, opts.timeZone));
     if (due) Object.assign(update, due);
   } else if (input.all_day !== undefined) update['all_day'] = input.all_day;
   const repeat = repeatFrom(input);

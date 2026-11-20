@@ -4,7 +4,7 @@ import { accountIdForProfile, resolveCategoryByName, withCategory } from './docu
 import { db } from '../config/database';
 import { auditContext, currentAuditSource, currentUndoBatch, type AuditSource } from './auditContext';
 import type { Account, CareAccess, CareCircleMember, CareProfile } from '../types';
-import { parseZonedTime, formatInZone, dateInZone } from '../lib/timezone';
+import { parseZonedTime, formatInZone, dateInZone, isValidTimeZone } from '../lib/timezone';
 import { matchProfileNames, type NameCandidate } from '../lib/nameMatch';
 import { drawDownOnHand, perDoseDrawdown } from './medicationSupply';
 import { resolveSupplierId } from '../routes/medications';
@@ -1434,7 +1434,8 @@ async function appointmentExtrasInput(
 function dayStart(text: string, timeZone: string | null | undefined): Date | null {
   const day = text.trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
-  return parseZonedTime(`${day}T00:00:00`, timeZone);
+  // With no zone known, midnight UTC, never the server's own clock.
+  return (isValidTimeZone(timeZone) ? parseZonedTime(`${day}T00:00:00`, timeZone) : null) ?? new Date(`${day}T00:00:00Z`);
 }
 
 async function executeOne(

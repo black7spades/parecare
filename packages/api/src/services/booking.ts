@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { deliverForwards } from './noteForwards';
 import { appointmentPlaceColumns, contactSummaries, ensureProfessional, fillProfessionalGaps, linkContact, type KnownPlace } from './professionals';
-import { createTask } from './tasks';
+import { createTask, ownerZone } from './tasks';
 import { withCategory } from './documentCategories';
 import { REPEAT_CHOICE_VALUES, advance, repeatChoice, repeatColumns } from '../lib/repeat';
 import { dateInZone, parseZonedTime, isValidTimeZone } from '../lib/timezone';
@@ -178,11 +178,8 @@ async function appointmentColumns(
   return out;
 }
 
-async function ownerZone(conn: Conn, profileId: string, given?: string | null): Promise<string | null> {
-  if (isValidTimeZone(given)) return given;
-  const row = (await conn('care_profiles as cp').join('accounts as a', 'cp.account_id', 'a.id').where('cp.id', profileId).first('a.timezone')) as { timezone: string | null } | undefined;
-  return row?.timezone ?? null;
-}
+
+const PREP_AHEAD_MS = 14 * 24 * 3600 * 1000;
 
 /**
  * The night-before reminder for an appointment with preparation: one task,
@@ -194,7 +191,10 @@ export async function syncPreparationTask(conn: Conn, appointmentId: string, tim
   if (!a) return;
   const taskId = a['preparation_task_id'] as string | null;
   const prep = String(a['preparation'] ?? '').trim();
-  const wanted = !!prep && !!a['starts_at'] && !['cancelled', 'missed', 'completed'].includes(String(a['status']));
+  // Only the next fortnight gets its reminder, so a long repeat does not fill
+  // the task list; the daily check adds each one as it comes into range.
+  const soon = !!a['starts_at'] && new Date(a['starts_at'] as string).getTime() <= Date.now() + PREP_AHEAD_MS;
+  const wanted = !!prep && soon && new Date(a['starts_at'] as string).getTime() > Date.now() && !['cancelled', 'missed', 'completed'].includes(String(a['status']));
   if (!wanted) {
     if (taskId) {
       await conn('appointments').where({ id: appointmentId }).update({ preparation_task_id: null });
@@ -366,6 +366,16 @@ export async function topUpAllSeries(conn: Conn = db): Promise<void> {
     .where((w) => w.whereNull('s.repeat_until').orWhere('s.repeat_until', '>=', today))
     .select('s.id')) as Array<{ id: string }>;
   for (const r of rows) await extendSeries(conn, r.id).catch((err) => console.warn('Series top-up failed:', (err as Error).message));
+  // Night-before reminders for appointments coming into the next fortnight.
+  const due = (await conn('appointments as a')
+    .join('care_profiles as cp', 'a.care_profile_id', 'cp.id')
+    .whereNull('cp.died_on')
+    .whereNull('a.preparation_task_id')
+    .whereNotNull('a.preparation')
+    .where('a.status', 'scheduled')
+    .whereBetween('a.starts_at', [new Date(), new Date(Date.now() + PREP_AHEAD_MS)])
+    .pluck('a.id')) as string[];
+  for (const id of due) await syncPreparationTask(conn, id).catch((err) => console.warn('Preparation reminder failed:', (err as Error).message));
 }
 
 export interface BookResult {
