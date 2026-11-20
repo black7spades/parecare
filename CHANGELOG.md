@@ -6,6 +6,16 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.49.1] - 2026-11-20
+
+### Fixed
+
+- **Attached to opens the record.** On a document, each record under
+  Attached to is a link that opens it, the same as in the documents list.
+- **A letter lists the medicines it changed.** When a medicine change, stop
+  or start says it came from a letter, the letter now lists that medicine
+  under Attached to. Changes already recorded are linked too.
+
 ## [0.49.0] - 2026-11-20
 
 ### Added

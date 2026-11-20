@@ -654,9 +654,9 @@ export function MedicationsPage() {
                       <span className="font-medium">{formatDateOnly(c.changed_on, 'd MMM yyyy')}:</span> {medicationChangeWhat(c)}.
                       {c.reason ? ` ${c.reason.replace(/\.$/, '')}.` : ''}
                       {c.source_appointment_id && c.source_appointment_title ? (
-                        <> From <Link to={`/app/${profile.id}/appointments?record=${c.source_appointment_id}`} className="text-primary hover:underline">{c.source_appointment_title}</Link>.</>
+                        <> From <Link to={`/app/${profile.id}/appointments?record=${c.source_appointment_id}`} className={CONTACT_LINK}>{c.source_appointment_title}</Link>.</>
                       ) : c.source_document_id && c.source_document_label ? (
-                        <> From <Link to={`/app/${profile.id}/documents?record=${c.source_document_id}`} className="text-primary hover:underline">{c.source_document_label}</Link>.</>
+                        <> From <Link to={`/app/${profile.id}/documents?record=${c.source_document_id}`} className={CONTACT_LINK}>{c.source_document_label}</Link>.</>
                       ) : null}
                     </li>
                   ))}

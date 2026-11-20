@@ -132,7 +132,28 @@ export async function recordMedicationChange(
       changed_by_account_id: opts.actorId,
     })
     .returning('id');
+  // The letter a change came from lists the medicine under Attached to.
+  if (doc) await linkLetter(conn, doc, med.id);
   return { change_id: (row as { id: string }).id };
+}
+
+/** Attach a letter to the medicine its change came from. */
+async function linkLetter(conn: Conn, documentId: string, medicationId: string): Promise<void> {
+  await conn('document_links')
+    .insert({ document_id: documentId, entity_type: 'medications', entity_id: medicationId })
+    .onConflict(['document_id', 'entity_type', 'entity_id'])
+    .ignore();
+}
+
+/**
+ * A change taken back out of the history no longer ties its letter to the
+ * medicine, unless another change on that medicine still cites the letter.
+ */
+async function unlinkLetterIfUnused(conn: Conn, documentId: string | null, medicationId: string): Promise<void> {
+  if (!documentId) return;
+  const still = await conn('medication_changes').where({ medication_id: medicationId, source_document_id: documentId }).first('id');
+  if (still) return;
+  await conn('document_links').where({ document_id: documentId, entity_type: 'medications', entity_id: medicationId }).delete();
 }
 
 /** Stop a medicine: off the active list, with the last day, why, and the history row. */
@@ -171,9 +192,10 @@ export async function restartMedication(
     const last = (await conn('medication_changes')
       .where({ medication_id: opts.medicationId })
       .orderBy('created_at', 'desc')
-      .first('id', 'change_kind')) as { id: string; change_kind: string } | undefined;
+      .first('id', 'change_kind', 'source_document_id')) as { id: string; change_kind: string; source_document_id: string | null } | undefined;
     if (last && last.id === opts.undoChangeId && last.change_kind === 'stopped') {
       await conn('medication_changes').where({ id: last.id }).delete();
+      await unlinkLetterIfUnused(conn, last.source_document_id, opts.medicationId);
       await conn('medications').where({ id: opts.medicationId }).update(restore);
       return true;
     }
