@@ -30,6 +30,7 @@ import { useProfile } from './ProfileLayout';
 import { ConditionEditor } from './conditions/ConditionEditor';
 import { ResolveConditionModal, type ResolutionDetails } from './conditions/ResolveConditionModal';
 import { RecordPanel, type RecordLink } from '../../../components/record/RecordPanel';
+import { ContactStrip } from '../../../components/ContactStrip';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { useNavigate } from 'react-router-dom';
@@ -494,7 +495,13 @@ export function ConditionsPage() {
             ]}
             links={links}
             onEdit={() => setEditing(c)}
-            extra={[{ label: 'Book an appointment for this', onRun: () => navigate(bookingHref(profile.id, { condition: c.id })) }]}
+            extra={[
+              {
+                label: 'Book an appointment for this',
+                // With whoever treats it, when someone does.
+                onRun: () => navigate(bookingHref(profile.id, { condition: c.id, provider: c.treating?.source === 'contact' ? c.treating.id : null })),
+              },
+            ]}
             done={
               isResolved(c)
                 ? null
@@ -508,7 +515,19 @@ export function ConditionsPage() {
               panel.close();
             }}
             onClose={panel.close}
-          />
+          >
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Who treats it</h3>
+              {c.treating ? (
+                <ContactStrip contact={c.treating} profileId={profile.id} book={{ condition: c.id }} />
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm text-muted">No one linked yet.</p>
+                  {canEdit ? <Button size="xs" variant="ghost" onClick={() => setEditing(c)}>Add who treats it</Button> : null}
+                </div>
+              )}
+            </section>
+          </RecordPanel>
         );
       })() : null}
     </div>

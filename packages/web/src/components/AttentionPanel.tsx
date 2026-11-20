@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, startOfDay, endOfDay } from 'date-fns';
 import { api } from '../api/client';
@@ -13,7 +13,7 @@ import { browserTimeZone } from '../lib/datetime';
 import { severityLabel } from '../pages/app/profile/ConditionSymptoms';
 import { coverMedDay, type ChartAdmin } from '../lib/marCoverage';
 import type { ContactSummary, MedicationRecord } from '../lib/care';
-import { ContactStrip } from './ContactStrip';
+import { ContactStrip, CONTACT_LINK } from './ContactStrip';
 
 export interface AttentionItem {
   profile_id: string;
@@ -25,7 +25,17 @@ export interface AttentionItem {
   key: string;
   urgent: boolean;
   dismissible: boolean;
+  /** The one record it is about, so the row opens that record. */
+  record_kind?: string | null;
+  record_id?: string | null;
+  /** Who to call about it. */
+  contact?: ContactSummary | null;
+  /** The next thing to do: call, email, order online, book, or open. */
+  next_action?: { kind: string; label: string; href: string | null } | null;
 }
+
+/** Where a row opens: the record itself when there is one. */
+const itemPath = (it: AttentionItem) => `/app/${it.profile_id}/${it.section}${it.record_id ? `?record=${it.record_id}` : ''}`;
 
 export interface HealthAlert {
   key: string;
@@ -133,6 +143,7 @@ function alertBrief(a: HealthAlert): string {
  */
 export function AttentionPanel({ profileId }: { profileId?: string }) {
   const openWithMessage = useAssistantStore((s) => s.openWithMessage);
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [collapsed, setCollapsed] = useState(false);
   const [confirmDismiss, setConfirmDismiss] = useState<{ key: string; who: string; what: string; warning: string } | null>(null);
@@ -291,7 +302,7 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
               }`}
             >
               <Link
-                to={`/app/${it.profile_id}/${it.section}`}
+                to={itemPath(it)}
                 className="flex items-start gap-2 min-w-0 flex-1 text-sm hover:underline"
               >
                 <span aria-hidden className="mt-0.5">{ATTENTION_ICON[it.kind]}</span>
@@ -306,11 +317,37 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                   ) : null}
                 </span>
               </Link>
+              {it.contact ? (
+                <div className="basis-full order-last pl-7">
+                  <ContactStrip
+                    contact={it.contact}
+                    profileId={it.profile_id}
+                    size="compact"
+                    lead={it.kind === 'out_of_stock' || it.kind === 'reorder_overdue' ? 'Reorder from' : 'Who with'}
+                    book={false}
+                  />
+                </div>
+              ) : null}
               <div className="flex flex-wrap items-center justify-end gap-1 shrink-0 ml-auto">
+                {it.next_action && (it.next_action.kind === 'call' || it.next_action.kind === 'email' || it.next_action.kind === 'order_online') && it.next_action.href ? (
+                  // Call, email or order straight from the alert: these are links.
+                  <a
+                    href={it.next_action.href}
+                    {...(it.next_action.kind === 'order_online' ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                    className={`${CONTACT_LINK} text-xs whitespace-nowrap px-1`}
+                  >
+                    {it.next_action.label}
+                  </a>
+                ) : null}
+                {it.next_action?.kind === 'book' && it.next_action.href ? (
+                  <Button size="xs" variant="secondary" className="whitespace-nowrap" onClick={() => navigate(it.next_action!.href!)}>
+                    {it.next_action.label}
+                  </Button>
+                ) : null}
                 {it.kind === 'unrecorded_dose' ? (
                   <>
-                    <Link to={`/app/${it.profile_id}/mar`}>
-                      <Button size="xs" variant="ghost" className="whitespace-nowrap">Check records</Button>
+                    <Link to={`/app/${it.profile_id}/mar`} className="text-xs text-primary hover:underline whitespace-nowrap px-1">
+                      Check records
                     </Link>
                     <Button
                       size="xs"

@@ -33,6 +33,8 @@ export function ContactPicker({
   onChange,
   kind,
   placeholder = 'Search Contacts or type a new name',
+  hint,
+  defaultType,
 }: {
   id: string;
   label?: string;
@@ -41,6 +43,10 @@ export function ContactPicker({
   onChange: (next: PickedContact) => void;
   kind?: 'person' | 'organisation';
   placeholder?: string;
+  /** Said under the box when nothing more pressing is, e.g. "Who writes the script." */
+  hint?: string;
+  /** What a new name is filed as when "What they do" is left empty. */
+  defaultType?: string;
 }) {
   const [open, setOpen] = useState(false);
   const q = value.name.trim();
@@ -57,8 +63,13 @@ export function ContactPicker({
   });
   const lower = q.toLowerCase();
   const linkedMatches = q ? linked.filter((p) => p.name.toLowerCase().includes(lower) || providerTypeLabel(p.provider_type).toLowerCase().includes(lower)) : linked;
+  // People they still see come first; anyone no longer seen is listed last,
+  // under Past contacts.
+  const current = linkedMatches.filter((p) => !p.ended_on);
+  const past = linkedMatches.filter((p) => !!p.ended_on);
   const others = (data?.providers ?? []).filter((p) => !linked.some((l) => l.id === p.id));
-  const matches = [...linkedMatches, ...others].slice(0, 6);
+  const matches = [...current, ...others, ...past].slice(0, 8);
+  const firstPast = matches.findIndex((p) => !!p.ended_on);
   const offering = open && !value.providerId && matches.length > 0;
   const picked = value.providerId ? linked.find((p) => p.id === value.providerId) ?? (data?.providers ?? []).find((p) => p.id === value.providerId) : undefined;
 
@@ -83,13 +94,14 @@ export function ContactPicker({
               ? 'Already in Contacts? Pick them below.'
               : q
                 ? 'New to Contacts. Filed there when you save.'
-                : undefined
+                : hint
         }
       />
       {offering ? (
         <ul className="rounded-md border border-border bg-card divide-y divide-border">
-          {matches.map((p) => (
+          {matches.map((p, i) => (
             <li key={p.id}>
+              {i === firstPast ? <p className="px-3 pt-2 text-xs text-muted">Past contacts</p> : null}
               <Button
                 type="button"
                 size="xs"
@@ -124,7 +136,7 @@ export function ContactPicker({
           <ProviderTypeField
             id={`${id}-type`}
             label="What they do"
-            value={value.providerType}
+            value={value.providerType || defaultType || ''}
             onChange={(providerType) => onChange({ ...value, providerType })}
           />
           <Input id={`${id}-phone`} label="Their phone" value={value.phone} onChange={(e) => onChange({ ...value, phone: e.target.value })} placeholder="e.g. 03 9345 6677" />
@@ -139,4 +151,32 @@ export function contactPayload(v: PickedContact): { provider_id: string | null }
   if (v.providerId) return { provider_id: v.providerId, ...(v.phone.trim() ? { provider_phone: v.phone.trim() } : {}) } as { provider_id: string };
   if (v.name.trim()) return { provider_name: v.name.trim(), provider_type: v.providerType.trim() || null, provider_phone: v.phone.trim() || null };
   return { provider_id: null };
+}
+
+/**
+ * The same, for a record that names its contact under another word: a
+ * medicine's prescriber, a condition's treating contact, a treatment's
+ * practitioner. "prescriber" sends prescriber_provider_id, or
+ * prescriber_name with prescriber_type and prescriber_phone.
+ */
+export function contactFieldsAs(prefix: string, v: PickedContact): Record<string, string | null> {
+  if (v.providerId) return { [`${prefix}_provider_id`]: v.providerId, ...(v.phone.trim() ? { [`${prefix}_phone`]: v.phone.trim() } : {}) };
+  if (v.name.trim()) {
+    return { [`${prefix}_name`]: v.name.trim(), [`${prefix}_type`]: v.providerType.trim() || null, [`${prefix}_phone`]: v.phone.trim() || null };
+  }
+  return { [`${prefix}_provider_id`]: null };
+}
+
+/** A picked contact from a record's contact, ready to edit. */
+export const pickedFrom = (c: { id: string | null; name: string } | null | undefined): PickedContact =>
+  c && c.id ? { providerId: c.id, name: c.name, providerType: '', phone: '' } : emptyContact;
+
+/**
+ * The same, but only when it changed from what the record already had, so
+ * saving an unrelated change never links a contact back that was removed
+ * from the person's contacts.
+ */
+export function changedContactFieldsAs(prefix: string, before: PickedContact, now: PickedContact): Record<string, string | null> {
+  const same = before.providerId === now.providerId && (now.providerId ? !now.phone.trim() : before.name.trim() === now.name.trim());
+  return same ? {} : contactFieldsAs(prefix, now);
 }

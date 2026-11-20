@@ -13,9 +13,12 @@ import {
   storeProviderType,
   syncPracticeMembers,
 } from '../services/providerPractices';
-import { fitTypeToKind, normaliseProviderType, type ProviderKind } from '../lib/providerTypes';
+import { fitTypeToKind, isOrganisationType, normaliseProviderType, PRACTICE_TYPE, type ProviderKind } from '../lib/providerTypes';
 import type { Provider, CareProfileProvider } from '../types';
 import { similarName } from '../lib/providerNames';
+import { linkContactToSuppliers, setContactStanding } from '../services/professionals';
+import { effectiveMainSql } from '../lib/mainContact';
+import { requireProfileOwner } from '../middleware/permissions';
 
 export const providersRouter = Router({ mergeParams: true });
 
@@ -49,6 +52,21 @@ export const providerKindField = {
   kind: z.enum(['organisation', 'person']).optional(),
 };
 
+/**
+ * Further ways to reach a contact, shared by both provider routers: an
+ * after-hours number, a fax, and the hours they are open (a row per open
+ * day, Monday = 1, times as HH:MM, opens before closes).
+ */
+const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+export const openingHoursSchema = z
+  .array(z.object({ day: z.number().int().min(1).max(7), opens: hhmm, closes: hhmm }).refine((h) => h.opens < h.closes, 'Opens before it closes'))
+  .max(21);
+export const providerContactFields = {
+  fax: z.string().max(50).optional().nullable(),
+  after_hours_phone: z.string().max(50).optional().nullable(),
+  opening_hours: openingHoursSchema.optional().nullable(),
+};
+
 /** The other names a provider goes by: one field, several names. */
 export const providerOtherNames = {
   also_known_as: z.array(z.string().trim().min(1).max(255)).max(30).optional(),
@@ -63,6 +81,7 @@ const providerSchema = z.object({
   ...providerPracticeFields,
   ...providerOtherNames,
   ...providerKindField,
+  ...providerContactFields,
   booking_link: z.string().url().optional().nullable(),
   directions_link: z.string().url().optional().nullable(),
 });
@@ -91,7 +110,10 @@ const PROVIDER_COLS = [
   'p.phone', 'p.email', 'p.address',
   'p.address_line1', 'p.address_line2', 'p.address_suburb', 'p.address_state', 'p.address_postcode', 'p.address_country',
   'p.booking_link', 'p.directions_link', 'p.practice_id', 'p.uses_practice_address', 'p.also_known_as', 'p.inherited_fields',
+  'p.fax', 'p.after_hours_phone', 'p.opening_hours',
   'p.created_at', 'cpp.poa_type', 'cpp.poa_activated', 'cpp.primary_contact_member_id',
+  db.raw(`${effectiveMainSql()} AS is_main`),
+  db.raw("to_char(cpp.ended_on, 'YYYY-MM-DD') AS ended_on"),
   db.raw('(SELECT count(*)::int FROM providers m WHERE m.practice_id = p.id) AS member_count'),
 ] as const;
 
@@ -144,20 +166,37 @@ export async function providerWriteColumns(
     const self = await db('providers').where({ id: selfId }).select('provider_type').first();
     if (self && fitTypeToKind(self.provider_type, kind, (own['name'] as string | undefined) ?? '') !== self.provider_type) own['provider_type'] = self.provider_type;
   }
+  // A person filed under a kind of place (Mrs Adams as a School) takes the
+  // matching kind of person (Teacher); the kind of place goes to where they
+  // are based, when that is new and its name does not say.
+  let placeTypeGiven: string | null = null;
   if (typeof own['provider_type'] === 'string') {
     const name = (own['name'] as string | undefined) ?? (selfId ? (await db('providers').where({ id: selfId }).select('name').first())?.name : '') ?? '';
-    const fitted = fitTypeToKind(normaliseProviderType(own['provider_type'] as string), kind, name);
+    const typed = normaliseProviderType(own['provider_type'] as string);
+    if (kind === 'person' && isOrganisationType(typed)) placeTypeGiven = typed;
+    const fitted = fitTypeToKind(typed, kind, name);
     own['provider_type'] = await storeProviderType(fitted, accountId, kind);
   }
   const composed = withComposedAddress(own);
   const { columns, note } = await practiceColumns(accountId, practice, composed, selfId);
+  if (placeTypeGiven && typeof columns['practice_id'] === 'string') {
+    await db('providers')
+      .where({ id: columns['practice_id'], provider_type: PRACTICE_TYPE })
+      .update({ provider_type: await storeProviderType(placeTypeGiven, accountId, 'organisation') });
+  }
   // Contact details shared from where they are based: an empty one uses the
   // organisation's and follows it from then on.
   const self = selfId ? await db('providers').where({ id: selfId }).first() : null;
   const practiceId = 'practice_id' in columns ? (columns['practice_id'] as string | null) : (self?.practice_id ?? null);
   const practiceRow = practiceId ? await db('providers').where({ id: practiceId }).first() : null;
   const contact = inheritContact(practiceRow, composed, self);
-  return { columns: { ...composed, ...columns, ...contact }, note: [kindNote, note].filter(Boolean).join(' ') || null };
+  const out: Record<string, unknown> = { ...composed, ...columns, ...contact };
+  // Opening hours are stored as JSON; an empty week is "not known".
+  if ('opening_hours' in out) {
+    const hours = out['opening_hours'];
+    out['opening_hours'] = Array.isArray(hours) && hours.length ? JSON.stringify(hours) : typeof hours === 'string' ? hours : null;
+  }
+  return { columns: out, note: [kindNote, note].filter(Boolean).join(' ') || null };
 }
 
 const linkSchema = z.object({
@@ -226,6 +265,7 @@ providersRouter.post('/', requireAuth, async (req, res) => {
   const [provider] = await db<Provider>('providers')
     .insert({ account_id: req.account!.id, ...columns })
     .returning('*');
+  await linkContactToSuppliers(db, provider.id);
 
   await db<CareProfileProvider>('care_profile_providers').insert({
     care_profile_id: profileId,
@@ -278,6 +318,32 @@ providersRouter.patch('/:providerId', requireAuth, async (req, res) => {
   }
 
   res.json({ provider: await selectLinked(req.params['id'] as string, current.id), note });
+});
+
+/**
+ * How this person stands with a contact: their main one of its kind, or no
+ * longer seen since a date. Making one main clears it from the others of
+ * that kind for this person; seeing them again clears the date.
+ */
+const standingSchema = z.object({
+  is_main: z.boolean().optional(),
+  ended_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+});
+
+providersRouter.patch('/:providerId/link', requireAuth, requireProfileOwner('change who their main contacts are'), async (req, res) => {
+  const parsed = standingSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Give the date as a day, month and year.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const profileId = req.params['id'] as string;
+  const providerId = req.params['providerId'] as string;
+  const result = await setContactStanding(db, profileId, providerId, parsed.data);
+  if (!result) {
+    res.status(404).json({ error: 'That contact is not linked to this person.', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ provider: await selectLinked(profileId, providerId), message: result });
 });
 
 providersRouter.delete('/:providerId', requireAuth, async (req, res) => {

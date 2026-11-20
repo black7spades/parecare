@@ -30,6 +30,43 @@ import { SELF_RELATIONSHIP,
   type MedicationRecord,
 } from '../../../lib/care';
 import { formatDateOnly } from '../../../lib/datetime';
+import { ContactStrip, CONTACT_LINK } from '../../../components/ContactStrip';
+import { PharmacyModal } from '../../../components/QuickAddModals';
+import { bookingHref } from '../../../lib/booking';
+import { useNavigate } from 'react-router-dom';
+import type { ContactSummary } from '../../../lib/care';
+
+const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
+
+/**
+ * The quickest way to reorder: the supplier's order site, else a call,
+ * else an email with the repeat request already written.
+ */
+function reorderLink(
+  c: ContactSummary | null,
+  m: MedicationRecord,
+  person: { full_name: string; date_of_birth: string | null },
+  holder: string | null
+): { label: string; href: string; external: boolean } | null {
+  if (!c) return null;
+  const order = m.supplier_order_url || c.order_link;
+  if (order) return { label: `Order online from ${c.name}`, href: order, external: true };
+  if (c.phone) return { label: `Call ${c.name}`, href: telHref(c.phone), external: false };
+  if (c.email) {
+    const what = [m.name, m.dose].filter(Boolean).join(' ');
+    const born = person.date_of_birth ? `, born ${formatDateOnly(person.date_of_birth, 'd MMM yyyy')}` : '';
+    const subject = `Repeat for ${person.full_name}: ${what}`;
+    const body = `Hello, please prepare a repeat of ${what} for ${person.full_name}${born}. Thank you${holder ? `, ${holder}` : ''}.`;
+    return { label: `Email ${c.name}`, href: `mailto:${c.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, external: false };
+  }
+  return null;
+}
+
+/** The account holder's name, to sign a repeat request. */
+function useProfileHolder(): string | null {
+  const { data } = useQuery({ queryKey: ['me'], queryFn: () => api.get<{ display_name: string }>('/auth/me'), staleTime: 300000 });
+  return data?.display_name ?? null;
+}
 
 // Domain sort/filter helpers for the reusable data view.
 const earliestTime = (m: MedicationRecord): number => {
@@ -58,10 +95,15 @@ const MED_SORTS: DataSort<MedicationRecord>[] = [
   { key: 'packs', label: 'Packs on hand', compare: (a, b) => (numAsc(a.packs_on_hand) - numAsc(b.packs_on_hand)) || byName(a, b) },
   { key: 'supply', label: 'Supply left', compare: (a, b) => (numAsc(daysOfSupply(a) ?? totalOnHand(a)) - numAsc(daysOfSupply(b) ?? totalOnHand(b))) || byName(a, b) },
   { key: 'supplier', label: 'Supplier', compare: (a, b) => (a.supplier ?? '').localeCompare(b.supplier ?? '') || byName(a, b) },
+  { key: 'prescriber', label: 'Prescribed by', compare: (a, b) => (a.prescriber?.name ?? '\uffff').localeCompare(b.prescriber?.name ?? '\uffff') || byName(a, b) },
+  // Missing dates sort last.
+  { key: 'repeats', label: 'Repeats due', compare: (a, b) => (a.repeats_due ?? '9999').localeCompare(b.repeats_due ?? '9999') || byName(a, b) },
 ];
 
 export function MedicationsPage() {
   const { profile, access, canEdit, careName, relationship } = useProfile();
+  const navigate = useNavigate();
+  const [addingPharmacy, setAddingPharmacy] = useState(false);
   const selfCare = relationship === SELF_RELATIONSHIP;
   const queryClient = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
@@ -82,9 +124,17 @@ export function MedicationsPage() {
 
   const { data } = useQuery({
     queryKey: ['medications', profile.id],
-    queryFn: () => api.get<{ medications: MedicationRecord[] }>(`/care-profiles/${profile.id}/medications`),
+    queryFn: () =>
+      api.get<{ medications: MedicationRecord[]; main_pharmacy: ContactSummary | null; main_gp: ContactSummary | null }>(
+        `/care-profiles/${profile.id}/medications`
+      ),
   });
   const meds = data?.medications ?? [];
+  // Where to reorder: the medicine's own supplier, else their main pharmacy.
+  const mainPharmacy = data?.main_pharmacy ?? null;
+  const mainGp = data?.main_gp ?? null;
+  const reorderFrom = (m: MedicationRecord) => m.supplier_contact ?? mainPharmacy;
+  const holder = useProfileHolder();
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['medications', profile.id] });
     void queryClient.invalidateQueries({ queryKey: ['med-chart', profile.id] });
@@ -135,7 +185,7 @@ export function MedicationsPage() {
   const dv = useDataView<MedicationRecord>({
     rows: visible,
     getId: (m) => m.id,
-    searchText: (m) => [m.name, m.dose, m.route, m.frequency, m.supplier].filter(Boolean).join(' '),
+    searchText: (m) => [m.name, m.dose, m.route, m.frequency, m.supplier, m.prescriber?.name].filter(Boolean).join(' '),
     sorts: MED_SORTS,
     filters: [statusFilter, routeFilter],
   });
@@ -175,7 +225,7 @@ export function MedicationsPage() {
     ...(canBulkDelete ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => { deleteMeds(dv.selectedRows); dv.clearSelection(); } }] : []),
   ];
 
-  const colCount = canSelect ? 11 : 10;
+  const colCount = canSelect ? 13 : 12;
 
   // As-needed medications have no fixed schedule, so they never appear as
   // due slots in the record. They live in their own group here, each with a
@@ -246,23 +296,37 @@ export function MedicationsPage() {
             </div>
           ) : <span className="text-muted">—</span>}
         </td>
+        <td className="px-4 py-3 text-muted">{m.prescriber?.name ? <span className="text-ink">{m.prescriber.name}</span> : '—'}</td>
+        <td className="px-4 py-3 text-muted whitespace-nowrap">{m.repeats_due ? formatDateOnly(m.repeats_due, 'd MMM yyyy') : '—'}</td>
         <td className="px-4 py-3 text-right whitespace-nowrap">
           <div className="inline-flex items-center justify-end gap-1">
             {/* Reorder workflow: order link and "mark ordered" while depleted
                 and not yet ordered; "mark replenished" once on order. The cart
                 links out to the supplier to place the order. */}
-            {depleted && !ordered && m.supplier_order_url ? (
-              <a
-                href={m.supplier_order_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={`Reorder ${m.name}, supply is low`}
-                title="Reorder now, supply is low"
-                className="inline-flex items-center justify-center rounded-sm px-2 py-1 transition-colors text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
-              >
-                <CartIcon />
-              </a>
-            ) : null}
+            {depleted && !ordered ? (() => {
+              const reach = reorderLink(reorderFrom(m), m, profile, holder);
+              if (!reach) {
+                return canManageMeds ? (
+                  <Button size="xs" variant="ghost" title="No pharmacy on file yet." onClick={() => setAddingPharmacy(true)}>Add a pharmacy</Button>
+                ) : null;
+              }
+              return reach.external ? (
+                <a
+                  href={reach.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`${reach.label}, ${m.name} supply is low`}
+                  title={reach.label}
+                  className="inline-flex items-center justify-center rounded-sm px-2 py-1 transition-colors text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+                >
+                  <CartIcon />
+                </a>
+              ) : (
+                <a href={reach.href} className={`${CONTACT_LINK} text-xs px-1`} aria-label={`${reach.label} about ${m.name}`} title={reach.label}>
+                  {reach.label.split(' ')[0]}
+                </a>
+              );
+            })() : null}
             {canManageMeds && depleted && !ordered ? (
               <Button size="xs" variant="ghost" aria-label={`Mark ${m.name} as ordered`} title="Mark as ordered" loading={markOrdered.isPending && markOrdered.variables === m.id} onClick={() => markOrdered.mutate(m.id)}><PackageIcon /></Button>
             ) : null}
@@ -361,6 +425,8 @@ export function MedicationsPage() {
                   <SortableTh label="Packs on hand" sortKey="packs" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
                   <SortableTh label="Supply left" sortKey="supply" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
                   <SortableTh label="Supplier" sortKey="supplier" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
+                  <SortableTh label="Prescribed by" sortKey="prescriber" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
+                  <SortableTh label="Repeats due" sortKey="repeats" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-4 py-3" />
                   <th className="px-4 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
@@ -418,6 +484,7 @@ export function MedicationsPage() {
 
       {addOpen ? <MedicationForm profileId={profile.id} selfCare={selfCare} onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); invalidate(); }} /> : null}
       {editing ? <MedicationForm profileId={profile.id} med={editing} selfCare={selfCare} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} /> : null}
+      <PharmacyModal profileId={profile.id} open={addingPharmacy} onClose={() => setAddingPharmacy(false)} onSaved={invalidate} />
       {bulkEditOpen ? <BulkEditModal profileId={profile.id} meds={dv.selectedRows} onClose={() => setBulkEditOpen(false)} onSaved={() => { setBulkEditOpen(false); dv.clearSelection(); invalidate(); }} /> : null}
 
       {panel.current ? (() => {
@@ -438,15 +505,14 @@ export function MedicationsPage() {
           ...(m.medical_condition_id && m.condition_name
             ? [{ label: 'For', value: m.condition_name, to: `/app/${profile.id}/conditions?record=${m.medical_condition_id}` }]
             : []),
-          ...(m.supplier
-            ? [{
-                label: 'Supplier',
-                value: m.supplier,
-                to: m.supplier_id ? `/app/directory/suppliers?record=${m.supplier_id}` : '/app/directory/suppliers',
-              }]
+          ...(m.source_appointment
+            ? [{ label: 'Started at', value: m.source_appointment.title, to: `/app/${profile.id}/appointments?record=${m.source_appointment.id}` }]
             : []),
-          ...(m.supplier_order_url ? [{ label: 'Reorder', value: 'Open the order page', href: m.supplier_order_url }] : []),
         ];
+        // Who writes the script, else their main GP, books the visit for scripts.
+        const scriptsWith = m.prescriber ?? mainGp;
+        const supplierShown = reorderFrom(m);
+        const reach = depleted && !ordered ? reorderLink(supplierShown, m, profile, holder) : null;
         return (
           <RecordPanel
             key={m.id}
@@ -484,7 +550,63 @@ export function MedicationsPage() {
             extra={extra}
             onDelete={canManageMeds ? () => { deleteMeds([m]); panel.close(); } : undefined}
             onClose={panel.close}
-          />
+          >
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Prescribed by</h3>
+              {m.prescriber ? (
+                <ContactStrip contact={m.prescriber} profileId={profile.id} book={false} />
+              ) : (
+                <p className="text-sm text-muted">
+                  No prescriber on file yet.{canManageMeds ? ' Choose Edit to add who writes the script.' : ''}
+                </p>
+              )}
+              {scriptsWith?.id && scriptsWith.source === 'contact' && canEdit ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="mt-2"
+                  onClick={() =>
+                    navigate(
+                      bookingHref(profile.id, {
+                        provider: scriptsWith.id,
+                        title: `Scripts for ${m.name}`,
+                        type: 'consultation',
+                        condition: m.medical_condition_id ?? undefined,
+                      })
+                    )
+                  }
+                >
+                  Book a visit for scripts
+                </Button>
+              ) : null}
+            </section>
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Supplier</h3>
+              {supplierShown ? (
+                <>
+                  {!m.supplier_contact ? <p className="text-xs text-muted mb-1">Their main pharmacy.</p> : null}
+                  <ContactStrip contact={supplierShown} profileId={profile.id} book={false} />
+                </>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm text-muted">No pharmacy on file yet.</p>
+                  {canManageMeds ? <Button size="xs" variant="secondary" onClick={() => setAddingPharmacy(true)}>Add a pharmacy</Button> : null}
+                </div>
+              )}
+              {reach ? (
+                <p className="mt-2 text-sm">
+                  <a
+                    href={reach.href}
+                    {...(reach.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                    className={CONTACT_LINK}
+                  >
+                    {reach.label}
+                  </a>
+                  <span className="text-muted">, then Mark as ordered.</span>
+                </p>
+              ) : null}
+            </section>
+          </RecordPanel>
         );
       })() : null}
 

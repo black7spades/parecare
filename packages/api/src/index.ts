@@ -8,6 +8,7 @@ import { webhookRouter } from './routes/webhooks';
 import { authRouter } from './routes/auth';
 import { oauthRouter } from './routes/oauth';
 import { careProfilesRouter } from './routes/careProfiles';
+import { emergencyContactsRouter } from './routes/emergencyContacts';
 import { careCircleRouter } from './routes/careCircle';
 import { invitationsRouter } from './routes/invitations';
 import { careLogRouter } from './routes/careLog';
@@ -188,6 +189,8 @@ v1.use('/care-profiles/:id/log', ...profileAccess, capturePlanEvents('log'), car
 // recorded as care plan events, which the incremental updater later
 // applies to the versioned plan as minimal deltas.
 v1.use('/care-profiles/:id/plan', ...profileAccess, capturePlanEvents('plan'), carePlanRouter);
+// Who to call in an emergency: feeds the care plan's emergency contacts.
+v1.use('/care-profiles/:id/emergency-contacts', ...profileAccess, capturePlanEvents('emergency_contacts'), emergencyContactsRouter);
 v1.use('/care-profiles/:id/checklists', ...profileAccess, checklistsRouter);
 v1.use('/care-profiles/:id/journeys', ...profileAccess, journeysRouter);
 v1.use('/care-profiles/:id/allergies', ...profileAccess, capturePlanEvents('allergies'), allergiesRouter);

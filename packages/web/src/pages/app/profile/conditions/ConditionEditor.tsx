@@ -13,6 +13,7 @@ import { CodesSection } from './CodesSection';
 import { FunctionsSection } from './FunctionsSection';
 import { ResolutionFields } from './ResolveConditionModal';
 import type { MedicalCondition } from '../../../../lib/care';
+import { ContactPicker, changedContactFieldsAs, pickedFrom, type PickedContact } from '../../../../components/ContactPicker';
 
 export function ConditionEditor({
   profileId,
@@ -45,6 +46,7 @@ export function ConditionEditor({
   const [isolationRequired, setIsolationRequired] = useState(condition?.isolation_required ?? false);
   const [region, setRegion] = useState(condition?.region ?? '');
   const [managedRows, setManagedRows] = useState<ManagedRow[]>([]);
+  const [treating, setTreating] = useState<PickedContact>(pickedFrom(condition?.treating ?? null));
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -87,6 +89,8 @@ export function ConditionEditor({
         is_contagious: isContagious,
         isolation_required: isolationRequired,
         region: region.trim() || null,
+        // Who treats it, picked or named.
+        ...changedContactFieldsAs('treating', pickedFrom(condition?.treating ?? null), treating),
       };
       const res = isNew
         ? await api.post<{ condition: MedicalCondition }>(`/care-profiles/${profileId}/conditions`, body)
@@ -250,6 +254,15 @@ export function ConditionEditor({
           ) : null}
         </div>
 
+        <ContactPicker
+          id="condition-treating"
+          label="Who treats it"
+          profileId={profileId}
+          value={treating}
+          onChange={setTreating}
+          placeholder="Search Contacts or type their name, e.g. Dr Anna Chen"
+        />
+
         <ManagedWithSection
           profileId={profileId}
           careName={careName}
@@ -279,7 +292,18 @@ export function ConditionEditor({
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button loading={saveMutation.isPending} disabled={!name.trim()} onClick={() => saveMutation.mutate()}>
+          <Button
+            loading={saveMutation.isPending}
+            onClick={() => {
+              // Save always answers: say what is missing.
+              if (!name.trim()) {
+                setError('Write the condition name first, then save.');
+                return;
+              }
+              setError('');
+              saveMutation.mutate();
+            }}
+          >
             Save
           </Button>
         </div>

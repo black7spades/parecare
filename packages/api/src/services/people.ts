@@ -12,27 +12,29 @@ export interface PickablePerson {
   ref: { account_id: string } | { circle_member_id: string };
   name: string;
   label: string | null;
+  /** What the person in care is to them ("Mum"), as they gave it. */
+  relationship?: string | null;
   phone: string | null;
   email: string | null;
   has_login: boolean;
 }
 
 const ROLE_WORDS: Record<string, string> = {
-  family: 'Family', friend: 'Friend', carer: 'Carer', organisation: 'Organisation', legal: 'Legal', other: 'In the care circle',
+  family: 'Family', friend: 'Friend', carer: 'Carer', support_worker: 'Support worker', nurse: 'Nurse', organisation: 'Organisation', legal: 'Legal', other: 'In the care circle',
 };
 
 export async function pickablePeople(profileId: string, viewerAccountId: string | null, conn: Conn = db): Promise<PickablePerson[]> {
   const profile = (await conn('care_profiles as cp')
     .join('accounts as a', 'cp.account_id', 'a.id')
     .where('cp.id', profileId)
-    .first('a.id', 'a.display_name', 'a.email')) as { id: string; display_name: string; email: string } | undefined;
+    .first('a.id', 'a.display_name', 'a.email', 'a.phone')) as { id: string; display_name: string; email: string; phone: string | null } | undefined;
   const out: PickablePerson[] = [];
   if (profile) {
     out.push({
       ref: { account_id: profile.id },
       name: profile.display_name,
       label: profile.id === viewerAccountId ? 'You' : 'Manages this profile',
-      phone: null,
+      phone: profile.phone?.trim() || null,
       email: profile.email,
       has_login: true,
     });
@@ -41,9 +43,9 @@ export async function pickablePeople(profileId: string, viewerAccountId: string 
     .leftJoin('accounts as a', 'm.account_id', 'a.id')
     .where('m.care_profile_id', profileId)
     .orderBy('m.created_at', 'asc')
-    .select('m.id', 'm.display_name', 'm.role', 'm.relationship', 'm.phone', 'm.email', 'm.account_id', 'm.invite_accepted', 'a.email as account_email')) as Array<{
+    .select('m.id', 'm.display_name', 'm.role', 'm.relationship', 'm.phone', 'm.email', 'm.account_id', 'm.invite_accepted', 'a.email as account_email', 'a.phone as account_phone')) as Array<{
     id: string; display_name: string; role: string; relationship: string | null; phone: string | null; email: string | null;
-    account_id: string | null; invite_accepted: boolean; account_email: string | null;
+    account_id: string | null; invite_accepted: boolean; account_email: string | null; account_phone: string | null;
   }>;
   for (const m of members) {
     // The account holder is already first.
@@ -51,8 +53,12 @@ export async function pickablePeople(profileId: string, viewerAccountId: string 
     out.push({
       ref: { circle_member_id: m.id },
       name: m.display_name,
-      label: m.account_id && m.account_id === viewerAccountId ? 'You' : m.relationship?.trim() || ROLE_WORDS[m.role] || null,
-      phone: m.phone,
+      // Their role, never the relationship word: that says what the person
+      // in care is to them, so "Jess Carter, Client" would read backwards.
+      label: m.account_id && m.account_id === viewerAccountId ? 'You' : ROLE_WORDS[m.role] || m.role || null,
+      relationship: m.relationship?.trim() || null,
+      // Someone with a login keeps their phone on their account, once.
+      phone: m.account_phone?.trim() || m.phone?.trim() || null,
       email: m.account_email ?? m.email,
       has_login: !!m.account_id && m.invite_accepted,
     });

@@ -1,4 +1,7 @@
 import { useEffect, useState } from 'react';
+import { EmailLink, PhoneLink } from '../../components/cards/profile/links';
+import { hoursText } from '../../components/OpeningHoursField';
+import { OpeningHoursField, badDays, hoursFrom, weekFrom, type WeekHours } from '../../components/OpeningHoursField';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { addressFrom, addressPayload, emptyAddress, type AddressValue } from '../../components/AddressFields';
@@ -504,8 +507,11 @@ function DirectoryProvidersPage({ kind }: { kind: ProviderKind }) {
             { label: 'Type', value: providerTypeLabel(current.provider_type) },
             { label: 'Other names', value: (current.also_known_as ?? []).join(', ') },
             { label: basedAtLabel(kind), value: current.organisation },
-            { label: 'Phone', value: current.phone ? <a href={`tel:${current.phone}`} className="text-primary hover:underline">{current.phone}</a> : null },
-            { label: 'Email', value: current.email ? <a href={`mailto:${current.email}`} className="text-primary hover:underline">{current.email}</a> : null },
+            { label: 'Phone', value: current.phone ? <PhoneLink phone={current.phone} /> : null },
+            { label: 'After-hours phone', value: current.after_hours_phone ? <PhoneLink phone={current.after_hours_phone} /> : null },
+            { label: 'Fax', value: current.fax },
+            { label: 'Email', value: current.email ? <EmailLink email={current.email} /> : null },
+            { label: 'Opening hours', value: hoursText(current.opening_hours) },
             { label: 'Address', value: current.address },
           ]}
           links={panelLinks}
@@ -726,6 +732,9 @@ function DirectoryProviderEditor({
   const [otherNames, setOtherNames] = useState<string[]>([]);
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [afterHours, setAfterHours] = useState('');
+  const [fax, setFax] = useState('');
+  const [week, setWeek] = useState<WeekHours>(weekFrom(null));
   const [address, setAddress] = useState<AddressValue>(emptyAddress);
   const [bookingLink, setBookingLink] = useState('');
   const [directionsLink, setDirectionsLink] = useState('');
@@ -739,6 +748,10 @@ function DirectoryProviderEditor({
     setSharesAddress(provider ? !!provider.uses_practice_address || !provider.organisation : true);
     setPhone(ownValue(provider, 'phone'));
     setEmail(ownValue(provider, 'email'));
+    setAfterHours(ownValue(provider, 'after_hours_phone'));
+    setFax(ownValue(provider, 'fax'));
+    // Hours taken from where they are based start empty, so they keep following it.
+    setWeek(weekFrom(provider && !(provider.inherited_fields ?? []).includes('opening_hours') ? provider.opening_hours : null));
     setAddress(provider ? addressFrom(provider) : emptyAddress);
     setBookingLink(ownValue(provider, 'booking_link'));
     setDirectionsLink(ownValue(provider, 'directions_link'));
@@ -753,6 +766,9 @@ function DirectoryProviderEditor({
         name: name.trim(),
         phone: phone.trim() || null,
         email: email.trim() || null,
+        after_hours_phone: afterHours.trim() || null,
+        fax: fax.trim() || null,
+        opening_hours: hoursFrom(week),
         ...addressPayload(address),
         ...practicePayload(worksAt, sharesAddress),
         also_known_as: otherNames,
@@ -774,7 +790,18 @@ function DirectoryProviderEditor({
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
-          if (name.trim()) mutation.mutate();
+          // Save always answers: say what is missing.
+          if (!name.trim()) {
+            setError('Write their name first, then save.');
+            return;
+          }
+          const bad = badDays(week);
+          if (bad.length) {
+            setError(`Check the opening hours on ${bad.join(', ')}: the closing time comes before the opening time.`);
+            return;
+          }
+          setError('');
+          mutation.mutate();
         }}
       >
         <ProviderTypeField key={`type-${provider?.id ?? 'new'}`} id="dir-provider-type" value={type} onChange={setType} kind={kind} />
@@ -791,6 +818,11 @@ function DirectoryProviderEditor({
           <Input label="Phone" placeholder={sharedPlaceholder(worksAt, 'phone')} value={phone} onChange={(e) => setPhone(e.target.value)} />
           <Input label="Email" type="email" placeholder={sharedPlaceholder(worksAt, 'email')} value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="After-hours phone" placeholder={sharedPlaceholder(worksAt, 'after_hours_phone')} value={afterHours} onChange={(e) => setAfterHours(e.target.value)} />
+          <Input label="Fax" placeholder={sharedPlaceholder(worksAt, 'fax')} value={fax} onChange={(e) => setFax(e.target.value)} />
+        </div>
+        <OpeningHoursField value={week} onChange={setWeek} inheritedFrom={worksAt.practiceName.trim() || null} />
         <PracticeAddress
           worksAt={worksAt}
           sharesAddress={sharesAddress}
@@ -806,7 +838,7 @@ function DirectoryProviderEditor({
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>Save</Button>
+          <Button type="submit" loading={mutation.isPending}>Save</Button>
         </div>
       </form>
       {provider && isPlace({ kind, member_count: provider.members?.length ?? 0 }) ? (

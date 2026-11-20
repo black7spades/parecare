@@ -11,6 +11,8 @@ import { AllergyModal } from '../../../components/AllergyModal';
 import { SetPoaForm } from '../../../components/SetPoaForm';
 import { ConditionModal, EmergencyContactModal, GpModal, MedicationModal } from '../../../components/QuickAddModals';
 import { useProfile } from './ProfileLayout';
+import { useEmergencyContacts } from '../../../components/EmergencyContactsEditor';
+import { PhoneLink } from '../../../components/cards/profile/links';
 import { poaLabel, providerTypeLabel, residenceTypeLabel, roomAreaTypeLabel, type Allergy, type CarePlan, type CircleMember, type MedicalCondition, type MedicationRecord, type Provider } from '../../../lib/care';
 import { formatDateOnly } from '../../../lib/datetime';
 
@@ -63,7 +65,9 @@ export function EmergencySheetPage() {
   const meds = (medData?.medications ?? []).filter((m) => m.active);
   const allergies = allergyData?.allergies ?? [];
   const conditions = conditionData?.conditions ?? [];
-  const contacts = asArray<{ name: string; relationship?: string; phone: string }>(plan?.emergency_contacts);
+  // Who to call, read live from each person's own record.
+  const { data: emergencyData } = useEmergencyContacts(profile.id);
+  const contacts = emergencyData?.contacts ?? [];
 
   // Where the person is, for anyone stepping in: a facility with the room
   // and a phone, or a private address.
@@ -139,12 +143,21 @@ export function EmergencySheetPage() {
 
         <Section title="Emergency contacts">
           {contacts.length === 0 ? (
-            <Empty action="Add emergency contact" canEdit={canEdit} onAdd={() => setModal('contact')} />
+            <Empty text="No emergency contact chosen yet." action="Choose who to call" canEdit={canEdit} onAdd={() => setModal('contact')} />
           ) : (
-            contacts.map((c, i) => (
-              <p key={i} className="text-sm">
+            contacts.map((c) => (
+              <p key={c.row_id ?? c.name} className="text-sm flex flex-wrap items-center gap-x-2">
                 <span className="font-medium">{c.name}</span>
-                {c.relationship ? ` (${c.relationship})` : ''} · {c.phone}
+                {c.relationship ? <span>{c.relationship}</span> : null}
+                {c.phone ? <PhoneLink phone={c.phone} /> : <span className="text-muted">No phone yet.</span>}
+                {c.inferred ? (
+                  <span className="text-xs text-muted print:hidden">
+                    Worked out from the profile.{' '}
+                    {canEdit ? (
+                      <Button size="xs" variant="ghost" onClick={() => setModal('contact')}>Change</Button>
+                    ) : null}
+                  </span>
+                ) : null}
               </p>
             ))
           )}
@@ -238,7 +251,7 @@ export function EmergencySheetPage() {
       </div>
 
       <AllergyModal profileId={profile.id} open={modal === 'allergy'} onClose={closeModal} />
-      <EmergencyContactModal profileId={profile.id} open={modal === 'contact'} onClose={closeModal} />
+      <EmergencyContactModal profileId={profile.id} open={modal === 'contact'} onClose={closeModal} ownerRelationship={profile.owner_relationship ?? null} />
       <ConditionModal profileId={profile.id} open={modal === 'condition'} onClose={closeModal} />
       <MedicationModal profileId={profile.id} open={modal === 'medication'} onClose={closeModal} />
       <GpModal profileId={profile.id} open={modal === 'gp'} onClose={closeModal} />

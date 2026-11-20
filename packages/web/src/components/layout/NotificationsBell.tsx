@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { CONTACT_LINK } from '../ContactStrip';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
@@ -28,7 +29,15 @@ interface NotificationItem {
   urgent: boolean;
   created_at: string;
   read: boolean;
+  /** Supply alerts: who to call, the next thing to do, and about how many days are left. */
+  contact?: { name: string; phone: string | null } | null;
+  next_action?: { kind: string; label: string; href: string | null } | null;
+  days_left?: number | null;
 }
+
+/** "Terry White Chemmart Box Hill, 03 9890 1234." after a supply alert. */
+const whoLine = (item: { contact?: { name: string; phone: string | null } | null }) =>
+  item.contact ? ` ${[item.contact.name, item.contact.phone].filter(Boolean).join(', ')}.` : '';
 
 /** Where each kind of record lives, and what to call it in a sentence. */
 const ENTITY_TARGETS: Record<string, { page: string; noun: string }> = {
@@ -67,10 +76,12 @@ function itemText(item: NotificationItem): string {
     return `${item.actor_name ?? 'Someone'} recorded ${item.profile_name}'s ${item.medication_name} as ${item.summary ?? 'not given'}.`;
   }
   if (item.kind === 'supply_out') {
-    return `${item.profile_name}'s prescription for ${item.medication_name} is out of stock.`;
+    return `${item.profile_name}'s ${item.medication_name} has run out.${whoLine(item)}`;
   }
   if (item.kind === 'supply_low') {
-    return `${item.profile_name}'s prescription for ${item.medication_name} is low.`;
+    const d = item.days_left;
+    const left = d == null ? '' : d === 0 ? ', less than a day left' : `, about ${d} ${d === 1 ? 'day' : 'days'} left`;
+    return `${item.profile_name}'s ${item.medication_name} is running low${left}.${whoLine(item)}`;
   }
   if (item.kind === 'care_plan_ready') {
     return `${item.profile_name}'s care plan is ready to review.`;
@@ -92,7 +103,9 @@ function itemPath(item: NotificationItem): string {
   // How an appointment went is recorded on the appointment itself.
   if (item.kind === 'outcome_due') return `/app/${item.profile_id}/appointments?outcome=${item.record_id ?? ''}`;
   const page = ENTITY_TARGETS[item.entity_type ?? '']?.page ?? '';
-  return `/app/${item.profile_id}${page ? `/${page}` : ''}`;
+  // A supply alert opens the medicine itself.
+  const record = page && item.record_id && (item.kind === 'supply_low' || item.kind === 'supply_out') ? `?record=${item.record_id}` : '';
+  return `/app/${item.profile_id}${page ? `/${page}` : ''}${record}`;
 }
 
 export function NotificationsBell() {
@@ -240,10 +253,11 @@ export function NotificationsBell() {
             <ul className="divide-y divide-border">
               {items.map((item) => (
                 <li key={item.key} className={`flex items-stretch ${item.read ? 'opacity-60' : ''}`}>
+                  <div className="flex-1 min-w-0">
                   <button
                     type="button"
                     onClick={() => openItem(item)}
-                    className="flex-1 min-w-0 text-left px-4 py-3 hover:bg-surface-2 transition-colors flex gap-2"
+                    className="w-full min-w-0 text-left px-4 py-3 hover:bg-surface-2 transition-colors flex gap-2"
                   >
                     {!item.read ? (
                       <span aria-hidden className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" />
@@ -264,6 +278,16 @@ export function NotificationsBell() {
                       </span>
                     </span>
                   </button>
+                  {item.next_action?.href && item.next_action.kind !== 'open' ? (
+                    <a
+                      href={item.next_action.href}
+                      {...(item.next_action.kind === 'order_online' ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                      className={`${CONTACT_LINK} block px-8 pb-3 -mt-1 text-xs`}
+                    >
+                      {item.next_action.label}
+                    </a>
+                  ) : null}
+                  </div>
                   {!item.read ? (
                     <button
                       type="button"

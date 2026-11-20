@@ -40,7 +40,8 @@ const CADENCE_WORD: Record<string, string> = {
   monthly: 'monthly update',
 };
 
-const abs = (u: string): string => (/^https?:\/\//i.test(u) ? u : `${env.APP_URL}${u}`);
+// A call or email link stays as it is; an in-app path gets the app's address.
+const abs = (u: string): string => (/^(https?:\/\/|tel:|mailto:)/i.test(u) ? u : `${env.APP_URL}${u}`);
 
 const hitsToSections = (
   groups: { title: string; hits: WatchHit[] }[]

@@ -40,9 +40,18 @@ const PARTS = ['address_line1', 'address_line2', 'address_suburb', 'address_stat
  * their own, kept in step as the organisation's change. The address is
  * shared the same way, through uses_practice_address.
  */
-export const SHARED_CONTACT_FIELDS = ['phone', 'email', 'booking_link', 'directions_link'] as const;
+export const SHARED_CONTACT_FIELDS = ['phone', 'email', 'booking_link', 'directions_link', 'fax', 'after_hours_phone', 'opening_hours'] as const;
 
-const text = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+/** A detail as comparable text: opening hours compare as JSON, an empty week as nothing. */
+const text = (v: unknown): string => {
+  if (typeof v === 'string') return v.trim();
+  if (Array.isArray(v)) return v.length ? JSON.stringify(v) : '';
+  if (v && typeof v === 'object') return JSON.stringify(v);
+  return '';
+};
+
+/** A value ready for its column: opening hours go in as JSON. */
+const columnValue = (f: string, v: unknown): unknown => (f === 'opening_hours' && v != null && typeof v !== 'string' ? JSON.stringify(v) : v);
 
 /**
  * The contact columns for a write to a record based at `practice`: a detail
@@ -68,7 +77,7 @@ export function inheritContact(
     if (f in data) {
       const given = text(data[f]);
       if (!given || given === text(theirs)) {
-        out[f] = theirs;
+        out[f] = columnValue(f, theirs);
         inherited.add(f);
       } else {
         out[f] = given;
@@ -76,7 +85,7 @@ export function inheritContact(
       }
     } else if (!self || inherited.has(f) || !text(self[f])) {
       // Not mentioned: follow the organisation if it was shared or missing.
-      out[f] = theirs;
+      out[f] = columnValue(f, theirs);
       inherited.add(f);
     }
   }
@@ -281,7 +290,7 @@ export async function syncPracticeMembers(practiceId: string, seen: Set<string> 
   await db('providers').where({ practice_id: practiceId }).update({ organisation: practice.name });
   await db('providers').where({ practice_id: practiceId, uses_practice_address: true }).update(addressCopy(practice));
   for (const f of SHARED_CONTACT_FIELDS) {
-    await db('providers').where({ practice_id: practiceId }).whereRaw('? = ANY(inherited_fields)', [f]).update({ [f]: practice[f] ?? null });
+    await db('providers').where({ practice_id: practiceId }).whereRaw('? = ANY(inherited_fields)', [f]).update({ [f]: columnValue(f, practice[f] ?? null) });
   }
   const children: Array<{ id: string }> = await db('providers').where({ practice_id: practiceId }).select('id');
   for (const child of children) await syncPracticeMembers(child.id, seen);

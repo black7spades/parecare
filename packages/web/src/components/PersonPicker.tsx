@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { Link } from 'react-router-dom';
 import { personKey, type PickablePerson } from '../lib/care';
+import { PhoneLink } from './cards/profile/links';
 
 /** Everyone who can be picked for a job around a person: you first, then the circle. */
 export function usePickablePeople(profileId: string) {
@@ -36,6 +38,7 @@ export function PersonPicker({
 }) {
   const { data } = usePickablePeople(profileId);
   const people = data?.people ?? [];
+  const picked = people.find((p) => personKey(p.ref) === value) ?? null;
   return (
     <div>
       <label htmlFor={id} className="block text-sm font-medium text-ink mb-1">{label}</label>
@@ -50,6 +53,22 @@ export function PersonPicker({
           <option key={personKey(p.ref)} value={personKey(p.ref)}>{personOption(p)}</option>
         ))}
       </select>
+      {picked ? (
+        <p className="mt-1 text-xs text-muted">
+          {picked.phone ? (
+            <>
+              Phone <PhoneLink phone={picked.phone} />
+            </>
+          ) : picked.label === 'You' ? (
+            <>
+              No phone on your account yet.{' '}
+              <Link to="/account/settings" className="text-primary hover:underline">Add your phone</Link>
+            </>
+          ) : (
+            'No phone on file yet.'
+          )}
+        </p>
+      ) : null}
     </div>
   );
 }

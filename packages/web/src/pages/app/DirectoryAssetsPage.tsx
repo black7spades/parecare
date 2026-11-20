@@ -14,7 +14,8 @@ import { RecordPanel } from '../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../stores/undo';
 import { useHealthConfig } from '../../lib/appConfig';
-import type { Asset } from '../../lib/care';
+import type { Asset, Supplier } from '../../lib/care';
+import { ContactStrip } from '../../components/ContactStrip';
 
 interface LinkedProfile {
   profile_id: string;
@@ -274,7 +275,7 @@ export function DirectoryAssetsPage() {
             { label: 'Make or model', value: current.make_model },
             { label: 'Price', value: current.price != null ? money(current.price) : null },
             { label: 'Purchase date', value: current.purchase_date },
-            { label: 'Bought from', value: current.supplier },
+
             { label: 'Warranty expiry', value: current.warranty_expiry },
             { label: 'Condition', value: current.condition ? (CONDITION_LABEL[current.condition] ?? current.condition) : null },
             { label: 'Location', value: current.location },
@@ -292,7 +293,18 @@ export function DirectoryAssetsPage() {
             panel.close();
           }}
           onClose={panel.close}
-        />
+        >
+          <section>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Supplier</h3>
+            {current.supplier_contact ? (
+              <ContactStrip contact={current.supplier_contact} book={false} />
+            ) : current.supplier ? (
+              <p className="text-sm text-ink">{current.supplier}</p>
+            ) : (
+              <p className="text-sm text-muted">No supplier on file yet.</p>
+            )}
+          </section>
+        </RecordPanel>
       ) : null}
     </div>
   );
@@ -407,6 +419,13 @@ export function DirectoryAssetEditor({
   const [price, setPrice] = useState('');
   const [purchaseDate, setPurchaseDate] = useState('');
   const [supplier, setSupplier] = useState('');
+  const [missing, setMissing] = useState('');
+  // The account's suppliers, offered for "Supplier".
+  const { data: suppliersData } = useQuery({
+    queryKey: ['suppliers'],
+    queryFn: () => api.get<{ suppliers: Supplier[] }>('/suppliers'),
+    enabled: open,
+  });
   const [warrantyExpiry, setWarrantyExpiry] = useState('');
   const [condition, setCondition] = useState('');
   const [usefulLife, setUsefulLife] = useState('');
@@ -460,9 +479,18 @@ export function DirectoryAssetEditor({
     <Modal open onClose={onClose} title={asset ? `Edit ${asset.name}` : 'Add asset'} wide>
       <form
         className="space-y-4"
-        onSubmit={(e) => { e.preventDefault(); if (name.trim()) mutation.mutate(); }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          // Save always answers: say what is missing.
+          if (!name.trim()) {
+            setMissing('Write the unit name first, then save.');
+            return;
+          }
+          setMissing('');
+          mutation.mutate();
+        }}
       >
-        <Input label="Unit name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Electric hospital bed" />
+        <Input label="Unit name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Electric hospital bed" />
         <div className="grid grid-cols-2 gap-2">
           <div>
             <Input label="Category" value={category} onChange={(e) => setCategory(e.target.value)} list="asset-category-options" placeholder="e.g. Mobility" />
@@ -478,7 +506,19 @@ export function DirectoryAssetEditor({
         </div>
         <div className="grid grid-cols-2 gap-2">
           <Input label="Purchase date" type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
-          <Input label="Bought from" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="e.g. Independence Australia" />
+          <div>
+            <Input
+              label="Supplier"
+              value={supplier}
+              onChange={(e) => setSupplier(e.target.value)}
+              placeholder="e.g. Independence Australia"
+              list="asset-supplier-options"
+              hint="Pick one on file, or type a new one and it is filed as a supplier."
+            />
+            <datalist id="asset-supplier-options">
+              {(suppliersData?.suppliers ?? []).map((sup) => <option key={sup.id} value={sup.name} />)}
+            </datalist>
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <Input label="Warranty expiry" type="date" value={warrantyExpiry} onChange={(e) => setWarrantyExpiry(e.target.value)} />
@@ -498,8 +538,9 @@ export function DirectoryAssetEditor({
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>Save</Button>
+          <Button type="submit" loading={mutation.isPending}>Save</Button>
         </div>
+        {missing ? <p className="text-sm text-red-600 text-right" role="alert">{missing}</p> : null}
       </form>
     </Modal>
   );

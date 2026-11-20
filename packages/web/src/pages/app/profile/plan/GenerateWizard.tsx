@@ -4,7 +4,7 @@ import {  } from '../../../../components/ui/icons';
 import { OptionChips } from '../../../../components/CatalogueCombo';
 import {  } from '../../../../components/ProseReport';
 import { AllergyModal } from '../../../../components/AllergyModal';
-import {   RELATIONSHIPS,
+import {
   type CarePlan } from '../../../../lib/care';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -13,6 +13,7 @@ import { api } from '../../../../api/client';
 import { Button } from '../../../../components/ui/Button';
 import { Input } from '../../../../components/ui/Input';
 import { Modal } from '../../../../components/ui/Modal';
+import { EmergencyContactAdd, useEmergencyContacts } from '../../../../components/EmergencyContactsEditor';
 
 export function GenerateWizard({
   profileId,
@@ -45,8 +46,9 @@ export function GenerateWizard({
     mobility_aids: asArray<string>(planData?.plan?.mobility_aids),
     communication_needs: asArray<string>(planData?.plan?.communication_needs),
     advance_care_directive: planData?.plan?.advance_care_directive ?? false,
-    advance_care_directive_location: planData?.plan?.advance_care_directive_location ?? null,
-    emergency_contacts: asArray(planData?.plan?.emergency_contacts) };
+    advance_care_directive_location: planData?.plan?.advance_care_directive_location ?? null };
+  const { data: emergencyData } = useEmergencyContacts(profileId);
+  const emergencyCount = emergencyData?.contacts.length ?? 0;
 
   const savePlanMutation = useMutation({
     mutationFn: (next: CarePlan) => api.put(`/care-profiles/${profileId}/plan`, next),
@@ -71,14 +73,11 @@ export function GenerateWizard({
           </GapRow>
         ) : null}
 
-        {gaps.emergency_contacts && plan.emergency_contacts.length === 0 ? (
+        {gaps.emergency_contacts && emergencyCount === 0 ? (
           <GapRow label="Emergency contacts" detail="Nobody is listed to call first.">
-            <InlineContactForm
-              saving={savePlanMutation.isPending}
-              onAdd={(contact) =>
-                savePlanMutation.mutate({ ...plan, emergency_contacts: [...plan.emergency_contacts, contact] })
-              }
-            />
+            <div className="w-full">
+              <EmergencyContactAdd profileId={profileId} />
+            </div>
           </GapRow>
         ) : null}
 
@@ -147,53 +146,13 @@ function GapRow({ label, detail, children }: { label: string; detail: string; ch
   );
 }
 
-function InlineContactForm({
-  saving,
-  onAdd }: {
-  saving: boolean;
-  onAdd: (contact: { name: string; relationship?: string; phone: string }) => void;
-}) {
-  const [name, setName] = useState('');
-  const [relationship, setRelationship] = useState('');
-  const [phone, setPhone] = useState('');
-  const selectClass =
-    'rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
-  return (
-    <>
-      <Input aria-label="Contact name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} className="w-36" />
-      <select aria-label="Relationship" className={selectClass} value={relationship} onChange={(e) => setRelationship(e.target.value)}>
-        <option value="">Relationship</option>
-        {RELATIONSHIPS.filter((r) => r !== 'Myself').map((r) => (
-          <option key={r} value={r}>
-            {r}
-          </option>
-        ))}
-      </select>
-      <Input aria-label="Contact phone" type="tel" placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-32" />
-      <Button
-        size="sm"
-        variant="secondary"
-        disabled={!name.trim() || !phone.trim()}
-        loading={saving}
-        onClick={() => {
-          onAdd({ name: name.trim(), relationship: relationship || undefined, phone: phone.trim() });
-          setName('');
-          setRelationship('');
-          setPhone('');
-        }}
-      >
-        Add
-      </Button>
-    </>
-  );
-}
-
 function GpGapRow({ profileId }: { profileId: string }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [practice, setPractice] = useState('');
   const [phone, setPhone] = useState('');
   const [added, setAdded] = useState(false);
+  const [missing, setMissing] = useState('');
 
   const addMutation = useMutation({
     mutationFn: () =>
@@ -213,9 +172,22 @@ function GpGapRow({ profileId }: { profileId: string }) {
       <Input aria-label="GP name" placeholder="GP name" value={name} onChange={(e) => setName(e.target.value)} className="w-36" />
       <Input aria-label="GP practice" placeholder="Practice" value={practice} onChange={(e) => setPractice(e.target.value)} className="w-36" />
       <Input aria-label="GP phone" type="tel" placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-32" />
-      <Button size="sm" variant="secondary" disabled={!name.trim()} loading={addMutation.isPending} onClick={() => addMutation.mutate()}>
+      <Button
+        size="sm"
+        variant="secondary"
+        loading={addMutation.isPending}
+        onClick={() => {
+          if (!name.trim()) {
+            setMissing("Write the GP's name, then add them.");
+            return;
+          }
+          setMissing('');
+          addMutation.mutate();
+        }}
+      >
         Add GP
       </Button>
+      {missing ? <p className="basis-full text-sm text-red-600" role="alert">{missing}</p> : null}
     </GapRow>
   );
 }

@@ -17,6 +17,8 @@ export interface Account {
   date_of_birth: string | Date | null;
   gender: string | null;
   pronouns: string | null;
+  /** Their own phone, shown wherever they are picked. */
+  phone?: string | null;
   oauth_provider: 'google' | 'facebook' | null;
   oauth_subject: string | null;
   mfa_secret: string | null;

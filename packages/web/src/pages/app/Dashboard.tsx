@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { CONTACT_LINK } from '../../components/ContactStrip';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -96,6 +97,10 @@ interface ProfileSummary {
   contact_relationship: string | null;
   primary_email: string | null;
   primary_phone: string | null;
+  /** Whose the phone is: their daughter, their care home, their own. */
+  primary_phone_owner?: { name: string; label: string } | null;
+  /** Their main GP, on its own row. */
+  gp?: { name: string; phone: string | null } | null;
   poa_holders: { display_name: string; poa_type: string | null; poa_activated: boolean }[];
   last_activity: { action: string; entity_type: string; summary: string | null; created_at: string; actor_name: string | null } | null;
   next_event: { title: string; next_due_at: string } | null;
@@ -611,13 +616,35 @@ function PareWelcomeCard() {
   );
 }
 
+const telOf = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
+
+/**
+ * Each phone on a card says whose it is: the label is who they are to the
+ * person (Daughter, Care home, Own phone), the name sits above the number.
+ * The GP has a row of their own, never a plain "Phone".
+ */
 const ContactRows = ({ p }: { p: ProfileSummary }) => (
   <>
     {p.primary_phone ? (
-      <Row label="Phone">
-        <a href={`tel:${p.primary_phone}`} className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
-          {p.primary_phone}
-        </a>
+      <Row label={p.primary_phone_owner?.label ?? 'Phone'}>
+        <span className="block min-w-0">
+          {p.primary_phone_owner && p.primary_phone_owner.label !== 'Own phone' ? (
+            <span className="block text-ink truncate">{p.primary_phone_owner.name}</span>
+          ) : null}
+          <a href={telOf(p.primary_phone)} className={CONTACT_LINK} onClick={(e) => e.stopPropagation()} aria-label={`Call ${p.primary_phone_owner?.name ?? p.full_name} on ${p.primary_phone}`}>
+            {p.primary_phone}
+          </a>
+        </span>
+      </Row>
+    ) : null}
+    {p.gp?.phone ? (
+      <Row label="GP">
+        <span className="block min-w-0">
+          <span className="block text-ink truncate">{p.gp.name}</span>
+          <a href={telOf(p.gp.phone)} className={CONTACT_LINK} onClick={(e) => e.stopPropagation()} aria-label={`Call ${p.gp.name} on ${p.gp.phone}`}>
+            {p.gp.phone}
+          </a>
+        </span>
       </Row>
     ) : null}
     {p.primary_email ? (
@@ -756,7 +783,7 @@ function ProfileCard({
       </Link>
 
       {collapsed ? (
-        (p.primary_phone || p.primary_email) ? (
+        (p.primary_phone || p.primary_email || p.gp?.phone) ? (
           <dl className="mt-3 space-y-1.5 text-xs">
             <ContactRows p={p} />
           </dl>

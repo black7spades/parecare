@@ -10,6 +10,9 @@ import { Modal } from '../../../../components/ui/Modal';
 import { TimeField } from './TimeField';
 import { SupplierModal } from './SupplierModal';
 import type { MedicationRecord, Supplier } from '../../../../lib/care';
+import type { Appointment } from '../AppointmentsPage';
+import { ContactPicker, changedContactFieldsAs, contactFieldsAs, pickedFrom, type PickedContact } from '../../../../components/ContactPicker';
+import { format } from 'date-fns';
 
 /**
  * The medication editor, laid out as three plain-language sentences:
@@ -22,6 +25,8 @@ export function MedicationForm({
   selfCare,
   initialName = '',
   initialCondition = '',
+  initialSourceAppointmentId = '',
+  initialPrescriber,
   onClose,
   onSaved,
 }: {
@@ -31,6 +36,10 @@ export function MedicationForm({
   /** Prefill a new medication, e.g. from a prescription an appointment gave. */
   initialName?: string;
   initialCondition?: string;
+  /** The visit it came from, when added from that visit's prescription step. */
+  initialSourceAppointmentId?: string;
+  /** Who wrote it, when known, e.g. the doctor at that visit. */
+  initialPrescriber?: { id: string | null; name: string } | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -60,7 +69,21 @@ export function MedicationForm({
   // one is immediately selectable before the list refetches.
   const [newSuppliers, setNewSuppliers] = useState<Supplier[]>([]);
   const [error, setError] = useState('');
+  const [prescriber, setPrescriber] = useState<PickedContact>(pickedFrom(med?.prescriber ?? initialPrescriber ?? null));
+  const [sourceAppointmentId, setSourceAppointmentId] = useState(med?.source_appointment_id ?? initialSourceAppointmentId);
   const formQueryClient = useQueryClient();
+
+  // Visits that have happened, newest first, for "Started at".
+  const { data: apptData } = useQuery({
+    queryKey: ['appointments', profileId],
+    queryFn: () => api.get<{ appointments: Appointment[] }>(`/care-profiles/${profileId}/appointments`),
+  });
+  const pastVisits = useMemo(() => {
+    const now = Date.now();
+    return (apptData?.appointments ?? [])
+      .filter((a) => a.starts_at && new Date(a.starts_at).getTime() <= now)
+      .sort((a, b) => new Date(b.starts_at!).getTime() - new Date(a.starts_at!).getTime());
+  }, [apptData]);
 
   const typeMeta = MED_TYPES.find((t) => t.value.toLowerCase() === type.toLowerCase());
 
@@ -137,6 +160,9 @@ export function MedicationForm({
         ...(supplierId
           ? { supplier_id: supplierId }
           : { supplier_id: null, supplier: null, supplier_order_url: null }),
+        // Who writes the script, picked or named; and the visit it started at.
+        ...(med ? changedContactFieldsAs('prescriber', pickedFrom(med.prescriber ?? null), prescriber) : contactFieldsAs('prescriber', prescriber)),
+        source_appointment_id: sourceAppointmentId || null,
       };
       return med ? api.patch(`/care-profiles/${profileId}/medications/${med.id}`, body) : api.post(`/care-profiles/${profileId}/medications`, body);
     },
@@ -156,8 +182,21 @@ export function MedicationForm({
 
   return (
     <Modal open onClose={onClose} title={med ? 'Edit medication' : 'Add medication'} wide>
-      <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); if (name.trim()) mutation.mutate(); }}>
-        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Metformin" list="med-catalogue-options" hint="Pick an existing medication to reuse it, or type a new one." />
+      <form
+        className="space-y-6"
+        onSubmit={(e) => {
+          e.preventDefault();
+          // Save always answers: say what is missing and go to it.
+          if (!name.trim()) {
+            setError('Write the medication name first, then save.');
+            document.getElementById('med-name')?.focus();
+            return;
+          }
+          setError('');
+          mutation.mutate();
+        }}
+      >
+        <Input id="med-name" label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Metformin" list="med-catalogue-options" hint="Pick an existing medication to reuse it, or type a new one." />
         <datalist id="med-catalogue-options">
           {suggestions.map((s) => <option key={s.id} value={s.name} />)}
         </datalist>
@@ -197,6 +236,33 @@ export function MedicationForm({
             </select>.
           </p>
           <p className="text-xs text-muted mt-1">A condition that isn't already recorded is added to this person's conditions.</p>
+        </section>
+
+        <section className="grid gap-4 sm:grid-cols-2">
+          <ContactPicker
+            id="med-prescriber"
+            label="Prescribed by"
+            profileId={profileId}
+            value={prescriber}
+            onChange={setPrescriber}
+            kind="person"
+            hint="Who writes the script."
+            placeholder="Search Contacts or type their name"
+          />
+          <div>
+            <label htmlFor="med-started-at" className="block text-sm font-medium text-ink mb-1">Started at</label>
+            <select id="med-started-at" className={`${SELECT} w-full`} value={sourceAppointmentId} onChange={(e) => setSourceAppointmentId(e.target.value)}>
+              <option value="">Not from an appointment</option>
+              {pastVisits.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.title}, {format(new Date(a.starts_at!), 'd MMM yyyy')}
+                </option>
+              ))}
+              {sourceAppointmentId && !pastVisits.some((a) => a.id === sourceAppointmentId) ? (
+                <option value={sourceAppointmentId}>{med?.source_appointment?.title ?? 'The visit it came from'}</option>
+              ) : null}
+            </select>
+          </div>
         </section>
 
         <section>
@@ -319,7 +385,7 @@ export function MedicationForm({
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>Save</Button>
+          <Button type="submit" loading={mutation.isPending}>Save</Button>
         </div>
       </form>
 

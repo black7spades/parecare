@@ -12,17 +12,69 @@ import { useState } from 'react';
 import {  useQuery } from '@tanstack/react-query';
 import {  } from 'date-fns';
 import { api } from '../../../../api/client';
+import { PhoneLink } from '../../../../components/cards/profile/links';
+import type { ContactSummary } from '../../../../lib/care';
 import { Button } from '../../../../components/ui/Button';
 import { Modal } from '../../../../components/ui/Modal';
 
-export function ContentSections({ content }: { content: PlanContent }) {
+/** One reference behind "supported by", read live: who or what, and how to reach them. */
+interface LiveRef {
+  label: string;
+  contact: ContactSummary | null;
+}
+
+/**
+ * Who supports each part of the plan, read live from their own records, so
+ * a changed phone shows at once. The written text is the signed snapshot,
+ * shown when a reference is gone.
+ */
+function SupportedBy({ text, refs, live }: { text: string; refs: string; live: Record<string, LiveRef> | undefined }) {
+  const found = refs
+    .split(';')
+    .map((r) => live?.[r.trim()])
+    .filter((r): r is LiveRef => !!r);
+  if (found.length === 0) return <>{text}</>;
+  return (
+    <ul className="space-y-1">
+      {found.map((r, i) => (
+        <li key={i}>
+          <span className="text-ink">{r.label}</span>
+          {r.contact && r.contact.name !== r.label ? <span className="text-muted">, {r.contact.name}</span> : null}
+          {r.contact?.phone ? (
+            <>
+              {' '}
+              <PhoneLink phone={r.contact.phone} />
+            </>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function ContentSections({ content, profileId }: { content: PlanContent; profileId?: string }) {
   const sections = SECTION_ORDER.filter((s) => (content.sections[s] ?? []).length > 0);
+  const allRefs = [
+    ...new Set(
+      Object.values(content.sections)
+        .flat()
+        .flatMap((e) => String((e as PlanEntry).fields['supported_by_refs'] ?? '').split(';'))
+        .map((r) => r.trim())
+        .filter(Boolean)
+    ),
+  ];
+  const { data: refData } = useQuery({
+    queryKey: ['plan-refs', profileId, allRefs.join(';')],
+    queryFn: () => api.get<{ refs: Record<string, LiveRef> }>(`/care-profiles/${profileId}/plan/refs?refs=${encodeURIComponent(allRefs.join(';'))}`),
+    enabled: !!profileId && allRefs.length > 0,
+  });
   if (sections.length === 0) return <p className="text-sm text-muted">This version is empty.</p>;
   return (
     <div className="space-y-4">
       {sections.map((s) => {
         const entries = content.sections[s] ?? [];
-        const fieldNames = [...new Set(entries.flatMap((e: PlanEntry) => Object.keys(e.fields)))];
+        // References behind "supported by" are read live, not shown as a column.
+        const fieldNames = [...new Set(entries.flatMap((e: PlanEntry) => Object.keys(e.fields)))].filter((f) => !f.endsWith('_refs'));
         const manage = SECTION_MANAGE_LINKS[s];
         const synthesized = PLAN_NARRATIVE_SECTIONS.has(s);
         return (
@@ -53,7 +105,11 @@ export function ContentSections({ content }: { content: PlanContent }) {
                     <tr key={e.key}>
                       {fieldNames.map((f) => (
                         <td key={f} className="py-1.5 pr-3 text-ink align-top whitespace-pre-line">
-                          {fieldText(e.fields[f])}
+                          {f === 'supported_by' && e.fields['supported_by_refs'] ? (
+                            <SupportedBy text={fieldText(e.fields[f])} refs={String(e.fields['supported_by_refs'])} live={refData?.refs} />
+                          ) : (
+                            fieldText(e.fields[f])
+                          )}
                         </td>
                       ))}
                     </tr>
@@ -124,12 +180,12 @@ export function VersionViewer({
               </div>
               {showRecord ? (
                 <div className="mt-3">
-                  <ContentSections content={data.version.content} />
+                  <ContentSections content={data.version.content} profileId={profileId} />
                 </div>
               ) : null}
             </div>
           ) : (
-            <ContentSections content={data.version.content} />
+            <ContentSections content={data.version.content} profileId={profileId} />
           )}
           {data.signatures.length > 0 ? (
             <div>

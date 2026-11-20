@@ -4,6 +4,7 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { providerAddressFields, withComposedAddress } from './providers';
 import type { Supplier } from '../types';
+import { linkSupplierToContact } from '../services/professionals';
 
 /**
  * Account-level supplier directory. Suppliers are the pharmacies and shops a
@@ -92,5 +93,7 @@ suppliersRouter.post('/', requireAuth, async (req, res) => {
       directions_link: normaliseUrl(parsed.data.directions_link),
     })
     .returning('*');
+  // The same business already in Contacts: linked, so its phone and hours show.
+  await linkSupplierToContact(db, supplier.id);
   res.status(201).json({ supplier });
 });

@@ -1,4 +1,5 @@
 import { db } from '../config/database';
+import { contactLine, supplyContext } from './alertContacts';
 import { dateInZone, hmInZone, startOfDayInZone } from '../lib/timezone';
 import { DOSE_AUDIT_ENTITY } from '../lib/doseOutcome';
 import { perDoseDrawdown } from './medicationSupply';
@@ -360,6 +361,8 @@ async function supplyHits(watch: WatchRow, ctx: EvalContext): Promise<WatchHit[]
   const rows = await q;
 
   const hits: WatchHit[] = [];
+  // Who to reorder from, and the quickest way: order online, call or email.
+  const reach = await supplyContext(rows.map((m: { id: string }) => m.id));
   for (const m of rows) {
     const packUnits = m.packs_on_hand != null && m.supply != null ? Number(m.packs_on_hand) * Number(m.supply) : 0;
     const remaining = Number(m.supply_remaining) + packUnits;
@@ -380,12 +383,18 @@ async function supplyHits(watch: WatchRow, ctx: EvalContext): Promise<WatchHit[]
       : daysLeft !== null
         ? `${name}'s ${m.name} has about ${shownDays} ${shownDays === 1 ? 'day' : 'days'} left.`
         : `${name}'s ${m.name} is running low.`;
+    const who = reach.get(m.id);
+    const action = who?.next_action ?? null;
     hits.push({
       key: `watch:${watch.id}:supply:${m.id}:${bucket}`,
-      text,
-      url: `/app/${m.care_profile_id}/medications`,
+      text: `${text}${contactLine(who?.contact ?? null)}`,
+      url: `/app/${m.care_profile_id}/medications?record=${m.id}`,
       urgent: out && !!m.critical,
-      ...(m.supplier_order_url ? { action_label: `Reorder${m.supplier ? ` from ${m.supplier}` : ''}`, action_url: String(m.supplier_order_url) } : {}),
+      ...(action?.href
+        ? { action_label: action.label, action_url: action.href }
+        : m.supplier_order_url
+          ? { action_label: `Reorder${m.supplier ? ` from ${m.supplier}` : ''}`, action_url: String(m.supplier_order_url) }
+          : {}),
       occurred_at: ctx.now.toISOString(),
     });
   }

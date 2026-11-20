@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'crypto';
+import { emergencyContactLines } from './emergencyContacts';
 import { z } from 'zod';
 import { accountIdForProfile, categoryIdByKey } from './documentCategories';
 import { db } from '../config/database';
@@ -110,6 +111,7 @@ const SECTIONS_BY_SOURCE: Record<string, PlanSection[]> = {
   treatments: ['treatments'],
   providers: ['providers'],
   plan: ['needs', 'directive', 'emergency_contacts'],
+  emergency_contacts: ['emergency_contacts'],
   // Care log entries carry no factual section of their own, but feed the
   // synthesized risk narrative (incidents, observations).
   log: [],
@@ -263,20 +265,7 @@ async function buildSection(profileId: string, section: FactualSection): Promise
       ];
     }
     case 'emergency_contacts': {
-      const plan = await db('care_plans').where({ care_profile_id: profileId }).first();
-      const contacts = ((): Array<{ name?: string; relationship?: string; phone?: string }> => {
-        const raw = plan?.emergency_contacts;
-        if (Array.isArray(raw)) return raw as Array<{ name?: string; relationship?: string; phone?: string }>;
-        if (typeof raw === 'string') {
-          try {
-            const parsed = JSON.parse(raw);
-            return Array.isArray(parsed) ? parsed : [];
-          } catch {
-            return [];
-          }
-        }
-        return [];
-      })();
+      const contacts = await emergencyContactLines(profileId);
       return contacts
         .filter((c) => c.name)
         .map((c) => ({
@@ -449,19 +438,7 @@ export async function gatherNarrativeSources(profileId: string): Promise<Narrati
       t.name,
     ]);
   }
-  const contacts = ((): Array<{ name?: string; relationship?: string; phone?: string }> => {
-    const raw = plan?.emergency_contacts;
-    if (Array.isArray(raw)) return raw;
-    if (typeof raw === 'string') {
-      try {
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  })();
+  const contacts = await emergencyContactLines(profileId);
   return {
     name: profile?.full_name ?? 'this person',
     display_name: profile?.preferred_name ?? profile?.first_name ?? profile?.full_name ?? 'this person',
@@ -786,6 +763,7 @@ async function synthesizeNarrative(profileId: string): Promise<Record<NarrativeS
   // 12 months. It is set once, on the first plan, and kept through every
   // rebuild unless a person moves it; a reminder task comes ahead of it.
   const dueBy = await standardReviewDue(profileId);
+  const supportRefs = await strategyRefs(profileId);
 
   const dedup = (entries: PlanEntry[]): PlanEntry[] => {
     const seen = new Set<string>();
@@ -808,6 +786,9 @@ async function synthesizeNarrative(profileId: string): Promise<Record<NarrativeS
           strategy: s.strategy,
           method: s.method ?? null,
           supported_by: s.supported_by ?? null,
+          // Who and what supports it, by reference, so the plan shows names
+          // and phones live; the text above is the signed snapshot.
+          supported_by_refs: supportRefs.get(String(s.condition ?? '').trim().toLowerCase()) ?? null,
         },
       }))
     ),
@@ -1446,6 +1427,30 @@ export async function deleteCarePlan(profileId: string): Promise<number> {
   return versions.length;
 }
 
+/**
+ * For each condition, who and what supports it as references: the contact
+ * who treats it, each medicine for it (its prescriber shows live) and each
+ * treatment (its practitioner shows live). Stored on the strategy as
+ * "providers:<id>;medications:<id>", keyed by condition name.
+ */
+async function strategyRefs(profileId: string): Promise<Map<string, string>> {
+  const [conditions, meds, treatments] = await Promise.all([
+    db('medical_conditions').where({ care_profile_id: profileId }).select('id', 'name', 'treating_provider_id'),
+    db('medications').where({ care_profile_id: profileId, active: true }).whereNotNull('medical_condition_id').select('id', 'medical_condition_id'),
+    db('treatments').where({ care_profile_id: profileId, active: true }).whereNotNull('medical_condition_id').select('id', 'medical_condition_id'),
+  ]);
+  const out = new Map<string, string>();
+  for (const c of conditions as Array<{ id: string; name: string; treating_provider_id: string | null }>) {
+    const refs = [
+      ...(c.treating_provider_id ? [`providers:${c.treating_provider_id}`] : []),
+      ...(meds as Array<{ id: string; medical_condition_id: string }>).filter((m) => m.medical_condition_id === c.id).map((m) => `medications:${m.id}`),
+      ...(treatments as Array<{ id: string; medical_condition_id: string }>).filter((t) => t.medical_condition_id === c.id).map((t) => `treatments:${t.id}`),
+    ];
+    if (refs.length) out.set(c.name.trim().toLowerCase(), refs.join(';'));
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // First-run baseline gaps
 
@@ -1466,8 +1471,7 @@ export async function baselineGaps(profileId: string): Promise<BaselineGaps> {
       .count<{ count: string }[]>('cpp.id as count'),
     db('care_plans').where({ care_profile_id: profileId }).first(),
   ]);
-  const contacts = plan?.emergency_contacts;
-  const contactList = Array.isArray(contacts) ? contacts : typeof contacts === 'string' ? JSON.parse(contacts || '[]') : [];
+  const contactList = await emergencyContactLines(profileId);
   const needsCount =
     asStringArray(plan?.dietary_requirements).length +
     asStringArray(plan?.mobility_aids).length +

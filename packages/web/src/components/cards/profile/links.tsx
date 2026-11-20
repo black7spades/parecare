@@ -1,7 +1,8 @@
+import { CONTACT_LINK } from '../../ContactStrip';
 /** A phone number and an email address, tappable wherever they appear. */
 export function PhoneLink({ phone }: { phone: string }) {
   return (
-    <a href={`tel:${phone.replace(/[^\d+]/g, '')}`} className="text-primary hover:underline">
+    <a href={`tel:${phone.replace(/[^\d+]/g, '')}`} className={CONTACT_LINK}>
       {phone}
     </a>
   );
@@ -10,7 +11,7 @@ export function PhoneLink({ phone }: { phone: string }) {
 /** An email address as a mailto link. */
 export function EmailLink({ email }: { email: string }) {
   return (
-    <a href={`mailto:${email}`} className="text-primary hover:underline">
+    <a href={`mailto:${email}`} className={CONTACT_LINK}>
       {email}
     </a>
   );

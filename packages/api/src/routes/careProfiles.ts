@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import { contactSummaries } from '../services/professionals';
+import { firstEmergencyContacts, isSelfRelationship } from '../services/emergencyContacts';
+import { providerTypeLabel } from '../lib/providerTypes';
 import multer from 'multer';
 import path from 'path';
 import { buildSituation } from '../services/situation';
@@ -265,16 +268,21 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
     return;
   }
 
-  const [pins, plans, gpProviders, poa, activity, events, journeyRows, healthRows] = await Promise.all([
+  const [pins, gps, emergency, owners, poa, activity, events, journeyRows, healthRows] = await Promise.all([
     db('care_profile_pins').where({ account_id: accountId }).whereIn('care_profile_id', ids).select('care_profile_id'),
-    db('care_plans').whereIn('care_profile_id', ids).select('care_profile_id', 'emergency_contacts'),
-    // The GP lives in providers; their phone backs up the named contact's.
-    db('care_profile_providers as cpp')
-      .join('providers as p', 'cpp.provider_id', 'p.id')
-      .whereIn('cpp.care_profile_id', ids)
-      .where({ 'p.provider_type': 'gp' })
-      .whereNotNull('p.phone')
-      .select('cpp.care_profile_id', 'p.phone'),
+    // Their main GP, shown on its own labelled row: the one marked main,
+    // else the first linked, never one they no longer see.
+    db.raw(
+      `SELECT DISTINCT ON (cpp.care_profile_id) cpp.care_profile_id, cpp.provider_id
+         FROM care_profile_providers cpp JOIN providers p ON p.id = cpp.provider_id
+        WHERE cpp.care_profile_id = ANY(?) AND lower(p.provider_type) = 'gp' AND cpp.ended_on IS NULL
+        ORDER BY cpp.care_profile_id, cpp.is_main DESC, cpp.created_at ASC, cpp.id`,
+      [ids]
+    ),
+    // Who to call when the person has no contact of their own on file.
+    firstEmergencyContacts(ids),
+    // The account holder's own phone, for someone managing their own health.
+    db('care_profiles as cp').join('accounts as a', 'a.id', 'cp.account_id').whereIn('cp.id', ids).select('cp.id', 'a.phone'),
     // Power of attorney can be held by a person in the care circle or by an
     // organisation in the providers list (e.g. a law firm). Gather both.
     Promise.all([
@@ -334,7 +342,7 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
     ...new Set(profiles.map((p) => (p as CareProfile).contact_account_id).filter((v): v is string => !!v)),
   ];
   const contactAccounts = contactAccountIds.length
-    ? await db('accounts').whereIn('id', contactAccountIds).select('id', 'display_name', 'email')
+    ? await db('accounts').whereIn('id', contactAccountIds).select('id', 'display_name', 'email', 'phone')
     : [];
   const contactAccountMap = new Map(contactAccounts.map((a) => [a.id, a]));
 
@@ -344,7 +352,7 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
     ...new Set(profiles.map((p) => (p as CareProfile).contact_provider_id).filter((v): v is string => !!v)),
   ];
   const contactProviders = contactProviderIds.length
-    ? await db('providers').whereIn('id', contactProviderIds).select('id', 'name', 'phone', 'email')
+    ? await db('providers').whereIn('id', contactProviderIds).select('id', 'name', 'phone', 'email', 'provider_type')
     : [];
   const contactProviderMap = new Map(contactProviders.map((p) => [p.id, p]));
 
@@ -359,11 +367,11 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
   const contactProfileMap = new Map(contactProfiles.map((p) => [p.id, p]));
 
   const pinSet = new Set(pins.map((p: { care_profile_id: string }) => p.care_profile_id));
-  const planMap = new Map(plans.map((p: { care_profile_id: string }) => [p.care_profile_id, p]));
-  const gpPhoneMap = new Map<string, string>();
-  for (const g of gpProviders as Array<{ care_profile_id: string; phone: string }>) {
-    if (!gpPhoneMap.has(g.care_profile_id)) gpPhoneMap.set(g.care_profile_id, g.phone);
-  }
+  const gpRows = (gps as { rows: Array<{ care_profile_id: string; provider_id: string }> }).rows;
+  const gpSummaries = await contactSummaries(db, gpRows.map((g) => g.provider_id));
+  const gpMap = new Map(gpRows.map((g) => [g.care_profile_id, gpSummaries.get(g.provider_id) ?? null] as const));
+  const emergencyMap = emergency;
+  const ownerPhoneMap = new Map((owners as Array<{ id: string; phone: string | null }>).map((o) => [o.id, o.phone?.trim() || null]));
   const poaMap = new Map<string, Array<Record<string, unknown>>>();
   for (const m of poa as Array<{ care_profile_id: string }>) {
     const arr = poaMap.get(m.care_profile_id) ?? [];
@@ -387,15 +395,22 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
   }
 
   const result = profiles.map((p) => {
-    const plan = planMap.get(p.id) as { emergency_contacts?: unknown } | undefined;
-    const contacts = Array.isArray(plan?.emergency_contacts) ? (plan!.emergency_contacts as Array<{ phone?: string }>) : [];
-    // The named contact leads; a linked user supplies their email; the GP
-    // and emergency contact remain the fallback for a phone.
+    // The named contact leads; a linked user supplies their email. Every
+    // phone says whose it is, and the GP has a row of its own, never a
+    // plain "Phone".
     const cp = p as CareProfile;
     const linked = cp.contact_account_id ? contactAccountMap.get(cp.contact_account_id) : undefined;
     const contactProvider = cp.contact_provider_id ? contactProviderMap.get(cp.contact_provider_id) : undefined;
     const carerProfile = cp.contact_profile_id ? contactProfileMap.get(cp.contact_profile_id) : undefined;
-    const primaryPhone = cp.contact_phone || contactProvider?.phone || carerProfile?.contact_phone || gpPhoneMap.get(p.id) || contacts[0]?.phone || null;
+    const gp = gpMap.get(p.id) ?? null;
+    const { phone: primaryPhone, owner: primaryPhoneOwner } = whosePhone({
+      profile: cp,
+      contactProvider,
+      carerProfile,
+      linked,
+      ownerPhone: ownerPhoneMap.get(p.id) ?? null,
+      emergency: emergencyMap.get(p.id) ?? null,
+    });
     const primaryEmail = cp.contact_email || contactProvider?.email || carerProfile?.contact_email || linked?.email || null;
     const contactName =
       cp.contact_kind === 'self'
@@ -425,6 +440,8 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
       contact_relationship: cp.contact_relationship ?? null,
       primary_email: primaryEmail,
       primary_phone: primaryPhone,
+      primary_phone_owner: primaryPhoneOwner,
+      gp: gp ? { name: gp.name, phone: gp.phone } : null,
       poa_holders: (poaMap.get(p.id) ?? []).map((m) => ({
         display_name: m['display_name'],
         poa_type: m['poa_type'],
@@ -438,6 +455,47 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
   });
   res.json({ profiles: result });
 });
+
+/**
+ * The phone a card shows, with whose it is: the person's named contact (a
+ * daughter, a care home), their own phone when they manage their own
+ * health, else who to call in an emergency. Never the GP under a plain
+ * "Phone" label: the GP has its own row.
+ */
+function whosePhone(o: {
+  profile: CareProfile;
+  contactProvider?: { name: string; phone: string | null; provider_type?: string | null };
+  carerProfile?: { full_name: string; contact_phone: string | null };
+  linked?: { display_name: string | null; phone?: string | null };
+  ownerPhone: string | null;
+  emergency: { name: string; phone: string | null; relationship: string | null } | null;
+}): { phone: string | null; owner: { name: string; label: string } | null } {
+  const cp = o.profile;
+  const said = (v: string | null | undefined) => (v && v.trim() ? v.trim() : null);
+  const self = isSelfRelationship(cp.owner_relationship);
+  if (cp.contact_kind === 'contact' && said(cp.contact_phone)) {
+    return { phone: said(cp.contact_phone), owner: { name: cp.contact_name?.trim() || 'Contact', label: said(cp.contact_relationship) ?? 'Contact' } };
+  }
+  if (cp.contact_kind === 'provider' && o.contactProvider && said(o.contactProvider.phone)) {
+    return {
+      phone: said(o.contactProvider.phone),
+      owner: { name: o.contactProvider.name, label: said(cp.contact_relationship) ?? providerTypeLabel(o.contactProvider.provider_type ?? null) ?? 'Contact' },
+    };
+  }
+  if (cp.contact_kind === 'profile' && o.carerProfile && said(o.carerProfile.contact_phone)) {
+    return { phone: said(o.carerProfile.contact_phone), owner: { name: o.carerProfile.full_name, label: said(cp.contact_relationship) ?? 'Carer' } };
+  }
+  if (cp.contact_kind === 'user' && o.linked && said(o.linked.phone)) {
+    return { phone: said(o.linked.phone), owner: { name: o.linked.display_name ?? 'Contact', label: said(cp.contact_relationship) ?? 'Contact' } };
+  }
+  // Their own phone: typed on the profile, or the account's when it is theirs.
+  const own = said(cp.contact_kind === 'self' || self ? cp.contact_phone : null) ?? (self ? o.ownerPhone : null);
+  if (own) return { phone: own, owner: { name: cp.full_name, label: 'Own phone' } };
+  if (o.emergency && said(o.emergency.phone)) {
+    return { phone: said(o.emergency.phone), owner: { name: o.emergency.name, label: o.emergency.relationship ?? 'Emergency contact' } };
+  }
+  return { phone: null, owner: null };
+}
 
 // Lightweight pinned list for the left nav. Returns the custom order and the
 // last-activity timestamp so the nav can arrange by recent activity, name, or

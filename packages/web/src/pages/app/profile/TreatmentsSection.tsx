@@ -7,6 +7,8 @@ import { PencilIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { RecordPanel } from '../../../components/record/RecordPanel';
+import { ContactStrip } from '../../../components/ContactStrip';
+import { ContactPicker, changedContactFieldsAs, pickedFrom, type PickedContact } from '../../../components/ContactPicker';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import {
@@ -204,6 +206,17 @@ export function TreatmentsSection({ profileId, careName, canManage, canLog }: {
           }}
           onClose={panel.close}
         >
+          <section>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Who provides it</h3>
+            {current.practitioner ? (
+              <ContactStrip contact={current.practitioner} profileId={profileId} book={{ condition: current.medical_condition_id }} />
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm text-muted">No one linked yet.</p>
+                {canManage ? <Button size="xs" variant="ghost" onClick={() => setEditing(current)}>Add who provides it</Button> : null}
+              </div>
+            )}
+          </section>
           <section>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Sessions</h3>
             <ObservationHistory profileId={profileId} treatment={current} canLog={canLog} onChanged={invalidate} />
@@ -463,6 +476,7 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved, onDelete }: {
     (treatment?.metrics ?? []).map((m) => ({ id: m.id, name: m.name, unit: m.unit ?? '', value_type: m.value_type }))
   );
   const [removedMetricIds, setRemovedMetricIds] = useState<string[]>([]);
+  const [practitioner, setPractitioner] = useState<PickedContact>(pickedFrom(treatment?.practitioner ?? null));
   const [error, setError] = useState('');
 
   const { data: conditionData } = useQuery({
@@ -499,6 +513,8 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved, onDelete }: {
         as_needed: asNeeded,
         instructions: instructions.trim() || null,
         active,
+        // Who provides it, picked or named.
+        ...changedContactFieldsAs('practitioner', pickedFrom(treatment?.practitioner ?? null), practitioner),
       };
       const cleanMetrics = metrics
         .map((m, i) => ({ ...m, name: m.name.trim(), unit: m.unit.trim(), sort_order: i }))
@@ -533,7 +549,19 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved, onDelete }: {
 
   return (
     <Modal open onClose={onClose} title={treatment ? 'Edit treatment' : 'Add treatment'} wide>
-      <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); if (name.trim()) mutation.mutate(); }}>
+      <form
+        className="space-y-5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          // Save always answers: say what is missing.
+          if (!name.trim()) {
+            setError('Write the treatment name first, then save.');
+            return;
+          }
+          setError('');
+          mutation.mutate();
+        }}
+      >
         {!treatment ? (
           <div>
             <label htmlFor="treatment-template" className="block text-sm font-medium text-ink mb-1">Start from a ready-made set-up</label>
@@ -546,7 +574,7 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved, onDelete }: {
         ) : null}
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. CPAP therapy" />
+          <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. CPAP therapy" />
           <div>
             <label htmlFor="treatment-category" className="block text-sm font-medium text-ink mb-1">Kind of treatment</label>
             <select id="treatment-category" className={`${SELECT} w-full`} value={category} onChange={(e) => setCategory(e.target.value)}>
@@ -565,6 +593,15 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved, onDelete }: {
           </div>
           <Input label="How often" value={frequency} onChange={(e) => setFrequency(e.target.value)} placeholder="e.g. Every night" />
         </div>
+
+        <ContactPicker
+          id="treatment-practitioner"
+          label="Who provides it"
+          profileId={profileId}
+          value={practitioner}
+          onChange={setPractitioner}
+          placeholder="Search Contacts or type their name, e.g. Maya Lopez"
+        />
 
 
         <div className="flex flex-wrap gap-4">
@@ -634,7 +671,7 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved, onDelete }: {
           ) : <span />}
           <div className="flex gap-2">
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>Save</Button>
+            <Button type="submit" loading={mutation.isPending}>Save</Button>
           </div>
         </div>
       </form>

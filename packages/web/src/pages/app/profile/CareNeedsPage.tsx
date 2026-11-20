@@ -4,20 +4,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
-import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
-import { Input } from '../../../components/ui/Input';
+import { EmergencyContactsEditor } from '../../../components/EmergencyContactsEditor';
 import { CatalogueCombo, OptionChips } from '../../../components/CatalogueCombo';
 import { PagePurpose } from '../../../components/PagePurpose';
 import { useProfile } from './ProfileLayout';
-import {
-  RELATIONSHIPS,
-  providerTypeLabel,
-  type CareDocument,
-  type CarePlan,
-  type CircleMember,
-  type EmergencyContact,
-  type Provider,
-} from '../../../lib/care';
+import { type CareDocument, type CarePlan } from '../../../lib/care';
 
 /**
  * The data entry home for the facts the care plan owns itself:
@@ -31,11 +22,7 @@ const EMPTY_PLAN: CarePlan = {
   communication_needs: [],
   advance_care_directive: false,
   advance_care_directive_location: null,
-  emergency_contacts: [],
 };
-
-const selectClass =
-  'rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
 export function CareNeedsPage() {
   const { profile, careName, canEdit } = useProfile();
@@ -56,7 +43,6 @@ export function CareNeedsPage() {
       dietary_requirements: asArray<string>(p.dietary_requirements),
       mobility_aids: asArray<string>(p.mobility_aids),
       communication_needs: asArray<string>(p.communication_needs),
-      emergency_contacts: asArray<EmergencyContact>(p.emergency_contacts),
     };
   }, [data]);
 
@@ -143,13 +129,11 @@ export function CareNeedsPage() {
 
       <div className="card">
         <h3 className="text-sm font-semibold text-ink">Emergency contacts</h3>
-        <p className="text-sm text-muted mb-3">Who to call first, picked from the care circle and their contacts.</p>
-        <EmergencyContactsTable
-          profileId={profile.id}
-          contacts={plan.emergency_contacts}
-          onChange={(v) => savePlan({ emergency_contacts: v })}
-          canEdit={canEdit}
-        />
+        <p className="text-sm text-muted mb-3">
+          Who to call first, picked from you, the care circle and their contacts. Each phone comes from the person's own
+          record, so a number changed there changes here too.
+        </p>
+        <EmergencyContactsEditor profileId={profile.id} canEdit={canEdit} ownerRelationship={profile.owner_relationship ?? null} />
       </div>
     </div>
   );
@@ -262,264 +246,20 @@ function DirectiveUpload({ profileId }: { profileId: string }) {
         type="button"
         variant="secondary"
         size="sm"
-        disabled={!file}
         loading={uploadMutation.isPending}
-        onClick={() => uploadMutation.mutate()}
+        onClick={() => {
+          // Upload always answers: say what is missing.
+          if (!file) {
+            setError('Choose the directive file first, then upload it.');
+            return;
+          }
+          setError('');
+          uploadMutation.mutate();
+        }}
       >
         Upload directive
       </Button>
       {error ? <p className="text-sm text-red-600 w-full">{error}</p> : null}
-    </div>
-  );
-}
-
-/**
- * Emergency contacts as an editable table. Who to call is picked from the
- * people already in the system, the care circle and the providers, so the
- * name is never typed. The phone completes automatically for providers and
- * can be filled in for circle members.
- */
-export function EmergencyContactsTable({
-  profileId,
-  contacts,
-  onChange,
-  canEdit,
-}: {
-  profileId: string;
-  contacts: EmergencyContact[];
-  onChange: (v: EmergencyContact[]) => void;
-  canEdit: boolean;
-}) {
-  const [who, setWho] = useState('');
-  const [customName, setCustomName] = useState('');
-  const [relationship, setRelationship] = useState('');
-  const [phone, setPhone] = useState('');
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [editRelationship, setEditRelationship] = useState('');
-  const [editPhone, setEditPhone] = useState('');
-
-  const { data: circleData } = useQuery({
-    queryKey: ['circle', profileId],
-    queryFn: () => api.get<{ members: CircleMember[] }>(`/care-profiles/${profileId}/circle`),
-    enabled: canEdit,
-  });
-  const { data: providerData } = useQuery({
-    queryKey: ['providers', profileId],
-    queryFn: () => api.get<{ providers: Provider[] }>(`/care-profiles/${profileId}/providers`),
-    enabled: canEdit,
-  });
-  const members = circleData?.members ?? [];
-  const providers = providerData?.providers ?? [];
-
-  const pickWho = (value: string) => {
-    setWho(value);
-    if (value === 'other') {
-      setCustomName('');
-      setRelationship('');
-      setPhone('');
-      return;
-    }
-    const [source, id] = value.split(':');
-    if (source === 'member') {
-      const m = members.find((x) => x.id === id);
-      setRelationship(m?.relationship ?? '');
-      setPhone('');
-    } else if (source === 'provider') {
-      const p = providers.find((x) => x.id === id);
-      setRelationship('');
-      setPhone(p?.phone ?? '');
-    }
-  };
-
-  const nameOf = (value: string): string => {
-    if (value === 'other') return customName.trim();
-    const [source, id] = value.split(':');
-    if (source === 'member') return members.find((x) => x.id === id)?.display_name ?? '';
-    if (source === 'provider') return providers.find((x) => x.id === id)?.name ?? '';
-    return '';
-  };
-
-  const [addMissing, setAddMissing] = useState('');
-  const add = () => {
-    const name = nameOf(who);
-    // Add always answers: say which boxes still need filling.
-    const gaps = [!name ? (who === 'other' ? 'their name' : 'who it is') : null, !phone.trim() ? 'a phone number' : null].filter(Boolean);
-    if (gaps.length) {
-      setAddMissing(`This emergency contact needs ${gaps.join(' and ')}.`);
-      return;
-    }
-    setAddMissing('');
-    onChange([...contacts, { name, relationship: relationship || undefined, phone: phone.trim() }]);
-    setWho('');
-    setCustomName('');
-    setRelationship('');
-    setPhone('');
-  };
-
-  return (
-    <div className="space-y-3">
-      {contacts.length === 0 ? (
-        <p className="text-sm text-muted">No emergency contacts recorded.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="py-1.5 pr-3 text-left font-medium text-muted">Name</th>
-                <th className="py-1.5 pr-3 text-left font-medium text-muted">Relationship</th>
-                <th className="py-1.5 pr-3 text-left font-medium text-muted">Phone</th>
-                {canEdit ? <th className="py-1.5 w-24" /> : null}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {contacts.map((c, i) => (
-                <tr key={`${c.name}-${i}`}>
-                  <td className="py-2 pr-3 font-medium text-ink">{c.name}</td>
-                  <td className="py-2 pr-3 text-ink">
-                    {editingIndex === i ? (
-                      <select
-                        aria-label={`Relationship of ${c.name}`}
-                        className={selectClass}
-                        value={editRelationship}
-                        onChange={(e) => setEditRelationship(e.target.value)}
-                      >
-                        <option value="">Prefer not to say</option>
-                        {RELATIONSHIPS.filter((r) => r !== 'Myself').map((r) => (
-                          <option key={r} value={r}>
-                            {r}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      c.relationship ?? ''
-                    )}
-                  </td>
-                  <td className="py-2 pr-3 text-ink whitespace-nowrap">
-                    {editingIndex === i ? (
-                      <Input
-                        aria-label={`Phone for ${c.name}`}
-                        type="tel"
-                        value={editPhone}
-                        onChange={(e) => setEditPhone(e.target.value)}
-                        className="w-40"
-                      />
-                    ) : (
-                      c.phone
-                    )}
-                  </td>
-                  {canEdit ? (
-                    <td className="py-2 text-right whitespace-nowrap">
-                      {editingIndex === i ? (
-                        <>
-                          <Button
-                            size="xs"
-                            variant="secondary"
-                            className="mr-1"
-                            onClick={() => {
-                              onChange(
-                                contacts.map((x, idx) =>
-                                  idx === i ? { ...x, relationship: editRelationship || undefined, phone: editPhone.trim() } : x
-                                )
-                              );
-                              setEditingIndex(null);
-                            }}
-                          >
-                            Save
-                          </Button>
-                          <Button size="xs" variant="ghost" onClick={() => setEditingIndex(null)}>
-                            Cancel
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          <Button
-                            size="xs"
-                            variant="ghost"
-                            className="mr-1"
-                            aria-label="Edit emergency contact"
-                            title="Edit"
-                            onClick={() => {
-                              setEditingIndex(i);
-                              setEditRelationship(c.relationship ?? '');
-                              setEditPhone(c.phone);
-                            }}
-                          >
-                            <PencilIcon />
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="ghost-danger"
-                            aria-label="Delete emergency contact"
-                            title="Delete"
-                            onClick={() => onChange(contacts.filter((_, idx) => idx !== i))}
-                          >
-                            <TrashIcon />
-                          </Button>
-                        </>
-                      )}
-                    </td>
-                  ) : null}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {canEdit ? (
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-muted">Who</span>
-            <select aria-label="Who to contact in an emergency" className={selectClass} value={who} onChange={(e) => pickWho(e.target.value)}>
-              <option value="">Choose who to call</option>
-              {members.length > 0 ? (
-                <optgroup label="People in the care circle">
-                  {members.map((m) => (
-                    <option key={m.id} value={`member:${m.id}`}>
-                      {m.display_name}
-                      {m.relationship ? `, ${m.relationship}` : ''}
-                    </option>
-                  ))}
-                </optgroup>
-              ) : null}
-              {providers.length > 0 ? (
-                <optgroup label="Professionals and organisations">
-                  {providers.map((p) => (
-                    <option key={p.id} value={`provider:${p.id}`}>
-                      {p.name}, {providerTypeLabel(p.provider_type)}
-                    </option>
-                  ))}
-                </optgroup>
-              ) : null}
-              <option value="other">Someone not in PareCare</option>
-            </select>
-          </label>
-          {who === 'other' ? (
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-muted">Name</span>
-              <Input aria-label="Emergency contact name" value={customName} onChange={(e) => setCustomName(e.target.value)} className="w-40" />
-            </label>
-          ) : null}
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-muted">Relationship</span>
-            <select aria-label="Relationship to this person" className={selectClass} value={relationship} onChange={(e) => setRelationship(e.target.value)}>
-              <option value="">Prefer not to say</option>
-              {RELATIONSHIPS.filter((r) => r !== 'Myself').map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-muted">Phone</span>
-            <Input aria-label="Emergency contact phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-40" />
-          </label>
-          <Button type="button" variant="secondary" size="sm" onClick={add}>
-            Add
-          </Button>
-          {addMissing ? <p className="basis-full text-sm text-red-600" role="alert">{addMissing}</p> : null}
-        </div>
-      ) : null}
     </div>
   );
 }
