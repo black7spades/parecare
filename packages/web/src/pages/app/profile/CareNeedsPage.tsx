@@ -339,9 +339,16 @@ export function EmergencyContactsTable({
     return '';
   };
 
+  const [addMissing, setAddMissing] = useState('');
   const add = () => {
     const name = nameOf(who);
-    if (!name || !phone.trim()) return;
+    // Add always answers: say which boxes still need filling.
+    const gaps = [!name ? (who === 'other' ? 'their name' : 'who it is') : null, !phone.trim() ? 'a phone number' : null].filter(Boolean);
+    if (gaps.length) {
+      setAddMissing(`This emergency contact needs ${gaps.join(' and ')}.`);
+      return;
+    }
+    setAddMissing('');
     onChange([...contacts, { name, relationship: relationship || undefined, phone: phone.trim() }]);
     setWho('');
     setCustomName('');
@@ -507,9 +514,10 @@ export function EmergencyContactsTable({
             <span className="text-xs text-muted">Phone</span>
             <Input aria-label="Emergency contact phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-40" />
           </label>
-          <Button type="button" variant="secondary" size="sm" disabled={!nameOf(who) || !phone.trim()} onClick={add}>
+          <Button type="button" variant="secondary" size="sm" onClick={add}>
             Add
           </Button>
+          {addMissing ? <p className="basis-full text-sm text-red-600" role="alert">{addMissing}</p> : null}
         </div>
       ) : null}
     </div>

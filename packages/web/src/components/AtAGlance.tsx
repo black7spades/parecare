@@ -17,6 +17,7 @@ interface TaskRow {
   id: string;
   completed: boolean;
   next_due_at: string;
+  all_day?: boolean;
 }
 
 function when(d: Date): string {
@@ -93,7 +94,10 @@ export function AtAGlance({ profileId }: { profileId: string }) {
 
   // Open tasks
   const open = (tasks.data?.reminders ?? []).filter((t) => !t.completed);
-  const overdue = open.filter((t) => new Date(t.next_due_at).getTime() < now).length;
+  // Any time that day is overdue only once the day is over.
+  const overdue = open.filter((t) =>
+    t.all_day ? new Date(t.next_due_at).getTime() + 24 * 3600 * 1000 <= now : new Date(t.next_due_at).getTime() < now
+  ).length;
   const taskValue = tasks.isLoading ? loading : tasks.isError ? trouble : open.length === 0 ? 'All done' : `${open.length} open`;
   const taskDetail = overdue > 0 ? `${overdue} overdue` : null;
 

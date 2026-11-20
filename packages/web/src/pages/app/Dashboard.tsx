@@ -558,10 +558,17 @@ export function Dashboard() {
 function PareWelcomeCard() {
   const openWithMessage = useAssistantStore((s) => s.openWithMessage);
   const [draft, setDraft] = useState('');
+  const [empty, setEmpty] = useState(false);
 
   function submit() {
     const message = draft.trim();
-    if (!message) return;
+    // Send always answers: an empty box says what to do.
+    if (!message) {
+      setEmpty(true);
+      document.getElementById('pare-welcome-input')?.focus();
+      return;
+    }
+    setEmpty(false);
     setDraft('');
     openWithMessage(message);
   }
@@ -581,6 +588,7 @@ function PareWelcomeCard() {
         }}
       >
         <input
+          id="pare-welcome-input"
           type="text"
           aria-label="Talk to Pare"
           placeholder="Talk to Pare"
@@ -588,10 +596,11 @@ function PareWelcomeCard() {
           onChange={(e) => setDraft(e.target.value)}
           className="flex-1 rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
         />
-        <Button type="submit" disabled={!draft.trim()}>
+        <Button type="submit">
           Send
         </Button>
       </form>
+      {empty ? <p className="text-sm text-red-600 mt-2" role="alert">Write who you want to start with, for example My mum Dorothy, then send it.</p> : null}
       <p className="text-xs text-muted mt-4">
         Prefer to fill in a form yourself?{' '}
         <Link to="/app/profiles/new" className="text-primary hover:underline">

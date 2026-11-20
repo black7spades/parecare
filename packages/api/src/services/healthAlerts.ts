@@ -1,4 +1,5 @@
 import { db } from '../config/database';
+import { contactSummaries, type ContactSummary } from './professionals';
 
 /**
  * Health alerts: the "this has gone on long enough, talk to the GP" nudges.
@@ -60,13 +61,8 @@ export interface HealthAlertSymptom {
   severity: number;
 }
 
-export interface HealthAlertGp {
-  id: string;
-  name: string;
-  organisation: string | null;
-  phone: string | null;
-  booking_link: string | null;
-}
+/** The GP to contact, as someone to call. */
+export type HealthAlertGp = ContactSummary;
 
 export interface HealthAlert {
   /** Stable identifier, also used for dismissal. */
@@ -197,17 +193,12 @@ export async function gatherHealthAlerts(
     .where('p.provider_type', 'gp')
     .orderBy('p.name', 'asc')
     .select('cpp.care_profile_id', 'p.id', 'p.name', 'p.organisation', 'p.phone', 'p.booking_link');
+  // Who to call, in the same shape as every other contact.
+  const summaries = await contactSummaries(db, gpRows.map((g) => g.id));
   const gpByProfile = new Map<string, HealthAlertGp>();
   for (const g of gpRows) {
-    if (!gpByProfile.has(g.care_profile_id)) {
-      gpByProfile.set(g.care_profile_id, {
-        id: g.id,
-        name: g.name,
-        organisation: g.organisation,
-        phone: g.phone,
-        booking_link: g.booking_link,
-      });
-    }
+    const sum = summaries.get(g.id);
+    if (!gpByProfile.has(g.care_profile_id) && sum) gpByProfile.set(g.care_profile_id, sum);
   }
 
   const symptomsByCondition = new Map<string, typeof symptoms>();

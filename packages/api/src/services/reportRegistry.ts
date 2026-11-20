@@ -1,6 +1,7 @@
 import { Knex } from 'knex';
 import { summarizeSpend, toNum, type SpendCategory } from './healthSpend';
 import { BUILT_IN_PROVIDER_TYPES } from '../lib/providerTypes';
+import { repeatChoice, repeatLabel } from '../lib/repeat';
 
 export interface ReportField {
   key: string;
@@ -896,7 +897,7 @@ registerSection({
     fields: [
       { key: 'title', label: 'Title', type: 'text' },
       { key: 'body', label: 'Description', type: 'text' },
-      { key: 'reminder_type', label: 'Repeat type', type: 'enum', enumValues: ['once', 'daily', 'weekly', 'monthly'] },
+      { key: 'reminder_type', label: 'Repeats', type: 'enum', enumValues: ["Doesn't repeat", 'Every day', 'Every week', 'Every 2 weeks', 'Every month', 'Every 3 months', 'Every 6 months', 'Every year'] },
       { key: 'next_due_at', label: 'Due date', type: 'date' },
       { key: 'completed', label: 'Completed', type: 'boolean' },
       { key: 'completed_at', label: 'Completed at', type: 'date' },
@@ -931,7 +932,7 @@ registerSection({
       _profile_name: r._profile_name,
       title: r.title,
       body: r.body,
-      reminder_type: r.reminder_type,
+      reminder_type: repeatLabel(repeatChoice(r)),
       next_due_at: r.next_due_at,
       completed: r.completed,
       completed_at: r.completed_at,

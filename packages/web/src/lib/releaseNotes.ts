@@ -20,6 +20,35 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.47.0',
+    date: '2026-11-20',
+    summary: 'Book anything from anywhere: Book it on tasks, who a task is with and their number, documents to bring, and repeats from every day to every year.',
+    groups: [
+      { heading: 'Added', items: [
+        'Book anything from anywhere. A task that books something now has a Book it button, in the list and on the task. It opens the booking form already filled in: what it is for, the kind, who it is with, the condition and the documents to bring. A contact has New appointment with them, a condition has Book an appointment for this, and a health alert books with the GP for that condition.',
+        'Who a task is with. New task asks who it is with. Pick someone from Contacts or type a new name with what they do and their phone, and they are filed in Contacts. The task shows them with a phone to tap, and the task list has Who with and Their phone columns.',
+        'Tasks can be edited. Open a task and choose Edit to change anything on it.',
+        'PareCare works out who and what. "Ask OT for progress report" links the occupational therapist, and "Book a neurologist" becomes a booking task. The task says what was worked out, with Change.',
+        'One task per booking. A next step or a new task for a booking that an open task already covers joins it, rather than making a second task. The screen says so and offers Keep them separate. Two tasks that already look like the same booking offer Join them.',
+        'Numbers in notes can be tapped. Phone numbers, emails and links in task, appointment and record notes can be tapped. A note that names someone with a number offers to add them to Contacts, and a contact with no number offers to save the one in the note.',
+        'Documents on tasks and appointments. A task can have documents attached as it is written, and an appointment can list documents to bring when it is made. Booking from a task brings its documents along.',
+        'More on every appointment. Who\'s going, with who is driving; an interpreter and the language; a video call link that shows as Join the video call; and how to get ready, with a reminder at 7pm the night before. The appointment shows who it is with, their phone, email and booking link.',
+        'Repeats from every day to every year. Tasks and appointments can repeat every day, every week, every 2 weeks, every month, every 3 months, every 6 months or every year. A repeating appointment can stop repeating, and moving one offers to move the ones after it.',
+        'Contacts show their appointments and open tasks.',
+      ] },
+      { heading: 'Changed', items: [
+        'A blank time means any time that day. A task or appointment saved with a date and no time shows as "any time" that day rather than 9am, and is not overdue until the day is over.',
+        'The appointment form is grouped into What and who, When, Where, Getting there, Bring and get ready, and Notes and cost.',
+        'The next appointment on the overview shows who to call and what to bring.',
+        'Save always answers. Add task, Upload, Add note, Attach, Add on emergency contacts and Send to Pare say what is missing rather than sitting greyed out.',
+        'Pare books and adds tasks the same way the forms do, with who it is with, their phone, documents, repeats and everything else above.',
+      ] },
+      { heading: 'Fixed', items: [
+        'Task notes are in one place. Notes added to a task in either of the two old places now show together on the task.',
+      ] },
+    ],
+  },
+  {
     version: '0.46.3',
     date: '2026-11-20',
     summary: 'Urgent fixes: refused doses alert the family, recording a death stops reminders, and birthdays stay on the right day.',

@@ -38,6 +38,12 @@ import {
   type ProviderKind,
 } from '../../../lib/care';
 import { useProfile } from './ProfileLayout';
+import { Link, useNavigate } from 'react-router-dom';
+import { format } from 'date-fns';
+import { ContactStrip } from '../../../components/ContactStrip';
+import { summaryFromProvider, type Task } from '../../../lib/care';
+import { bookingHref } from '../../../lib/booking';
+import { whenText, type Appointment } from './AppointmentsPage';
 
 const kindOf = (p: { kind?: ProviderKind }): ProviderKind => p.kind ?? 'person';
 const basedAtLabel = (kind: ProviderKind) => (kind === 'organisation' ? 'Part of' : 'Based at');
@@ -85,6 +91,19 @@ export function ProvidersPage() {
     organisation: everything.filter((p) => kindOf(p) === 'organisation').length,
   };
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['providers', profile.id] });
+  const navigate = useNavigate();
+  // Their appointments and open tasks come from what the other pages
+  // already fetch, filtered to this contact.
+  const { data: apptData } = useQuery({
+    queryKey: ['appointments', profile.id],
+    queryFn: () => api.get<{ appointments: Appointment[] }>(`/care-profiles/${profile.id}/appointments`),
+    enabled: !!panel.current,
+  });
+  const { data: taskData } = useQuery({
+    queryKey: ['tasks', profile.id],
+    queryFn: () => api.get<{ reminders: Task[] }>(`/care-profiles/${profile.id}/reminders?status=all`),
+    enabled: !!panel.current,
+  });
 
   // The type filter offers custom types actually in use, not just built-ins.
   const filters: DataFilter<Provider>[] = [
@@ -339,6 +358,10 @@ export function ProvidersPage() {
         const pKind = kindOf(p);
         const practice = practiceName(p.practice_id);
         const segmented = !!(p.address_line1 || p.address_suburb || p.address_state || p.address_postcode);
+        const theirAppointments = (apptData?.appointments ?? [])
+          .filter((a) => a.provider_id === p.id)
+          .sort((a, b) => (b.starts_at ? new Date(b.starts_at).getTime() : Number.MAX_SAFE_INTEGER) - (a.starts_at ? new Date(a.starts_at).getTime() : Number.MAX_SAFE_INTEGER));
+        const theirTasks = (taskData?.reminders ?? []).filter((t) => t.provider_id === p.id && !t.completed);
         return (
           <RecordPanel
             key={p.id}
@@ -353,8 +376,6 @@ export function ProvidersPage() {
               { label: 'Type', value: providerTypeLabel(p.provider_type) },
               { label: 'Also known as', value: (p.also_known_as ?? []).join(', ') },
               { label: basedAtLabel(pKind), value: p.organisation },
-              { label: 'Phone', value: p.phone ? <a href={`tel:${p.phone}`} className="text-primary hover:underline">{p.phone}</a> : null },
-              { label: 'Email', value: p.email ? <a href={`mailto:${p.email}`} className="text-primary hover:underline">{p.email}</a> : null },
               ...(segmented
                 ? [
                     { label: 'Street', value: p.address_line1 },
@@ -373,25 +394,54 @@ export function ProvidersPage() {
               ...(p.practice_id && practice
                 ? [{ label: basedAtLabel(pKind), value: practice, to: `/app/${profile.id}/providers?record=${p.practice_id}` }]
                 : []),
-              ...(p.booking_link ? [{ label: 'Booking', value: 'Book appointment', href: p.booking_link }] : []),
-              ...(p.directions_link ? [{ label: 'Directions', value: 'Get directions', href: p.directions_link }] : []),
             ]}
             onEdit={() => {
               setEditing(p);
               setEditorOpen(true);
             }}
-            extra={[
-              ...(p.phone ? [{ label: 'Call', onRun: () => { window.location.href = `tel:${p.phone}`; } }] : []),
-              ...(p.email ? [{ label: 'Email', onRun: () => { window.location.href = `mailto:${p.email}`; } }] : []),
-              ...(p.booking_link ? [{ label: 'Book', onRun: () => { window.open(p.booking_link!, '_blank', 'noopener,noreferrer'); } }] : []),
-            ]}
+            extra={[{ label: 'New appointment with them', onRun: () => navigate(bookingHref(profile.id, { provider: p.id })) }]}
             deleteLabel="Remove"
             onDelete={() => {
               removeProviders([p]);
               panel.close();
             }}
             onClose={panel.close}
-          />
+          >
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">How to reach them</h3>
+              <ContactStrip contact={summaryFromProvider(p)} profileId={profile.id} book={false} />
+            </section>
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Appointments</h3>
+              {theirAppointments.length === 0 ? (
+                <p className="text-sm text-muted">No appointments with them yet.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {theirAppointments.map((a) => (
+                    <li key={a.id} className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                      <Link to={`/app/${profile.id}/appointments?record=${a.id}`} className="text-primary hover:underline">{a.title}</Link>
+                      <span className="text-xs text-muted">{whenText(a)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Open tasks</h3>
+              {theirTasks.length === 0 ? (
+                <p className="text-sm text-muted">No open tasks with them.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {theirTasks.map((t) => (
+                    <li key={t.id} className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                      <Link to={`/app/${profile.id}/tasks?record=${t.id}`} className="text-primary hover:underline">{t.title}</Link>
+                      <span className="text-xs text-muted">Due {format(new Date(t.next_due_at), 'd MMM yyyy')}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </RecordPanel>
         );
       })() : null}
     </div>

@@ -181,3 +181,10 @@ export function normaliseProviderType(input: string | null | undefined): string 
   if (seeded) return seeded;
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
+
+/** What someone does, in words: built-in codes read as their label ("gp" is "GP"). */
+export function providerTypeLabel(type: string | null | undefined): string | null {
+  const t = String(type ?? '').trim();
+  if (!t || t === 'other') return null;
+  return BUILT_IN_PROVIDER_TYPES.find((b) => b.value === t)?.label ?? t;
+}

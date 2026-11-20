@@ -1,5 +1,6 @@
 import { db } from '../config/database';
-import { formatInZone } from '../lib/timezone';
+import { dateInZone, formatInZone } from '../lib/timezone';
+import { repeatChoice, repeatLabel } from '../lib/repeat';
 import { withCategory } from './documentCategories';
 import { roleMaySee } from '../lib/circleRoles';
 import type { CareAccess, CareProfile } from '../types';
@@ -398,7 +399,11 @@ export async function buildProfileContext(
     sections.push(
       `## Upcoming tasks and appointments, next 30 days\n` +
         tasks
-          .map((t) => `- ${fmtDate(t.next_due_at, timeZone)}: ${t.title}${t.reminder_type !== 'once' ? ` (repeats ${t.reminder_type})` : ''}${t.body ? ` — ${t.body}` : ''}`)
+          .map((t) => {
+            const choice = repeatChoice(t);
+            const when = (t as { all_day?: boolean }).all_day ? `${dateInZone(new Date(t.next_due_at), timeZone)}, any time that day` : fmtDate(t.next_due_at, timeZone);
+            return `- ${when}: ${t.title}${choice !== 'once' ? ` (repeats ${repeatLabel(choice).toLowerCase()})` : ''}${t.body ? ` — ${t.body}` : ''}`;
+          })
           .join('\n')
     );
   }

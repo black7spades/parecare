@@ -515,13 +515,98 @@ export interface PracticeMember {
   kind?: ProviderKind;
 }
 
+/** Each day of the week a place opens, Monday = 1, times as HH:MM. */
+export type OpeningHours = Array<{ day: 1 | 2 | 3 | 4 | 5 | 6 | 7; opens: string; closes: string }>;
+
+/** One shape for anyone to call, wherever they are named. The API builds it. */
+export interface ContactSummary {
+  source: 'contact' | 'supplier' | 'circle' | 'account' | 'typed';
+  id: string | null;
+  name: string;
+  role_label: string | null;
+  organisation: { id: string | null; name: string } | null;
+  phone: string | null;
+  after_hours_phone: string | null;
+  fax: string | null;
+  email: string | null;
+  booking_link: string | null;
+  order_link: string | null;
+  directions_link: string | null;
+  address: string | null;
+  opening_hours: OpeningHours | null;
+  /** Which details came from their practice. */
+  inherited: string[];
+  is_main: boolean;
+  ended_on: string | null;
+}
+
+/** A contact record as someone to call. */
+export function summaryFromProvider(p: Pick<Provider, 'id' | 'name' | 'provider_type' | 'organisation' | 'phone' | 'email' | 'booking_link' | 'directions_link' | 'address' | 'practice_id' | 'inherited_fields'>): ContactSummary {
+  return {
+    source: 'contact',
+    id: p.id,
+    name: p.name,
+    role_label: p.provider_type && p.provider_type !== 'other' ? providerTypeLabel(p.provider_type) : null,
+    organisation: p.organisation ? { id: p.practice_id ?? null, name: p.organisation } : null,
+    phone: p.phone,
+    after_hours_phone: null,
+    fax: null,
+    email: p.email,
+    booking_link: p.booking_link,
+    order_link: null,
+    directions_link: p.directions_link,
+    address: p.address,
+    opening_hours: null,
+    inherited: p.inherited_fields ?? [],
+    is_main: false,
+    ended_on: null,
+  };
+}
+
+/** Someone who can be picked for a job: the account holder first, then the circle. */
+export interface PickablePerson {
+  ref: { account_id: string } | { circle_member_id: string };
+  name: string;
+  label: string | null;
+  phone: string | null;
+  email: string | null;
+  has_login: boolean;
+}
+
+export const personKey = (ref: PickablePerson['ref']) => ('account_id' in ref ? `a:${ref.account_id}` : `m:${ref.circle_member_id}`);
+
 export interface Task {
   id: string;
   title: string;
   body: string | null;
-  reminder_type: 'once' | 'daily' | 'weekly' | 'monthly';
+  reminder_type: 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+  /** The repeat choice, e.g. fortnightly or yearly. */
+  repeat?: string;
   next_due_at: string;
+  /** Any time that day: next_due_at is midnight that day. */
+  all_day?: boolean;
   assigned_to: string | null;
+  /** Assigned to the account holder, who is not a circle member. */
+  assigned_account_id?: string | null;
+  assigned_name?: string | null;
+  provider_id?: string | null;
+  provider_name?: string | null;
+  /** Who it is with, as someone to call. */
+  provider?: ContactSummary | null;
+  next_step_type_id?: string | null;
+  kind?: { id: string; name: string; system_key: string | null; books: boolean } | null;
+  /** Done by booking an appointment. */
+  books?: boolean;
+  medical_condition_id?: string | null;
+  condition?: { id: string; name: string } | null;
+  documents?: Array<{ id: string; label: string; category_name: string | null }>;
+  /** Details worked out from the words rather than chosen. */
+  inferred_fields?: string[];
+  booked_appointment?: { id: string; title: string; starts_at: string; status: string } | null;
+  possible_duplicate_of?: { id: string; title: string } | null;
+  merged_into_id?: string | null;
+  merged_into_title?: string | null;
+  created_at?: string;
   completed: boolean;
   completed_at: string | null;
   completed_by_name: string | null;

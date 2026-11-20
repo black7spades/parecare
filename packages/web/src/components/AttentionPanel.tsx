@@ -12,7 +12,8 @@ import { IngestModal } from './IngestModal';
 import { browserTimeZone } from '../lib/datetime';
 import { severityLabel } from '../pages/app/profile/ConditionSymptoms';
 import { coverMedDay, type ChartAdmin } from '../lib/marCoverage';
-import type { MedicationRecord } from '../lib/care';
+import type { ContactSummary, MedicationRecord } from '../lib/care';
+import { ContactStrip } from './ContactStrip';
 
 export interface AttentionItem {
   profile_id: string;
@@ -39,7 +40,8 @@ export interface HealthAlert {
   since: string;
   days: number;
   symptoms: Array<{ id: string; name: string; severity: number }>;
-  gp: { id: string; name: string; organisation: string | null; phone: string | null; booking_link: string | null } | null;
+  /** Their GP, as someone to call. */
+  gp: ContactSummary | null;
 }
 
 const ATTENTION_ICON: Record<AttentionItem['kind'], string> = {
@@ -263,20 +265,13 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
               </div>
               <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1.5 pl-7 text-sm">
                 {a.gp ? (
-                  <>
-                    <span className="text-ink">
-                      Consider contacting their GP: <span className="font-medium">{a.gp.name}</span>
-                      {a.gp.organisation ? <span className="text-muted"> · {a.gp.organisation}</span> : null}
-                    </span>
-                    {a.gp.phone ? (
-                      <a href={`tel:${a.gp.phone.replace(/[^\d+]/g, '')}`} className="text-primary hover:underline">
-                        {a.gp.phone}
-                      </a>
-                    ) : null}
-                    <Link to={`/app/${a.profile_id}/appointments?new=1&provider=${a.gp.id}`}>
-                      <Button size="xs" variant="secondary">Book appointment</Button>
-                    </Link>
-                  </>
+                  <ContactStrip
+                    contact={a.gp}
+                    profileId={a.profile_id}
+                    lead="Consider contacting their GP"
+                    size="compact"
+                    book={{ condition: a.condition_id }}
+                  />
                 ) : (
                   <>
                     <span className="text-ink">Consider contacting their GP. No GP is on file yet.</span>

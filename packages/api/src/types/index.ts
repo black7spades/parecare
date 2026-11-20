@@ -369,9 +369,17 @@ export interface Reminder {
   assigned_to: string | null;
   title: string;
   body: string | null;
-  reminder_type: 'once' | 'daily' | 'weekly' | 'monthly';
+  reminder_type: 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly';
   next_due_at: string | Date;
   rrule: string | null;
+  /** Any time that day: next_due_at is midnight that day where they live. */
+  all_day?: boolean;
+  assigned_account_id: string | null;
+  provider_id?: string | null;
+  next_step_type_id?: string | null;
+  medical_condition_id?: string | null;
+  merged_into_id?: string | null;
+  inferred_fields?: string[];
   completed: boolean;
   completed_at: string | Date | null;
   completed_by_account_id: string | null;

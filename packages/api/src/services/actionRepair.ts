@@ -32,7 +32,7 @@ export function replyIntendsToAct(reply: string): boolean {
 export const PROFILE_ACTION_REFERENCE = [
   '- {"type":"log_event","entry_type":"visit|medication|medical_appointment|phone_call|decision_made|concern_raised|observation|handover","title":optional,"body":required,"occurred_at":optional ISO}',
   '- {"type":"record_medication","medication_name":exact name,"status":"given|refused|omitted|held|self_administered","dose_given":optional,"notes":optional,"administered_at":optional ISO}',
-  '- {"type":"add_task","title":required,"body":optional,"due_at":ISO,"repeat":"once|daily|weekly|monthly"}',
+  '- {"type":"add_task","title":required,"body":optional,"due_at":"ISO, or YYYY-MM-DD for any time that day","repeat":"once|daily|weekly|fortnightly|monthly|three_monthly|six_monthly|yearly","with":optional who it is with,"with_type":optional,"with_phone":optional their number,"kind":optional,"for_condition":optional,"assign_to":optional,"documents":optional names}',
   '- {"type":"add_medication","medication_name":required,"dose":optional,"schedule_times":optional ["HH:MM"],"supply":optional,"packs_on_hand":optional}',
   '- {"type":"update_medication","medication_name":exact name, then any of "dose","schedule_times",["HH:MM"],"supply","supply_remaining","packs_on_hand"}',
   '- {"type":"restock_medication","medication_name":exact name,"packs_on_hand":optional,"units_remaining":optional} when a new pack or repeat is picked up',
@@ -41,10 +41,10 @@ export const PROFILE_ACTION_REFERENCE = [
   '- {"type":"raise_question","title":required,"body":optional}',
   '- {"type":"add_provider","kind":"organisation or person, optional","provider_type":"gp|specialist|legal|social_worker for a professional, practice|clinic|pharmacy|care_facility for an organisation, or plain words such as Neurologist or Government department","name":required,"organisation":"the organisation they are based at, optional","phone":optional}',
   '- {"type":"add_substance","substance":required,"status":optional,"frequency":optional}',
-  '- {"type":"book_appointment","title":required,"appointment_type":"consultation|test|procedure|therapy|review|vaccination|other","provider_name":optional,"location":optional,"starts_at":ISO,"ends_at":optional ISO,"notes":optional,"cost_estimate":optional number} for an appointment being made, never a log entry',
+  '- {"type":"book_appointment","title":required,"appointment_type":"consultation|test|procedure|therapy|review|vaccination|other","provider_name":optional,"location":optional,"starts_at":ISO,"ends_at":optional ISO,"notes":optional,"cost_estimate":optional number,"for_next_step":optional open task title,"no_set_time":optional true,"repeat":optional,"telehealth_link":optional,"interpreter_language":optional,"going":optional names,"driver":optional,"preparation":optional,"documents_to_bring":optional names,"with_phone":optional} for an appointment being made, never a log entry',
   '- {"type":"update_appointment","title":its current title, then any of "new_title","provider_name","location","starts_at" (to move it),"ends_at","status":"scheduled|completed|cancelled|missed","notes","cost_actual"}',
   '- {"type":"complete_task","title":the open task title,"completion_note":optional}',
-  '- {"type":"reschedule_task","title":the open task title,"due_at":ISO,"repeat":optional "once|daily|weekly|monthly"}',
+  '- {"type":"reschedule_task","title":the open task title,"due_at":"ISO, or YYYY-MM-DD for any time that day","repeat":optional "once|daily|weekly|fortnightly|monthly|three_monthly|six_monthly|yearly"}',
   '- {"type":"record_cost","amount":number,"spent_on":optional YYYY-MM-DD,"description":optional,"funding_source":optional "self|ndis|private_health|medicare|government|other"}',
   '- {"type":"record_reading","treatment_name":exact name,"observed_at":optional ISO,"status":"completed|partial|skipped|refused","notes":required unless completed,"values":[{"metric_name":exact measure name,"value_number":number}]}',
 ].join('\n');

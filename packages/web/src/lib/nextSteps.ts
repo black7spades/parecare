@@ -39,6 +39,8 @@ export interface NextStep {
   provider_id?: string | null;
   provider_name?: string | null;
   provider_type?: string | null;
+  /** Who it is with, as someone to call. */
+  provider?: import('./care').ContactSummary | null;
   /** The appointment booked to carry it out, if any. */
   /** Empty starts_at: the details are saved but it is not booked yet. */
   led_to: { id: string; title: string; starts_at: string | null; status: string } | null;

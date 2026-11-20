@@ -11,6 +11,7 @@ import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import { TrashIcon } from '../ui/icons';
 import { ForwardedFromTag, ForwardTags, type ForwardedFrom, type SentForward } from '../ForwardNotes';
+import { LinkedText } from '../LinkedText';
 
 export interface RecordField {
   label: string;
@@ -313,6 +314,10 @@ export function RecordPanel({
                     onSubmit={(e) => {
                       e.preventDefault();
                       if (note.trim()) addNote.mutate();
+                      else {
+                        setError('Write the note first, then add it.');
+                        document.getElementById('record-note')?.focus();
+                      }
                     }}
                   >
                     <Textarea
@@ -324,7 +329,7 @@ export function RecordPanel({
                       onChange={(e) => setNote(e.target.value)}
                     />
                     <div className="flex justify-end">
-                      <Button type="submit" size="sm" variant="secondary" loading={addNote.isPending} disabled={!note.trim()}>Add note</Button>
+                      <Button type="submit" size="sm" variant="secondary" loading={addNote.isPending}>Add note</Button>
                     </div>
                   </form>
                 ) : null}
@@ -335,7 +340,9 @@ export function RecordPanel({
                     {extras!.notes.map((n) => (
                       <li key={n.id} className="rounded-md border border-border px-3 py-2">
                         <div className="flex items-start gap-2">
-                          <p className={`flex-1 text-sm whitespace-pre-wrap break-words ${(n.forwarded_to ?? []).length ? 'text-muted' : 'text-ink'}`}>{n.body}</p>
+                          <p className={`flex-1 text-sm whitespace-pre-wrap break-words ${(n.forwarded_to ?? []).length ? 'text-muted' : 'text-ink'}`}>
+                            <LinkedText text={n.body} profileId={profileId} canEdit={canEdit} />
+                          </p>
                           {canEdit && onForwardNote ? (
                             <Button size="xs" variant="ghost" onClick={() => onForwardNote(n.id)}>Forward</Button>
                           ) : null}
@@ -389,7 +396,14 @@ export function RecordPanel({
                       <option value="">Attach one already on file…</option>
                       {attachable.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
                     </select>
-                    <Button size="sm" variant="secondary" disabled={!attachId} loading={attach.isPending} onClick={() => attach.mutate(attachId)}>Attach</Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      loading={attach.isPending}
+                      onClick={() => (attachId ? attach.mutate(attachId) : setError('Pick a document from the list, then attach it.'))}
+                    >
+                      Attach
+                    </Button>
                   </div>
                 ) : null}
               </section>

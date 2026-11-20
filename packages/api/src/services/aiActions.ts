@@ -4,7 +4,7 @@ import { accountIdForProfile, resolveCategoryByName, withCategory } from './docu
 import { db } from '../config/database';
 import { auditContext, currentAuditSource, currentUndoBatch, type AuditSource } from './auditContext';
 import type { Account, CareAccess, CareCircleMember, CareProfile } from '../types';
-import { parseZonedTime, formatInZone, dateInZone } from '../lib/timezone';
+import { parseZonedTime, formatInZone, dateInZone, isValidTimeZone } from '../lib/timezone';
 import { matchProfileNames, type NameCandidate } from '../lib/nameMatch';
 import { drawDownOnHand, perDoseDrawdown } from './medicationSupply';
 import { resolveSupplierId } from '../routes/medications';
@@ -17,10 +17,14 @@ import { SUBSTANCE_STATUSES, SUBSTANCE_ROUTES } from '../routes/substanceUse';
 import { resolveSymptomCatalogueId } from '../routes/symptomCatalogue';
 import { resolveNeurotypeAttributeCatalogueId, ATTRIBUTE_KINDS } from '../routes/neurotypeAttributeCatalogue';
 import { linkAddressToProfile, syncProfileResidence, RESIDENCE_KIND } from './addresses';
-import { APPOINTMENT_TYPES, APPOINTMENT_STATUSES, addBookingTodo, addNextSteps, syncAppointmentSpend } from '../routes/appointments';
-import { createForwards, deliverForwards, type ForwardItem } from './noteForwards';
+import { addNextSteps } from '../routes/appointments';
+import { APPOINTMENT_TYPES, APPOINTMENT_STATUSES, BookingProblem, bookAppointment, updateAppointment, type AppointmentInput } from './booking';
+import { TaskProblem, createTask, updateTask, type TaskInput } from './tasks';
+import { findPickablePerson } from './people';
+import { REPEAT_CHOICE_VALUES } from '../lib/repeat';
+import { findPhones } from '../lib/phoneText';
+import { createForwards, type ForwardItem } from './noteForwards';
 import { addCirclePerson, findCircleMemberByName, isAddedPerson } from './circlePeople';
-import { appointmentPlaceColumns, ensureProfessional, type KnownPlace } from './professionals';
 import { OBSERVATION_STATUSES } from '../routes/treatments';
 import { FUNDING_SOURCES, CLAIM_STATUSES } from './healthSpend';
 import { addPracticeMember, syncPracticeMembers, whereNamed } from './providerPractices';
@@ -82,12 +86,30 @@ const recordMedicationBatchSchema = z.object({
     .max(20),
 });
 
-const addTaskSchema = z.object({
-  type: z.literal('add_task'),
+/**
+ * A task. "with" is who it is with (a contact by name; a new name is filed
+ * in Contacts) and "with_phone" their number, so a number is never left only
+ * in the notes. A date with no time (YYYY-MM-DD) means any time that day.
+ * The same task service as the task form, so who and what are worked out
+ * from the words and a second task for one booking joins the first.
+ */
+const taskFields = {
   title: z.string().min(1).max(255),
   body: z.string().optional().nullable(),
   due_at: z.string(),
-  repeat: z.enum(['once', 'daily', 'weekly', 'monthly']).default('once'),
+  repeat: z.enum(REPEAT_CHOICE_VALUES).default('once'),
+  with: z.string().max(255).optional().nullable(),
+  with_type: z.string().max(100).optional().nullable(),
+  with_phone: z.string().max(50).optional().nullable(),
+  kind: z.string().max(100).optional().nullable(),
+  for_condition: z.string().max(255).optional().nullable(),
+  assign_to: z.string().max(255).optional().nullable(),
+  documents: z.array(z.string().max(255)).max(20).optional().nullable(),
+};
+
+const addTaskSchema = z.object({
+  type: z.literal('add_task'),
+  ...taskFields,
 });
 
 const CARE_PHASES = [
@@ -437,6 +459,24 @@ const updateProfileSchema = z.object({
  * given at booking time becomes an estimated spend entry, exactly as the
  * appointment form does.
  */
+const appointmentExtras = {
+  with_type: z.string().max(100).optional().nullable(),
+  with_phone: z.string().max(50).optional().nullable(),
+  for_condition: z.string().max(255).optional().nullable(),
+  // A day with no set time, such as a walk-in blood test.
+  no_set_time: z.boolean().optional().nullable(),
+  repeat: z.enum(REPEAT_CHOICE_VALUES).optional().nullable(),
+  repeat_until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  telehealth_link: z.string().max(2000).optional().nullable(),
+  // Setting a language marks that an interpreter is needed.
+  interpreter_language: z.string().max(100).optional().nullable(),
+  // Who is going, by name, or "me"; the driver is one of them.
+  going: z.array(z.string().max(255)).max(20).optional().nullable(),
+  driver: z.string().max(255).optional().nullable(),
+  preparation: z.string().max(4000).optional().nullable(),
+  documents_to_bring: z.array(z.string().max(255)).max(20).optional().nullable(),
+};
+
 const bookAppointmentSchema = z.object({
   type: z.literal('book_appointment'),
   title: z.string().min(1).max(255),
@@ -449,10 +489,11 @@ const bookAppointmentSchema = z.object({
   ends_at: z.string().optional().nullable(),
   notes: z.string().max(4000).optional().nullable(),
   cost_estimate: z.number().min(0).max(1e9).optional().nullable(),
-  // The open next step this booking carries out, such as "Referral" or
-  // "Dr Patel, neurologist". Booking it ticks the step off and anything
-  // forwarded to it lands on this appointment.
+  // The title of the open task or next step this booking is for, such as
+  // "Book a neurologist" or "Dr Patel, neurologist". Booking it ticks the task
+  // off and anything forwarded to it lands on this appointment.
   for_next_step: z.string().max(255).optional().nullable(),
+  ...appointmentExtras,
 });
 
 /**
@@ -520,6 +561,7 @@ const updateAppointmentSchema = z.object({
   notes: z.string().max(4000).optional().nullable(),
   cost_estimate: z.number().min(0).max(1e9).optional().nullable(),
   cost_actual: z.number().min(0).max(1e9).optional().nullable(),
+  ...appointmentExtras,
 });
 
 /**
@@ -564,8 +606,9 @@ const completeTaskSchema = z.object({
 const rescheduleTaskSchema = z.object({
   type: z.literal('reschedule_task'),
   title: z.string().min(1).max(255),
+  // A date with no time (YYYY-MM-DD) means any time that day.
   due_at: z.string(),
-  repeat: z.enum(['once', 'daily', 'weekly', 'monthly']).optional(),
+  repeat: z.enum(REPEAT_CHOICE_VALUES).optional(),
 });
 
 /**
@@ -731,10 +774,7 @@ const crossProfileTaskSchema = z.object({
     .array(
       z.object({
         profile_name: z.string().min(1),
-        title: z.string().min(1).max(255),
-        body: z.string().optional().nullable(),
-        due_at: z.string(),
-        repeat: z.enum(['once', 'daily', 'weekly', 'monthly']).default('once'),
+        ...taskFields,
       })
     )
     .min(1)
@@ -1161,27 +1201,6 @@ async function recordOneMedication(
 }
 
 /**
- * Resolve a spoken provider name to one already in the account's directory.
- * A name that matches nothing still books the appointment: losing the time
- * and place because a provider is not filed yet would be worse than the
- * missing link, so it is reported instead.
- */
-async function resolveProviderForAppointment(
-  name: string | null | undefined,
-  profileId: string,
-  /** Where the appointment is, carried into Contacts where it knows nothing yet. */
-  location?: string | null
-): Promise<{ providerId: string | null; note: string }> {
-  if (!name?.trim()) return { providerId: null, note: '' };
-  // Someone named for an appointment is someone this person sees: a name
-  // already in Contacts is linked, a new one is filed there as a professional.
-  const place = location?.trim() ? (appointmentPlaceColumns({ location }) as KnownPlace) : null;
-  const pro = await ensureProfessional(db, { profileId, name, place });
-  if (!pro) return { providerId: null, note: '' };
-  return { providerId: pro.id, note: pro.created ? ` Added ${pro.name} to Contacts.` : '' };
-}
-
-/**
  * Find the appointment a spoken title refers to: an exact title first, then a
  * partial match, preferring the next one still to come so "move my
  * physio appointment" lands on the upcoming one rather than last month's.
@@ -1243,7 +1262,10 @@ async function findOpenTaskByTitle(
   );
 }
 
-/** An open next step an appointment set off, found by its title or its kind. */
+/**
+ * The open task or next step a booking is for, found by its title, who it is
+ * with or its kind.
+ */
 async function findOpenNextStep(
   name: string,
   profileId: string
@@ -1254,7 +1276,7 @@ async function findOpenNextStep(
     .leftJoin('next_step_types as t', 'r.next_step_type_id', 't.id')
     .leftJoin('providers as p', 'r.provider_id', 'p.id')
     .where({ 'r.care_profile_id': profileId, 'r.completed': false })
-    .whereNotNull('r.appointment_id')
+    .whereNull('r.merged_into_id')
     .orderBy('r.created_at', 'desc')
     .select('r.id', 'r.title', 'r.provider_id', 't.name as type_name', 'p.name as provider_name')) as Array<{
     id: string;
@@ -1269,6 +1291,151 @@ async function findOpenNextStep(
     rows.find((r) => (r.type_name ?? '').toLowerCase() === needle) ??
     rows.find((r) => r.title.toLowerCase().includes(needle) || needle.includes(r.title.toLowerCase()));
   return hit ? { id: hit.id, title: hit.title, provider_id: hit.provider_id } : undefined;
+}
+
+/** A condition on this person, by what it is called. */
+async function findConditionByName(name: string | null | undefined, profileId: string): Promise<{ id: string; name: string } | undefined> {
+  const needle = name?.trim().toLowerCase();
+  if (!needle) return undefined;
+  const rows = (await db('medical_conditions').where({ care_profile_id: profileId }).select('id', 'name')) as Array<{ id: string; name: string }>;
+  return rows.find((r) => r.name.toLowerCase() === needle) ?? rows.find((r) => r.name.toLowerCase().includes(needle) || needle.includes(r.name.toLowerCase()));
+}
+
+/** Documents on file, by what they are called; names that match nothing are returned too. */
+async function findDocumentsByNames(names: string[] | null | undefined, profileId: string): Promise<{ ids: string[]; missing: string[] }> {
+  const wanted = (names ?? []).map((n) => n.trim()).filter(Boolean);
+  if (wanted.length === 0) return { ids: [], missing: [] };
+  const rows = (await db('documents').where({ care_profile_id: profileId }).orderBy('created_at', 'desc').select('id', 'label')) as Array<{ id: string; label: string }>;
+  const ids: string[] = [];
+  const missing: string[] = [];
+  for (const w of wanted) {
+    const l = w.toLowerCase();
+    const hit = rows.find((r) => r.label.toLowerCase() === l) ?? rows.find((r) => r.label.toLowerCase().includes(l) || l.includes(r.label.toLowerCase()));
+    if (hit) ids.push(hit.id);
+    else missing.push(w);
+  }
+  return { ids: [...new Set(ids)], missing };
+}
+
+/** "With" a person by name: someone in Contacts, or a new name to file, with their phone. */
+function withFields(a: { with?: string | null; with_type?: string | null; with_phone?: string | null; body?: string | null }): Pick<TaskInput, 'provider_name' | 'provider_type' | 'provider_phone'> {
+  if (!a.with?.trim()) return {};
+  // A number given only in the notes still goes on their record.
+  let phone = a.with_phone?.trim() || null;
+  if (!phone && a.body) {
+    const phones = findPhones(a.body);
+    if (phones.length === 1) phone = phones[0]!.text;
+  }
+  return { provider_name: a.with.trim(), provider_type: a.with_type?.trim() || null, provider_phone: phone };
+}
+
+/** The task form's fields from what Pare was asked. */
+async function taskInputFrom(
+  a: z.infer<typeof addTaskSchema> | Omit<z.infer<typeof addTaskSchema>, 'type'>,
+  profileId: string,
+  account: Account,
+  timeZone: string | null | undefined
+): Promise<{ input?: TaskInput; problem?: string; notes: string[] }> {
+  const notes: string[] = [];
+  const dueText = a.due_at.trim();
+  let due: Pick<TaskInput, 'next_due_at' | 'due_on'>;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dueText)) due = { due_on: dueText };
+  else {
+    const at = parseZonedTime(dueText, timeZone);
+    if (!at) return { problem: `Could not add the task "${a.title}": the due time was unclear.`, notes };
+    due = { next_due_at: at.toISOString() };
+  }
+  const condition = await findConditionByName(a.for_condition, profileId);
+  if (a.for_condition && !condition) notes.push(`No condition called "${a.for_condition}" is on file, so it is not tied to one.`);
+  let assign: Pick<TaskInput, 'assigned_to' | 'assigned_account_id'> = {};
+  if (a.assign_to?.trim()) {
+    const person = await findPickablePerson(profileId, account.id, a.assign_to);
+    if (person) assign = 'account_id' in person.ref ? { assigned_account_id: person.ref.account_id } : { assigned_to: person.ref.circle_member_id };
+    else notes.push(`${a.assign_to} is not in the care circle, so the task is for anyone.`);
+  }
+  const docs = await findDocumentsByNames(a.documents, profileId);
+  if (docs.missing.length) notes.push(`No document called ${docs.missing.map((m) => `"${m}"`).join(' or ')} is on file.`);
+  return {
+    input: {
+      title: a.title,
+      body: a.body ?? null,
+      ...due,
+      tz: timeZone ?? null,
+      repeat: a.repeat,
+      ...withFields(a),
+      kind: a.kind?.trim() || null,
+      medical_condition_id: condition?.id ?? null,
+      ...assign,
+      document_ids: docs.ids,
+    },
+    notes,
+  };
+}
+
+/** Who is going, by name or "me", with the driver among them. */
+async function attendeesFrom(
+  going: string[] | null | undefined,
+  driver: string | null | undefined,
+  profileId: string,
+  account: Account
+): Promise<{ attendees?: AppointmentInput['attendees']; missing: string[] }> {
+  const names = [...(going ?? []), ...(driver && !(going ?? []).some((g) => g.trim().toLowerCase() === driver.trim().toLowerCase()) ? [driver] : [])];
+  if (names.length === 0) return { missing: [] };
+  const missing: string[] = [];
+  const driverPerson = driver ? await findPickablePerson(profileId, account.id, driver) : undefined;
+  const out: NonNullable<AppointmentInput['attendees']> = [];
+  for (const n of names) {
+    const p = await findPickablePerson(profileId, account.id, n);
+    if (!p) {
+      missing.push(n);
+      continue;
+    }
+    const isDriver = !!driverPerson && JSON.stringify(driverPerson.ref) === JSON.stringify(p.ref);
+    out.push('account_id' in p.ref ? { account_id: p.ref.account_id, circle_member_id: null, is_driver: isDriver } : { circle_member_id: p.ref.circle_member_id, account_id: null, is_driver: isDriver });
+  }
+  return { attendees: out, missing };
+}
+
+/** The new booking fields shared by book_appointment and update_appointment. */
+async function appointmentExtrasInput(
+  a: z.infer<typeof bookAppointmentSchema> | z.infer<typeof updateAppointmentSchema>,
+  profileId: string,
+  account: Account
+): Promise<{ input: Partial<AppointmentInput>; notes: string[] }> {
+  const notes: string[] = [];
+  const input: Partial<AppointmentInput> = {};
+  if (a.for_condition !== undefined && a.for_condition !== null) {
+    const c = await findConditionByName(a.for_condition, profileId);
+    if (c) input.medical_condition_id = c.id;
+    else notes.push(`No condition called "${a.for_condition}" is on file, so it is not tied to one.`);
+  }
+  if (a.repeat) input.repeat = a.repeat;
+  if (a.repeat_until !== undefined) input.repeat_until = a.repeat_until;
+  if (a.telehealth_link !== undefined) input.telehealth_link = a.telehealth_link;
+  if (a.interpreter_language !== undefined) {
+    input.interpreter_language = a.interpreter_language;
+    input.interpreter_needed = !!a.interpreter_language?.trim();
+  }
+  if (a.preparation !== undefined) input.preparation = a.preparation;
+  if (a.going || a.driver) {
+    const people = await attendeesFrom(a.going, a.driver, profileId, account);
+    if (people.attendees) input.attendees = people.attendees;
+    if (people.missing.length) notes.push(`${people.missing.join(' and ')} ${people.missing.length === 1 ? 'is' : 'are'} not in the care circle, so I left them off who is going.`);
+  }
+  if (a.documents_to_bring) {
+    const docs = await findDocumentsByNames(a.documents_to_bring, profileId);
+    input.bring_document_ids = docs.ids;
+    if (docs.missing.length) notes.push(`No document called ${docs.missing.map((m) => `"${m}"`).join(' or ')} is on file to bring.`);
+  }
+  return { input, notes };
+}
+
+/** Midnight that day where they live, for something with no set time. */
+function dayStart(text: string, timeZone: string | null | undefined): Date | null {
+  const day = text.trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  // With no zone known, midnight UTC, never the server's own clock.
+  return (isValidTimeZone(timeZone) ? parseZonedTime(`${day}T00:00:00`, timeZone) : null) ?? new Date(`${day}T00:00:00Z`);
 }
 
 async function executeOne(
@@ -1317,21 +1484,27 @@ async function executeOne(
       return results;
     }
     case 'add_task': {
-      const due = parseZonedTime(action.due_at, timeZone);
-      if (!due) {
-        return `Could not add the task "${action.title}": the due time was unclear.`;
+      const built = await taskInputFrom(action, profileId, account, timeZone);
+      if (!built.input) return built.problem!;
+      let result;
+      try {
+        result = await db.transaction((trx) => createTask(trx, { profileId, actorId: account.id, source: 'pare', input: built.input!, timeZone }));
+      } catch (err) {
+        if (err instanceof TaskProblem) return `Could not add the task "${action.title}": ${err.message}`;
+        throw err;
       }
-      const [taskRow] = await db('reminders')
-        .insert({
-          care_profile_id: profileId,
-          title: action.title,
-          body: action.body ?? null,
-          reminder_type: action.repeat,
-          next_due_at: due,
-        })
-        .returning('id');
-      await audit(profileId, account.id, 'reminders', action.title, taskRow?.id);
-      return `Added the task "${action.title}" due ${formatInZone(due, timeZone)}.`;
+      const extra = [
+        ...result.filed.map((f) => `Added ${f.name} to Contacts.`),
+        ...built.notes,
+      ].join(' ');
+      if (result.joined_into) {
+        await audit(profileId, account.id, 'reminders', `updated ${result.joined_into.title}`, result.joined_into.id);
+        return `"${result.joined_into.title}" was already on the list for this booking, so I added these details to it rather than making a second task.${extra ? ` ${extra}` : ''}`;
+      }
+      await audit(profileId, account.id, 'reminders', action.title, result.reminder.id);
+      const due = new Date(result.reminder['next_due_at'] as string);
+      const when = result.reminder['all_day'] ? `on ${dateInZone(due, timeZone)}, any time that day` : formatInZone(due, timeZone);
+      return `Added the task "${action.title}" due ${when}.${extra ? ` ${extra}` : ''}`;
     }
     case 'add_medication': {
       const name = action.medication_name.trim();
@@ -1915,122 +2088,120 @@ async function executeOne(
     }
     case 'book_appointment': {
       const dateless = !action.starts_at?.trim();
-      const startsAt = dateless ? null : parseFutureWhen(action.starts_at, timeZone);
+      const allDay = !!action.no_set_time && !dateless;
+      const startsAt = dateless ? null : allDay ? dayStart(action.starts_at!, timeZone) : parseFutureWhen(action.starts_at, timeZone);
       if (!dateless && !startsAt) {
         return `${CLARIFY_MARK} I did not book "${action.title}": the date and time were unclear. When is it?`;
       }
-      const endsAt = parseFutureWhen(action.ends_at, timeZone);
+      const endsAt = allDay ? null : parseFutureWhen(action.ends_at, timeZone);
       const step = action.for_next_step ? await findOpenNextStep(action.for_next_step, profileId) : undefined;
       if (action.for_next_step && !step) {
-        return `${CLARIFY_MARK} I did not book "${action.title}": I could not find an open next step called "${action.for_next_step}". Which one is it for?`;
+        return `${CLARIFY_MARK} I did not book "${action.title}": I could not find an open task or next step called "${action.for_next_step}". Which one is it for?`;
       }
-      const resolved = await resolveProviderForAppointment(action.provider_name, profileId, action.location);
-      const providerNote = resolved.note;
-      // Booking a referral with no name given is with whoever it is to.
-      const providerId = resolved.providerId ?? step?.provider_id ?? null;
-      // Details already saved for this step, not booked yet: give them the date.
+      const extras = await appointmentExtrasInput(action, profileId, account);
+      // Details already saved for this task, not booked yet: give them the date.
       const waiting = step
-        ? ((await db('appointments').where({ care_profile_id: profileId, from_reminder_id: step.id }).whereNull('starts_at').first()) as
-            | { id: string; title: string }
-            | undefined)
+        ? ((await db('appointments').where({ care_profile_id: profileId, from_reminder_id: step.id }).whereNull('starts_at').first('id')) as { id: string } | undefined)
         : undefined;
-      const fields = {
+      const input: AppointmentInput = {
         title: action.title,
         appointment_type: action.appointment_type,
-        ...(providerId ? { provider_id: providerId } : {}),
-        ...(action.location !== undefined && action.location !== null ? appointmentPlaceColumns({ location: action.location }) : {}),
-        starts_at: startsAt,
-        ends_at: endsAt,
+        // Booking a referral with no name given is with whoever it is to.
+        ...(action.provider_name?.trim()
+          ? { provider_name: action.provider_name.trim(), provider_type: action.with_type ?? null, provider_phone: action.with_phone ?? null }
+          : step?.provider_id
+            ? { provider_id: step.provider_id }
+            : {}),
+        ...(action.location !== undefined && action.location !== null ? { location: action.location } : {}),
+        starts_at: startsAt ? startsAt.toISOString() : null,
+        ends_at: endsAt ? endsAt.toISOString() : null,
+        all_day: allDay,
         status: startsAt ? 'scheduled' : 'to_book',
         ...(action.notes ? { notes: action.notes } : {}),
+        ...(action.cost_estimate != null ? { cost_estimate: action.cost_estimate } : {}),
+        ...(step ? { from_reminder_id: step.id } : {}),
+        ...extras.input,
+        tz: timeZone ?? null,
       };
-      const [appointment] = waiting
-        ? await db('appointments').where({ id: waiting.id }).update({ ...fields, updated_at: db.fn.now() }).returning('*')
-        : await db('appointments')
-            .insert({
-              care_profile_id: profileId,
-              ...fields,
-              provider_id: providerId,
-              from_reminder_id: step?.id ?? (startsAt ? null : await addBookingTodo(profileId, action.title, account.id)),
-              created_by_account_id: account.id,
-            })
-            .returning('*');
-      // The cost is a ledger entry dated to the appointment day, never a
-      // field on the appointment, exactly as the booking form does it.
-      if (action.cost_estimate != null) {
-        await syncAppointmentSpend(appointment.id, profileId, account.id, startsAt, { estimate: action.cost_estimate });
+      let booked;
+      try {
+        booked = await db.transaction(async (trx) => {
+          if (waiting) {
+            const { from_reminder_id: _f, ...rest } = input;
+            void _f;
+            const r = await updateAppointment(trx, { profileId, appointmentId: waiting.id, actorId: account.id, input: rest, timeZone });
+            return r!;
+          }
+          return bookAppointment(trx, { profileId, actorId: account.id, input, timeZone });
+        });
+      } catch (err) {
+        if (err instanceof BookingProblem) return `${CLARIFY_MARK} I did not book "${action.title}": ${err.message}`;
+        throw err;
       }
+      const providerNote = booked.filed.map((f) => ` Added ${f.name} to Contacts.`).join('');
+      const extraNote = extras.notes.length ? ` ${extras.notes.join(' ')}` : '';
       if (!startsAt) {
-        await audit(profileId, account.id, 'appointments', `${action.title}, not booked yet`);
-        return `Saved "${action.title}" as not booked yet, with a to-do to book it. Tell me the date when it is booked.${providerNote}`;
+        await audit(profileId, account.id, 'appointments', `${action.title}, not booked yet`, booked.appointment.id);
+        const todo = step ? `"${step.title}" stays on the list until it has a date` : 'with a to-do to book it';
+        return `Saved "${action.title}" as not booked yet, ${todo}. Tell me the date when it is booked.${providerNote}${extraNote}`;
       }
-      // Booking a next step ticks it off, and notes forwarded to it land here.
-      let stepNote = '';
-      if (step) {
-        await db('reminders')
-          .where({ id: step.id, care_profile_id: profileId, completed: false })
-          .update({ completed: true, completed_at: db.fn.now(), completed_by_account_id: account.id });
-        const landed = await deliverForwards(db, { profileId, reminderId: step.id, appointmentId: appointment.id });
-        stepNote = ` Ticked off "${step.title}".${landed ? ` ${landed === 1 ? 'A forwarded note is' : `${landed} forwarded notes are`} on it.` : ''}`;
-      }
-      await audit(profileId, account.id, 'appointments', action.title);
+      await audit(profileId, account.id, 'appointments', action.title, booked.appointment.id);
       const costNote = action.cost_estimate != null ? ` Estimated cost ${action.cost_estimate} added to the spend ledger.` : '';
-      return `Booked "${action.title}" for ${formatInZone(startsAt, timeZone)}. It is on the calendar.${providerNote}${costNote}${stepNote}`;
+      const stepNote = step ? ` Ticked off "${step.title}".` : '';
+      const when = allDay ? `${dateInZone(startsAt, timeZone)}, any time that day` : formatInZone(startsAt, timeZone);
+      const prepNote = action.preparation?.trim() ? ' A reminder about getting ready goes out at 7pm the night before.' : '';
+      return `Booked "${action.title}" for ${when}. It is on the calendar.${providerNote}${costNote}${stepNote}${prepNote}${extraNote}`;
     }
     case 'update_appointment': {
       const appointment = await findAppointmentByTitle(action.title, profileId);
       if (!appointment) {
         return `${CLARIFY_MARK} I could not find an appointment called "${action.title}". Which one did you mean?`;
       }
-      const fields: Record<string, unknown> = { updated_at: db.fn.now() };
+      const input: Partial<AppointmentInput> = { tz: timeZone ?? null };
       let startsAt: Date | null = null;
       if (action.starts_at) {
-        startsAt = parseFutureWhen(action.starts_at, timeZone);
+        startsAt = action.no_set_time ? dayStart(action.starts_at, timeZone) : parseFutureWhen(action.starts_at, timeZone);
         if (!startsAt) {
           return `${CLARIFY_MARK} I did not move "${appointment.title}": the new date and time were unclear. When should it be?`;
         }
-        fields['starts_at'] = startsAt;
+        input.starts_at = startsAt.toISOString();
+        input.all_day = !!action.no_set_time;
+      } else if (action.no_set_time) input.all_day = true;
+      if (action.ends_at !== undefined) {
+        const e = parseFutureWhen(action.ends_at, timeZone);
+        input.ends_at = e ? e.toISOString() : null;
       }
-      if (action.ends_at !== undefined) fields['ends_at'] = parseFutureWhen(action.ends_at, timeZone);
-      if (action.new_title) fields['title'] = action.new_title;
-      if (action.appointment_type) fields['appointment_type'] = action.appointment_type;
-      if (action.location !== undefined) Object.assign(fields, appointmentPlaceColumns({ location: action.location }));
-      if (action.status) fields['status'] = action.status;
-      // Given its date, an appointment that was not booked yet is booked now,
-      // and the to-do waiting on it is done.
-      const wasWaiting = !(appointment as { starts_at: unknown }).starts_at;
-      if (startsAt && wasWaiting) {
-        if (!action.status) fields['status'] = 'scheduled';
-        const full = (await db('appointments').where({ id: appointment.id }).first('from_reminder_id')) as { from_reminder_id: string | null };
-        if (full.from_reminder_id) {
-          await db('reminders')
-            .where({ id: full.from_reminder_id, care_profile_id: profileId, completed: false })
-            .update({ completed: true, completed_at: db.fn.now(), completed_by_account_id: account.id });
-        }
-      }
-      if (action.notes !== undefined) fields['notes'] = action.notes;
-      let providerNote = '';
+      if (action.new_title) input.title = action.new_title;
+      if (action.appointment_type) input.appointment_type = action.appointment_type;
+      if (action.location !== undefined) input.location = action.location;
+      if (action.status) input.status = action.status;
+      if (action.notes !== undefined) input.notes = action.notes;
       if (action.provider_name !== undefined) {
-        const resolved = await resolveProviderForAppointment(action.provider_name, profileId, action.location);
-        fields['provider_id'] = resolved.providerId;
-        providerNote = resolved.note;
+        if (action.provider_name?.trim()) Object.assign(input, { provider_name: action.provider_name.trim(), provider_type: action.with_type ?? null, provider_phone: action.with_phone ?? null });
+        else input.provider_id = null;
       }
-      await db('appointments').where({ id: appointment.id, care_profile_id: profileId }).update(fields);
-      if (action.cost_estimate !== undefined || action.cost_actual !== undefined) {
-        await syncAppointmentSpend(
-          appointment.id,
-          profileId,
-          account.id,
-          startsAt ?? appointment.starts_at,
-          { estimate: action.cost_estimate, actual: action.cost_actual }
-        );
+      if (action.cost_estimate !== undefined) input.cost_estimate = action.cost_estimate;
+      if (action.cost_actual !== undefined) input.cost_actual = action.cost_actual;
+      const extras = await appointmentExtrasInput(action, profileId, account);
+      Object.assign(input, extras.input);
+      let result;
+      try {
+        result = await db.transaction((trx) => updateAppointment(trx, { profileId, appointmentId: appointment.id, actorId: account.id, input, timeZone }));
+      } catch (err) {
+        if (err instanceof BookingProblem) return `${CLARIFY_MARK} I did not change "${appointment.title}": ${err.message}`;
+        throw err;
       }
-      await audit(profileId, account.id, 'appointments', `updated ${appointment.title}`);
+      const providerNote = (result?.filed ?? []).map((f) => ` Added ${f.name} to Contacts.`).join('') + (extras.notes.length ? ` ${extras.notes.join(' ')}` : '');
+      await audit(profileId, account.id, 'appointments', `updated ${appointment.title}`, appointment.id);
       const name = action.new_title ?? appointment.title;
       if (action.status === 'cancelled') return `Cancelled "${name}". It stays on the record as cancelled.${providerNote}`;
       if (action.status === 'completed') return `Marked "${name}" as attended.${providerNote}`;
       if (action.status === 'missed') return `Marked "${name}" as missed.${providerNote}`;
-      if (startsAt) return `Moved "${name}" to ${formatInZone(startsAt, timeZone)}.${providerNote}`;
+      if (startsAt) {
+        const when = action.no_set_time ? `${dateInZone(startsAt, timeZone)}, any time that day` : formatInZone(startsAt, timeZone);
+        const later = result?.series_move ? ` The ${result.series_move.later} after it in the repeat stay where they were.` : '';
+        return `Moved "${name}" to ${when}.${later}${providerNote}`;
+      }
       return `Updated "${name}".${providerNote}`;
     }
     case 'record_appointment_outcome': {
@@ -2238,15 +2409,23 @@ async function executeOne(
       if (!task) {
         return `${CLARIFY_MARK} I could not find an open task called "${action.title}". Which one did you mean?`;
       }
-      const due = parseFutureWhen(action.due_at, timeZone);
+      // A date with no time is any time that day.
+      const dayOnly = /^\d{4}-\d{2}-\d{2}$/.test(action.due_at.trim());
+      const due = dayOnly ? dayStart(action.due_at, timeZone) : parseFutureWhen(action.due_at, timeZone);
       if (!due) {
         return `${CLARIFY_MARK} I did not move "${task.title}": the new due time was unclear. When is it due?`;
       }
-      const fields: Record<string, unknown> = { next_due_at: due };
-      if (action.repeat) fields['reminder_type'] = action.repeat;
-      await db('reminders').where({ id: task.id, care_profile_id: profileId }).update(fields);
-      await audit(profileId, account.id, 'reminders', `rescheduled ${task.title}`);
-      return `Moved "${task.title}" to ${formatInZone(due, timeZone)}.`;
+      await updateTask(db, {
+        profileId,
+        taskId: task.id,
+        timeZone,
+        input: {
+          ...(dayOnly ? { due_on: action.due_at.trim(), tz: timeZone ?? null } : { next_due_at: due.toISOString(), all_day: false }),
+          ...(action.repeat ? { repeat: action.repeat } : {}),
+        },
+      });
+      await audit(profileId, account.id, 'reminders', `rescheduled ${task.title}`, task.id);
+      return `Moved "${task.title}" to ${dayOnly ? `${dateInZone(due, timeZone)}, any time that day` : formatInZone(due, timeZone)}.`;
     }
     case 'record_cost': {
       // The spend ledger is owner and admin only, the same rule the REST
@@ -2468,7 +2647,9 @@ function toSingleProfileAction(action: CrossProfileAction, entry: CrossProfileAc
   }
   if (action.type === 'cross_profile_task') {
     const e = entry as z.infer<typeof crossProfileTaskSchema>['entries'][number];
-    return { type: 'add_task', title: e.title, body: e.body, due_at: e.due_at, repeat: e.repeat };
+    const { profile_name: _who, ...task } = e;
+    void _who;
+    return { type: 'add_task', ...task };
   }
   if (action.type === 'cross_profile_medications') {
     const e = entry as z.infer<typeof crossProfileMedicationSchema>['entries'][number];
