@@ -29,3 +29,14 @@ export function useAiStatus(enabled = true) {
 
 /** The plain sentence to show while a model is still getting ready. */
 export const AI_WARMING_MESSAGE = 'Pare is still getting ready. Everything else works in the meantime.';
+
+/**
+ * Whether Pare can be offered at all. When no assistant is attached, every
+ * Pare button is hidden and the plain way to do the same thing shows in its
+ * place. Until the status has loaded, Pare is not offered, so nobody taps a
+ * button that then says it is not set up.
+ */
+export function usePareOn(): boolean {
+  const { data } = useAiStatus();
+  return !!data && data.state !== 'unavailable';
+}

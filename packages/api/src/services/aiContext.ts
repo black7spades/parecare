@@ -277,6 +277,9 @@ export async function buildProfileContext(
                 ? `supply remaining ${m.supply_remaining}`
                 : null,
               m.instructions ? `instructions: ${m.instructions}` : null,
+              m.as_needed ? `as needed${m.as_needed_for ? ` for ${m.as_needed_for}` : ''}` : null,
+              m.min_hours_between_doses != null ? `at least ${Number(m.min_hours_between_doses)} hours between doses` : null,
+              m.max_doses_per_day != null ? `no more than ${m.max_doses_per_day} in 24 hours` : null,
             ];
             return bits.filter(Boolean).join('; ');
           })

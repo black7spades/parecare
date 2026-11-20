@@ -33,6 +33,8 @@ import { UpdatesPage } from './pages/app/UpdatesPage';
 import { WhatsNewPage } from './pages/app/WhatsNewPage';
 import { DirectoryAddressesPage } from './pages/app/DirectoryAddressesPage';
 import { DirectoryPeoplePage, DirectoryPetsPage } from './pages/app/DirectoryProfilesPage';
+import { EmergencySheetsPage } from './pages/app/EmergencySheetsPage';
+import { MedicineRoundPage } from './pages/app/MedicineRoundPage';
 import { InvitePage } from './pages/InvitePage';
 import { SubscriptionPage } from './pages/account/Subscription';
 import { AccountSettings } from './pages/account/Settings';
@@ -148,6 +150,8 @@ export const router = createBrowserRouter([
       { path: 'app/directory/assets', element: <DirectoryAssetsPage /> },
       { path: 'app/directory/addresses', element: <DirectoryAddressesPage /> },
       { path: 'app/reports', element: <ReportGeneratorPage /> },
+      { path: 'app/round', element: <MedicineRoundPage /> },
+      { path: 'app/emergency-sheets', element: <EmergencySheetsPage /> },
       { path: 'app/whats-new', element: <WhatsNewPage /> },
       // The developer release notes are only of interest to whoever runs the
       // system, so they are kept to super admins; everyone else has What's new

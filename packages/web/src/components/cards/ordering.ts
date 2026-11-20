@@ -12,8 +12,11 @@ import type { Situation } from '../../lib/situation';
  * order wins from then on. So an adaptive default and a saved arrangement never
  * fight each other.
  */
-export function orderBySituation(keys: string[], situation: Situation | null, fresh: Set<string> = new Set()): string[] {
+export function orderBySituation(keys: string[], situation: Situation | null, fresh: Set<string> = new Set(), access?: string): string[] {
+  // Someone helping, not the owner, starts a shift: Before you start leads.
+  const helper = access === 'contributor' || access === 'viewer';
   const rank = (key: string): number => {
+    if (key === 'shift') return helper ? -5 : -0.7;
     if (situation?.acuity === 'unwell' && key === 'health') return -3;
     if (situation?.ended && key === 'poa') return -2;
     if (situation?.acuity === 'watching' && key === 'health') return -1;

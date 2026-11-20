@@ -1,3 +1,4 @@
+import { usePareOn } from '../../../lib/aiStatus';
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
@@ -38,6 +39,7 @@ export function CardAiSummary({
   autoGenerate?: boolean;
 }) {
   const queryClient = useQueryClient();
+  const pareOn = usePareOn();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
@@ -106,6 +108,8 @@ export function CardAiSummary({
 
   if (isLoading) return null;
   if (!summary && !canEdit) return null;
+  // With no assistant attached there is nothing to offer: the card itself is the summary.
+  if (!summary && !pareOn) return null;
   if (!summary && !generateMutation.isPending && !error) {
     return (
       <div className="flex items-center gap-2">

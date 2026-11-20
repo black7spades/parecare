@@ -60,6 +60,8 @@ export interface ChangeSource {
   reason?: string | null;
   source_appointment_id?: string | null;
   source_document_id?: string | null;
+  /** Who said so: a contact, when a carer records a change a doctor or pharmacist asked for. */
+  source_provider_id?: string | null;
   changed_on?: string | null;
 }
 
@@ -69,14 +71,20 @@ export async function todayFor(conn: Conn, profileId: string): Promise<string> {
 }
 
 /** Whether the source named belongs to this person; anything else is dropped rather than linked. */
-async function cleanSource(conn: Conn, profileId: string, s: ChangeSource): Promise<{ appt: string | null; doc: string | null }> {
+async function cleanSource(conn: Conn, profileId: string, s: ChangeSource): Promise<{ appt: string | null; doc: string | null; provider: string | null }> {
   const appt = s.source_appointment_id
     ? ((await conn('appointments').where({ id: s.source_appointment_id, care_profile_id: profileId }).first('id')) as { id: string } | undefined)?.id ?? null
     : null;
   const doc = s.source_document_id
     ? ((await conn('documents').where({ id: s.source_document_id, care_profile_id: profileId }).first('id')) as { id: string } | undefined)?.id ?? null
     : null;
-  return { appt, doc };
+  const provider = s.source_provider_id
+    ? ((await conn('providers as p')
+        .join('care_profiles as cp', 'cp.account_id', 'p.account_id')
+        .where({ 'p.id': s.source_provider_id, 'cp.id': profileId })
+        .first('p.id')) as { id: string } | undefined)?.id ?? null
+    : null;
+  return { appt, doc, provider };
 }
 
 /**
@@ -112,7 +120,7 @@ export async function recordMedicationChange(
   const kind: ChangeKind | null = opts.kind ?? (doseMoved ? 'dose' : timesMoved ? 'times' : null);
   if (!kind) return { change_id: null };
 
-  const { appt, doc } = await cleanSource(conn, opts.profileId, opts.source ?? {});
+  const { appt, doc, provider } = await cleanSource(conn, opts.profileId, opts.source ?? {});
   const tracked = kind === 'dose' || kind === 'times' || kind === 'started';
   const [row] = await conn('medication_changes')
     .insert({
@@ -129,6 +137,7 @@ export async function recordMedicationChange(
       reason: opts.source?.reason?.trim() || null,
       source_appointment_id: appt,
       source_document_id: doc,
+      source_provider_id: provider,
       changed_by_account_id: opts.actorId,
     })
     .returning('id');
@@ -224,13 +233,15 @@ export async function changesFor(conn: Conn, profileId: string): Promise<Map<str
     .leftJoin('appointments as a', 'a.id', 'ch.source_appointment_id')
     .leftJoin('documents as d', 'd.id', 'ch.source_document_id')
     .leftJoin('accounts as acc', 'acc.id', 'ch.changed_by_account_id')
+    .leftJoin('providers as sp', 'sp.id', 'ch.source_provider_id')
     .where('ch.care_profile_id', profileId)
     .orderBy([{ column: 'ch.changed_on', order: 'desc' }, { column: 'ch.created_at', order: 'desc' }])
     .select(
       'ch.id', 'ch.medication_id', 'ch.changed_on', 'ch.change_kind', 'ch.dose_amount_before', 'ch.dose_amount_after',
       'ch.dose_unit_before', 'ch.dose_unit_after', 'ch.schedule_times_before', 'ch.schedule_times_after', 'ch.reason',
       'ch.source_appointment_id', 'a.title as source_appointment_title', 'a.starts_at as source_appointment_starts_at',
-      'ch.source_document_id', 'd.label as source_document_label', 'acc.display_name as changed_by_name', 'ch.created_at'
+      'ch.source_document_id', 'd.label as source_document_label', 'acc.display_name as changed_by_name', 'ch.created_at',
+      'ch.source_provider_id', 'sp.name as source_provider_name'
     )) as Array<Record<string, unknown> & { medication_id: string }>;
   const out = new Map<string, Array<Record<string, unknown>>>();
   for (const r of rows) {

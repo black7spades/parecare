@@ -124,19 +124,19 @@ questionsRouter.get('/:questionId/responses', requireAuth, async (req, res) => {
     res.status(404).json({ error: 'Question not found', code: 'NOT_FOUND' });
     return;
   }
-  const responses = await db('open_question_responses')
-    .leftJoin('care_circle_members', 'open_question_responses.author_member_id', 'care_circle_members.id')
-    .where({ question_id: question.id })
-    .orderBy('open_question_responses.created_at', 'asc')
-    .select(
-      'open_question_responses.id',
-      'open_question_responses.body',
-      'open_question_responses.created_at',
-      'open_question_responses.is_ai',
-      'care_circle_members.display_name as author_name'
-    );
+  const responses = await responsesWithAuthors().where({ 'r.question_id': question.id }).orderBy('r.created_at', 'asc');
   res.json({ responses });
 });
+
+/**
+ * Replies as every thread reads them: who wrote each one, by their login's
+ * name, else the circle member's name.
+ */
+const responsesWithAuthors = () =>
+  db('open_question_responses as r')
+    .leftJoin('accounts as acc', 'acc.id', 'r.author_account_id')
+    .leftJoin('care_circle_members as m', 'm.id', 'r.author_member_id')
+    .select('r.id', 'r.body', 'r.created_at', 'r.is_ai', 'r.author_account_id', db.raw('coalesce(acc.display_name, m.display_name) as author_name'));
 
 // Neutral AI mediation for a disputed question: summarises common ground,
 // each position, options, and a next step, and posts it into the thread.
@@ -153,11 +153,7 @@ questionsRouter.post('/:questionId/mediate', requireAuth, requireAccountRight('c
     return;
   }
 
-  const rows = await db('open_question_responses')
-    .leftJoin('care_circle_members', 'open_question_responses.author_member_id', 'care_circle_members.id')
-    .where({ question_id: question.id, is_ai: false })
-    .orderBy('open_question_responses.created_at', 'asc')
-    .select('open_question_responses.body', 'care_circle_members.display_name as author_name');
+  const rows = await responsesWithAuthors().where({ 'r.question_id': question.id, 'r.is_ai': false }).orderBy('r.created_at', 'asc');
 
   let summary: string;
   try {
@@ -196,9 +192,11 @@ questionsRouter.post('/:questionId/responses', requireAuth, async (req, res) => 
     return;
   }
 
-  const [response] = await db('open_question_responses')
-    .insert({ question_id: question.id, body: parsed.data.body })
-    .returning('*');
+  // Who wrote it, from the session.
+  const [created] = await db('open_question_responses')
+    .insert({ question_id: question.id, body: parsed.data.body, author_account_id: req.account!.id, author_member_id: req.careAccess?.member?.id ?? null })
+    .returning('id');
+  const response = await responsesWithAuthors().where('r.id', (created as { id: string }).id).first();
 
   res.status(201).json({ response });
 });

@@ -1,6 +1,12 @@
 import { useMemo, useState } from 'react';
 import { CONTACT_LINK } from '../../components/ContactStrip';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { DataToolbar } from '../../components/data/DataToolbar';
+import { SortableTh } from '../../components/data/SortableTh';
+import { useDataView, type DataSort } from '../../components/data/useDataView';
+import { Input } from '../../components/ui/Input';
+import { BulkInviteModal } from './homeboard/BulkInviteModal';
+import { browserTimeZone } from '../../lib/datetime';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow, format } from 'date-fns';
 import { api } from '../../api/client';
@@ -100,7 +106,11 @@ interface ProfileSummary {
   /** Whose the phone is: their daughter, their care home, their own. */
   primary_phone_owner?: { name: string; label: string } | null;
   /** Their main GP, on its own row. */
-  gp?: { name: string; phone: string | null } | null;
+  gp?: { name: string; phone: string | null; practice?: string | null } | null;
+  /** Their room, where they live in a home. */
+  room_number?: string | null;
+  /** The person on their profile to contact about them. */
+  next_of_kin?: { name: string; relationship: string | null; phone: string | null } | null;
   poa_holders: { display_name: string; poa_type: string | null; poa_activated: boolean }[];
   last_activity: { action: string; entity_type: string; summary: string | null; created_at: string; actor_name: string | null } | null;
   next_event: { title: string; next_due_at: string } | null;
@@ -109,6 +119,9 @@ interface ProfileSummary {
 }
 
 type SortKey = 'name' | 'activity' | 'journey';
+
+/** What a search for a person matches: their name, preferred name and room. */
+const findText = (p: ProfileSummary) => [p.full_name, p.preferred_name, p.room_number ? `room ${p.room_number}` : null, p.room_number].filter(Boolean).join(' ').toLowerCase();
 
 const poaLabel = (type: string | null) => POA_TYPES.find((t) => t.value === type)?.label ?? 'POA';
 
@@ -132,6 +145,11 @@ export function Dashboard() {
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [archiveNote, setArchiveNote] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteNote, setInviteNote] = useState('');
+  // Find a person by name or room, across the cards and the table.
+  const [search, setSearch] = useState('');
+  const navigate = useNavigate();
   // Only platform staff may permanently delete profiles; everyone can act on
   // their own records for the reversible actions.
   const isAdmin = account?.role === 'admin' || account?.role === 'super_admin';
@@ -207,8 +225,19 @@ export function Dashboard() {
     [profiles]
   );
 
+  // The medicine round, offered when two or more people have doses due now.
+  const tz = browserTimeZone();
+  const { data: roundData } = useQuery({
+    queryKey: ['medicine-round-count'],
+    queryFn: () => api.get<{ people_count: number }>(`/medicine-round${tz ? `?tz=${encodeURIComponent(tz)}` : ''}`),
+    enabled: profiles.length > 1,
+  });
+  const roundPeople = roundData?.people_count ?? 0;
+
   const shown = useMemo(() => {
     let list = profiles.slice();
+    const q = search.trim().toLowerCase();
+    if (q) list = list.filter((p) => findText(p).includes(q));
     if (journeyFilter) list = list.filter((p) => p.journeys.some((j) => j.name === journeyFilter));
     if (poaOnly) list = list.filter((p) => p.poa_holders.length > 0);
     list.sort((a, b) => {
@@ -242,7 +271,7 @@ export function Dashboard() {
       return 0;
     };
     return list.sort((a, b) => alertWeight(b) - alertWeight(a) || Number(b.pinned) - Number(a.pinned));
-  }, [profiles, sort, journeyFilter, poaOnly]);
+  }, [profiles, sort, journeyFilter, poaOnly, search]);
 
   const viewToggle = (
     <div className="flex items-center gap-1 bg-surface-2 rounded-md p-0.5">
@@ -294,6 +323,19 @@ export function Dashboard() {
       ) : (
         <>
           <AttentionPanel />
+          {roundPeople >= 2 ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card px-4 py-3">
+              <p className="text-sm text-ink">
+                {roundPeople} people have doses due in the next two hours.
+              </p>
+              <Button size="sm" variant="secondary" onClick={() => navigate('/app/round')}>Start the medicine round</Button>
+            </div>
+          ) : null}
+          {profiles.length > 1 && view === 'cards' ? (
+            <div className="max-w-md">
+              <Input aria-label="Find a person by name or room" placeholder="Find a person by name or room" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2 text-sm">
             {profiles.length > 1 ? (
               <>
@@ -340,6 +382,13 @@ export function Dashboard() {
             </div>
           </div>
 
+          {inviteNote ? (
+            <div className="flex items-start justify-between gap-3 rounded-md border-l-4 border-primary bg-primary-50 px-4 py-2.5 text-sm text-ink" role="status">
+              <span>{inviteNote}</span>
+              <Button size="xs" variant="ghost" onClick={() => setInviteNote('')}>Dismiss</Button>
+            </div>
+          ) : null}
+
           {archiveNote ? (
             <div className="flex items-start justify-between gap-3 rounded-md border border-border bg-card px-4 py-2.5 text-sm text-ink">
               <span>{archiveNote}</span>
@@ -355,6 +404,16 @@ export function Dashboard() {
               <Button size="sm" variant="secondary" onClick={() => setBulkEditOpen(true)}>
                 Edit
               </Button>
+              {selectedPersonIds.length > 0 ? (
+                <Button size="sm" variant="secondary" onClick={() => navigate(`/app/emergency-sheets?ids=${selectedPersonIds.join(',')}`)}>
+                  Print emergency sheets
+                </Button>
+              ) : null}
+              {archivable.some((p) => p.kind !== 'pet') ? (
+                <Button size="sm" variant="secondary" onClick={() => setInviteOpen(true)}>
+                  Invite someone
+                </Button>
+              ) : null}
               {archivable.length > 0 ? (
                 <Button size="sm" variant="secondary" onClick={() => setConfirmArchive(true)}>
                   Archive
@@ -412,6 +471,13 @@ export function Dashboard() {
                 return next;
               });
 
+            if (groups.length === 0 && search.trim()) {
+              return view === 'cards' ? (
+                <div className="card text-center py-8 text-sm text-muted">No one matches "{search}". Try part of their name or their room number.</div>
+              ) : (
+                <ProfileTable profiles={[]} search={search} onSearch={setSearch} onTogglePin={togglePin} />
+              );
+            }
             return groups.map((g) => (
               <div key={g.key} className="space-y-3">
                 {mixed ? <h2 className="text-sm font-semibold text-muted">{g.heading}</h2> : null}
@@ -440,6 +506,8 @@ export function Dashboard() {
                 ) : (
                   <ProfileTable
                     profiles={g.list}
+                    search={search}
+                    onSearch={setSearch}
                     onTogglePin={togglePin}
                     selectable
                     selectedIds={selectedProfileIds}
@@ -501,6 +569,19 @@ export function Dashboard() {
               void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
             }}
           />
+
+          {inviteOpen ? (
+            <BulkInviteModal
+              profileIds={archivable.filter((p) => p.kind !== 'pet').map((p) => p.id)}
+              notYours={selectedPersonIds.length - archivable.filter((p) => p.kind !== 'pet').length}
+              onClose={() => setInviteOpen(false)}
+              onSent={(message) => {
+                setInviteOpen(false);
+                setSelectedProfileIds(new Set());
+                setInviteNote(message);
+              }}
+            />
+          ) : null}
 
           {bulkEditOpen ? (
             <BulkEditModal
@@ -790,6 +871,11 @@ function ProfileCard({
         ) : null
       ) : (
       <dl className="mt-3 space-y-1.5 text-xs">
+        {p.room_number ? (
+          <Row label="Room">
+            <span className="text-ink">{p.room_number}</span>
+          </Row>
+        ) : null}
         <ContactRows p={p} />
         {showPoa.length > 0 ? (
           <Row label="POA / executor">
@@ -822,28 +908,53 @@ function ProfileCard({
   );
 }
 
-type TableSortCol = 'name' | 'relationship' | 'health' | 'phase' | 'next' | 'updated';
-
 /** Rank a health state so a column sort can order by severity. */
 function healthRank(p: ProfileSummary): number {
   const level = profileAlertLevel(p.health_statuses);
   return level === 'red' ? 3 : level === 'yellow' ? 2 : level === 'green' ? 1 : 0;
 }
 
-const TABLE_COMPARATORS: Record<TableSortCol, (a: ProfileSummary, b: ProfileSummary) => number> = {
-  name: (a, b) => a.full_name.localeCompare(b.full_name),
-  relationship: (a, b) => (a.relationship ?? '').localeCompare(b.relationship ?? '') || a.full_name.localeCompare(b.full_name),
-  health: (a, b) => healthRank(a) - healthRank(b) || a.full_name.localeCompare(b.full_name),
-  phase: (a, b) =>
-    ((firstJourney(a)?.phase_sort_order ?? -1) - (firstJourney(b)?.phase_sort_order ?? -1)) ||
-    a.full_name.localeCompare(b.full_name),
-  // Missing values sort to the end regardless of direction.
-  next: (a, b) => (a.next_event ? new Date(a.next_event.next_due_at).getTime() : Infinity) - (b.next_event ? new Date(b.next_event.next_due_at).getTime() : Infinity),
-  updated: (a, b) => (b.last_activity ? new Date(b.last_activity.created_at).getTime() : 0) - (a.last_activity ? new Date(a.last_activity.created_at).getTime() : 0),
-};
+const byName = (a: ProfileSummary, b: ProfileSummary) => a.full_name.localeCompare(b.full_name);
+// Missing values sort to the end, whichever way round.
+const textLast = (x: string | null | undefined) => (x && x.trim() ? x : '\uffff');
+/** Rooms in number order: 9 before 10, 101 before 201. */
+const roomCompare = (a: ProfileSummary, b: ProfileSummary) =>
+  textLast(a.room_number).localeCompare(textLast(b.room_number), undefined, { numeric: true }) || byName(a, b);
+
+const TABLE_SORTS: DataSort<ProfileSummary>[] = [
+  // The priority order the list arrives in: alerts, then pins.
+  { key: 'priority', label: 'Needs attention first', compare: () => 0 },
+  { key: 'name', label: 'Name', compare: byName },
+  { key: 'room', label: 'Room', compare: roomCompare },
+  { key: 'relationship', label: 'Relationship to you', compare: (a, b) => textLast(a.relationship).localeCompare(textLast(b.relationship)) || byName(a, b) },
+  { key: 'health', label: 'Health', compare: (a, b) => healthRank(a) - healthRank(b) || byName(a, b), defaultDir: 'desc' },
+  {
+    key: 'phase',
+    label: 'Phase',
+    compare: (a, b) => ((firstJourney(a)?.phase_sort_order ?? -1) - (firstJourney(b)?.phase_sort_order ?? -1)) || byName(a, b),
+  },
+  {
+    key: 'next',
+    label: 'Next',
+    compare: (a, b) => (a.next_event ? new Date(a.next_event.next_due_at).getTime() : Infinity) - (b.next_event ? new Date(b.next_event.next_due_at).getTime() : Infinity),
+  },
+  { key: 'gp', label: 'GP', compare: (a, b) => textLast(a.gp?.name).localeCompare(textLast(b.gp?.name)) || byName(a, b) },
+  { key: 'gp_phone', label: 'GP phone', compare: (a, b) => textLast(a.gp?.phone).localeCompare(textLast(b.gp?.phone)) || byName(a, b) },
+  { key: 'kin', label: 'Next of kin', compare: (a, b) => textLast(a.next_of_kin?.name).localeCompare(textLast(b.next_of_kin?.name)) || byName(a, b) },
+  { key: 'kin_relationship', label: 'Relationship', compare: (a, b) => textLast(a.next_of_kin?.relationship).localeCompare(textLast(b.next_of_kin?.relationship)) || byName(a, b) },
+  { key: 'kin_phone', label: 'Next of kin phone', compare: (a, b) => textLast(a.next_of_kin?.phone).localeCompare(textLast(b.next_of_kin?.phone)) || byName(a, b) },
+  {
+    key: 'updated',
+    label: 'Last update',
+    compare: (a, b) => (a.last_activity ? new Date(a.last_activity.created_at).getTime() : 0) - (b.last_activity ? new Date(b.last_activity.created_at).getTime() : 0),
+    defaultDir: 'desc',
+  },
+];
 
 function ProfileTable({
   profiles,
+  search,
+  onSearch,
   onTogglePin,
   selectable,
   selectedIds,
@@ -851,145 +962,151 @@ function ProfileTable({
   onToggleAll,
 }: {
   profiles: ProfileSummary[];
+  search: string;
+  onSearch: (v: string) => void;
   onTogglePin: (p: ProfileSummary) => void;
   selectable?: boolean;
   selectedIds?: Set<string>;
   onToggleSelect?: (id: string) => void;
   onToggleAll?: (ids: string[]) => void;
 }) {
-  // A clicked column takes over ordering; clicking it again flips direction.
-  // Until then, the incoming priority order (alerts, then pins) is kept.
-  const [sortCol, setSortCol] = useState<TableSortCol | null>(null);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const toggleSort = (col: TableSortCol) => {
-    if (sortCol === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else {
-      setSortCol(col);
-      setSortDir('asc');
-    }
-  };
-  const rows = useMemo(() => {
-    if (!sortCol) return profiles;
-    const sorted = [...profiles].sort(TABLE_COMPARATORS[sortCol]);
-    return sortDir === 'desc' ? sorted.reverse() : sorted;
-  }, [profiles, sortCol, sortDir]);
-
+  // The list arrives already found by name or room; the table sorts and pages it.
+  const dv = useDataView<ProfileSummary>({ rows: profiles, getId: (p) => p.id, sorts: TABLE_SORTS, defaultPageSize: 25 });
+  const rows = dv.view;
   const allSelected = selectable && rows.length > 0 && rows.every((p) => selectedIds?.has(p.id));
-
-  const SortableTh = ({ col, label }: { col: TableSortCol; label: string }) => {
-    const active = sortCol === col;
-    return (
-      <th className="px-3 py-2 font-medium" aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}>
-        <button
-          type="button"
-          className={`flex items-center gap-1 hover:text-ink ${active ? 'text-ink' : ''}`}
-          onClick={() => toggleSort(col)}
-          title={active ? `Sorted ${sortDir === 'asc' ? 'ascending' : 'descending'}. Click to reverse.` : `Sort by ${label.toLowerCase()}`}
-        >
-          {label}
-          <span aria-hidden="true" className={active ? '' : 'opacity-0'}>
-            {active && sortDir === 'desc' ? '▼' : '▲'}
-          </span>
-        </button>
-      </th>
-    );
-  };
+  const th = (key: string, label: string) => <SortableTh label={label} sortKey={key} activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="whitespace-nowrap" />;
+  const tel = (phone: string, who: string) => (
+    <a href={telOf(phone)} className={CONTACT_LINK} aria-label={`Call ${who} on ${phone}`}>{phone}</a>
+  );
 
   return (
-    <div className="card p-0 overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="border-b border-border">
-          <tr className="text-left text-xs text-muted">
-            {selectable ? (
-              <th className="px-3 py-2 w-8">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                  checked={!!allSelected}
-                  onChange={() => onToggleAll?.(rows.map((p) => p.id))}
-                  aria-label="Select all"
-                />
-              </th>
-            ) : null}
-            <th className="px-3 py-2 w-8" aria-label="Pinned" />
-            <SortableTh col="name" label="Name" />
-            <SortableTh col="relationship" label="Relationship" />
-            <SortableTh col="health" label="Health" />
-            <SortableTh col="phase" label="Phase" />
-            <SortableTh col="next" label="Next" />
-            <SortableTh col="updated" label="Last update" />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((p) => {
-            const j = firstJourney(p);
-            const alertLevel = profileAlertLevel(p.health_statuses);
-            const rowBg = alertLevel ? ALERT_ROW_BG[alertLevel] : '';
-            return (
-              <tr key={p.id} data-record={p.id} data-record-kind={p.kind} className={`border-b border-border last:border-0 align-top ${rowBg} ${selectedIds?.has(p.id) ? 'bg-primary-50/50 dark:bg-primary-900/10' : ''}`}>
-                {selectable ? (
+    <div className="space-y-2">
+      <DataToolbar
+        search={search}
+        onSearch={onSearch}
+        searchPlaceholder="Find a person by name or room"
+        sorts={TABLE_SORTS.map((s) => ({ key: s.key, label: s.label }))}
+        sortKey={dv.sortKey}
+        onSort={dv.setSortKey}
+        page={dv.page}
+        totalPages={dv.totalPages}
+        pageSize={dv.pageSize}
+        totalFiltered={dv.totalFiltered}
+        onPageChange={dv.setPage}
+        onPageSizeChange={dv.setPageSize}
+      />
+      {rows.length === 0 ? (
+        <div className="card text-center py-8 text-sm text-muted">No one matches {search ? `"${search}"` : 'that'}. Try part of their name or their room number.</div>
+      ) : (
+      <div className="card p-0 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="border-b border-border">
+            <tr className="text-left text-xs text-muted">
+              {selectable ? (
+                <th className="px-3 py-2 w-8">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    checked={!!allSelected}
+                    onChange={() => onToggleAll?.(rows.map((p) => p.id))}
+                    aria-label="Select all"
+                  />
+                </th>
+              ) : null}
+              <th className="px-3 py-2 w-8" aria-label="Pinned" />
+              {th('name', 'Name')}
+              {th('room', 'Room')}
+              {th('relationship', 'Relationship to you')}
+              {th('health', 'Health')}
+              {th('phase', 'Phase')}
+              {th('next', 'Next')}
+              {th('gp', 'GP')}
+              {th('gp_phone', 'GP phone')}
+              {th('kin', 'Next of kin')}
+              {th('kin_relationship', 'Relationship')}
+              {th('kin_phone', 'Next of kin phone')}
+              {th('updated', 'Last update')}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((p) => {
+              const j = firstJourney(p);
+              const alertLevel = profileAlertLevel(p.health_statuses);
+              const rowBg = alertLevel ? ALERT_ROW_BG[alertLevel] : '';
+              return (
+                <tr key={p.id} data-record={p.id} data-record-kind={p.kind} className={`border-b border-border last:border-0 align-top ${rowBg} ${selectedIds?.has(p.id) ? 'bg-primary-50/50 dark:bg-primary-900/10' : ''}`}>
+                  {selectable ? (
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                        checked={!!selectedIds?.has(p.id)}
+                        onChange={() => onToggleSelect?.(p.id)}
+                        aria-label={`Select ${p.full_name}`}
+                      />
+                    </td>
+                  ) : null}
                   <td className="px-3 py-2">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                      checked={!!selectedIds?.has(p.id)}
-                      onChange={() => onToggleSelect?.(p.id)}
-                      aria-label={`Select ${p.full_name}`}
-                    />
+                    <button
+                      type="button"
+                      aria-label={p.pinned ? 'Unpin' : 'Pin to quick access'}
+                      title={p.pinned ? 'Unpin' : 'Pin to quick access'}
+                      onClick={() => onTogglePin(p)}
+                      className={`leading-none ${p.pinned ? 'text-primary' : 'text-muted hover:text-primary'}`}
+                    >
+                      {p.pinned ? '★' : '☆'}
+                    </button>
                   </td>
-                ) : null}
-                <td className="px-3 py-2">
-                  <button
-                    type="button"
-                    aria-label={p.pinned ? 'Unpin' : 'Pin to quick access'}
-                    onClick={() => onTogglePin(p)}
-                    className={`leading-none ${p.pinned ? 'text-primary' : 'text-muted hover:text-primary'}`}
-                  >
-                    {p.pinned ? '★' : '☆'}
-                  </button>
-                </td>
-                <td data-field="name" className="px-3 py-2">
-                  <Link to={`/app/${p.id}`} className="font-medium text-primary hover:underline">
-                    {p.full_name}
-                  </Link>
-                </td>
-                <td data-field="relationship" className="px-3 py-2 text-muted">{p.relationship ?? ''}</td>
-                <td data-field="health" className="px-3 py-2">
-                  {p.health_statuses.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {p.health_statuses.map((hs) => (
-                        <span
-                          key={hs.id}
-                          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${
-                            hs.is_contagious || hs.isolation_required
-                              ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                              : hs.status === 'active'
-                                ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-                                : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                          }`}
-                        >
-                          {hs.name}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-muted">OK</span>
-                  )}
-                </td>
-                <td data-field="phase" className="px-3 py-2 text-muted">{j?.phase_name ?? ''}</td>
-                <td data-field="next" className="px-3 py-2 text-muted whitespace-nowrap">
-                  {p.next_event ? `${p.next_event.title} · ${format(new Date(p.next_event.next_due_at), 'd MMM, HH:mm')}` : ''}
-                </td>
-                <td data-field="updated" className="px-3 py-2 text-muted">
-                  {p.last_activity
-                    ? `${p.last_activity.summary || `${p.last_activity.action} ${p.last_activity.entity_type}`} · ${formatDistanceToNow(new Date(p.last_activity.created_at), { addSuffix: true })}`
-                    : ''}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                  <td data-field="name" className="px-3 py-2">
+                    <Link to={`/app/${p.id}`} className="font-medium text-primary hover:underline">
+                      {p.full_name}
+                    </Link>
+                  </td>
+                  <td data-field="room" className="px-3 py-2 text-ink whitespace-nowrap">{p.room_number ?? ''}</td>
+                  <td data-field="relationship" className="px-3 py-2 text-muted">{p.relationship ?? ''}</td>
+                  <td data-field="health" className="px-3 py-2">
+                    {p.health_statuses.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {p.health_statuses.map((hs) => (
+                          <span
+                            key={hs.id}
+                            className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${
+                              hs.is_contagious || hs.isolation_required
+                                ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                                : hs.status === 'active'
+                                  ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                                  : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                            }`}
+                          >
+                            {hs.name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-muted">OK</span>
+                    )}
+                  </td>
+                  <td data-field="phase" className="px-3 py-2 text-muted">{j?.phase_name ?? ''}</td>
+                  <td data-field="next" className="px-3 py-2 text-muted whitespace-nowrap">
+                    {p.next_event ? `${p.next_event.title} · ${format(new Date(p.next_event.next_due_at), 'd MMM, HH:mm')}` : ''}
+                  </td>
+                  <td data-field="gp" className="px-3 py-2 text-ink">{p.gp?.name ?? ''}</td>
+                  <td data-field="gp_phone" className="px-3 py-2 whitespace-nowrap">{p.gp?.phone ? tel(p.gp.phone, p.gp.name) : ''}</td>
+                  <td data-field="kin" className="px-3 py-2 text-ink">{p.next_of_kin?.name ?? ''}</td>
+                  <td data-field="kin_relationship" className="px-3 py-2 text-muted">{p.next_of_kin?.relationship ?? ''}</td>
+                  <td data-field="kin_phone" className="px-3 py-2 whitespace-nowrap">{p.next_of_kin?.phone ? tel(p.next_of_kin.phone, p.next_of_kin.name) : ''}</td>
+                  <td data-field="updated" className="px-3 py-2 text-muted">
+                    {p.last_activity
+                      ? `${p.last_activity.summary || `${p.last_activity.action} ${p.last_activity.entity_type}`} · ${formatDistanceToNow(new Date(p.last_activity.created_at), { addSuffix: true })}`
+                      : ''}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      )}
     </div>
   );
 }

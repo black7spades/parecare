@@ -10,11 +10,12 @@ import { nextStepTypeIdByKey } from './nextStepTypes';
 import type { Account, CareAccess, CareCircleMember, CareProfile } from '../types';
 import { parseZonedTime, formatInZone, dateInZone, isValidTimeZone } from '../lib/timezone';
 import { matchProfileNames, type NameCandidate } from '../lib/nameMatch';
-import { drawDownOnHand, perDoseDrawdown } from './medicationSupply';
 import { resolveSupplierId } from '../routes/medications';
 import { resolveConditionCatalogueId } from '../routes/conditionCatalogue';
 import { CONDITION_RESOLUTION_REASONS } from '../lib/conditionResolution';
-import { DOSE_AUDIT_ENTITY, doseSummary } from '../lib/doseOutcome';
+import { DOSE_AUDIT_ENTITY, DOSE_STATUSES, doseSummary } from '../lib/doseOutcome';
+import { DoseProblem, limitSentence, recordDoses } from './doses';
+import { limitsFromText } from '../lib/asNeeded';
 import { CIRCLE_ROLE_VALUES, roleMaySee } from '../lib/circleRoles';
 import { resolveAssetSupplier, resolveContactInput, setContactStanding } from './professionals';
 import { parseHoursList } from '../lib/openingHours';
@@ -59,7 +60,8 @@ export const LOG_ENTRY_TYPES = [
   'handover',
 ] as const;
 
-const MEDICATION_STATUSES = ['given', 'refused', 'omitted', 'held', 'self_administered'] as const;
+// The same outcomes as the dose form, including not in stock.
+const MEDICATION_STATUSES = DOSE_STATUSES;
 
 const logEventSchema = z.object({
   type: z.literal('log_event'),
@@ -75,6 +77,10 @@ const recordMedicationSchema = z.object({
   status: z.enum(MEDICATION_STATUSES).default('given'),
   dose_given: z.string().max(255).optional().nullable(),
   notes: z.string().optional().nullable(),
+  // Why an as-needed dose was needed now.
+  reason: z.string().max(2000).optional().nullable(),
+  // Why it must be given inside the gap or over the most in 24 hours.
+  why_now: z.string().max(2000).optional().nullable(),
   administered_at: z.string().optional().nullable(),
 });
 
@@ -87,6 +93,8 @@ const recordMedicationBatchSchema = z.object({
         status: z.enum(MEDICATION_STATUSES).default('self_administered'),
         dose_given: z.string().max(255).optional().nullable(),
         notes: z.string().optional().nullable(),
+        reason: z.string().max(2000).optional().nullable(),
+        why_now: z.string().max(2000).optional().nullable(),
         administered_at: z.string().optional().nullable(),
       })
     )
@@ -150,6 +158,11 @@ const addMedicationSchema = z.object({
   supplier_order_url: z.string().url().max(2000).optional().nullable(),
   with_food: z.boolean().optional(),
   as_needed: z.boolean().optional(),
+  // As-needed: what it is for, the least hours between doses and the most
+  // in 24 hours. Read from the instructions when not given.
+  as_needed_for: z.string().max(255).optional().nullable(),
+  min_hours_between_doses: z.number().min(0).max(168).optional().nullable(),
+  max_doses_per_day: z.number().int().min(0).max(50).optional().nullable(),
   critical: z.boolean().optional(),
   // Who writes the script: a contact by name, filed in Contacts when new.
   prescriber: z.string().max(255).optional().nullable(),
@@ -179,6 +192,11 @@ const updateMedicationSchema = z.object({
   supplier_order_url: z.string().url().max(2000).optional().nullable(),
   with_food: z.boolean().optional(),
   as_needed: z.boolean().optional(),
+  // As-needed: what it is for, the least hours between doses and the most
+  // in 24 hours. Read from the instructions when not given.
+  as_needed_for: z.string().max(255).optional().nullable(),
+  min_hours_between_doses: z.number().min(0).max(168).optional().nullable(),
+  max_doses_per_day: z.number().int().min(0).max(50).optional().nullable(),
   critical: z.boolean().optional(),
   // Who writes the script: a contact by name, filed in Contacts when new.
   prescriber: z.string().max(255).optional().nullable(),
@@ -896,6 +914,8 @@ const crossProfileMedicationSchema = z.object({
         status: z.enum(MEDICATION_STATUSES).default('self_administered'),
         dose_given: z.string().max(255).optional().nullable(),
         notes: z.string().optional().nullable(),
+        reason: z.string().max(2000).optional().nullable(),
+        why_now: z.string().max(2000).optional().nullable(),
         administered_at: z.string().optional().nullable(),
       })
     )
@@ -1227,6 +1247,8 @@ interface MedicationEntry {
   status: (typeof MEDICATION_STATUSES)[number];
   dose_given?: string | null;
   notes?: string | null;
+  reason?: string | null;
+  why_now?: string | null;
   administered_at?: string | null;
 }
 
@@ -1272,35 +1294,42 @@ async function recordOneMedication(
     med = pool.find((m) => !usedMedIds?.has(m.id)) ?? pool[0];
   }
   usedMedIds?.add(med.id);
-  if (!GIVEN.has(entry.status) && !entry.notes?.trim()) {
+  if (!GIVEN.has(entry.status) && entry.status !== 'not_in_stock' && !entry.notes?.trim()) {
     return `Could not record the ${entry.status} dose of ${med.name}: a note explaining why is required.`;
   }
   const administeredAt = parseWhen(entry.administered_at, timeZone);
-  const [doseRow] = await db('medication_administrations').insert({
-    medication_id: med.id,
-    care_profile_id: profileId,
-    administered_at: administeredAt,
-    administered_by_account_id: account.id,
-    administered_by_name: account.display_name,
-    status: entry.status,
-    dose_given: entry.dose_given ?? med.dose ?? null,
-    route_given: med.route ?? null,
-    notes: [entry.notes?.trim(), 'Recorded through the PareCare assistant.'].filter(Boolean).join(' '),
-    right_patient: true,
-    right_medication: true,
-    right_documentation: true,
-    // Dose, route and time must be verified by a person at the point of
-    // care; a conversational log cannot confirm them.
-    right_dose: false,
-    right_route: false,
-    right_time: false,
-  }).returning('id');
-  if (GIVEN.has(entry.status)) {
-    // Draw supply down by units taken each time; the dose volume only counts
-    // for measured, liquid-style forms. Shared with the REST record path.
-    await drawDownOnHand(med.id, perDoseDrawdown(med));
+  let recorded;
+  try {
+    // The same service as the dose form: limits, supply and not in stock.
+    recorded = await db.transaction((trx) =>
+      recordDoses(trx, {
+        profileId,
+        account,
+        viaAssistant: true,
+        entries: [{
+          medication_id: med.id,
+          administered_at: administeredAt,
+          status: entry.status,
+          dose_given: entry.dose_given ?? null,
+          notes: entry.notes ?? null,
+          reason: entry.reason ?? null,
+          outside_limits_reason: entry.why_now ?? null,
+        }],
+      })
+    );
+  } catch (err) {
+    if (err instanceof DoseProblem && err.code === 'OUTSIDE_LIMITS' && err.limits) {
+      // Inside the gap or over the daily most, with no reason: ask first.
+      return `${CLARIFY_MARK} ${limitSentence(err.limits, (d) => formatInZone(d, timeZone).split(', ').pop() ?? '')} Give it anyway, and why?`;
+    }
+    if (err instanceof DoseProblem) return `Could not record ${med.name}: ${err.message}`;
+    throw err;
   }
-  await audit(profileId, account.id, DOSE_AUDIT_ENTITY, doseSummary(med.name, entry.status), (doseRow as { id: string } | undefined)?.id ?? null);
+  const doseId = recorded.doses[0]?.id ?? null;
+  await audit(profileId, account.id, DOSE_AUDIT_ENTITY, doseSummary(med.name, entry.status), doseId);
+  if (entry.status === 'not_in_stock') {
+    return `Recorded ${med.name} as not in stock at ${formatInZone(administeredAt, timeZone)}. It now shows as out of stock, with who to call.`;
+  }
   const at = formatInZone(administeredAt, timeZone);
   return `Recorded ${med.name}${entry.dose_given ?? med.dose ? ` ${entry.dose_given ?? med.dose}` : ''} as ${entry.status.replace(/_/g, ' ')} at ${at}.`;
 }
@@ -1626,6 +1655,8 @@ async function executeOne(
         .insert({
           care_profile_id: profileId,
           author_member_id: access.member?.id ?? null,
+          // Who wrote it: whoever asked Pare to.
+          author_account_id: account.id,
           entry_type: action.entry_type,
           title: action.title ?? null,
           body: action.body,
@@ -1732,6 +1763,10 @@ async function executeOne(
         supplier_order_url: action.supplier_order_url ?? null,
         with_food: action.with_food ?? false,
         as_needed: action.as_needed ?? false,
+        as_needed_for: action.as_needed_for ?? null,
+        // Only an as-needed medicine has limits.
+        min_hours_between_doses: action.as_needed ? action.min_hours_between_doses ?? limitsFromText(action.instructions, action.units_per_dose).min_hours_between_doses : null,
+        max_doses_per_day: action.as_needed ? action.max_doses_per_day ?? limitsFromText(action.instructions, action.units_per_dose).max_doses_per_day : null,
         critical: action.critical ?? false,
         active: true,
       }).returning('id');
@@ -1780,6 +1815,15 @@ async function executeOne(
       if (action.supplier_order_url !== undefined) patch['supplier_order_url'] = action.supplier_order_url;
       if (action.with_food !== undefined) patch['with_food'] = action.with_food;
       if (action.as_needed !== undefined) patch['as_needed'] = action.as_needed;
+      if (action.as_needed_for !== undefined) patch['as_needed_for'] = action.as_needed_for;
+      if (action.min_hours_between_doses !== undefined) patch['min_hours_between_doses'] = action.min_hours_between_doses;
+      if (action.max_doses_per_day !== undefined) patch['max_doses_per_day'] = action.max_doses_per_day;
+      // New instructions bring their limits with them unless limits were given.
+      if (action.instructions !== undefined && (action.as_needed ?? med.as_needed)) {
+        const read = limitsFromText(action.instructions, action.units_per_dose ?? (med.units_per_dose == null ? null : Number(med.units_per_dose)));
+        if (action.min_hours_between_doses === undefined && read.min_hours_between_doses != null) patch['min_hours_between_doses'] = read.min_hours_between_doses;
+        if (action.max_doses_per_day === undefined && read.max_doses_per_day != null) patch['max_doses_per_day'] = read.max_doses_per_day;
+      }
       if (action.critical !== undefined) patch['critical'] = action.critical;
       let filed = '';
       if (action.prescriber !== undefined) {
@@ -1844,6 +1888,8 @@ async function executeOne(
       const patch: Record<string, unknown> = { updated_at: db.fn.now() };
       if (action.packs_on_hand != null) patch['packs_on_hand'] = action.packs_on_hand;
       if (action.units_remaining != null) patch['supply_remaining'] = action.units_remaining;
+      // Restocked: a dose found not in stock no longer says it has run out.
+      patch['not_in_stock_admin_id'] = null;
       // Restocking packs alone, with nothing loose recorded, starts the count
       // from zero loose units so the total reads exactly what was picked up.
       await db('medications').where({ id: med.id }).update(patch);
@@ -3113,6 +3159,8 @@ function toSingleProfileAction(action: CrossProfileAction, entry: CrossProfileAc
       status: e.status,
       dose_given: e.dose_given,
       notes: e.notes,
+      reason: e.reason,
+      why_now: e.why_now,
       administered_at: e.administered_at,
     };
   }

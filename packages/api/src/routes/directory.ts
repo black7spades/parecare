@@ -5,7 +5,9 @@ import { requireAuth } from '../middleware/auth';
 import { roleAtLeast } from '../middleware/requireRole';
 import { providerAddressFields, providerContactFields, providerKindField, providerOtherNames, providerPracticeFields, providerWriteColumns, withComposedAddress } from './providers';
 import { kindFor, type ProviderKind } from '../lib/providerTypes';
-import { linkContactToSuppliers, linkSupplierToContact, resolveAssetSupplier, supplierContacts } from '../services/professionals';
+import { contactSummaries, ensureProfessional, linkContactToSuppliers, linkSupplierToContact, resolveAssetSupplier, supplierContacts } from '../services/professionals';
+import { accountHasRight } from '../middleware/accountRights';
+import { PLAN_LIMITS, getEffectiveTier } from '../middleware/subscriptionGate';
 import { hoursFromText, hoursToText } from '../lib/openingHours';
 import { dismissDuplicate, likelyDuplicates, mergeProviders, undoMerge } from '../services/providerMerge';
 import {
@@ -57,8 +59,8 @@ function profilesEndpoint(kind: ProfileKind) {
       'cp.id', 'cp.full_name', 'cp.preferred_name', 'cp.date_of_birth',
       'cp.current_phase', 'cp.photo_url', 'cp.photo_color',
       'cp.contact_kind', 'cp.contact_account_id', 'cp.contact_profile_id',
-      'cp.contact_name', 'cp.contact_phone', 'cp.contact_email',
-      'cp.owner_relationship',
+      'cp.contact_name', 'cp.contact_phone', 'cp.contact_email', 'cp.contact_relationship',
+      'cp.owner_relationship', 'cp.room_number',
       ...(kind === 'pet' ? ['cp.species', 'cp.breed', 'cp.desexed', 'cp.microchip_number', 'cp.owner_profile_id'] as const : []),
     ];
 
@@ -126,19 +128,8 @@ function profilesEndpoint(kind: ProfileKind) {
       contactProfiles.map((p: { id: string; full_name: string; contact_phone: string | null; contact_email: string | null }) => [p.id, p]),
     );
 
-    // GP phone fallback
-    const gpPhoneMap = new Map<string, string>();
-    if (ids.length > 0) {
-      const gpRows = await db('care_profile_providers as cpp')
-        .join('providers as p', 'cpp.provider_id', 'p.id')
-        .whereIn('cpp.care_profile_id', ids)
-        .where({ 'p.provider_type': 'gp' })
-        .whereNotNull('p.phone')
-        .select('cpp.care_profile_id', 'p.phone');
-      for (const g of gpRows as Array<{ care_profile_id: string; phone: string }>) {
-        if (!gpPhoneMap.has(g.care_profile_id)) gpPhoneMap.set(g.care_profile_id, g.phone);
-      }
-    }
+    // Their GP, on columns of its own: never standing in as the contact.
+    const gpMap = await mainGps(ids);
 
     const profiles = rows.map((p: CareProfile) => {
       const linked = p.contact_account_id ? contactAccountMap.get(p.contact_account_id) : undefined;
@@ -151,21 +142,55 @@ function profilesEndpoint(kind: ProfileKind) {
             : p.contact_kind === 'profile'
               ? carer?.full_name ?? null
               : p.contact_name ?? null;
-      const contactPhone = p.contact_phone || carer?.contact_phone || gpPhoneMap.get(p.id) || null;
+      const contactPhone = p.contact_phone || carer?.contact_phone || null;
       const contactEmail = p.contact_email || carer?.contact_email || linked?.email || null;
+      const gp = gpMap.get(p.id) ?? null;
+      // Next of kin is a person to contact about them, never themselves.
+      const isKin = contact_kindOf(p) === 'contact' || contact_kindOf(p) === 'user' || contact_kindOf(p) === 'profile';
 
       const { contact_kind, contact_account_id, contact_profile_id, ...rest } = p;
+      void contact_kind;
+      void contact_account_id;
+      void contact_profile_id;
       return {
         ...rest,
         contact_name: contactName,
         contact_phone: contactPhone,
         contact_email: contactEmail,
+        gp_name: gp?.name ?? null,
+        gp_phone: gp?.phone ?? null,
+        gp_practice: gp?.practice ?? null,
+        next_of_kin_name: isKin ? contactName : null,
+        next_of_kin_relationship: isKin ? (p as CareProfile & { contact_relationship?: string | null }).contact_relationship ?? null : null,
+        next_of_kin_phone: isKin ? contactPhone : null,
       };
     });
 
     const canEdit = roleAtLeast(account.role, 'admin');
-    res.json({ profiles, can_edit: canEdit });
+    // Anyone who may set up a profile may bring a list of people in.
+    res.json({ profiles, can_edit: canEdit, can_import: canEdit || accountHasRight(account, 'can_create_care_profiles') });
   };
+}
+
+const contact_kindOf = (p: CareProfile): string | null => (p as CareProfile & { contact_kind?: string | null }).contact_kind ?? null;
+
+/** Each person's main GP: the one marked main, else the first linked, never one they no longer see. */
+async function mainGps(ids: string[]): Promise<Map<string, { name: string; phone: string | null; practice: string | null }>> {
+  const out = new Map<string, { name: string; phone: string | null; practice: string | null }>();
+  if (ids.length === 0) return out;
+  const rows = (await db.raw(
+    `SELECT DISTINCT ON (cpp.care_profile_id) cpp.care_profile_id, cpp.provider_id
+       FROM care_profile_providers cpp JOIN providers p ON p.id = cpp.provider_id
+      WHERE cpp.care_profile_id = ANY(?) AND lower(p.provider_type) = 'gp' AND cpp.ended_on IS NULL
+      ORDER BY cpp.care_profile_id, cpp.is_main DESC, cpp.created_at ASC, cpp.id`,
+    [ids]
+  )) as { rows: Array<{ care_profile_id: string; provider_id: string }> };
+  const summaries = await contactSummaries(db, rows.rows.map((r) => r.provider_id));
+  for (const r of rows.rows) {
+    const s = summaries.get(r.provider_id);
+    if (s) out.set(r.care_profile_id, { name: s.name, phone: s.phone, practice: s.organisation?.name ?? null });
+  }
+  return out;
 }
 
 directoryRouter.get('/people', requireAuth, profilesEndpoint('person'));
@@ -1478,15 +1503,21 @@ const personPort: PortDescriptor<AnyRow, PortRecord> = {
     { key: 'primary_language', header: 'Language', aliases: ['primary language'], toCell: (r) => cell(r['primary_language']) },
     { key: 'current_phase', header: 'Phase', toCell: (r) => cell(r['current_phase']) },
     { key: 'owner_relationship', header: 'Relationship', aliases: ['relationship'], toCell: (r) => cell(r['owner_relationship']) },
-    { key: 'contact_name', header: 'Contact name', toCell: (r) => cell(r['contact_name']) },
-    { key: 'contact_phone', header: 'Contact phone', toCell: (r) => cell(r['contact_phone']) },
-    { key: 'contact_email', header: 'Contact email', toCell: (r) => cell(r['contact_email']) },
+    { key: 'room_number', header: 'Room', aliases: ['room number', 'room no', 'bed'], toCell: (r) => cell(r['room_number']) },
+    { key: 'gp_name', header: 'GP name', aliases: ['gp', 'doctor', 'general practitioner'], toCell: (r) => cell(r['gp_name']) },
+    { key: 'gp_phone', header: 'GP phone', aliases: ['doctor phone'], toCell: (r) => cell(r['gp_phone']) },
+    { key: 'gp_practice', header: 'GP practice', aliases: ['practice', 'medical centre', 'clinic'], toCell: (r) => cell(r['gp_practice']) },
+    { key: 'contact_name', header: 'Next of kin name', aliases: ['next of kin', 'nok', 'nok name', 'contact name', 'contact'], toCell: (r) => cell(r['contact_name']) },
+    { key: 'contact_relationship', header: 'Next of kin relationship', aliases: ['nok relationship', 'contact relationship', 'relationship to them'], toCell: (r) => cell(r['contact_relationship']) },
+    { key: 'contact_phone', header: 'Next of kin phone', aliases: ['nok phone', 'contact phone'], toCell: (r) => cell(r['contact_phone']) },
+    { key: 'contact_email', header: 'Next of kin email', aliases: ['nok email', 'contact email'], toCell: (r) => cell(r['contact_email']) },
   ],
   coerce: (raw, n) => {
     const full = (raw['full_name'] ?? '').trim();
     if (!full) return { ok: false as const, error: `Row ${n}: a name is required.` };
     const contactName = portBlank(raw['contact_name']);
     const phase = (raw['current_phase'] ?? '').trim();
+    const room = portBlank(raw['room_number']);
     return {
       ok: true as const,
       value: {
@@ -1499,10 +1530,15 @@ const personPort: PortDescriptor<AnyRow, PortRecord> = {
         primary_language: portBlank(raw['primary_language']),
         current_phase: PORT_PHASES.has(phase) ? phase : 'early_concern',
         owner_relationship: portBlank(raw['owner_relationship']),
+        room_number: room,
         contact_kind: contactName ? 'contact' : null,
         contact_name: contactName,
+        contact_relationship: portBlank(raw['contact_relationship']),
         contact_phone: portBlank(raw['contact_phone']),
+        contact_phone_type: portBlank(raw['contact_phone']) ? (/^\s*(\+?61\s*4|04)/.test(raw['contact_phone'] ?? '') ? 'mobile' : 'home') : null,
         contact_email: portEmail(raw['contact_email']),
+        // Filed in Contacts after the person is saved, not on the profile.
+        _gp: portBlank(raw['gp_name']) ? { name: portBlank(raw['gp_name']), phone: portBlank(raw['gp_phone']), practice: portBlank(raw['gp_practice']) } : null,
       },
     };
   },
@@ -1569,7 +1605,13 @@ function mountPort(
     /** Organisations only, or professionals only, out of the providers table. */
     providerKind?: ProviderKind;
     canWrite: (role: AccountRole) => boolean;
-    afterImport?: (ids: string[]) => Promise<void>;
+    /** Who else may import, by an account right, such as setting up profiles. */
+    canWriteAccount?: (account: NonNullable<import('express').Request['account']>) => boolean;
+    afterImport?: (ids: string[], records?: PortRecord[]) => Promise<void>;
+    /** Columns that live outside the table, added to each row before export. */
+    decorate?: (rows: AnyRow[]) => Promise<AnyRow[]>;
+    /** How many more rows this account may add, when its plan caps them. */
+    roomFor?: (account: NonNullable<import('express').Request['account']>) => Promise<number>;
   }
 ) {
   directoryRouter.get(`/${path}/export`, requireAuth, async (req, res) => {
@@ -1580,7 +1622,8 @@ function mountPort(
       if (opts.providerKind) q.where({ kind: opts.providerKind });
       q.orderBy(opts.kind ? 'full_name' : (descriptor.columns[0]!.key), 'asc');
     });
-    const { body, contentType, filename } = exportRecords(descriptor, rows as AnyRow[], format);
+    const decorated = opts.decorate ? await opts.decorate(rows as AnyRow[]) : (rows as AnyRow[]);
+    const { body, contentType, filename } = exportRecords(descriptor, decorated, format);
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(body);
@@ -1588,7 +1631,7 @@ function mountPort(
 
   directoryRouter.post(`/${path}/import`, requireAuth, async (req, res) => {
     const account = req.account!;
-    if (!opts.canWrite(account.role)) {
+    if (!opts.canWrite(account.role) && !opts.canWriteAccount?.(account)) {
       res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
       return;
     }
@@ -1610,9 +1653,26 @@ function mountPort(
       res.status(400).json({ error: 'No valid rows found to import.', code: 'IMPORT_EMPTY', imported: 0, skipped: total, errors });
       return;
     }
-    const rows = records.map((r) => ({ ...r, ...(opts.providerKind ? { kind: opts.providerKind } : {}), account_id: account.id }));
+    if (opts.roomFor) {
+      const room = await opts.roomFor(account);
+      if (records.length > room) {
+        res.status(402).json({
+          error: room <= 0
+            ? 'Your plan has no room for more people. Upgrade to add more.'
+            : `Your plan has room for ${room} more ${room === 1 ? 'person' : 'people'}, and the file has ${records.length}. Remove some rows or upgrade, then import again.`,
+          code: 'PLAN_LIMIT_REACHED',
+        });
+        return;
+      }
+    }
+    // Side data (a GP to file in Contacts) never goes into the table itself.
+    const rows = records.map((r) => {
+      const { _gp, ...cols } = r as PortRecord & { _gp?: unknown };
+      void _gp;
+      return { ...cols, ...(opts.providerKind ? { kind: opts.providerKind } : {}), account_id: account.id };
+    });
     const inserted = await db(opts.table).insert(rows).returning('id');
-    if (opts.afterImport) await opts.afterImport(inserted.map((r) => (r as { id: string }).id));
+    if (opts.afterImport) await opts.afterImport(inserted.map((r) => (r as { id: string }).id), records);
     res.status(201).json({ imported: inserted.length, skipped: errors.length, errors });
   });
 }
@@ -1658,5 +1718,39 @@ mountPort('assets', assetPort, {
   },
 });
 mountPort('addresses', addressPort, { table: 'addresses', canWrite: adminWrite });
-mountPort('people', personPort, { table: 'care_profiles', kind: 'person', canWrite: adminWrite });
+mountPort('people', personPort, {
+  table: 'care_profiles',
+  kind: 'person',
+  canWrite: adminWrite,
+  // A home manager brings her residents in, the same right as adding one.
+  canWriteAccount: (account) => accountHasRight(account, 'can_create_care_profiles'),
+  roomFor: async (account) => {
+    const limit = PLAN_LIMITS.care_profiles[getEffectiveTier(account)];
+    if (limit === Infinity) return Number.MAX_SAFE_INTEGER;
+    const row = await db('care_profiles').where({ account_id: account.id, archived: false }).count('id as n').first();
+    return Math.max(0, limit - Number(row?.n ?? 0));
+  },
+  // The GP has columns of their own in the file.
+  decorate: async (rows) => {
+    const gps = await mainGps(rows.map((r) => String(r['id'])));
+    return rows.map((r) => {
+      const gp = gps.get(String(r['id']));
+      return { ...r, gp_name: gp?.name ?? null, gp_phone: gp?.phone ?? null, gp_practice: gp?.practice ?? null };
+    });
+  },
+  // Each GP named in the file is found in Contacts or filed there, with
+  // their number and practice, and linked to the person.
+  afterImport: async (ids, records) => {
+    for (let i = 0; i < ids.length; i++) {
+      const gp = (records?.[i] as { _gp?: { name: string; phone: string | null; practice: string | null } | null } | undefined)?._gp;
+      if (!gp?.name) continue;
+      const filed = await ensureProfessional(db, { profileId: ids[i]!, name: gp.name, providerType: 'gp', phone: gp.phone });
+      if (!filed || !gp.practice) continue;
+      const row = await db('providers').where({ id: filed.id }).first();
+      if (!row || row.practice_id) continue;
+      const { columns } = await practiceColumns(row.account_id, { organisation: gp.practice }, row, row.id);
+      if (Object.keys(columns).length) await db('providers').where({ id: row.id }).update(columns);
+    }
+  },
+});
 mountPort('pets', petPort, { table: 'care_profiles', kind: 'pet', canWrite: adminWrite });

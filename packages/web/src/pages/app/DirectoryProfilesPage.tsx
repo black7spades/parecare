@@ -13,6 +13,7 @@ import { RecordPanel } from '../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../components/record/useRecordPanel';
 import { ageFrom, phaseLabel, CARE_PHASES, type ProfileKind } from '../../lib/care';
 import { formatDateOnly } from '../../lib/datetime';
+import { CONTACT_LINK } from '../../components/ContactStrip';
 
 interface CircleMember {
   display_name: string;
@@ -38,7 +39,18 @@ interface DirectoryProfile {
   microchip_number: string | null;
   owner_name: string | null;
   circle_members: CircleMember[] | null;
+  room_number?: string | null;
+  gp_name?: string | null;
+  gp_phone?: string | null;
+  gp_practice?: string | null;
+  next_of_kin_name?: string | null;
+  next_of_kin_relationship?: string | null;
+  next_of_kin_phone?: string | null;
 }
+
+// Missing values sort to the end, whichever way round.
+const last = (v: string | null | undefined) => (v && v.trim() ? v : '\uffff');
+const telOf = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
 
 const contactText = (p: DirectoryProfile) => (p.contact_name ?? p.contact_phone ?? p.contact_email ?? '');
 const circleCount = (p: DirectoryProfile) => p.circle_members?.length ?? 0;
@@ -47,8 +59,13 @@ const PEOPLE_SORTS: DataSort<DirectoryProfile>[] = [
   { key: 'name', label: 'Name', compare: (a, b) => a.full_name.localeCompare(b.full_name) },
   { key: 'age', label: 'Age', compare: (a, b) => (ageFrom(b.date_of_birth) ?? -1) - (ageFrom(a.date_of_birth) ?? -1) },
   { key: 'dob', label: 'Date of birth', compare: (a, b) => (a.date_of_birth ?? '').localeCompare(b.date_of_birth ?? '') },
+  { key: 'room', label: 'Room', compare: (a, b) => last(a.room_number).localeCompare(last(b.room_number), undefined, { numeric: true }) },
   { key: 'phase', label: 'Phase', compare: (a, b) => phaseLabel(a.current_phase).localeCompare(phaseLabel(b.current_phase)) },
-  { key: 'contact', label: 'Contact', compare: (a, b) => contactText(a).localeCompare(contactText(b)) },
+  { key: 'gp', label: 'GP', compare: (a, b) => last(a.gp_name).localeCompare(last(b.gp_name)) },
+  { key: 'gp_phone', label: 'GP phone', compare: (a, b) => last(a.gp_phone).localeCompare(last(b.gp_phone)) },
+  { key: 'kin', label: 'Next of kin', compare: (a, b) => last(a.next_of_kin_name).localeCompare(last(b.next_of_kin_name)) },
+  { key: 'kin_relationship', label: 'Relationship', compare: (a, b) => last(a.next_of_kin_relationship).localeCompare(last(b.next_of_kin_relationship)) },
+  { key: 'kin_phone', label: 'Next of kin phone', compare: (a, b) => last(a.next_of_kin_phone).localeCompare(last(b.next_of_kin_phone)) },
   { key: 'circle', label: 'Care circle', compare: (a, b) => circleCount(b) - circleCount(a) },
 ];
 
@@ -90,10 +107,11 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ['directory-profiles', kind],
-    queryFn: () => api.get<{ profiles: DirectoryProfile[]; can_edit: boolean }>(endpoint),
+    queryFn: () => api.get<{ profiles: DirectoryProfile[]; can_edit: boolean; can_import?: boolean }>(endpoint),
   });
   const profiles = data?.profiles ?? [];
   const canEdit = data?.can_edit ?? false;
+  const canImport = data?.can_import ?? canEdit;
   const canCreate = useAuthStore((s) => s.account?.can_create_care_profiles !== false);
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['directory-profiles', kind] });
 
@@ -112,6 +130,9 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
         p.species,
         p.breed,
         p.owner_name,
+        p.room_number,
+        p.gp_name,
+        p.next_of_kin_name,
         ...(p.circle_members ?? []).map((m) => m.display_name),
       ]
         .filter(Boolean)
@@ -133,13 +154,13 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
           <ImportExport
             basePath={isPeople ? '/directory/people' : '/directory/pets'}
             resource={isPeople ? 'people' : 'pets'}
-            canImport={canEdit}
+            canImport={isPeople ? canImport : canEdit}
             onImported={invalidate}
             templateHeaders={isPeople
-              ? ['Name', 'Preferred name', 'Date of birth', 'Pronouns', 'Language', 'Phase', 'Relationship', 'Contact name', 'Contact phone', 'Contact email']
+              ? ['Name', 'Preferred name', 'Date of birth', 'Pronouns', 'Language', 'Phase', 'Relationship', 'Room', 'GP name', 'GP phone', 'GP practice', 'Next of kin name', 'Next of kin relationship', 'Next of kin phone', 'Next of kin email']
               : ['Name', 'Species', 'Breed', 'Desexed', 'Microchip', 'Date of birth', 'Relationship', 'Contact name', 'Contact phone', 'Contact email']}
             templateSample={isPeople
-              ? ['Marie Rose', 'Marie', '1948-03-14', 'she/her', 'English', 'home_with_support', 'Mother', 'Chris Rattray', '07 5555 5555', 'chris@example.com']
+              ? ['Marie Rose', 'Marie', '1948-03-14', 'she/her', 'English', 'residential_ongoing', 'Resident', '112', 'Dr Rachel Cohen', '03 9560 4422', 'Glen Waverley Medical', 'Chris Rattray', 'Son', '0412 555 555', 'chris@example.com']
               : ['Bread Loaf', 'Cat', 'Domestic Shorthair', 'true', '', '2019-06-01', 'Cat', 'Chris Rattray', '07 5555 5555', '']}
           />
           {/* Offered to everyone allowed to set up a profile. */}
@@ -208,7 +229,13 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
                   <>
                     <SortableTh label="Age" sortKey="age" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                     <SortableTh label="Date of birth" sortKey="dob" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                    <SortableTh label="Room" sortKey="room" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                     <SortableTh label="Phase" sortKey="phase" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                    <SortableTh label="GP" sortKey="gp" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                    <SortableTh label="GP phone" sortKey="gp_phone" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                    <SortableTh label="Next of kin" sortKey="kin" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                    <SortableTh label="Relationship" sortKey="kin_relationship" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                    <SortableTh label="Next of kin phone" sortKey="kin_phone" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                   </>
                 ) : (
                   <>
@@ -217,7 +244,7 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
                     <SortableTh label="Owner" sortKey="owner" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                   </>
                 )}
-                <SortableTh label="Contact" sortKey="contact" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                {isPeople ? null : <SortableTh label="Contact" sortKey="contact" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />}
                 <SortableTh label="Care circle" sortKey="circle" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
               </tr>
             </thead>
@@ -266,10 +293,20 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
                           ? formatDateOnly(p.date_of_birth, 'd MMM yyyy')
                           : '-'}
                       </td>
+                      <td className="px-3 py-2 text-ink whitespace-nowrap">{p.room_number || '-'}</td>
                       <td className="px-3 py-2">
                         <span className="badge bg-surface-2 text-muted text-xs">
                           {phaseLabel(p.current_phase)}
                         </span>
+                      </td>
+                      <td className="px-3 py-2 text-ink">{p.gp_name || '-'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {p.gp_phone ? <a href={telOf(p.gp_phone)} className={CONTACT_LINK} onClick={(e) => e.stopPropagation()} aria-label={`Call ${p.gp_name ?? 'their GP'} on ${p.gp_phone}`}>{p.gp_phone}</a> : <span className="text-muted">-</span>}
+                      </td>
+                      <td className="px-3 py-2 text-ink">{p.next_of_kin_name || '-'}</td>
+                      <td className="px-3 py-2 text-muted">{p.next_of_kin_relationship || '-'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {p.next_of_kin_phone ? <a href={telOf(p.next_of_kin_phone)} className={CONTACT_LINK} onClick={(e) => e.stopPropagation()} aria-label={`Call ${p.next_of_kin_name ?? 'their next of kin'} on ${p.next_of_kin_phone}`}>{p.next_of_kin_phone}</a> : <span className="text-muted">-</span>}
                       </td>
                     </>
                   ) : (
@@ -281,7 +318,7 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
                       </td>
                     </>
                   )}
-                  <td className="px-3 py-2">
+                  {isPeople ? null : <td className="px-3 py-2">
                     {p.contact_name || p.contact_phone || p.contact_email ? (
                       <span className="text-ink text-xs">
                         {p.contact_name ? <span>{p.contact_name}</span> : null}
@@ -313,7 +350,7 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
                     ) : (
                       <span className="text-muted">-</span>
                     )}
-                  </td>
+                  </td>}
                   <td className="px-3 py-2">
                     {p.circle_members && p.circle_members.length > 0 ? (
                       <div className="flex flex-wrap gap-1">
@@ -352,7 +389,15 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
             { label: 'Date of birth', value: current.date_of_birth ? formatDateOnly(current.date_of_birth, 'd MMM yyyy') : null },
             { label: 'Age', value: ageFrom(current.date_of_birth) != null ? String(ageFrom(current.date_of_birth)) : null },
             ...(isPeople
-              ? [{ label: 'Phase', value: phaseLabel(current.current_phase) }]
+              ? [
+                  { label: 'Phase', value: phaseLabel(current.current_phase) },
+                  { label: 'Room', value: current.room_number ?? null },
+                  { label: 'GP', value: current.gp_name ?? null },
+                  { label: 'GP practice', value: current.gp_practice ?? null },
+                  { label: 'GP phone', value: current.gp_phone ? <a href={telOf(current.gp_phone)} className={CONTACT_LINK}>{current.gp_phone}</a> : null },
+                  { label: 'Next of kin', value: current.next_of_kin_name ?? null },
+                  { label: 'Next of kin relationship', value: current.next_of_kin_relationship ?? null },
+                ]
               : [
                   { label: 'Species', value: current.species },
                   { label: 'Breed', value: current.breed },

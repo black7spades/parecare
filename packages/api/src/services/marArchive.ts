@@ -38,6 +38,8 @@ export async function archiveOldAdministrations(cutoff: Date = retentionCutoff()
         dose_given: r.dose_given,
         route_given: r.route_given,
         notes: r.notes,
+        reason: r.reason,
+        outside_limits: r.outside_limits ?? false,
         right_patient: r.right_patient,
         right_medication: r.right_medication,
         right_dose: r.right_dose,

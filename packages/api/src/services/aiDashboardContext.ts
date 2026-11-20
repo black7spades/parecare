@@ -21,7 +21,7 @@ interface ProfileSummaryData {
   medications: Array<{ name: string; dose: string | null; schedule_times: string[] }>;
   overdueMedications: string[];
   /** Active medications whose remaining supply has reached zero. */
-  outOfStockMedications: Array<{ id: string; name: string }>;
+  outOfStockMedications: Array<{ id: string; name: string; on_order?: boolean }>;
   /** Medications ordered but not replenished after the reorder-stale window. */
   reorderOverdueMedications: Array<{ id: string; name: string; days: number }>;
   staleQuestionCount: number;
@@ -144,7 +144,7 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
       .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
       .whereIn('m.care_profile_id', ids)
       .where('m.active', true)
-      .select('m.care_profile_id', 'm.id', 'c.name as name', 'm.dose', 'm.schedule_times', 'm.supply', 'm.supply_remaining', 'm.packs_on_hand', 'm.reorder_ordered_at')
+      .select('m.care_profile_id', 'm.id', 'c.name as name', 'm.dose', 'm.schedule_times', 'm.supply', 'm.supply_remaining', 'm.packs_on_hand', 'm.reorder_ordered_at', 'm.not_in_stock_admin_id')
       .orderBy('c.name', 'asc'),
     db('medication_administrations')
       .whereIn('care_profile_id', ids)
@@ -216,10 +216,10 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
   );
 
   const medsMap = new Map<string, Array<{ name: string; dose: string | null; schedule_times: string[] }>>();
-  const outOfStockMap = new Map<string, Array<{ id: string; name: string }>>();
+  const outOfStockMap = new Map<string, Array<{ id: string; name: string; on_order?: boolean }>>();
   const reorderOverdueMap = new Map<string, Array<{ id: string; name: string; days: number }>>();
   const nowMs = now.getTime();
-  for (const m of meds as Array<{ care_profile_id: string; id: string; name: string; dose: string | null; schedule_times: unknown; supply: string | number | null; supply_remaining: string | number | null; packs_on_hand: string | number | null; reorder_ordered_at: Date | string | null }>) {
+  for (const m of meds as Array<{ care_profile_id: string; id: string; name: string; dose: string | null; schedule_times: unknown; supply: string | number | null; supply_remaining: string | number | null; packs_on_hand: string | number | null; reorder_ordered_at: Date | string | null; not_in_stock_admin_id: string | null }>) {
     const arr = medsMap.get(m.care_profile_id) ?? [];
     arr.push({
       name: m.name,
@@ -231,9 +231,11 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
     // unopened packs, means a repeat is needed before the next dose.
     const packUnits =
       m.packs_on_hand != null && m.supply != null ? Number(m.packs_on_hand) * Number(m.supply) : 0;
-    if (m.supply_remaining !== null && m.supply_remaining !== undefined && Number(m.supply_remaining) + packUnits <= 0) {
+    // Found not in stock on a round counts too, until it is restocked.
+    const counted = m.supply_remaining !== null && m.supply_remaining !== undefined && Number(m.supply_remaining) + packUnits <= 0;
+    if (counted || m.not_in_stock_admin_id) {
       const out = outOfStockMap.get(m.care_profile_id) ?? [];
-      out.push({ id: m.id, name: m.name });
+      out.push({ id: m.id, name: m.name, on_order: !!m.reorder_ordered_at });
       outOfStockMap.set(m.care_profile_id, out);
     }
     // Ordered but still not replenished after the stale window: the order
@@ -408,6 +410,8 @@ export interface AttentionItem {
   contact: ContactSummary | null;
   /** The next thing to do, so the alert never stops at a list. */
   next_action: NextAction | null;
+  /** Out of stock, and a repeat is already on order. */
+  on_order?: boolean;
 }
 
 /** Where the row opens: the record itself when there is one. */
@@ -481,8 +485,9 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
         profile_id: s.profile.id,
         profile_name: name,
         kind: 'out_of_stock',
-        label: 'Out of stock',
+        label: m.on_order ? 'Out of stock, on order' : 'Out of stock',
         detail: m.name,
+        on_order: !!m.on_order,
         section: 'medications',
         key: `out_of_stock:${m.id}`,
         urgent: true,

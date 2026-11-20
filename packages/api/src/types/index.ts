@@ -184,6 +184,8 @@ export interface CareLogEntry {
   id: string;
   care_profile_id: string;
   author_member_id: string | null;
+  /** Who wrote it, by their login. */
+  author_account_id: string | null;
   entry_type: string;
   title: string | null;
   body: string;

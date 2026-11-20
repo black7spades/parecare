@@ -5,7 +5,8 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../../api/client';
 import { Button } from '../../../../components/ui/Button';
-import { Input } from '../../../../components/ui/Input';
+import { Input, Textarea } from '../../../../components/ui/Input';
+import { limitsFromText } from '../../../../lib/asNeeded';
 import { Modal } from '../../../../components/ui/Modal';
 import { TimeField } from './TimeField';
 import { SupplierModal } from './SupplierModal';
@@ -53,6 +54,17 @@ export function MedicationForm({
   const [route, setRoute] = useState(med?.route ?? '');
   const [withFood, setWithFood] = useState(med?.with_food ?? false);
   const [critical, setCritical] = useState(med?.critical ?? false);
+  const [instructions, setInstructions] = useState(med?.instructions ?? '');
+  const [asNeededFor, setAsNeededFor] = useState(med?.as_needed_for ?? '');
+  const [gapHours, setGapHours] = useState(med?.min_hours_between_doses != null ? String(med.min_hours_between_doses) : '');
+  const [mostPerDay, setMostPerDay] = useState(med?.max_doses_per_day != null ? String(med.max_doses_per_day) : '');
+  // Limits typed by a person stay; until then they follow the instructions.
+  // Saved limits that the instructions do not say were typed, so they stay.
+  const [limitsTouched, setLimitsTouched] = useState(() => {
+    if (!med) return false;
+    const read = limitsFromText(med.instructions ?? '', med.units_per_dose ?? null);
+    return (med.min_hours_between_doses ?? null) !== read.min_hours_between_doses || (med.max_doses_per_day ?? null) !== read.max_doses_per_day;
+  });
   // Times a day drives how many time fields show; 0 means as needed.
   const initialTimes = med?.schedule_times ?? [];
   const [perDay, setPerDay] = useState(med?.as_needed ? 0 : initialTimes.length || 1);
@@ -172,6 +184,11 @@ export function MedicationForm({
         route: route || null,
         with_food: withFood,
         as_needed: asNeeded,
+        instructions: instructions.trim() || null,
+        as_needed_for: asNeeded ? asNeededFor.trim() || null : null,
+        // Only an as-needed medicine has limits.
+        min_hours_between_doses: !asNeeded || gapHours.trim() === '' ? null : Number(gapHours),
+        max_doses_per_day: !asNeeded || mostPerDay.trim() === '' ? null : Number(mostPerDay),
         critical,
         schedule_times: asNeeded ? [] : slots.slice(0, perDay),
         supply: packSize.trim() === '' ? null : Number(packSize),
@@ -333,11 +350,61 @@ export function MedicationForm({
               </div>
             </>
           ) : (
-            <label className="inline-flex items-center gap-1.5 text-sm text-ink">
-              <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary" checked={withFood} onChange={(e) => setWithFood(e.target.checked)} />
-              Taken with food
-            </label>
+            <div className="space-y-3">
+              <label className="inline-flex items-center gap-1.5 text-sm text-ink">
+                <input type="checkbox" className="h-4 w-4 rounded border-border text-primary focus:ring-primary" checked={withFood} onChange={(e) => setWithFood(e.target.checked)} />
+                Taken with food
+              </label>
+              <Input id="med-as-needed-for" label="What it is for" value={asNeededFor} onChange={(e) => setAsNeededFor(e.target.value)} placeholder="e.g. Breakthrough pain" />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input
+                  id="med-gap-hours"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  label="Hours between doses"
+                  value={gapHours}
+                  onChange={(e) => { setGapHours(e.target.value); setLimitsTouched(true); }}
+                  placeholder="e.g. 4"
+                />
+                <Input
+                  id="med-most-per-day"
+                  type="number"
+                  min="0"
+                  step="1"
+                  label="Most in 24 hours"
+                  value={mostPerDay}
+                  onChange={(e) => { setMostPerDay(e.target.value); setLimitsTouched(true); }}
+                  placeholder="e.g. 4"
+                />
+              </div>
+              {!limitsTouched && (gapHours || mostPerDay) && (() => {
+                const read = limitsFromText(instructions, units.trim() === '' ? null : Number(units));
+                return String(read.min_hours_between_doses ?? '') === gapHours && String(read.max_doses_per_day ?? '') === mostPerDay;
+              })() ? (
+                <p className="text-xs text-muted">Worked out from the instructions.</p>
+              ) : null}
+              <p className="text-xs text-muted">A dose given sooner, or more often, asks why. It is never stopped.</p>
+            </div>
           )}
+          <div className="mt-3">
+            <Textarea
+              id="med-instructions"
+              label="Instructions"
+              value={instructions}
+              onChange={(e) => {
+                setInstructions(e.target.value);
+                // The limits follow what the instructions say until someone types their own.
+                if (!limitsTouched) {
+                  const read = limitsFromText(e.target.value, units.trim() === '' ? null : Number(units));
+                  setGapHours(read.min_hours_between_doses != null ? String(read.min_hours_between_doses) : '');
+                  setMostPerDay(read.max_doses_per_day != null ? String(read.max_doses_per_day) : '');
+                }
+              }}
+              rows={2}
+              placeholder="e.g. Minimum 4 hours between doses"
+            />
+          </div>
           <div className="mt-3 max-w-xs">
             <Input
               id="med-course-ends"

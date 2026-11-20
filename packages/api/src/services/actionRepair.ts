@@ -31,7 +31,7 @@ export function replyIntendsToAct(reply: string): boolean {
 /** Compact action reference for the profile assistant's repair prompt. */
 export const PROFILE_ACTION_REFERENCE = [
   '- {"type":"log_event","entry_type":"visit|medication|medical_appointment|phone_call|decision_made|concern_raised|observation|handover","title":optional,"body":required,"occurred_at":optional ISO}',
-  '- {"type":"record_medication","medication_name":exact name,"status":"given|refused|omitted|held|self_administered","dose_given":optional,"notes":optional,"administered_at":optional ISO}',
+  '- {"type":"record_medication","medication_name":exact name,"status":"given|refused|omitted|held|self_administered|not_in_stock","dose_given":optional,"notes":optional,"reason":optional,"administered_at":optional ISO}',
   '- {"type":"add_task","title":required,"body":optional,"due_at":"ISO, or YYYY-MM-DD for any time that day","repeat":"once|daily|weekly|fortnightly|monthly|three_monthly|six_monthly|yearly","with":optional who it is with,"with_type":optional,"with_phone":optional their number,"kind":optional,"for_condition":optional,"assign_to":optional,"documents":optional names}',
   '- {"type":"add_medication","medication_name":required,"dose":optional,"schedule_times":optional ["HH:MM"],"supply":optional,"packs_on_hand":optional,"prescriber":optional who writes the script,"started_at_appointment":optional visit title,"course_ends_on":optional YYYY-MM-DD,"repeats_left":optional,"reason":optional}',
   '- {"type":"update_medication","medication_name":exact name, then any of "dose","schedule_times",["HH:MM"],"supply","supply_remaining","packs_on_hand","prescriber","started_at_appointment","course_ends_on","repeats_left","reason","changed_on"}',
@@ -56,7 +56,7 @@ export const PROFILE_ACTION_REFERENCE = [
 export function dashboardActionReference(openProfileName: string | null): string {
   return [
     '- {"type":"cross_profile_log","entries":[{"profile_name":"exact person name","entry_type":"observation|visit|medication|medical_appointment|phone_call|decision_made|concern_raised|handover","title":optional,"body":required,"occurred_at":optional ISO}]}',
-    '- {"type":"cross_profile_medications","entries":[{"profile_name":"exact person name","medication_name":"exact name","status":"given|refused|omitted|held|self_administered","dose_given":optional,"notes":required unless given or self_administered,"administered_at":optional ISO}]}',
+    '- {"type":"cross_profile_medications","entries":[{"profile_name":"exact person name","medication_name":"exact name","status":"given|refused|omitted|held|self_administered|not_in_stock","dose_given":optional,"notes":required when refused, omitted or held,"reason":optional,"administered_at":optional ISO}]}',
     '- {"type":"profile_actions","entries":[{"profile_name":"exact person name","action":{ one single-profile action }}]} where a single-profile action is any of:',
     PROFILE_ACTION_REFERENCE.replace(/^/gm, '    '),
     openProfileName

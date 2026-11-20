@@ -9,6 +9,7 @@
  * from a vial or a spoon of liquid from a bottle.
  */
 
+import type { Knex } from 'knex';
 import { db } from '../config/database';
 
 // Forms given as a measured volume rather than a counted number of units.
@@ -36,9 +37,9 @@ export function perDoseDrawdown(med: { form: string | null; units_per_dose: unkn
  * down by one and its units become the loose supply. Shared by every path
  * that records a dose.
  */
-export async function drawDownOnHand(medId: string, amount: number): Promise<void> {
+export async function drawDownOnHand(medId: string, amount: number, conn: Knex | Knex.Transaction = db): Promise<void> {
   if (amount <= 0) return;
-  const row = await db('medications')
+  const row = await conn('medications')
     .where({ id: medId })
     .select('supply', 'supply_remaining', 'packs_on_hand')
     .first();
@@ -60,7 +61,7 @@ export async function drawDownOnHand(medId: string, amount: number): Promise<voi
     need -= take;
   }
 
-  await db('medications')
+  await conn('medications')
     .where({ id: medId })
     .update({
       supply_remaining: loose,

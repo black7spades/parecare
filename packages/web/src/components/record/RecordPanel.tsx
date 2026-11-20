@@ -12,6 +12,7 @@ import { Textarea } from '../ui/Input';
 import { TrashIcon } from '../ui/icons';
 import { ForwardedFromTag, ForwardTags, type ForwardedFrom, type SentForward } from '../ForwardNotes';
 import { LinkedText } from '../LinkedText';
+import { usePareOn } from '../../lib/aiStatus';
 
 export interface RecordField {
   label: string;
@@ -119,6 +120,8 @@ export function RecordPanel({
   const queryClient = useQueryClient();
   const myId = useAuthStore((s) => s.account?.id);
   const askPare = useAssistantStore((s) => s.openWithMessage);
+  // With no assistant attached, Ask Pare is not offered.
+  const pareOn = usePareOn();
   const [note, setNote] = useState('');
   const [uploading, setUploading] = useState(false);
   const [attachId, setAttachId] = useState('');
@@ -247,7 +250,7 @@ export function RecordPanel({
             {canEdit && personal ? (
               <Button size="sm" variant="ghost" onClick={() => setUploading(true)}>Attach a document</Button>
             ) : null}
-            <Button
+            {pareOn ? <Button
               size="sm"
               variant="ghost"
               onClick={() => {
@@ -256,7 +259,7 @@ export function RecordPanel({
               }}
             >
               Ask Pare about this
-            </Button>
+            </Button> : null}
             <Button size="sm" variant="ghost" onClick={print}>Print</Button>
             <Button size="sm" variant="ghost" onClick={() => void copyLink()}>{copied ? 'Link copied' : 'Copy link'}</Button>
             {canEdit && onDelete ? <Button size="sm" variant="ghost-danger" onClick={onDelete}>{deleteLabel}</Button> : null}

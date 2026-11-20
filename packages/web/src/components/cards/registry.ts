@@ -8,6 +8,7 @@ import { HealthCard } from './profile/HealthCard';
 import { HealthSpendCard } from './profile/HealthSpendCard';
 import { CareLogCard } from './profile/CareLogCard';
 import { RecentActivityCard } from './profile/RecentActivityCard';
+import { ShiftCard } from './profile/ShiftCard';
 import type { CardDefinition } from './types';
 
 /**
@@ -21,6 +22,9 @@ import type { CardDefinition } from './types';
 export const PROFILE_CARDS: CardDefinition[] = [
   // What changed since this person last looked leads, so a busy week shows.
   { key: 'recent', label: 'Recent activity', Component: RecentActivityCard },
+  // What someone starting a shift needs before anything else. It leads for
+  // helpers and comes second for the owner (see ordering.ts).
+  { key: 'shift', label: 'Before you start', Component: ShiftCard, shows: (ctx) => ctx.profile.kind !== 'pet' },
   { key: 'profile', label: 'Contact details', Component: ProfileContactCard },
   { key: 'conditions', label: 'Conditions', Component: ConditionsCard },
   // A pet has no neurotypes or substance use; only people do.
