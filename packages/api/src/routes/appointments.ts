@@ -25,6 +25,7 @@ import {
   updateAppointment,
 } from '../services/booking';
 import { createTask, findSameBookingTask, joinTask } from '../services/tasks';
+import { refreshReferrals } from '../services/documentDates';
 
 /**
  * Appointments are a first-class record: who is being seen, what for,
@@ -519,6 +520,7 @@ appointmentsRouter.post('/bulk', requireAuth, async (req, res) => {
   const scope = db('appointments').whereIn('id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']);
   if (parsed.data.action === 'delete') {
     const deleted = await scope.del();
+    await refreshReferrals(db, String(req.params['id']));
     res.json({ deleted });
     return;
   }
@@ -526,6 +528,7 @@ appointmentsRouter.post('/bulk', requireAuth, async (req, res) => {
     status: parsed.data.action === 'complete' ? 'completed' : 'cancelled',
     updated_at: db.fn.now(),
   });
+  await refreshReferrals(db, String(req.params['id']));
   res.json({ updated });
 });
 
@@ -537,5 +540,6 @@ appointmentsRouter.delete('/:appointmentId', requireAuth, async (req, res) => {
     res.status(404).json({ error: 'Appointment not found', code: 'NOT_FOUND' });
     return;
   }
+  await refreshReferrals(db, String(req.params['id']));
   res.json({ message: 'Appointment deleted.' });
 });

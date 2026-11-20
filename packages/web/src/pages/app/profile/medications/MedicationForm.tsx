@@ -9,7 +9,7 @@ import { Input } from '../../../../components/ui/Input';
 import { Modal } from '../../../../components/ui/Modal';
 import { TimeField } from './TimeField';
 import { SupplierModal } from './SupplierModal';
-import type { MedicationRecord, Supplier } from '../../../../lib/care';
+import type { CareDocument, MedicationRecord, Supplier } from '../../../../lib/care';
 import type { Appointment } from '../AppointmentsPage';
 import { ContactPicker, changedContactFieldsAs, contactFieldsAs, pickedFrom, type PickedContact } from '../../../../components/ContactPicker';
 import { format } from 'date-fns';
@@ -61,6 +61,12 @@ export function MedicationForm({
   const [remaining, setRemaining] = useState(med?.supply_remaining != null ? String(med.supply_remaining) : '');
   const [packs, setPacks] = useState(med?.packs_on_hand != null ? String(med.packs_on_hand) : '');
   const [repeatsDue, setRepeatsDue] = useState(med?.repeats_due ?? '');
+  const [repeatsLeft, setRepeatsLeft] = useState(med?.repeats_left != null ? String(med.repeats_left) : '');
+  const [courseEnds, setCourseEnds] = useState(med?.course_ends_on ?? '');
+  // Why the dose or times changed and where from, asked only when they did.
+  const [changeReason, setChangeReason] = useState('');
+  const [changeSource, setChangeSource] = useState('');
+  const [changeDocId, setChangeDocId] = useState('');
   // The supplier is chosen from the account's shared suppliers; picking one
   // autofills the reorder link, which is saved on the supplier itself.
   const [supplierId, setSupplierId] = useState(med?.supplier_id ?? '');
@@ -84,6 +90,23 @@ export function MedicationForm({
       .filter((a) => a.starts_at && new Date(a.starts_at).getTime() <= now)
       .sort((a, b) => new Date(b.starts_at!).getTime() - new Date(a.starts_at!).getTime());
   }, [apptData]);
+
+  // Letters on file, for "Where did the change come from?".
+  const { data: docData } = useQuery({
+    queryKey: ['documents', profileId],
+    queryFn: () => api.get<{ documents: CareDocument[] }>(`/care-profiles/${profileId}/documents`),
+    enabled: !!med,
+  });
+  const letters = docData?.documents ?? [];
+
+  // The dose or times moved from what is on file: ask why, and where from.
+  const sameTimes = (a: string[], b: string[]) => a.length === b.length && [...a].sort().join() === [...b].sort().join();
+  const timesNow = perDay < 1 ? [] : slots.slice(0, perDay);
+  const changed =
+    !!med &&
+    ((doseAmount.trim() || '') !== (med.dose_amount ?? '') ||
+      (doseUnit.trim() || '') !== (med.dose_unit ?? '') ||
+      !sameTimes(timesNow, med.as_needed ? [] : med.schedule_times ?? []));
 
   const typeMeta = MED_TYPES.find((t) => t.value.toLowerCase() === type.toLowerCase());
 
@@ -155,6 +178,15 @@ export function MedicationForm({
         supply_remaining: remaining.trim() === '' ? null : Number(remaining),
         packs_on_hand: packs.trim() === '' ? null : Number(packs),
         repeats_due: repeatsDue || null,
+        repeats_left: repeatsLeft.trim() === '' ? null : Number(repeatsLeft),
+        course_ends_on: courseEnds || null,
+        ...(changed
+          ? {
+              change_reason: changeReason.trim() || null,
+              change_source_appointment_id: changeSource.startsWith('appt:') ? changeSource.slice(5) : null,
+              change_source_document_id: changeSource === 'letter' && changeDocId ? changeDocId : null,
+            }
+          : {}),
         // The chosen supplier is authoritative: the server derives the name
         // and reorder link from it. No supplier clears all three.
         ...(supplierId
@@ -306,6 +338,16 @@ export function MedicationForm({
               Taken with food
             </label>
           )}
+          <div className="mt-3 max-w-xs">
+            <Input
+              id="med-course-ends"
+              type="date"
+              label="Last day of the course"
+              value={courseEnds}
+              onChange={(e) => setCourseEnds(e.target.value)}
+              hint="Only for a course, such as antibiotics. After this day its doses stop being due."
+            />
+          </div>
           <label className="mt-3 flex items-start gap-2 text-sm text-ink">
             <input
               type="checkbox"
@@ -340,6 +382,10 @@ export function MedicationForm({
           <p className="text-sm text-ink leading-8">
             Repeats due:{' '}
             <input className={`${inlineInput} w-40`} aria-label="Repeats due" type="date" value={repeatsDue} onChange={(e) => setRepeatsDue(e.target.value)} />
+          </p>
+          <p className="text-sm text-ink leading-8">
+            Repeats left on the script:{' '}
+            <input className={inlineInput} aria-label="Repeats left on the script" type="number" min="0" max="99" step="1" value={repeatsLeft} onChange={(e) => setRepeatsLeft(e.target.value)} />
           </p>
           <p className="text-sm text-ink leading-8">
             Reordered from{' '}
@@ -381,6 +427,42 @@ export function MedicationForm({
             When the open {containerWord} runs out, the next unopened one is opened automatically.
           </p>
         </section>
+
+        {changed ? (
+          <section className="rounded-md border border-border bg-surface-2 p-3 space-y-3">
+            <p className="text-sm text-ink">The {(doseAmount.trim() || '') !== (med?.dose_amount ?? '') || (doseUnit.trim() || '') !== (med?.dose_unit ?? '') ? 'dose' : 'times'} changed. This is kept in its history.</p>
+            <Input
+              id="med-change-reason"
+              label="Why did it change?"
+              placeholder="e.g. Blood pressure low after a fall"
+              value={changeReason}
+              onChange={(e) => setChangeReason(e.target.value)}
+            />
+            <div>
+              <label htmlFor="med-change-source" className="block text-sm font-medium text-ink mb-1">Where did the change come from?</label>
+              <select id="med-change-source" className={`${SELECT} w-full`} value={changeSource} onChange={(e) => setChangeSource(e.target.value)}>
+                <option value="">Choose one</option>
+                {pastVisits.slice(0, 10).map((a) => (
+                  <option key={a.id} value={`appt:${a.id}`}>
+                    {a.title}, {format(new Date(a.starts_at!), 'd MMM yyyy')}
+                  </option>
+                ))}
+                <option value="letter">A letter on file</option>
+                <option value="unsure">Not sure</option>
+              </select>
+            </div>
+            {changeSource === 'letter' ? (
+              <div>
+                <label htmlFor="med-change-letter" className="block text-sm font-medium text-ink mb-1">Which letter</label>
+                <select id="med-change-letter" className={`${SELECT} w-full`} value={changeDocId} onChange={(e) => setChangeDocId(e.target.value)}>
+                  <option value="">Choose a document</option>
+                  {letters.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
+                </select>
+                {letters.length === 0 ? <p className="mt-1 text-xs text-muted">No documents on file yet. Upload the letter in Documents, then pick it here.</p> : null}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">

@@ -167,6 +167,8 @@ export async function findSameBookingTask(
     .whereNull('r.merged_into_id')
     .whereNull('r.stopped_by_death_at')
     .where('r.created_at', '>', new Date(Date.now() - 365 * 24 * 3600 * 1000))
+    // A "Get a new referral" reminder is its own job, never joined by a booking with the GP.
+    .whereNotExists((q) => q.select(1).from('documents').whereRaw('documents.renewal_task_id = r.id'))
     .modify((q) => { if (c.excludeIds?.length) void q.whereNotIn('r.id', c.excludeIds); })
     .orderBy('r.created_at', 'asc')
     .select('r.id', 'r.title', 'r.body', 'r.provider_id', 't.system_key')) as Array<{
@@ -593,8 +595,12 @@ export async function enrichTasks(conn: Conn, profileId: string, rows: TaskListR
     };
   });
 
-  // An open booking task that matches an older open one looks like the same job.
-  const open = out.filter((t) => !t['completed'] && !t['merged_into_id'] && t.books);
+  // An open booking task that matches an older open one looks like the same
+  // job. A "Get a new referral" reminder is its own job.
+  const renewals = new Set(
+    (await conn('documents').where({ care_profile_id: profileId }).whereIn('renewal_task_id', ids).pluck('renewal_task_id')) as string[]
+  );
+  const open = out.filter((t) => !t['completed'] && !t['merged_into_id'] && t.books && !renewals.has(t.id));
   for (const t of open) {
     const prov = t.provider;
     const older = open.filter((o) => o.id !== t.id && new Date(o['created_at'] as string) < new Date(t['created_at'] as string));

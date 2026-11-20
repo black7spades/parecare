@@ -13,6 +13,8 @@ export interface AuditContext {
   source: AuditSource;
   /** Groups the rows one action call wrote, so one token can undo them. */
   undoBatch: string | null;
+  /** The letter being filed, when Pare files from a document: every record made links back to it. */
+  sourceDocumentId?: string | null;
 }
 
 export const auditContext = new AsyncLocalStorage<AuditContext>();
@@ -20,6 +22,11 @@ export const auditContext = new AsyncLocalStorage<AuditContext>();
 /** The source in force right now, or a person when nothing set one. */
 export function currentAuditSource(): AuditSource {
   return auditContext.getStore()?.source ?? 'person';
+}
+
+/** The document a change is being filed from, if any. */
+export function currentSourceDocument(): string | null {
+  return auditContext.getStore()?.sourceDocumentId ?? null;
 }
 
 /** The undo batch in force right now, if any. */

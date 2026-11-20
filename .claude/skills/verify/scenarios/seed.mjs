@@ -68,12 +68,14 @@ function tinyPdf(text) {
   return Buffer.from(out);
 }
 
-async function upload(token, pid, label, category, text, link) {
+async function upload(token, pid, label, category, text, link, extra = {}) {
   const fd = new FormData();
   fd.append('file', new Blob([tinyPdf(text)], { type: 'application/pdf' }), `${label.replace(/\W+/g, '-')}.pdf`);
   fd.append('label', label);
   fd.append('category', category);
   if (link) { fd.append('link_entity_type', link.type); fd.append('link_entity_id', link.id); }
+  // Date written, who it is from and to, and the like (Wave 3).
+  for (const [k, v] of Object.entries(extra)) fd.append(k, String(v));
   const res = await fetch(`${API}/care-profiles/${pid}/documents`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) console.warn('  ! upload failed', res.status, JSON.stringify(j).slice(0, 120));
@@ -161,11 +163,14 @@ const mumOldAppt = await appt(dauT, mum.id, { title: 'Cardiology follow-up', app
 await appt(dauT, mum.id, { title: 'GP visit for script repeats', appointment_type: 'consultation', provider_id: mumGp.id, starts_at: at(5, 10, 30) });
 await appt(dauT, mum.id, { title: 'Geriatrician assessment', appointment_type: 'consultation', provider_id: geri.id, starts_at: at(12, 13) });
 await appt(dauT, mum.id, { title: 'Podiatry', appointment_type: 'therapy', starts_at: at(8, 11) });
-await task(dauT, mum.id, { title: 'Book a neurologist', body: 'Dr Okafor referred Mum for memory testing. Neurologist is Dr Anna Chen, 03 9345 6677.', reminder_type: 'once', next_due_at: at(2) });
+const mumNeuroTask = await task(dauT, mum.id, { title: 'Book a neurologist', body: 'Dr Okafor referred Mum for memory testing. Neurologist is Dr Anna Chen, 03 9345 6677.', reminder_type: 'once', next_due_at: at(2) });
 await task(dauT, mum.id, { title: 'Reorder Metoprolol from pharmacy', reminder_type: 'once', next_due_at: at(1) });
 await task(dauT, mum.id, { title: 'Book flu shot', reminder_type: 'once', next_due_at: at(9) });
 await task(dauT, mum.id, { title: 'Ask GP about 75+ health assessment', reminder_type: 'once', next_due_at: at(14) });
-const ref = await upload(dauT, mum.id, 'Neurology referral letter', 'Referral', 'Referral to Dr Anna Chen, Neurologist, Epworth Richmond. For memory assessment. 12 months from 10 Nov.');
+// Written by her GP ten days ago and attached to the task it is for. Who it is
+// to is left for the person to fill in, so scenario 01 still finds Dr Chen
+// only in the task notes.
+const ref = await upload(dauT, mum.id, 'Neurology referral letter', 'Referral', 'Referral to Dr Anna Chen, Neurologist, Epworth Richmond. For memory assessment. 12 months from 10 Nov.', mumNeuroTask ? { type: 'reminders', id: mumNeuroTask.id } : null, { issued_on: dateOnly(-10), from_provider_id: mumGp.id });
 await upload(dauT, mum.id, 'Discharge summary Box Hill Hospital', 'Letter', 'Discharge summary. Admitted 2 days, fall at home. Metoprolol dose changed to 25mg. See GP within 7 days.');
 await question(dauT, mum.id, { title: 'Is the memory change getting worse?', body: 'Ask Dr Okafor and the neurologist.' });
 await question(dauT, mum.id, { title: 'Can Warfarin be swapped for something that needs fewer blood tests?' });

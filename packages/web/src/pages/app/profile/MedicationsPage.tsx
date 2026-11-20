@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
@@ -12,6 +12,7 @@ import { MedicationForm } from './medications/MedicationForm';
 import { ReplenishModal } from './medications/ReplenishModal';
 import { BulkEditModal } from './medications/BulkEditModal';
 import { AdministerModal } from './medications/AdministerModal';
+import { StopModal } from './medications/StopModal';
 import { localNow } from './medications/shared';
 import { ImportExport } from '../../../components/ImportExport';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
@@ -27,7 +28,10 @@ import { SELF_RELATIONSHIP,
   regimenLine,
   supplyLabel,
   totalOnHand,
+  medicationChangeWhat,
+  stopReasonLabel,
   type MedicationRecord,
+  type StopReason,
 } from '../../../lib/care';
 import { formatDateOnly } from '../../../lib/datetime';
 import { ContactStrip, CONTACT_LINK } from '../../../components/ContactStrip';
@@ -84,7 +88,14 @@ const numAsc = (n: number | null): number => (n == null ? Number.POSITIVE_INFINI
 
 const fmtNum = (n: number): string => (Number.isInteger(n) ? String(n) : String(Number(n.toFixed(3))));
 
-const MED_SORTS: DataSort<MedicationRecord>[] = [
+/** Who a medicine is reordered from as the table shows it: its own supplier, else their main pharmacy. */
+const supplierName = (m: MedicationRecord, mainPharmacy: string | null): string => m.supplier || mainPharmacy || '';
+
+/** A course whose last day has gone by, still on the active list. */
+const courseFinished = (m: MedicationRecord): boolean =>
+  m.active && !!m.course_ends_on && m.course_ends_on < format(new Date(), 'yyyy-MM-dd');
+
+const medSorts = (mainPharmacy: string | null): DataSort<MedicationRecord>[] => [
   { key: 'default', label: 'Active first, then name', compare: (a, b) => (Number(b.active) - Number(a.active)) || byName(a, b) },
   { key: 'name', label: 'Medication', compare: byName },
   { key: 'units', label: 'Unit', compare: (a, b) => (numAsc(a.units_per_dose) - numAsc(b.units_per_dose)) || byName(a, b) },
@@ -94,7 +105,7 @@ const MED_SORTS: DataSort<MedicationRecord>[] = [
   { key: 'schedule', label: 'Schedule (time of day)', compare: (a, b) => (earliestTime(a) - earliestTime(b)) || byName(a, b) },
   { key: 'packs', label: 'Packs on hand', compare: (a, b) => (numAsc(a.packs_on_hand) - numAsc(b.packs_on_hand)) || byName(a, b) },
   { key: 'supply', label: 'Supply left', compare: (a, b) => (numAsc(daysOfSupply(a) ?? totalOnHand(a)) - numAsc(daysOfSupply(b) ?? totalOnHand(b))) || byName(a, b) },
-  { key: 'supplier', label: 'Supplier', compare: (a, b) => (a.supplier ?? '').localeCompare(b.supplier ?? '') || byName(a, b) },
+  { key: 'supplier', label: 'Supplier', compare: (a, b) => (supplierName(a, mainPharmacy) || '￿').localeCompare(supplierName(b, mainPharmacy) || '￿') || byName(a, b) },
   { key: 'prescriber', label: 'Prescribed by', compare: (a, b) => (a.prescriber?.name ?? '\uffff').localeCompare(b.prescriber?.name ?? '\uffff') || byName(a, b) },
   // Missing dates sort last.
   { key: 'repeats', label: 'Repeats due', compare: (a, b) => (a.repeats_due ?? '9999').localeCompare(b.repeats_due ?? '9999') || byName(a, b) },
@@ -118,6 +129,10 @@ export function MedicationsPage() {
   const [recording, setRecording] = useState<MedicationRecord | null>(null);
   // Recording that an ordered repeat has arrived, topping up the supply.
   const [replenishing, setReplenishing] = useState<MedicationRecord | null>(null);
+  // Stopping a medicine, from its panel or a finished course.
+  const [stopping, setStopping] = useState<{ med: MedicationRecord; reason: StopReason | ''; day: string | null } | null>(null);
+  // Said after a stop, with Undo.
+  const [stopped, setStopped] = useState<{ med: MedicationRecord; changeId: string | null } | null>(null);
   // The management list opens expanded so the regimen is visible at a
   // glance; it can be collapsed to focus on the record below.
   const [listOpen, setListOpen] = useState(true);
@@ -134,6 +149,8 @@ export function MedicationsPage() {
   const mainPharmacy = data?.main_pharmacy ?? null;
   const mainGp = data?.main_gp ?? null;
   const reorderFrom = (m: MedicationRecord) => m.supplier_contact ?? mainPharmacy;
+  const mainPharmacyName = mainPharmacy?.name ?? null;
+  const MED_SORTS = useMemo(() => medSorts(mainPharmacyName), [mainPharmacyName]);
   const holder = useProfileHolder();
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['medications', profile.id] });
@@ -160,7 +177,7 @@ export function MedicationsPage() {
   const statusFilter: DataFilter<MedicationRecord> = {
     key: 'status',
     label: 'Status',
-    options: [{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }],
+    options: [{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Stopped' }],
     match: (m, v) => (v === 'active' ? m.active : !m.active),
   };
 
@@ -185,7 +202,7 @@ export function MedicationsPage() {
   const dv = useDataView<MedicationRecord>({
     rows: visible,
     getId: (m) => m.id,
-    searchText: (m) => [m.name, m.dose, m.route, m.frequency, m.supplier, m.prescriber?.name].filter(Boolean).join(' '),
+    searchText: (m) => [m.name, m.dose, m.route, m.frequency, supplierName(m, mainPharmacyName), m.prescriber?.name].filter(Boolean).join(' '),
     sorts: MED_SORTS,
     filters: [statusFilter, routeFilter],
   });
@@ -207,6 +224,19 @@ export function MedicationsPage() {
     onError: failed('The medication was not marked as ordered. Try again.'),
   });
 
+  // A finished course still being taken: clear the last day so its doses are due again.
+  const stillTaking = useMutation({
+    mutationFn: (id: string) => api.patch(`/care-profiles/${profile.id}/medications/${id}`, { course_ends_on: null }),
+    onSuccess: () => { setActionError(''); invalidate(); },
+    onError: failed('That did not save. Try again.'),
+  });
+
+  const restart = useMutation({
+    mutationFn: (v: { id: string; undo?: string | null }) => api.post(`/care-profiles/${profile.id}/medications/${v.id}/restart`, { undo_change_id: v.undo ?? null }),
+    onSuccess: () => { setActionError(''); setStopped(null); invalidate(); },
+    onError: failed('The medicine was not started again. Try again.'),
+  });
+
   const bulkSetActive = useMutation({
     mutationFn: (action: 'activate' | 'deactivate') => api.post(`/care-profiles/${profile.id}/medications/bulk`, {
       action, ids: dv.selectedRows.map((m) => m.id),
@@ -219,8 +249,8 @@ export function MedicationsPage() {
     ...(canAdminister ? [{ key: 'log', label: 'Record all doses', onRun: () => setConfirmBulkLog(true) }] : []),
     ...(canManageMeds ? [
       { key: 'edit', label: 'Edit selected', onRun: () => setBulkEditOpen(true) },
-      { key: 'activate', label: 'Mark active', onRun: () => bulkSetActive.mutate('activate') },
-      { key: 'deactivate', label: 'Mark inactive', onRun: () => bulkSetActive.mutate('deactivate') },
+      { key: 'activate', label: 'Start again', onRun: () => bulkSetActive.mutate('activate') },
+      { key: 'deactivate', label: 'Stop these medicines', onRun: () => bulkSetActive.mutate('deactivate') },
     ] : []),
     ...(canBulkDelete ? [{ key: 'delete', label: 'Delete selected', destructive: true, onRun: () => { deleteMeds(dv.selectedRows); dv.clearSelection(); } }] : []),
   ];
@@ -254,8 +284,19 @@ export function MedicationsPage() {
           </td>
         ) : null}
         <td className="px-4 py-3">
-          <div data-testid="med-name" className="font-medium text-ink">{m.name}{m.active ? '' : ' (inactive)'}</div>
+          <div data-testid="med-name" className="font-medium text-ink">{m.name}{m.active ? '' : ' (stopped)'}</div>
           {m.condition_name ? <div className="text-xs text-muted">For {m.condition_name}</div> : null}
+          {courseFinished(m) ? (
+            <div className="mt-1 text-xs text-amber-800 dark:text-amber-200">
+              Course finished on {formatDateOnly(m.course_ends_on!, 'd MMM yyyy')}.
+              {canManageMeds ? (
+                <span className="mt-1 flex flex-wrap gap-1">
+                  <Button size="xs" variant="secondary" onClick={() => setStopping({ med: m, reason: 'finished', day: m.course_ends_on ?? null })}>Stop it</Button>
+                  <Button size="xs" variant="ghost" loading={stillTaking.isPending && stillTaking.variables === m.id} onClick={() => stillTaking.mutate(m.id)}>Still taking it</Button>
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </td>
         <td className="px-4 py-3 text-muted">{m.units_per_dose != null ? fmtNum(m.units_per_dose) : '—'}</td>
         <td className="px-4 py-3 text-muted">{m.dose_amount || '—'}</td>
@@ -293,6 +334,12 @@ export function MedicationsPage() {
             <div>
               <span className="text-ink">{m.supplier}</span>
               {m.supplier_suburb ? <div className="text-xs">{m.supplier_suburb}</div> : null}
+            </div>
+          ) : mainPharmacy ? (
+            // No supplier of its own: it is reordered from their main pharmacy, as the panel says.
+            <div>
+              <span className="text-ink">{mainPharmacy.name}</span>
+              <div className="text-xs">Main pharmacy</div>
             </div>
           ) : <span className="text-muted">—</span>}
         </td>
@@ -368,13 +415,23 @@ export function MedicationsPage() {
               resource="medications"
               canImport={canManageMeds}
               onImported={invalidate}
-              templateHeaders={['Name', 'Units per dose', 'Dose', 'Type', 'Route', 'With food', 'As needed', 'Times', 'Instructions', 'Supply in units', 'Packs on hand', 'Supplier', 'Order link', 'Active']}
-              templateSample={['Metformin', '1', '500 mg', 'Tablet', 'By mouth', 'true', 'false', '08:00; 20:00', 'Take with a full glass of water', '60', '2', 'City Pharmacy', 'https://citypharmacy.example/reorder', 'true']}
+              templateHeaders={['Name', 'Units per dose', 'Dose', 'Type', 'Route', 'With food', 'As needed', 'Times', 'Instructions', 'Supply in units', 'Packs on hand', 'Supplier', 'Order link', 'Repeats left', 'Last day of the course', 'Active']}
+              templateSample={['Metformin', '1', '500 mg', 'Tablet', 'By mouth', 'true', 'false', '08:00; 20:00', 'Take with a full glass of water', '60', '2', 'City Pharmacy', 'https://citypharmacy.example/reorder', '5', '', 'true']}
             />
             {canManageMeds ? <Button onClick={() => setAddOpen(true)}>Add medication</Button> : null}
           </div>
         ) : null}
       </div>
+
+      {stopped ? (
+        <div className="mb-3 flex items-start justify-between gap-3 rounded-md border-l-4 border-primary bg-primary-50 px-4 py-2 text-sm text-ink" role="status">
+          <span>Stopped {stopped.med.name}.</span>
+          <span className="flex gap-1">
+            <Button size="xs" variant="secondary" loading={restart.isPending} onClick={() => restart.mutate({ id: stopped.med.id, undo: stopped.changeId })}>Undo</Button>
+            <Button size="xs" variant="ghost" onClick={() => setStopped(null)}>Dismiss</Button>
+          </span>
+        </div>
+      ) : null}
 
       {actionError ? (
         <div className="mb-3 flex items-start justify-between gap-3 rounded-md border-l-4 border-red-400 bg-red-50 dark:bg-red-900/10 px-4 py-2 text-sm text-red-700 dark:text-red-300">
@@ -473,6 +530,23 @@ export function MedicationsPage() {
         />
       ) : null}
 
+      {stopping ? (
+        <StopModal
+          profileId={profile.id}
+          med={stopping.med}
+          initialReason={stopping.reason}
+          initialDay={stopping.day}
+          onClose={() => setStopping(null)}
+          onStopped={(changeId) => {
+            setStopped({ med: stopping.med, changeId });
+            setStopping(null);
+            // Back to the list, where "Stopped" and its Undo show.
+            if (panel.current) panel.close();
+            invalidate();
+          }}
+        />
+      ) : null}
+
       {replenishing ? (
         <ReplenishModal
           profileId={profile.id}
@@ -500,6 +574,10 @@ export function MedicationsPage() {
             ? [{ label: 'Mark as ordered', onRun: () => markOrdered.mutate(m.id), pending: markOrdered.isPending && markOrdered.variables === m.id }]
             : []),
           ...(canManageMeds && ordered ? [{ label: 'Mark as arrived', onRun: () => setReplenishing(m) }] : []),
+          ...(canManageMeds && m.active ? [{ label: 'Stop this medicine', onRun: () => setStopping({ med: m, reason: '', day: null }) }] : []),
+          ...(canManageMeds && !m.active
+            ? [{ label: 'Start again', onRun: () => restart.mutate({ id: m.id }), pending: restart.isPending && restart.variables?.id === m.id }]
+            : []),
         ];
         const links: RecordLink[] = [
           ...(m.medical_condition_id && m.condition_name
@@ -542,8 +620,13 @@ export function MedicationsPage() {
               { label: 'Supplier branch', value: m.supplier_suburb },
               { label: 'On order since', value: m.reorder_ordered_at ? format(new Date(m.reorder_ordered_at), 'd MMM yyyy') : null },
               { label: 'Next repeat due', value: m.repeats_due ? formatDateOnly(m.repeats_due, 'd MMM yyyy') : null },
+              { label: 'Repeats left on the script', value: m.repeats_left != null ? String(m.repeats_left) : null },
+              { label: 'Last day of the course', value: m.course_ends_on ? formatDateOnly(m.course_ends_on, 'd MMM yyyy') : null },
               { label: 'Dangerous to miss', value: m.critical ? 'Yes' : null },
-              { label: 'Status', value: m.active ? 'Active' : 'Inactive' },
+              { label: 'Status', value: m.active ? 'Active' : 'Stopped' },
+              { label: 'Last day taken', value: !m.active && m.stopped_on ? formatDateOnly(m.stopped_on, 'd MMM yyyy') : null },
+              { label: 'Why it stopped', value: !m.active ? stopReasonLabel(m.stop_reason) : null },
+              { label: 'In their words', value: !m.active ? m.stop_notes : null },
             ]}
             links={links}
             onEdit={canManageMeds ? () => setEditing(m) : undefined}
@@ -551,6 +634,37 @@ export function MedicationsPage() {
             onDelete={canManageMeds ? () => { deleteMeds([m]); panel.close(); } : undefined}
             onClose={panel.close}
           >
+            {courseFinished(m) ? (
+              <section className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-900/10 p-3">
+                <p className="text-sm text-ink">Course finished on {formatDateOnly(m.course_ends_on!, 'd MMM yyyy')}.</p>
+                {canManageMeds ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => setStopping({ med: m, reason: 'finished', day: m.course_ends_on ?? null })}>Stop it</Button>
+                    <Button size="sm" variant="ghost" loading={stillTaking.isPending} onClick={() => stillTaking.mutate(m.id)}>Still taking it</Button>
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Changes</h3>
+              {(m.changes ?? []).length ? (
+                <ul className="space-y-1.5 text-sm text-ink">
+                  {(m.changes ?? []).map((c) => (
+                    <li key={c.id}>
+                      <span className="font-medium">{formatDateOnly(c.changed_on, 'd MMM yyyy')}:</span> {medicationChangeWhat(c)}.
+                      {c.reason ? ` ${c.reason.replace(/\.$/, '')}.` : ''}
+                      {c.source_appointment_id && c.source_appointment_title ? (
+                        <> From <Link to={`/app/${profile.id}/appointments?record=${c.source_appointment_id}`} className="text-primary hover:underline">{c.source_appointment_title}</Link>.</>
+                      ) : c.source_document_id && c.source_document_label ? (
+                        <> From <Link to={`/app/${profile.id}/documents?record=${c.source_document_id}`} className="text-primary hover:underline">{c.source_document_label}</Link>.</>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-muted">No changes recorded yet. A change to the dose or times is kept here with why.</p>
+              )}
+            </section>
             <section>
               <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Prescribed by</h3>
               {m.prescriber ? (

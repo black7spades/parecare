@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
@@ -10,8 +10,12 @@ import { Modal } from '../../../components/ui/Modal';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
 import { IngestModal } from '../../../components/IngestModal';
-import { CIRCLE_ROLES, circleRoleLabel, type CareDocument, type CircleMember } from '../../../lib/care';
-import { categoryNameOf, documentCategoriesKey } from '../../../lib/documentCategories';
+import { CIRCLE_ROLES, EXPIRING_CATEGORY_KEYS, circleRoleLabel, type CareDocument, type CircleMember } from '../../../lib/care';
+import { categoryNameOf, documentCategoriesKey, useDocumentCategories } from '../../../lib/documentCategories';
+import { SortableTh } from '../../../components/data/SortableTh';
+import { ContactPicker, changedContactFieldsAs, contactFieldsAs, emptyContact, pickedFrom, type PickedContact } from '../../../components/ContactPicker';
+import { ContactStrip } from '../../../components/ContactStrip';
+import { formatDateOnly } from '../../../lib/datetime';
 import { DocumentCategoryField } from '../../../components/DocumentCategoryField';
 import { EditCategoriesModal } from '../../../components/EditCategoriesModal';
 import { PagePurpose } from '../../../components/PagePurpose';
@@ -45,14 +49,52 @@ const sizeValue = (d: CareDocument): number => d.file_size_bytes ?? 0;
 const visibilityText = (d: CareDocument): string =>
   (d.visible_to_roles?.length ?? 0) > 0 ? d.visible_to_roles!.map(circleRoleLabel).join(', ') : 'Everyone';
 const byName = (a: CareDocument, b: CareDocument) => a.label.localeCompare(b.label);
+const attachedText = (d: CareDocument): string => (d.attached_to ?? []).map((a) => a.label).join(', ');
+// Missing dates sort last; "does not expire" sorts after every date.
+const untilValue = (d: CareDocument): string => (d.no_expiry ? '9999-12-30' : d.valid_until ?? '9999-12-31');
 
 const DOC_SORTS: DataSort<CareDocument>[] = [
   { key: 'name', label: 'By name', compare: byName },
-  { key: 'date', label: 'By date', defaultDir: 'desc', compare: (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime() || byName(a, b) },
+  { key: 'date', label: 'By date added', defaultDir: 'desc', compare: (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime() || byName(a, b) },
   { key: 'category', label: 'By category', compare: (a, b) => categoryNameOf(a).localeCompare(categoryNameOf(b)) || byName(a, b) },
+  { key: 'written', label: 'By date written', defaultDir: 'desc', compare: (a, b) => (a.issued_on ?? '0000').localeCompare(b.issued_on ?? '0000') || byName(a, b) },
+  { key: 'until', label: 'By valid until', compare: (a, b) => untilValue(a).localeCompare(untilValue(b)) || byName(a, b) },
+  { key: 'attached', label: 'By attached to', compare: (a, b) => (attachedText(a) || '￿').localeCompare(attachedText(b) || '￿') || byName(a, b) },
   { key: 'size', label: 'By size', defaultDir: 'desc', compare: (a, b) => sizeValue(a) - sizeValue(b) || byName(a, b) },
   { key: 'visibility', label: 'By who can see it', compare: (a, b) => visibilityText(a).localeCompare(visibilityText(b)) || byName(a, b) },
 ];
+
+const todayYmd = () => format(new Date(), 'yyyy-MM-dd');
+
+/** Valid until, in words: a date, "Does not expire", or nothing. A date gone by says so. */
+function ValidUntil({ doc }: { doc: CareDocument }) {
+  if (doc.no_expiry) return <span className="text-muted">Does not expire</span>;
+  if (!doc.valid_until) return <span className="text-xs text-muted">Not given</span>;
+  const gone = doc.valid_until < todayYmd();
+  return (
+    <span className={gone ? 'text-red-700 dark:text-red-300' : 'text-ink'}>
+      {formatDateOnly(doc.valid_until, 'd MMM yyyy')}
+      {gone ? <span className="block text-xs">Ran out</span> : null}
+    </span>
+  );
+}
+
+/** What a document is attached to: each record by name, opening it. */
+function AttachedList({ doc, limit }: { doc: CareDocument; limit?: number }) {
+  const all = doc.attached_to ?? [];
+  if (all.length === 0) return <span className="text-xs text-muted">Nothing yet</span>;
+  const shown = limit ? all.slice(0, limit) : all;
+  return (
+    <span className="flex flex-col gap-0.5">
+      {shown.map((a) => (
+        <Link key={`${a.kind}-${a.id}`} to={a.path} className={`text-primary hover:underline ${limit ? 'block truncate max-w-[11rem]' : 'break-words'}`} title={`Open the ${a.kind_label.toLowerCase()}: ${a.label}`}>
+          {a.label}
+        </Link>
+      ))}
+      {limit && all.length > limit ? <span className="text-xs text-muted">and {all.length - limit} more</span> : null}
+    </span>
+  );
+}
 
 export function DocumentsPage() {
   const { profile, canEdit, isOwner } = useProfile();
@@ -72,6 +114,8 @@ export function DocumentsPage() {
   const [reading, setReading] = useState<CareDocument | null>(null);
   const [editingCategories, setEditingCategories] = useState(false);
   const [recategorising, setRecategorising] = useState<CareDocument[] | null>(null);
+  // Said when a file saved but one of its details could not be used.
+  const [uploadWarning, setUploadWarning] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['documents', profile.id],
@@ -163,7 +207,7 @@ export function DocumentsPage() {
   const dv = useDataView<CareDocument>({
     rows: visible,
     getId: (d) => d.id,
-    searchText: (d) => [d.label, categoryNameOf(d)].join(' '),
+    searchText: (d) => [d.label, categoryNameOf(d), attachedText(d), d.from?.name, d.to?.name].filter(Boolean).join(' '),
     sorts: DOC_SORTS,
     filters: [categoryFilter],
   });
@@ -250,6 +294,12 @@ export function DocumentsPage() {
         />
 
         <p className="sr-only" aria-live="polite">{justAdded ? `${justAdded.label} uploaded.` : ''}</p>
+        {uploadWarning ? (
+          <div className="mt-3 flex items-start justify-between gap-3 rounded-md border-l-4 border-amber-400 bg-amber-50 dark:bg-amber-900/10 px-4 py-2 text-sm text-amber-800 dark:text-amber-200" role="status">
+            <span>{uploadWarning}</span>
+            <Button size="xs" variant="ghost" onClick={() => setUploadWarning('')}>Dismiss</Button>
+          </div>
+        ) : null}
 
         {isLoading ? (
           <p className="text-sm text-muted mt-4">Loading…</p>
@@ -283,11 +333,14 @@ export function DocumentsPage() {
                       onChange={dv.toggleAll}
                     />
                   </th>
-                  <SortableHeader label="Name" sortKey="name" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
-                  <SortableHeader label="Category" sortKey="category" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
-                  <SortableHeader label="Size" sortKey="size" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
-                  <SortableHeader label="Date" sortKey="date" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
-                  <SortableHeader label="Visibility" sortKey="visibility" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                  <SortableTh label="Name" sortKey="name" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-3 py-3 whitespace-nowrap" />
+                  <SortableTh label="Category" sortKey="category" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-3 py-3 whitespace-nowrap" />
+                  <SortableTh label="Date written" sortKey="written" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-3 py-3 whitespace-nowrap" />
+                  <SortableTh label="Valid until" sortKey="until" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-3 py-3 whitespace-nowrap" />
+                  <SortableTh label="Attached to" sortKey="attached" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-3 py-3 whitespace-nowrap" />
+                  <SortableTh label="Size" sortKey="size" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-3 py-3 whitespace-nowrap" />
+                  <SortableTh label="Added" sortKey="date" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-3 py-3 whitespace-nowrap" />
+                  <SortableTh label="Who can see it" sortKey="visibility" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="px-3 py-3 whitespace-nowrap" />
                   <th className="px-4 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
@@ -313,6 +366,9 @@ export function DocumentsPage() {
                     <td className="px-4 py-3">
                       <span className="badge bg-surface-2 text-muted text-xs">{categoryNameOf(doc)}</span>
                     </td>
+                    <td className="px-4 py-3 text-muted whitespace-nowrap">{doc.issued_on ? formatDateOnly(doc.issued_on, 'd MMM yyyy') : <span className="text-xs">Not given</span>}</td>
+                    <td className="px-4 py-3 whitespace-nowrap"><ValidUntil doc={doc} /></td>
+                    <td className="px-3 py-3 text-sm"><AttachedList doc={doc} limit={2} /></td>
                     <td className="px-4 py-3 text-muted">{formatSize(doc.file_size_bytes)}</td>
                     <td className="px-4 py-3 text-muted whitespace-nowrap">{format(new Date(doc.created_at), 'd MMM yyyy')}</td>
                     <td className="px-4 py-3">
@@ -381,8 +437,18 @@ export function DocumentsPage() {
             fields={[
               { label: 'Name', value: doc.label },
               { label: 'Category', value: categoryNameOf(doc) },
+              { label: 'Date written', value: doc.issued_on ? formatDateOnly(doc.issued_on, 'd MMM yyyy') : null },
+              {
+                label: 'Valid until',
+                value: doc.no_expiry || doc.valid_until ? (
+                  <span>
+                    <ValidUntil doc={doc} />
+                    {doc.validity_note ? <span className="block text-xs text-muted">{doc.validity_note}</span> : null}
+                  </span>
+                ) : doc.validity_note ? <span className="text-xs text-muted">{doc.validity_note}</span> : null,
+              },
               { label: 'Size', value: formatSize(doc.file_size_bytes) },
-              { label: 'Date', value: format(new Date(doc.created_at), 'd MMM yyyy') },
+              { label: 'Added', value: format(new Date(doc.created_at), 'd MMM yyyy') },
               { label: 'Condition', value: condition },
               {
                 label: 'Who can see it',
@@ -403,13 +469,45 @@ export function DocumentsPage() {
               panel.close();
             }}
             onClose={panel.close}
-          />
+          >
+            {doc.from ? (
+              <section>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">From</h3>
+                <ContactStrip contact={doc.from} profileId={profile.id} book={false} />
+              </section>
+            ) : null}
+            {doc.to ? (
+              <section>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">To</h3>
+                <ContactStrip
+                  contact={doc.to}
+                  profileId={profile.id}
+                  book={canEdit && doc.category_key === 'referral' ? { title: `${doc.to.role_label ?? 'Specialist'} appointment` } : false}
+                />
+              </section>
+            ) : null}
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Attached to</h3>
+              {(doc.attached_to ?? []).length ? (
+                <ul className="space-y-1 text-sm">
+                  {(doc.attached_to ?? []).map((a) => (
+                    <li key={`${a.kind}-${a.id}`}>
+                      <span className="text-muted">{a.kind_label}: </span>
+                      <Link to={a.path} className="font-medium text-primary underline">{a.label}</Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-muted">Not attached to anything yet.</p>
+              )}
+            </section>
+          </RecordPanel>
         );
       })() : null}
 
       {viewing ? (
         <DocumentViewerModal
-          key={viewing.id}
+          key={`view-${viewing.id}`}
           profileId={profile.id}
           doc={viewing}
           onClose={() => setViewing(null)}
@@ -420,7 +518,7 @@ export function DocumentsPage() {
 
       {editing ? (
         <EditDocumentModal
-          key={editing.id}
+          key={`edit-${editing.id}`}
           profileId={profile.id}
           doc={editing}
           members={members}
@@ -445,8 +543,9 @@ export function DocumentsPage() {
           members={members}
           initialFile={uploading.file}
           onClose={() => setUploading(null)}
-          onUploaded={(doc) => {
+          onUploaded={(doc, warning) => {
             setUploading(null);
+            setUploadWarning(warning ?? '');
             invalidate();
             // Newest first, so the new document is at the top where its row lights up.
             dv.setSearch('');
@@ -468,7 +567,7 @@ export function DocumentsPage() {
       ) : null}
       {reading ? (
         <IngestModal
-          key={reading.id}
+          key={`read-${reading.id}`}
           profileId={profile.id}
           document={{ id: reading.id, label: reading.label }}
           title={`Read ${reading.label} with Pare`}
@@ -484,39 +583,134 @@ export function DocumentsPage() {
   );
 }
 
+/** The dates and people a document carries, as the form holds them. */
+export interface DocumentDatesValue {
+  issuedOn: string;
+  validUntil: string;
+  noExpiry: boolean;
+  from: PickedContact;
+  to: PickedContact;
+  /** Valid until was worked out and has not been opened to change. */
+  workedOut: boolean;
+}
+
+export const emptyDocumentDates: DocumentDatesValue = { issuedOn: '', validUntil: '', noExpiry: false, from: emptyContact, to: emptyContact, workedOut: false };
+
+const datesFrom = (doc: CareDocument): DocumentDatesValue => ({
+  issuedOn: doc.issued_on ?? '',
+  validUntil: doc.valid_until ?? '',
+  noExpiry: !!doc.no_expiry,
+  from: pickedFrom(doc.from ?? null),
+  to: pickedFrom(doc.to ?? null),
+  workedOut: !!doc.valid_until_worked_out,
+});
+
 /**
- * A column header that sorts the table: first click sorts by the column,
- * clicking again flips between ascending and descending. The arrow marks
- * the active column and direction.
+ * What the dates and people send to the server. On an edit only what moved
+ * is sent, so a worked-out date stays worked out and a contact removed from
+ * the person is never linked back by an unrelated save.
  */
-function SortableHeader({
-  label,
-  sortKey,
-  activeKey,
-  dir,
-  onToggle,
+function datesBody(now: DocumentDatesValue, before?: DocumentDatesValue): Record<string, string | boolean | null> {
+  const out: Record<string, string | boolean | null> = {};
+  if (!before || now.issuedOn !== before.issuedOn) out['issued_on'] = now.issuedOn || null;
+  if (!before || now.noExpiry !== before.noExpiry) out['no_expiry'] = now.noExpiry;
+  if (!now.noExpiry && !now.workedOut && (!before || now.validUntil !== before.validUntil || before.workedOut)) out['valid_until'] = now.validUntil || null;
+  Object.assign(out, before ? changedContactFieldsAs('from', before.from, now.from) : contactFieldsAs('from', now.from));
+  Object.assign(out, before ? changedContactFieldsAs('to', before.to, now.to) : contactFieldsAs('to', now.to));
+  return out;
+}
+
+/**
+ * Date written, Valid until with Does not expire, From and To. A referral's
+ * Valid until is worked out from who wrote it, and says so, with Change.
+ */
+function DocumentDatesFields({
+  idPrefix,
+  profileId,
+  category,
+  value,
+  onChange,
+  note,
 }: {
-  label: string;
-  sortKey: string;
-  activeKey: string;
-  dir: 'asc' | 'desc';
-  onToggle: (key: string) => void;
+  idPrefix: string;
+  profileId: string;
+  category: string;
+  value: DocumentDatesValue;
+  onChange: (next: DocumentDatesValue) => void;
+  /** How a worked-out date was reached, from the server. */
+  note?: string | null;
 }) {
-  const active = activeKey === sortKey;
+  const { data } = useDocumentCategories(profileId);
+  const key = (data?.categories ?? []).find((c) => c.name.toLowerCase() === category.trim().toLowerCase())?.system_key ?? null;
+  const expires = !!key && EXPIRING_CATEGORY_KEYS.includes(key);
+  const referral = key === 'referral';
+  const set = (patch: Partial<DocumentDatesValue>) => onChange({ ...value, ...patch });
   return (
-    <th className="px-4 py-3 font-medium" aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}>
-      <button
-        type="button"
-        className={`flex items-center gap-1 hover:text-ink ${active ? 'text-ink' : ''}`}
-        onClick={() => onToggle(sortKey)}
-        title={active ? `Sorted ${dir === 'asc' ? 'ascending' : 'descending'}. Click to reverse.` : `Sort by ${label.toLowerCase()}`}
-      >
-        {label}
-        <span aria-hidden="true" className={active ? '' : 'opacity-0'}>
-          {active && dir === 'desc' ? '▼' : '▲'}
-        </span>
-      </button>
-    </th>
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Input
+          id={`${idPrefix}-issued`}
+          type="date"
+          label="Date written"
+          value={value.issuedOn}
+          onChange={(e) => set({ issuedOn: e.target.value })}
+        />
+        <div>
+          {value.noExpiry ? (
+            <p className="text-sm text-ink pt-7">Does not expire.</p>
+          ) : value.workedOut && value.validUntil ? (
+            <div>
+              <span className="block text-sm font-medium text-ink mb-1">Valid until</span>
+              <p className="text-sm text-ink">
+                {formatDateOnly(value.validUntil, 'd MMM yyyy')}{' '}
+                <Button type="button" size="xs" variant="ghost" onClick={() => set({ workedOut: false })}>Change</Button>
+              </p>
+            </div>
+          ) : (
+            <Input
+              id={`${idPrefix}-until`}
+              type="date"
+              label={expires ? 'Valid until' : 'Valid until, if it expires'}
+              value={value.validUntil}
+              onChange={(e) => set({ validUntil: e.target.value, workedOut: false })}
+              hint={referral && !value.validUntil ? 'Leave it empty and it is worked out from who wrote it.' : undefined}
+            />
+          )}
+          <label className="mt-1 flex items-center gap-2 text-sm text-ink">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+              checked={value.noExpiry}
+              onChange={(e) => set({ noExpiry: e.target.checked })}
+            />
+            Does not expire
+          </label>
+        </div>
+      </div>
+      {note && value.workedOut && !value.noExpiry ? <p className="text-xs text-muted">{note}</p> : null}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <ContactPicker
+          id={`${idPrefix}-from`}
+          label="From"
+          profileId={profileId}
+          value={value.from}
+          onChange={(from) => set({ from })}
+          hint="Who wrote it."
+          defaultType="gp"
+          placeholder="Search Contacts or type their name"
+        />
+        <ContactPicker
+          id={`${idPrefix}-to`}
+          label="To"
+          profileId={profileId}
+          value={value.to}
+          onChange={(to) => set({ to })}
+          hint="Who it is addressed to."
+          defaultType="specialist"
+          placeholder="Search Contacts or type their name"
+        />
+      </div>
+    </div>
   );
 }
 
@@ -801,7 +995,8 @@ export function UploadDocumentModal({
   /** Attach it to several records at once, such as a next step and its appointment. */
   links?: Array<{ kind: string; id: string }>;
   onClose: () => void;
-  onUploaded: (doc: CareDocument) => void;
+  /** A warning says the file saved but a detail could not be used. */
+  onUploaded: (doc: CareDocument, warning?: string) => void;
 }) {
   const [tried, setTried] = useState(false);
   const [file, setFile] = useState<File | null>(initialFile);
@@ -813,6 +1008,7 @@ export function UploadDocumentModal({
   const [conditionId, setConditionId] = useState(initialConditionId);
   const [restricted, setRestricted] = useState(false);
   const [roles, setRoles] = useState<string[]>([]);
+  const [dates, setDates] = useState<DocumentDatesValue>(emptyDocumentDates);
   const [uploadError, setUploadError] = useState('');
 
   const { data: conditionData } = useQuery({
@@ -833,9 +1029,10 @@ export function UploadDocumentModal({
         form.append('link_entity_type', l.kind);
         form.append('link_entity_id', l.id);
       }
-      return api.upload<{ document: CareDocument }>(`/care-profiles/${profileId}/documents`, form);
+      for (const [k, v] of Object.entries(datesBody(dates))) form.append(k, v === null ? '' : String(v));
+      return api.upload<{ document: CareDocument; warning?: string }>(`/care-profiles/${profileId}/documents`, form);
     },
-    onSuccess: (res) => onUploaded(res.document),
+    onSuccess: (res) => onUploaded(res.document, res.warning),
     onError: (err) =>
       setUploadError(err instanceof Error ? err.message : 'The file did not upload. Check your connection and try again.'),
   });
@@ -905,6 +1102,7 @@ export function UploadDocumentModal({
             </select>
             <span className="block text-xs text-muted mt-1">Files it under that condition's tracking as well as here.</span>
           </div>
+          <DocumentDatesFields idPrefix="upload-doc" profileId={profileId} category={category} value={dates} onChange={setDates} />
         </DocumentDetailsFields>
         {uploadError ? <p className="text-sm text-red-600">{uploadError}</p> : null}
         {tried && !canSave ? (
@@ -924,23 +1122,29 @@ function EditDocumentModal({ profileId, doc, members, onClose, onSaved }: { prof
   const [editCategory, setEditCategory] = useState(categoryNameOf(doc));
   const [restricted, setRestricted] = useState((doc.visible_to_roles?.length ?? 0) > 0);
   const [roles, setRoles] = useState<string[]>(doc.visible_to_roles ?? []);
+  const [initialDates] = useState(() => datesFrom(doc));
+  const [dates, setDates] = useState<DocumentDatesValue>(initialDates);
   const [editError, setEditError] = useState('');
+  const [tried, setTried] = useState(false);
 
   const mutation = useMutation({
     mutationFn: () => api.patch(`/care-profiles/${profileId}/documents/${doc.id}`, {
       label: editLabel.trim(),
       category: editCategory.trim() || 'Other',
       visible_to_roles: restricted ? roles : [],
+      ...datesBody(dates, initialDates),
     }),
     onSuccess: onSaved,
-    onError: (err) => setEditError(err instanceof Error ? err.message : 'Failed to save'),
+    onError: (err) => setEditError(err instanceof Error ? err.message : 'The changes did not save. Check your connection and try again.'),
   });
 
-  const canSave = !!editLabel.trim() && (!restricted || roles.length > 0);
+  // Save always answers: what is missing is named beside it.
+  const missing = [!editLabel.trim() ? 'a name' : null, restricted && roles.length === 0 ? 'who can see it' : null].filter(Boolean) as string[];
+  const canSave = missing.length === 0;
 
   return (
     <Modal open onClose={onClose} title="Edit document">
-      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (canSave) mutation.mutate(); }}>
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); setTried(true); if (canSave) mutation.mutate(); }}>
         <DocumentDetailsFields
           idPrefix="edit-doc"
           profileId={profileId}
@@ -953,11 +1157,14 @@ function EditDocumentModal({ profileId, doc, members, onClose, onSaved }: { prof
           onRestricted={setRestricted}
           roles={roles}
           onRoles={setRoles}
-        />
+        >
+          <DocumentDatesFields idPrefix="edit-doc" profileId={profileId} category={editCategory} value={dates} onChange={setDates} note={doc.validity_note} />
+        </DocumentDetailsFields>
         {editError ? <p className="text-sm text-red-600">{editError}</p> : null}
+        {tried && !canSave ? <p className="text-sm text-red-600" role="alert">This document needs {missing.join(' and ')}.</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={mutation.isPending} disabled={!canSave}>Save</Button>
+          <Button type="submit" loading={mutation.isPending}>Save</Button>
         </div>
       </form>
     </Modal>
@@ -987,7 +1194,15 @@ function ChangeCategoryModal({
   });
   return (
     <Modal open onClose={onClose} title="Change category">
-      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (name.trim()) mutation.mutate(); }}>
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          // Save always answers: say what is missing.
+          if (name.trim()) mutation.mutate();
+          else setSaveError('Pick a category or type a new one, then save.');
+        }}
+      >
         <p className="text-sm text-muted">
           Files the {docs.length} selected document{docs.length === 1 ? '' : 's'} under one category.
         </p>
@@ -995,7 +1210,7 @@ function ChangeCategoryModal({
         {saveError ? <p className="text-sm text-red-600">{saveError}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>Save</Button>
+          <Button type="submit" loading={mutation.isPending}>Save</Button>
         </div>
       </form>
     </Modal>

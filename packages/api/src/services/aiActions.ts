@@ -2,7 +2,11 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { accountIdForProfile, resolveCategoryByName, withCategory } from './documentCategories';
 import { db } from '../config/database';
-import { auditContext, currentAuditSource, currentUndoBatch, type AuditSource } from './auditContext';
+import { auditContext, currentAuditSource, currentSourceDocument, currentUndoBatch, type AuditSource } from './auditContext';
+import { applyDocumentDetails } from '../routes/documents';
+import { STOP_REASON_LABELS, recordMedicationChange, stopMedication, stopReasonFrom } from './medicationChanges';
+import { findSameBookingTask, joinTask } from './tasks';
+import { nextStepTypeIdByKey } from './nextStepTypes';
 import type { Account, CareAccess, CareCircleMember, CareProfile } from '../types';
 import { parseZonedTime, formatInZone, dateInZone, isValidTimeZone } from '../lib/timezone';
 import { matchProfileNames, type NameCandidate } from '../lib/nameMatch';
@@ -152,6 +156,11 @@ const addMedicationSchema = z.object({
   prescriber_type: providerTypeField.optional().nullable(),
   // The title of the visit it started at, matched among their appointments.
   started_at_appointment: z.string().max(255).optional().nullable(),
+  // The last day of a course, and the repeats left on the script.
+  course_ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  repeats_left: z.number().int().min(0).max(99).optional().nullable(),
+  // Why it was started, kept in its history.
+  reason: z.string().max(2000).optional().nullable(),
 });
 
 const updateMedicationSchema = z.object({
@@ -176,6 +185,13 @@ const updateMedicationSchema = z.object({
   prescriber_type: providerTypeField.optional().nullable(),
   // The title of the visit it started at, matched among their appointments.
   started_at_appointment: z.string().max(255).optional().nullable(),
+  course_ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  repeats_left: z.number().int().min(0).max(99).optional().nullable(),
+  // Why the dose or times changed, and the day it changed; kept in its history.
+  reason: z.string().max(2000).optional().nullable(),
+  changed_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  // The visit the change came from, by title.
+  changed_at_appointment: z.string().max(255).optional().nullable(),
 });
 
 // "Picked up two packs of Perindopril": set what is on hand after a restock.
@@ -189,6 +205,12 @@ const restockMedicationSchema = z.object({
 const stopMedicationSchema = z.object({
   type: z.literal('stop_medication'),
   medication_name: z.string().min(1).max(255),
+  // The last day it was taken, why it stopped (finished | side_effects |
+  // not_working | changed | doctor_stopped | no_longer_needed | other, or
+  // plain words), and anything else in their words.
+  stopped_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  stop_reason: z.string().max(100).optional().nullable(),
+  stop_notes: z.string().max(2000).optional().nullable(),
 });
 
 const addAllergySchema = z.object({
@@ -430,6 +452,19 @@ const fileDocumentSchema = z.object({
   document: z.string().max(255).optional(),
   category: z.string().trim().max(100).optional().nullable(),
   label: z.string().trim().max(255).optional().nullable(),
+  // The date it was written, when it runs out, or that it does not.
+  issued_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  valid_until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  no_expiry: z.boolean().optional(),
+  // Who wrote it and who it is to, by name, with what they do; filed in
+  // Contacts when new. The person it is to may come with their phone and
+  // the practice they are at.
+  from_name: z.string().trim().max(255).optional().nullable(),
+  from_type: z.string().trim().max(100).optional().nullable(),
+  to_name: z.string().trim().max(255).optional().nullable(),
+  to_type: z.string().trim().max(100).optional().nullable(),
+  to_phone: z.string().trim().max(50).optional().nullable(),
+  to_practice: z.string().trim().max(255).optional().nullable(),
 });
 
 const updateProviderSchema = z.object({
@@ -1414,6 +1449,37 @@ async function appointmentByTitle(profileId: string, title: string | null | unde
   return (row as { id: string } | undefined)?.id ?? null;
 }
 
+/**
+ * Filing from a letter: every record Pare makes or changes from it is
+ * attached to the letter, so the letter shows what it led to and each
+ * record shows where it came from.
+ */
+async function linkSource(kind: string, id: string | null | undefined): Promise<void> {
+  const doc = currentSourceDocument();
+  if (!doc || !id) return;
+  await db('document_links')
+    .insert({ document_id: doc, entity_type: kind, entity_id: id })
+    .onConflict(['document_id', 'entity_type', 'entity_id'])
+    .ignore();
+}
+
+/** A spoken dose split into its amount and measure: "25 mg" is 25 and mg. */
+function doseColumns(dose: string | null | undefined): { dose: string | null; dose_amount: string | null; dose_unit: string | null } {
+  const raw = (dose ?? '').trim();
+  if (!raw) return { dose: null, dose_amount: null, dose_unit: null };
+  const m = /^([0-9]+(?:\.[0-9]+)?)\s*(.*)$/.exec(raw);
+  // The measure is a word such as mg or puffs; a longer phrase stays in the
+  // spoken dose only, so it is never cut off or refused.
+  const measure = (s: string): string | null => {
+    const t = s.trim();
+    if (!t) return null;
+    if (t.length <= 30) return t;
+    const word = t.split(/\s+/)[0]!;
+    return word.length <= 30 ? word : null;
+  };
+  return m ? { dose: raw.slice(0, 255), dose_amount: m[1]!.slice(0, 50), dose_unit: measure(m[2]!) } : { dose: raw.slice(0, 255), dose_amount: null, dose_unit: measure(raw) };
+}
+
 /** Contact details Pare can set beyond the basics: after hours, fax, hours. */
 function extraContactColumns(a: { after_hours_phone?: string | null; fax?: string | null; opening_hours?: unknown }): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -1567,6 +1633,7 @@ async function executeOne(
         })
         .returning('id');
       await audit(profileId, account.id, 'log', action.title ?? action.body, logRow?.id);
+      await linkSource('log', logRow?.id);
       return `Logged a ${action.entry_type.replace(/_/g, ' ')} entry${action.title ? `: ${action.title}` : ''} at ${formatInZone(occurredAt, timeZone)}.`;
     }
     case 'record_medication': {
@@ -1602,6 +1669,7 @@ async function executeOne(
         ...result.filed.map((f) => `Added ${f.name} to Contacts.`),
         ...built.notes,
       ].join(' ');
+      await linkSource('reminders', result.joined_into?.id ?? result.reminder.id);
       if (result.joined_into) {
         await audit(profileId, account.id, 'reminders', `updated ${result.joined_into.title}`, result.joined_into.id);
         return `"${result.joined_into.title}" was already on the list for this booking, so I added these details to it rather than making a second task.${extra ? ` ${extra}` : ''}`;
@@ -1613,6 +1681,25 @@ async function executeOne(
     }
     case 'add_medication': {
       const name = action.medication_name.trim();
+      // Already on the list: a letter naming it again is a change to it, not
+      // a second copy.
+      // A second strength of the same medicine (a different dose) is its own row.
+      const sameName = (await db('medications as m')
+        .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
+        .where({ 'm.care_profile_id': profileId, 'm.active': true })
+        .whereRaw('lower(c.name) = lower(?)', [name])
+        .select('c.name', 'm.dose', 'm.dose_amount', 'm.dose_unit')) as Array<{ name: string; dose: string | null; dose_amount: string | null; dose_unit: string | null }>;
+      const wanted = normDose(action.dose);
+      const current = sameName.find(
+        (r) => !wanted || normDose(r.dose) === wanted || normDose(`${r.dose_amount ?? ''}${r.dose_unit ?? ''}`) === wanted
+      );
+      if (current) {
+        const { type: _t, form: _f, ...rest } = action;
+        void _t;
+        void _f;
+        const updated = await executeOne({ ...rest, type: 'update_medication', medication_name: current.name }, profileId, account, access, timeZone, usedMedIds);
+        return `${current.name} is already on the list, so I updated it rather than adding it twice. ${Array.isArray(updated) ? updated.join(' ') : updated}`;
+      }
       let cat = await db('medication_catalogue').whereRaw('lower(name) = lower(?)', [name]).first();
       if (!cat) {
         [cat] = await db('medication_catalogue')
@@ -1624,12 +1711,14 @@ async function executeOne(
       const supplierId = await resolveSupplierId(action.supplier, action.supplier_order_url, account.id);
       const prescriber = await namedContact(profileId, action.prescriber, action.prescriber_type, 'gp');
       const sourceAppt = await appointmentByTitle(profileId, action.started_at_appointment);
-      await db('medications').insert({
+      const [medRow] = await db('medications').insert({
         care_profile_id: profileId,
         medication_catalogue_id: cat.id,
         prescriber_provider_id: prescriber.id,
         source_appointment_id: sourceAppt,
-        dose: action.dose ?? null,
+        ...doseColumns(action.dose),
+        course_ends_on: action.course_ends_on ?? null,
+        repeats_left: action.repeats_left ?? null,
         route: action.route ?? null,
         frequency: action.frequency ?? null,
         schedule_times: action.schedule_times ? JSON.stringify(action.schedule_times) : null,
@@ -1645,9 +1734,19 @@ async function executeOne(
         as_needed: action.as_needed ?? false,
         critical: action.critical ?? false,
         active: true,
+      }).returning('id');
+      const newMedId = (medRow as { id: string }).id;
+      await recordMedicationChange(db, {
+        medicationId: newMedId,
+        profileId,
+        actorId: account.id,
+        kind: 'started',
+        source: { reason: action.reason ?? null, source_appointment_id: sourceAppt, source_document_id: currentSourceDocument() },
       });
-      await audit(profileId, account.id, 'medications', `added ${name}`);
-      return `Added ${name}${action.dose ? ` ${action.dose}` : ''} to the medication list.${prescriber.note}`;
+      await audit(profileId, account.id, 'medications', `added ${name}`, newMedId);
+      await linkSource('medications', newMedId);
+      const course = action.course_ends_on ? ` The course ends on ${action.course_ends_on}.` : '';
+      return `Added ${name}${action.dose ? ` ${action.dose}` : ''} to the medication list.${course}${prescriber.note}`;
     }
     case 'update_medication': {
       const med = await db('medications as m')
@@ -1658,7 +1757,9 @@ async function executeOne(
         .first();
       if (!med) return `Could not find an active medication called "${action.medication_name}".`;
       const patch: Record<string, unknown> = { updated_at: db.fn.now() };
-      if (action.dose !== undefined) patch['dose'] = action.dose;
+      if (action.dose !== undefined) Object.assign(patch, doseColumns(action.dose));
+      if (action.course_ends_on !== undefined) patch['course_ends_on'] = action.course_ends_on;
+      if (action.repeats_left !== undefined) patch['repeats_left'] = action.repeats_left;
       if (action.route !== undefined) patch['route'] = action.route;
       if (action.frequency !== undefined) patch['frequency'] = action.frequency;
       if (action.schedule_times !== undefined)
@@ -1687,10 +1788,20 @@ async function executeOne(
         filed = who.note;
       }
       if (action.started_at_appointment !== undefined) patch['source_appointment_id'] = await appointmentByTitle(profileId, action.started_at_appointment);
-      await db('medications').where({ id: med.id }).update(patch);
-      await audit(profileId, account.id, 'medications', `updated ${med.name}`);
+      // A new dose or new times go in its history, with why and where from.
+      const changedAt = await appointmentByTitle(profileId, action.changed_at_appointment);
+      const change = await recordMedicationChange(db, {
+        medicationId: med.id,
+        profileId,
+        actorId: account.id,
+        patch,
+        source: { reason: action.reason ?? null, changed_on: action.changed_on ?? null, source_appointment_id: changedAt, source_document_id: currentSourceDocument() },
+      });
+      await audit(profileId, account.id, 'medications', `updated ${med.name}`, med.id);
+      await linkSource('medications', med.id);
       const when = action.schedule_times ? ` Scheduled at ${action.schedule_times.join(', ')}.` : '';
-      return `Updated ${med.name}.${when}${filed}`;
+      const kept = change.change_id ? ` The change is kept in its history${action.reason?.trim() ? `: ${action.reason.trim().replace(/\.$/, '')}` : ''}.` : '';
+      return `Updated ${med.name}.${when}${kept}${filed}`;
     }
     case 'stop_medication': {
       const med = await db('medications as m')
@@ -1700,9 +1811,24 @@ async function executeOne(
         .select('m.id', 'c.name as name')
         .first();
       if (!med) return `Could not find an active medication called "${action.medication_name}".`;
-      await db('medications').where({ id: med.id }).update({ active: false, updated_at: db.fn.now() });
-      await audit(profileId, account.id, 'medications', `stopped ${med.name}`);
-      return `Stopped ${med.name}. It is no longer on the active medication list.`;
+      const reason = stopReasonFrom(action.stop_reason);
+      // Plain words that are not one of the reasons are kept in their words.
+      const notes = [reason === 'other' && action.stop_reason?.trim() && !/^other$/i.test(action.stop_reason.trim()) ? action.stop_reason.trim() : null, action.stop_notes?.trim() || null]
+        .filter(Boolean)
+        .join('. ') || null;
+      await stopMedication(db, {
+        medicationId: med.id,
+        profileId,
+        actorId: account.id,
+        stopped_on: action.stopped_on ?? null,
+        stop_reason: reason,
+        stop_notes: notes,
+        source: { source_document_id: currentSourceDocument() },
+      });
+      await audit(profileId, account.id, 'medications', `stopped ${med.name}`, med.id);
+      await linkSource('medications', med.id);
+      const why = reason ? ` Reason: ${STOP_REASON_LABELS[reason].toLowerCase()}.` : '';
+      return `Stopped ${med.name}. It is no longer on the active medication list.${why}`;
     }
     case 'restock_medication': {
       if (action.packs_on_hand == null && action.units_remaining == null) {
@@ -1739,6 +1865,7 @@ async function executeOne(
         })
         .returning('id');
       await audit(profileId, account.id, 'allergies', `added allergy ${action.substance}`, allergyRow?.id);
+      await linkSource('allergies', allergyRow?.id);
       return `Recorded an allergy to ${action.substance}${action.reaction ? ` (${action.reaction})` : ''}.`;
     }
     case 'remove_allergy': {
@@ -1770,6 +1897,7 @@ async function executeOne(
         })
         .returning('id');
       await audit(profileId, account.id, 'conditions', `added condition ${name}`, conditionRow?.id);
+      await linkSource('conditions', conditionRow?.id);
       return `Added the condition ${name}${action.category ? ` (${action.category.replace(/_/g, ' ')})` : ''}.${treating.note}`;
     }
     case 'update_condition': {
@@ -1791,6 +1919,7 @@ async function executeOne(
       if (Object.keys(patch).length === 0) return `Nothing to change for ${condition.name}.`;
       await db('medical_conditions').where({ id: condition.id }).update({ ...patch, updated_at: db.fn.now() });
       await audit(profileId, account.id, 'conditions', `updated ${condition.name}`, condition.id);
+      await linkSource('conditions', condition.id);
       return `Updated ${condition.name}.${filed}`;
     }
     case 'remove_condition': {
@@ -2012,6 +2141,7 @@ async function executeOne(
         })
         .returning('id');
       await audit(profileId, account.id, 'treatments', `added treatment ${action.name}`, treatmentRow?.id);
+      await linkSource('treatments', treatmentRow?.id);
       return `Added the treatment ${action.name}${action.condition_name ? ` for ${action.condition_name}` : ''}.${practitioner.note}`;
     }
     case 'raise_question': {
@@ -2024,6 +2154,7 @@ async function executeOne(
         })
         .returning('id');
       await audit(profileId, account.id, 'questions', `raised ${action.title}`, questionRow?.id);
+      await linkSource('questions', questionRow?.id);
       return `Raised the question "${action.title}" for the care circle.`;
     }
     case 'set_care_phase': {
@@ -2058,7 +2189,8 @@ async function executeOne(
               ...(action.no_longer_seeing ? { ended_on: new Date().toISOString().slice(0, 10) } : {}),
             })
           : null;
-      await audit(profileId, account.id, 'providers', `added provider ${action.name}`);
+      await audit(profileId, account.id, 'providers', `added provider ${action.name}`, provider.id);
+      await linkSource('providers', provider.id);
       const at = columns['organisation'] ? ` at ${columns['organisation']}` : '';
       const filedAs = columns['kind'] === 'organisation' ? 'organisations' : 'professionals';
       return `Added ${action.name}${at} to their ${filedAs}.${note ? ` ${note}` : ''}${standing ? ` ${standing}` : ''}`;
@@ -2075,7 +2207,8 @@ async function executeOne(
       return outcome;
     }
     case 'file_document': {
-      if (!action.category && !action.label) return 'Say which category to file the document under, or what to call it.';
+      const detailGiven = [action.issued_on, action.valid_until, action.no_expiry, action.from_name, action.to_name].some((v) => v !== undefined && v !== null && v !== '');
+      if (!action.category && !action.label && !detailGiven) return 'Say which category to file the document under, what to call it, or its dates or who it is from or to.';
       const docs = (await withCategory(db('documents'))
         .where('documents.care_profile_id', profileId)) as Array<{ id: string; label: string; visible_to_roles: string[] | null }>;
       const visible = docs.filter((d) => {
@@ -2094,6 +2227,11 @@ async function executeOne(
         }
       }
       if (!doc) return 'That document could not be found in their documents.';
+      // What it was before, so booking whoever a referral is to happens once, not on every rename.
+      const was = (await db('documents as d')
+        .leftJoin('document_categories as dc', 'dc.id', 'd.category_id')
+        .where('d.id', doc.id)
+        .first('d.to_provider_id', 'dc.system_key')) as { to_provider_id: string | null; system_key: string | null };
       const changes: Record<string, unknown> = {};
       let categoryName: string | null = null;
       if (action.category) {
@@ -2104,9 +2242,94 @@ async function executeOne(
       }
       const newLabel = action.label?.trim();
       if (newLabel) changes['label'] = newLabel.slice(0, 255);
-      await db('documents').where({ id: doc.id }).update(changes);
+      if (Object.keys(changes).length) await db('documents').where({ id: doc.id }).update(changes);
       const shown = newLabel || doc.label;
-      return categoryName ? `Filed ${shown} under ${categoryName}.` : `Renamed the document to ${shown}.`;
+      const lines = [categoryName ? `Filed ${shown} under ${categoryName}.` : newLabel ? `Renamed the document to ${shown}.` : `Updated ${shown}.`];
+      // Who it is to, filed at their practice when the letter names one.
+      let toId: string | null = null;
+      if (action.to_name?.trim() && action.to_practice?.trim()) {
+        const accountId = (await accountIdForProfile(profileId))!;
+        const placed = await addPracticeMember(accountId, action.to_name.trim(), action.to_practice.trim(), {
+          provider_type: action.to_type ?? undefined,
+          phone: action.to_phone ?? undefined,
+        });
+        toId = placed.practitionerId;
+      }
+      const problem = await applyDocumentDetails(db, profileId, doc.id, {
+          ...(action.issued_on !== undefined ? { issued_on: action.issued_on } : {}),
+          ...(action.valid_until !== undefined ? { valid_until: action.valid_until } : {}),
+          ...(action.no_expiry !== undefined ? { no_expiry: action.no_expiry } : {}),
+          ...(action.from_name?.trim() ? { from_name: action.from_name.trim(), from_type: action.from_type ?? null } : {}),
+          ...(toId
+            ? { to_provider_id: toId, to_phone: action.to_phone ?? null }
+            : action.to_name?.trim()
+              ? { to_name: action.to_name.trim(), to_type: action.to_type ?? null, to_phone: action.to_phone ?? null }
+              : {}),
+      });
+      if (problem) lines.push(problem);
+      const filedDoc = (await db('documents as d')
+        .leftJoin('document_categories as dc', 'dc.id', 'd.category_id')
+        .leftJoin('providers as tp', 'tp.id', 'd.to_provider_id')
+        .leftJoin('providers as fp', 'fp.id', 'd.from_provider_id')
+        .where('d.id', doc.id)
+        .first('d.valid_until', 'd.no_expiry', 'd.renewal_task_id', 'd.to_provider_id', 'dc.system_key', 'tp.name as to_name', 'tp.provider_type as to_type', 'fp.name as from_name')) as {
+        valid_until: string | null; no_expiry: boolean; renewal_task_id: string | null; to_provider_id: string | null; system_key: string | null; to_name: string | null; to_type: string | null; from_name: string | null;
+      };
+      if (filedDoc.system_key === 'referral') {
+        if (filedDoc.to_name) lines.push(`It is a referral${filedDoc.from_name ? ` from ${filedDoc.from_name}` : ''} to ${filedDoc.to_name}, who is in Contacts.`);
+        if (filedDoc.valid_until && !filedDoc.no_expiry) {
+          const renew = filedDoc.renewal_task_id ? (await db('reminders').where({ id: filedDoc.renewal_task_id }).first('next_due_at')) as { next_due_at: Date } | undefined : undefined;
+          lines.push(`It runs out on ${filedDoc.valid_until}.${renew ? ` A reminder to get a new one is set for ${dateInZone(new Date(renew.next_due_at), timeZone)}.` : ''}`);
+        }
+        // One task to book whoever it is to: join the one already open, or
+        // add it. Only when it first becomes a referral to them, never again
+        // on a rename or a second read.
+        const isNew = was.system_key !== 'referral' || was.to_provider_id !== filedDoc.to_provider_id;
+        if (isNew && filedDoc.to_provider_id && filedDoc.to_name) {
+          const same = await findSameBookingTask(db, profileId, {
+            providerId: filedDoc.to_provider_id,
+            providerName: filedDoc.to_name,
+            providerType: filedDoc.to_type,
+            kindKey: 'referral',
+            title: `Book ${filedDoc.to_name}`,
+            excludeIds: filedDoc.renewal_task_id ? [filedDoc.renewal_task_id] : [],
+          });
+          const accountId = (await accountIdForProfile(profileId))!;
+          const referralKind = await nextStepTypeIdByKey(accountId, 'referral');
+          if (same) {
+            await joinTask(db, {
+              profileId,
+              intoId: same.id,
+              actorId: account.id,
+              fields: { provider_id: filedDoc.to_provider_id, next_step_type_id: referralKind },
+              note: `The referral letter "${shown}" is filed and attached.`,
+              documentIds: [doc.id],
+            });
+            lines.push(`"${same.title}" was already on the list, so the letter and ${filedDoc.to_name}'s details went on it rather than a second task.`);
+          } else {
+            const inAWeek = new Date(Date.now() + 7 * 86400000);
+            const made = await createTask(db, {
+              profileId,
+              actorId: account.id,
+              source: 'pare',
+              input: {
+                title: `Book ${filedDoc.to_name}`.slice(0, 255),
+                due_on: dateInZone(inAWeek, timeZone),
+                tz: timeZone ?? null,
+                provider_id: filedDoc.to_provider_id,
+                next_step_type_id: referralKind,
+                document_ids: [doc.id],
+                no_join: true,
+                no_infer: true,
+              },
+              timeZone,
+            });
+            await audit(profileId, account.id, 'reminders', `Book ${filedDoc.to_name}`, made.reminder.id);
+            lines.push(`Added the task "Book ${filedDoc.to_name}" with the letter attached.`);
+          }
+        }
+      }
+      return lines.join(' ');
     }
     case 'add_asset': {
       // The supplier named is the supplier on file: found by name, or filed.
@@ -2130,7 +2353,8 @@ async function executeOne(
         })
         .returning('id');
       await db('care_profile_assets').insert({ care_profile_id: profileId, asset_id: asset.id });
-      await audit(profileId, account.id, 'assets', `added asset ${action.name}`);
+      await audit(profileId, account.id, 'assets', `added asset ${action.name}`, asset.id);
+      await linkSource('assets', asset.id);
       return `Added ${action.name} to the assets and linked it to this profile.`;
     }
     case 'update_provider': {
@@ -2323,6 +2547,9 @@ async function executeOne(
         return `${CLARIFY_MARK} I did not book "${action.title}": I could not find an open task or next step called "${action.for_next_step}". Which one is it for?`;
       }
       const extras = await appointmentExtrasInput(action, profileId, account);
+      // Booked from a letter: the letter goes with them to the visit.
+      const letter = currentSourceDocument();
+      if (letter) extras.input.bring_document_ids = [...new Set([...(extras.input.bring_document_ids ?? []), letter])];
       // Details already saved for this task, not booked yet: give them the date.
       const waiting = step
         ? ((await db('appointments').where({ care_profile_id: profileId, from_reminder_id: step.id }).whereNull('starts_at').first('id')) as { id: string } | undefined)
@@ -2362,6 +2589,7 @@ async function executeOne(
         if (err instanceof BookingProblem) return `${CLARIFY_MARK} I did not book "${action.title}": ${err.message}`;
         throw err;
       }
+      await linkSource('appointments', booked.appointment.id);
       const providerNote = booked.filed.map((f) => ` Added ${f.name} to Contacts.`).join('');
       const extraNote = extras.notes.length ? ` ${extras.notes.join(' ')}` : '';
       if (!startsAt) {
@@ -2496,6 +2724,8 @@ async function executeOne(
         });
       });
       await audit(profileId, account.id, 'appointments', `outcome of ${appointment.title}`, appointment.id);
+      await linkSource('appointments', appointment.id);
+      for (const s of steps) await linkSource('reminders', s.joined?.into_id ?? s.id);
       const parts: string[] = [];
       if (filedNew) {
         parts.push(
@@ -2746,14 +2976,14 @@ export async function executeActions(
   timeZone?: string | null,
   // How the change was made and, for a reversible batch, the token to group its
   // audit rows under. Defaults to a person making the change directly.
-  attribution?: { source?: AuditSource; undoBatch?: string | null }
+  attribution?: { source?: AuditSource; undoBatch?: string | null; sourceDocumentId?: string | null }
 ): Promise<string[]> {
   if (actions.length === 0) return [];
   if (access.level === 'viewer') {
     return ['No changes were made: you have view-only access to this care profile.'];
   }
   return auditContext.run(
-    { source: attribution?.source ?? 'person', undoBatch: attribution?.undoBatch ?? null },
+    { source: attribution?.source ?? 'person', undoBatch: attribution?.undoBatch ?? null, sourceDocumentId: attribution?.sourceDocumentId ?? null },
     async () => {
       const results: string[] = [];
       // One set for the whole turn, so several "Escitalopram" doses across

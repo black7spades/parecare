@@ -88,6 +88,20 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
     expand: (a) => `Add this medication to the list: ${a}`,
   },
   {
+    name: 'stop',
+    hint: 'a medicine to stop, and why',
+    description: 'Stop a medicine, e.g. /stop the amoxicillin, the course finished yesterday',
+    expand: (a) =>
+      `Stop this medicine, with the last day it was taken and why it stopped when given, so the stop is kept in its history: ${a}`,
+  },
+  {
+    name: 'change',
+    hint: 'a medicine change, and why',
+    description: 'Change a medicine, e.g. /change metoprolol down to 25mg after the hospital stay, blood pressure was low',
+    expand: (a) =>
+      `Change this medicine on the list and keep why it changed and where the change came from in its history: ${a}`,
+  },
+  {
     name: 'restock',
     hint: 'medication and how much was picked up',
     description: 'Record a repeat pickup, e.g. /restock 2 packs of perindopril',

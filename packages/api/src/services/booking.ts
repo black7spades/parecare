@@ -5,6 +5,7 @@ import { deliverForwards } from './noteForwards';
 import { appointmentPlaceColumns, contactSummaries, ensureProfessional, fillProfessionalGaps, linkContact, type KnownPlace } from './professionals';
 import { createTask, ownerZone } from './tasks';
 import { withCategory } from './documentCategories';
+import { refreshReferrals } from './documentDates';
 import { REPEAT_CHOICE_VALUES, advance, repeatChoice, repeatColumns } from '../lib/repeat';
 import { dateInZone, parseZonedTime, isValidTimeZone } from '../lib/timezone';
 
@@ -428,6 +429,8 @@ export async function bookAppointment(
   await syncAppointmentSpend(id, profileId, actorId, input.starts_at ?? null, { estimate: input.cost_estimate, actual: input.cost_actual }, conn);
   await syncPreparationTask(conn, id, zone);
   if (dated && input.repeat && input.repeat !== 'once') await startSeries(conn, id, profileId, actorId, input.repeat, input.repeat_until, zone);
+  // A first visit with a specialist starts the count on their referral.
+  await refreshReferrals(conn, profileId);
   const row = (await conn('appointments').where({ id }).first()) as BookResult['appointment'];
   return { appointment: row, filed };
 }
@@ -519,6 +522,8 @@ export async function updateAppointment(
     const later = await laterCleanOccurrences(conn, { id: fresh.id, series_id: fresh.series_id, starts_at: before.starts_at });
     if (later.length) seriesMove = { from_starts_at: new Date(before.starts_at).toISOString(), later: later.length };
   }
+  // Moved or cancelled: a referral counting from this visit counts again.
+  await refreshReferrals(conn, profileId);
   return { appointment: fresh, filed, series_move: seriesMove };
 }
 

@@ -261,6 +261,18 @@ export interface Document {
   file_size_bytes: number | null;
   mime_type: string | null;
   visible_to_roles: string[];
+  /** The date it was written, and the dates it is valid between. */
+  issued_on?: string | null;
+  valid_from?: string | null;
+  valid_from_appointment_id?: string | null;
+  valid_until?: string | null;
+  no_expiry?: boolean;
+  /** The referral rule set Valid until, not a person. */
+  valid_until_worked_out?: boolean;
+  /** Who wrote it and who it is addressed to. */
+  from_provider_id?: string | null;
+  to_provider_id?: string | null;
+  renewal_task_id?: string | null;
   created_at: string | Date;
 }
 

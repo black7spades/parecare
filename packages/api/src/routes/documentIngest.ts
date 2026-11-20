@@ -8,9 +8,16 @@ import { uploadFile, readStoredFile } from '../services/storage';
 import { canSeeDocument } from './documents';
 import { accountIdForProfile, categoryIdByKey, listCategories } from '../services/documentCategories';
 import type { Document } from '../types';
-import { complete, isAiConfigured, type ChatTurn } from '../services/aiProvider';
+import { complete, isAiConfigured, readsScannedDocuments, type ChatTurn } from '../services/aiProvider';
 import { dateInZone } from '../lib/timezone';
-import { extractText, buildIngestPrompt } from '../services/documentIngest';
+import { extractText, buildIngestPrompt, splitIntoParts, MAX_PARTS, type CurrentMedicine } from '../services/documentIngest';
+
+/** Said when a scan reaches an AI service that cannot read scanned pages. */
+const SCAN_MESSAGE =
+  'This looks like a scan. The AI service set up here cannot read scanned pages. Take a photo of each page and upload the photos instead.';
+/** Said when a document is longer than Pare reads in one go. */
+const LONG_MESSAGE =
+  'This is a long document. Pare read the first 6 parts. Upload the pages that matter most and Pare reads those too.';
 import { executeActions, actionSchema, type AssistantAction } from '../services/aiActions';
 
 /**
@@ -153,6 +160,7 @@ async function readAndPropose(
   const personName = name?.preferred_name || name?.full_name || 'this person';
 
   const isImage = file.mimetype.startsWith('image/');
+  const isPdf = file.mimetype === 'application/pdf' || file.filename.toLowerCase().endsWith('.pdf');
   const text = extractText(file.buffer, file.mimetype, file.filename);
   const haveText = !!text && text.length >= 20;
 
@@ -167,20 +175,36 @@ async function readAndPropose(
     return;
   }
 
-  // A photo or scan goes to the model as an image, read natively; a text-based
-  // file goes as its extracted text. Anything else that yielded no text is kept
-  // and left for the person to file by hand.
-  let userTurn: ChatTurn;
+  // A photo goes to the model as an image, read natively; a text-based file
+  // goes as its extracted text, in parts when it is long. A scanned PDF goes
+  // whole to Claude, which reads scanned pages; any other service is told
+  // plainly to have the pages photographed. Anything else that yielded no
+  // text is kept and left for the person to file by hand.
+  let turns: ChatTurn[];
+  let tooLong = false;
   if (haveText) {
-    userTurn = { role: 'user', content: text.slice(0, 12000) };
+    const parts = splitIntoParts(text);
+    tooLong = parts.length > MAX_PARTS;
+    turns = parts.slice(0, MAX_PARTS).map((p) => ({ role: 'user', content: p }));
   } else if (isImage) {
-    userTurn = {
+    turns = [{
       role: 'user',
       content: [
         { type: 'text', text: 'The document is the attached image. Read it and file what you find.' },
         { type: 'image', media_type: file.mimetype, data: file.buffer.toString('base64') },
       ],
-    };
+    }];
+  } else if (isPdf && readsScannedDocuments()) {
+    turns = [{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'The document is the attached PDF. Its pages may be scanned. Read every page and file what you find.' },
+        { type: 'document', media_type: 'application/pdf', data: file.buffer.toString('base64') },
+      ],
+    }];
+  } else if (isPdf) {
+    res.json({ document_id: docId, text_found: false, summary: SCAN_MESSAGE, scan: true, actions: [] });
+    return;
   } else {
     res.json({
       document_id: docId,
@@ -200,26 +224,56 @@ async function readAndPropose(
     : [];
   const knownAddresses = knownRows.map((r) => (r as { formatted: string | null }).formatted).filter((v): v is string => !!v);
   const categories = account ? (await listCategories((account as { account_id: string }).account_id)).map((c) => c.name) : [];
-  const system = buildIngestPrompt(personName, today, knownAddresses, categories);
+  // Their medicines now, so a letter changing one proposes a change, not a second copy.
+  const medRows = (await db('medications as m')
+    .join('medication_catalogue as c', 'c.id', 'm.medication_catalogue_id')
+    .where({ 'm.care_profile_id': profileId, 'm.active': true })
+    .orderBy('c.name')
+    .select('c.name', 'm.dose', 'm.schedule_times')) as Array<{ name: string; dose: string | null; schedule_times: unknown }>;
+  const medicines: CurrentMedicine[] = medRows.map((m) => ({ name: m.name, dose: m.dose, times: Array.isArray(m.schedule_times) ? (m.schedule_times as string[]) : [] }));
+  const system = buildIngestPrompt(personName, today, knownAddresses, categories, medicines);
 
   try {
-    // Reading a whole document is a heavy, rare job worth the best model available.
-    const result = await complete(system, [userTurn], 1500, 'mediation');
+    // Reading a whole document is a heavy, rare job worth the best model
+    // available. A long one is read part by part; each later part is told
+    // what is already proposed, and the results merge without repeats.
+    const proposed: AssistantAction[] = [];
+    const seen = new Set<string>();
+    const summaries: string[] = [];
+    for (let i = 0; i < turns.length; i++) {
+      const turn = turns[i]!;
+      const content =
+        turns.length > 1 && typeof turn.content === 'string'
+          ? i === 0
+            ? `Part 1 of ${turns.length}.\n\n${turn.content}`
+            : `Part ${i + 1} of ${turns.length}. Only add records not already proposed:\n${proposed.map((a) => JSON.stringify(a)).join('\n') || 'none yet'}\n\n${turn.content}`
+          : turn.content;
+      const result = await complete(system, [{ role: 'user', content }], 3000, 'mediation');
+      for (const a of parseProposedActions(result.text)) {
+        const key = JSON.stringify(a);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        proposed.push(a);
+      }
+      // The summary is the model's prose with any fenced blocks removed.
+      const prose = result.text.replace(/```[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim();
+      if (prose && (i === 0 || summaries.length === 0)) summaries.push(prose);
+    }
     // Pare files the document it just read, never another one, and only once.
     let filedOnce = false;
-    const actions = parseProposedActions(result.text).flatMap((a): AssistantAction[] => {
+    const actions = proposed.flatMap((a): AssistantAction[] => {
       if (a.type !== 'file_document') return [a];
       if (filedOnce) return [];
       filedOnce = true;
       const { document: _ignored, ...rest } = a;
       return [{ ...rest, document_id: docId }];
     });
-    // The summary is the model's prose with any fenced blocks removed.
-    const summary = result.text.replace(/```[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim();
+    const summary = [summaries[0] || (isImage ? 'Read the photo.' : 'Read the document.'), tooLong ? LONG_MESSAGE : null].filter(Boolean).join('\n\n');
     res.json({
       document_id: docId,
       text_found: haveText,
-      summary: summary || (isImage ? 'Read the photo.' : 'Read the document.'),
+      summary,
+      long: tooLong,
       actions,
     });
   } catch (err) {
@@ -254,7 +308,9 @@ async function readAndPropose(
   }
 }
 
-const applySchema = z.object({ actions: z.array(z.unknown()).min(1).max(50) });
+// The document the actions were read from, so everything filed from it is
+// attached to it.
+const applySchema = z.object({ actions: z.array(z.unknown()).min(1).max(50), document_id: z.string().uuid().optional().nullable() });
 
 documentIngestRouter.post('/apply', requireAuth, async (req, res) => {
   const parsed = applySchema.safeParse(req.body);
@@ -271,6 +327,13 @@ documentIngestRouter.post('/apply', requireAuth, async (req, res) => {
     if (a.success) valid.push(a.data);
     else errors.push('Skipped an item that was not a valid action.');
   }
-  const outcomes = await executeActions(valid, profileIdOf(req), req.account!, req.careAccess!, (req.headers['x-time-zone'] as string) || null);
+  let sourceDocumentId: string | null = null;
+  if (parsed.data.document_id) {
+    const doc = await db<Document>('documents').where({ id: parsed.data.document_id, care_profile_id: profileIdOf(req) }).first();
+    if (doc && canSeeDocument(req, doc)) sourceDocumentId = doc.id;
+  }
+  const outcomes = await executeActions(valid, profileIdOf(req), req.account!, req.careAccess!, (req.headers['x-time-zone'] as string) || null, {
+    sourceDocumentId,
+  });
   res.json({ outcomes: [...outcomes, ...errors] });
 });
