@@ -26,7 +26,7 @@ export function repeatColumns(choice: RepeatChoice | string | null | undefined):
   return { reminder_type: hit.reminder_type, rrule: hit.rrule };
 }
 
-function parseRule(rrule: string | null | undefined): { freq: string; interval: number } | null {
+function parseRule(rrule: string | null | undefined): { freq: string; interval: number; monthDay: number | null } | null {
   if (!rrule) return null;
   const parts = Object.fromEntries(
     rrule.split(';').map((p) => p.split('=').map((s) => s.trim().toUpperCase()) as [string, string])
@@ -34,7 +34,8 @@ function parseRule(rrule: string | null | undefined): { freq: string; interval: 
   const freq = parts['FREQ'];
   if (!freq || !['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'].includes(freq)) return null;
   const interval = Math.max(1, Number(parts['INTERVAL'] ?? 1) || 1);
-  return { freq, interval };
+  const md = Number(parts['BYMONTHDAY']);
+  return { freq, interval, monthDay: md >= 1 && md <= 31 ? md : null };
 }
 
 /** The rule for a stored row: its rrule, or one from its older reminder_type. */
@@ -95,16 +96,27 @@ export function advance(date: Date, rrule: string | null | undefined, timeZone?:
     const total = mo + months;
     y += Math.floor(total / 12);
     mo = ((total % 12) + 12) % 12;
-    d = Math.min(anchorDay ?? d, daysIn(y, mo));
+    d = Math.min(anchorDay ?? rule.monthDay ?? d, daysIn(y, mo));
   }
   const naive = `${y}-${pad(mo + 1)}-${pad(d)}T${pad(w.h)}:${pad(w.mi)}:${pad(w.s)}`;
   return (isValidTimeZone(timeZone) ? parseZonedTime(naive, timeZone) : null) ?? new Date(`${naive}Z`);
 }
 
+/**
+ * A monthly or yearly rule remembers the day it started on, so a task due on
+ * the 31st comes back on the 31st after a short month.
+ */
+export function withMonthDay(rrule: string | null, due: Date, timeZone?: string | null): string | null {
+  const rule = parseRule(rrule);
+  if (!rrule || !rule || (rule.freq !== 'MONTHLY' && rule.freq !== 'YEARLY')) return rrule;
+  const base = rrule.split(';').filter((p) => !/^BYMONTHDAY=/i.test(p)).join(';');
+  return `${base};BYMONTHDAY=${wallClock(due, timeZone).d}`;
+}
+
 /** Roll a due time forward by its rule until it is after `now`. */
 export function nextAfter(due: Date, rrule: string | null | undefined, now: Date, timeZone?: string | null): Date {
   if (!parseRule(rrule)) return due;
-  const anchor = wallClock(due, timeZone).d;
+  const anchor = parseRule(rrule)?.monthDay ?? wallClock(due, timeZone).d;
   let next = new Date(due);
   for (let i = 0; i < 2000 && next <= now; i++) next = advance(next, rrule, timeZone, anchor);
   return next;

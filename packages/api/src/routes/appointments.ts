@@ -263,7 +263,9 @@ export async function addNextSteps(
         providerId: provider?.id ?? null, providerName: provider?.name ?? null, providerType: providerType ?? null, kindKey: typeRow.system_key, title,
       });
       if (same) {
-        const when = source?.starts_at ? `, ${new Date(source.starts_at).toISOString().slice(0, 10)}` : '';
+        const when = source?.starts_at
+          ? `, ${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: isValidTimeZone(opts.timeZone) ? opts.timeZone! : 'UTC' }).format(new Date(source.starts_at))}`
+          : '';
         const joined = await joinTask(trx, {
           profileId: opts.profileId,
           intoId: same.id,

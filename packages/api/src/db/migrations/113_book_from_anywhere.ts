@@ -56,6 +56,8 @@ export async function up(knex: Knex): Promise<void> {
     t.boolean('all_day').notNullable().defaultTo(false);
     t.text('preparation').nullable();
     t.uuid('preparation_task_id').nullable().references('id').inTable('reminders').onDelete('SET NULL');
+    // The person deleted the night-before reminder: it is not made again.
+    t.boolean('preparation_reminder_off').notNullable().defaultTo(false);
     t.text('telehealth_link').nullable();
     t.boolean('interpreter_needed').notNullable().defaultTo(false);
     t.string('interpreter_language', 100).nullable();
@@ -121,6 +123,7 @@ export async function down(knex: Knex): Promise<void> {
     t.dropColumn('interpreter_language');
     t.dropColumn('interpreter_needed');
     t.dropColumn('telehealth_link');
+    t.dropColumn('preparation_reminder_off');
     t.dropColumn('preparation_task_id');
     t.dropColumn('preparation');
     t.dropColumn('all_day');

@@ -391,7 +391,7 @@ export function TasksPage() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_20rem] items-start">
-      <div className="space-y-3">
+      <div className="space-y-3 min-w-0">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-ink">Tasks</h2>
           <span className="text-xs text-muted">{openCount} open · {visible.length} in the record</span>
@@ -486,7 +486,7 @@ export function TasksPage() {
                       onChange={() => handleComplete(t)}
                     />
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="px-3 py-3 min-w-[12rem]">
                     <div className={`text-ink font-medium ${t.completed ? 'line-through' : ''}`}>
                       {t.title}
                       {t.sentiment ? <span className="ml-1.5" title={SENTIMENTS.find((s) => s.value === t.sentiment)?.label}>{sentimentEmoji(t.sentiment)}</span> : null}
@@ -517,7 +517,7 @@ export function TasksPage() {
                     ) : null}
                     <Button size="xs" variant="ghost" className="mt-1 -ml-2" onClick={() => openNotes(t)}>Notes</Button>
                   </td>
-                  <td className="px-3 py-3 text-ink hidden lg:table-cell">{t.provider?.name ?? ''}</td>
+                  <td className="px-3 py-3 text-ink min-w-[7rem] hidden lg:table-cell">{t.provider?.name ?? ''}</td>
                   <td className="px-3 py-3 whitespace-nowrap hidden lg:table-cell">
                     {t.provider?.phone ? (
                       <a href={`tel:${t.provider.phone.replace(/[^\d+]/g, '')}`} className="text-primary hover:underline" aria-label={`Call ${t.provider.name} on ${t.provider.phone}`}>
@@ -739,7 +739,7 @@ export function TasksPage() {
 
       {editing ? (
         <TaskEditor
-          key={editing.task.id}
+          key={`edit-${editing.task.id}`}
           profileId={profile.id}
           task={editing.task}
           focus={editing.focus}

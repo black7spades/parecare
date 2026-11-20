@@ -328,15 +328,21 @@ icsRouter.get('/:token.ics', async (req, res) => {
     return;
   }
 
+  // A task due any time that day is a whole-day event in the owner's zone.
+  const ownerZone = ((await db('accounts').where({ id: profile.account_id }).first('timezone')) as { timezone?: string | null } | undefined)?.timezone ?? null;
   for (const r of reminders) {
     const start = new Date(r.next_due_at);
     const end = new Date(start.getTime() + 30 * 60 * 1000);
+    const day = dateInZone(start, ownerZone);
+    const nextDay = new Date(`${day}T12:00:00Z`);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
     lines.push(
       'BEGIN:VEVENT',
       `UID:${r.id}@parecare`,
       `DTSTAMP:${icsDate(new Date())}`,
-      `DTSTART:${icsDate(start)}`,
-      `DTEND:${icsDate(end)}`,
+      ...(r.all_day
+        ? [`DTSTART;VALUE=DATE:${day.replace(/-/g, '')}`, `DTEND;VALUE=DATE:${nextDay.toISOString().slice(0, 10).replace(/-/g, '')}`]
+        : [`DTSTART:${icsDate(start)}`, `DTEND:${icsDate(end)}`]),
       `SUMMARY:${icsEscape(r.title)}`
     );
     if (r.body) lines.push(`DESCRIPTION:${icsEscape(r.body)}`);

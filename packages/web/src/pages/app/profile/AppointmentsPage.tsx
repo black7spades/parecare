@@ -414,7 +414,10 @@ export function AppointmentsPage() {
       {seriesMove ? (
         <div className="card flex flex-wrap items-center gap-3" role="status">
           <p className="flex-1 text-sm text-ink">
-            Moved this one. Move the {seriesMove.later} after it to {format(new Date(seriesMove.to), 'EEEE')}s at {format(new Date(seriesMove.to), 'HH:mm')} too?
+            {/* Weekly kinds keep a weekday; monthly and longer move by the same change. */}
+            {['daily', 'weekly', 'fortnightly'].includes(appointments.find((a) => a.id === seriesMove.id)?.series?.repeat ?? '')
+              ? `Moved this one. Move the ${seriesMove.later} after it to ${format(new Date(seriesMove.to), 'EEEE')}s at ${format(new Date(seriesMove.to), 'HH:mm')} too?`
+              : `Moved this one. Move the ${seriesMove.later} after it by the same change too?`}
           </p>
           <Button size="sm" variant="secondary" loading={moveLater.isPending} onClick={() => moveLater.mutate({ id: seriesMove.id, from: seriesMove.from })}>Move them too</Button>
           <Button size="sm" variant="ghost" onClick={() => setSeriesMove(null)}>Leave them</Button>
@@ -576,10 +579,12 @@ export function AppointmentsPage() {
             {
               label: "Who's going",
               value: (current.attendees ?? []).length
-                ? (current.attendees ?? []).map((p) => `${p.name}${p.is_driver ? ', driving' : ''}`).join('; ')
+                ? (current.attendees ?? []).map((p) => p.name).join(', ')
                 : null,
             },
-            { label: 'Interpreter', value: current.interpreter_needed ? (current.interpreter_language ? `Needed, ${current.interpreter_language}` : 'Needed') : null },
+            { label: 'Driving', value: (current.attendees ?? []).filter((p) => p.is_driver).map((p) => p.name).join(', ') },
+            { label: 'Interpreter', value: current.interpreter_needed ? 'Needed' : null },
+            { label: 'Language', value: current.interpreter_needed ? current.interpreter_language : null },
             { label: 'How to get ready', value: current.preparation ? <LinkedText text={current.preparation} canEdit={false} /> : null },
             {
               label: 'Status',
@@ -1072,6 +1077,7 @@ export function AppointmentFields({
   idPrefix = 'appt',
   errors = {},
   dateOptional = false,
+  waitsOnTask = false,
 }: {
   profileId: string;
   value: AppointmentDraft;
@@ -1082,6 +1088,8 @@ export function AppointmentFields({
   errors?: AppointmentDraftErrors;
   /** The date can be left blank: it saves as Not booked yet with a to-do. */
   dateOptional?: boolean;
+  /** Booked from a task: that task stays open until the date is known. */
+  waitsOnTask?: boolean;
 }) {
   const health = useHealthConfig();
   const set = (patch: Partial<AppointmentDraft>) => onChange({ ...value, ...patch });
@@ -1211,7 +1219,7 @@ export function AppointmentFields({
             value={value.startDate}
             onChange={(e) => set({ startDate: e.target.value })}
             error={errors.startDate}
-            hint={dateOptional && !value.startDate ? 'No date yet? Leave it blank. It saves as Not booked yet, with a to-do to book it.' : undefined}
+            hint={dateOptional && !value.startDate ? (waitsOnTask ? 'No date yet? Leave it blank. It saves as Not booked yet, and the task stays open until it has a date.' : 'No date yet? Leave it blank. It saves as Not booked yet, with a to-do to book it.') : undefined}
           />
           <Input
             id={`${idPrefix}-start`}
@@ -1484,7 +1492,7 @@ export function AppointmentEditor({
   return (
     <Modal open onClose={onClose} title={isNew ? 'Add appointment' : appointment.starts_at ? `Edit ${appointment.title}` : `Book ${appointment.title}`} wide>
       <div className="space-y-4">
-        <AppointmentFields profileId={profileId} value={draft} onChange={setDraft} errors={errors} dateOptional={!requireDate} />
+        <AppointmentFields profileId={profileId} value={draft} onChange={setDraft} errors={errors} dateOptional={!requireDate} waitsOnTask={isNew && !!fromReminderId} />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         {tried && !draftIsBookable(draft, requireDate) ? (
           <p className="text-sm text-red-600" role="alert">{missingSentence(appointmentDraftErrors(draft, requireDate))}</p>

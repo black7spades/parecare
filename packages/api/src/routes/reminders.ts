@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import type { Knex } from 'knex';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { getCareAccess } from '../middleware/subscriptionGate';
@@ -269,7 +270,18 @@ remindersRouter.post('/:reminderId/join', requireAuth, async (req, res) => {
 remindersRouter.post('/:reminderId/separate', requireAuth, async (req, res) => {
   const parsed = z
     .object({
-      previous: z.record(z.unknown()).default({}),
+      // Only what a join can change, each checked.
+      previous: z
+        .object({
+          provider_id: z.string().uuid().nullable().optional(),
+          next_step_type_id: z.string().uuid().nullable().optional(),
+          medical_condition_id: z.string().uuid().nullable().optional(),
+          appointment_id: z.string().uuid().nullable().optional(),
+          next_due_at: z.coerce.date().optional(),
+          all_day: z.boolean().optional(),
+        })
+        .strict()
+        .default({}),
       note_id: z.string().uuid().optional().nullable(),
       document_ids: z.array(z.string().uuid()).max(50).default([]),
       create: taskInputSchema,
@@ -285,6 +297,14 @@ remindersRouter.post('/:reminderId/separate', requireAuth, async (req, res) => {
     const result = await db.transaction(async (trx) => {
       const exists = await trx('reminders').where({ id: taskId, care_profile_id: profileId }).first('id');
       if (!exists) return null;
+      const prev = parsed.data.previous;
+      const problem = await contactProblem(trx, profileId, prev.provider_id);
+      if (problem) throw new TaskProblem(problem);
+      const own = async (table: string, id: string | null | undefined) =>
+        !id || !!(await trx(table).where({ id, care_profile_id: profileId }).first('id'));
+      if (!(await own('medical_conditions', prev.medical_condition_id)) || !(await own('appointments', prev.appointment_id))) {
+        throw new TaskProblem('That task could not be put back as it was. Refresh and try again.');
+      }
       await undoJoin(trx, profileId, { id: taskId, previous: parsed.data.previous, note_id: parsed.data.note_id, document_ids: parsed.data.document_ids });
       return createTask(trx, { profileId, actorId: req.account!.id, input: { ...parsed.data.create, no_join: true }, timeZone: tzOf(req) });
     });
@@ -397,7 +417,11 @@ remindersRouter.post('/bulk', requireAuth, async (req, res) => {
   const profileId = String(req.params['id']);
   const scope = () => db('reminders').where({ care_profile_id: profileId }).whereIn('id', parsed.data.ids);
   if (parsed.data.action === 'delete') {
-    const deleted = await scope().del();
+    const ids = (await scope().pluck('id')) as string[];
+    const deleted = await db.transaction(async (trx) => {
+      await forgetTasks(trx, profileId, ids);
+      return trx('reminders').whereIn('id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']).del();
+    });
     res.json({ deleted });
     return;
   }
@@ -427,10 +451,24 @@ remindersRouter.post('/bulk', requireAuth, async (req, res) => {
   res.json({ updated, waiting });
 });
 
+/**
+ * What goes with a deleted task: its notes and document links, and a
+ * night-before reminder someone deleted is not made again.
+ */
+async function forgetTasks(trx: Knex.Transaction, profileId: string, ids: string[]) {
+  if (ids.length === 0) return;
+  await trx('appointments').where({ care_profile_id: profileId }).whereIn('preparation_task_id', ids).update({ preparation_reminder_off: true });
+  await trx('record_notes').where({ care_profile_id: profileId, entity_type: 'reminders' }).whereIn('entity_id', ids).delete();
+  await trx('document_links').where({ entity_type: 'reminders' }).whereIn('entity_id', ids).delete();
+}
+
 remindersRouter.delete('/:reminderId', requireAuth, async (req, res) => {
-  const affected = await db('reminders')
-    .where({ id: req.params['reminderId'], care_profile_id: req.params['id'] })
-    .delete();
+  const profileId = String(req.params['id']);
+  const affected: number = await db.transaction(async (trx): Promise<number> => {
+    const ids = (await trx('reminders').where({ id: req.params['reminderId'], care_profile_id: profileId }).pluck('id')) as string[];
+    await forgetTasks(trx, profileId, ids);
+    return (await trx('reminders').whereIn('id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']).delete()) as number;
+  });
   if (!affected) {
     res.status(404).json({ error: 'Reminder not found', code: 'NOT_FOUND' });
     return;

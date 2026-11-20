@@ -5,7 +5,7 @@ import { accountIdForProfile, withCategory } from './documentCategories';
 import { nextStepTypeIdByKey, resolveNextStepTypeByName, stepBooks } from './nextStepTypes';
 import { contactSummaries, ensureProfessional, linkContact, type ContactSummary } from './professionals';
 import { parseZonedTime, isValidTimeZone } from '../lib/timezone';
-import { REPEAT_CHOICE_VALUES, repeatChoice, repeatColumns } from '../lib/repeat';
+import { REPEAT_CHOICE_VALUES, repeatChoice, repeatColumns, withMonthDay } from '../lib/repeat';
 import { findPhones, phoneDigits, typeWordIn } from '../lib/phoneText';
 import { providerTypeLabel } from '../lib/providerTypes';
 
@@ -81,6 +81,9 @@ const KIND_WORDS: Array<{ re: RegExp; key: string }> = [
 const SPECIALIST_TYPES = /ologist$|iatrist$|iatrician$|^surgeon$|^specialist$/i;
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** A name or word appears whole, never as part of another word ("Ann" is not in "annual"). */
+const hasWords = (text: string, words: string) => !!words && new RegExp(`(^|[^a-z0-9])${escapeRe(words)}($|[^a-z0-9])`, 'i').test(text);
 const TITLE_WORD = /^(dr|prof|professor|mr|mrs|ms|miss|mx|sister)\.?\s+/i;
 
 interface LinkedContact { id: string; name: string; provider_type: string | null; phone: string | null; also_known_as: string[] | null }
@@ -125,11 +128,11 @@ export async function inferTaskIntent(
       const names = [c.name, ...(c.also_known_as ?? [])].map(norm);
       return names.some((n) => {
         const bare = n.replace(TITLE_WORD, '');
-        if (lower.includes(n) || (bare.split(' ').length > 1 && lower.includes(bare))) return true;
+        if (hasWords(lower, n) || (bare.split(' ').length > 1 && hasWords(lower, bare))) return true;
         // "Dr Chen" names Dr Anna Chen.
         const t = n.match(TITLE_WORD);
         const last = bare.split(' ').pop();
-        return !!t && !!last && last.length > 1 && new RegExp(`\\b${t[1]}\\.?\\s+${last}\\b`, 'i').test(all);
+        return !!t && !!last && last.length > 1 && new RegExp(`\\b${escapeRe(t[1]!)}\\.?\\s+${escapeRe(last)}($|[^a-z0-9])`, 'i').test(all);
       });
     })
   );
@@ -177,7 +180,7 @@ export async function findSameBookingTask(
     if (c.providerId && r.provider_id === c.providerId) return r;
     if (r.provider_id) continue;
     const words = norm(`${r.title} ${r.body ?? ''}`);
-    if (name && (words.includes(name) || (bareName.includes(' ') && words.includes(bareName)))) return r;
+    if (name && (hasWords(words, name) || (bareName.includes(' ') && hasWords(words, bareName)))) return r;
     if (typeWord && typeWord !== 'other' && new RegExp(`\\b${typeWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i').test(words)) return r;
     if (!c.providerId && c.kindKey && r.system_key === c.kindKey) return r;
   }
@@ -206,7 +209,7 @@ export async function joinTask(
     profileId: string;
     intoId: string;
     actorId: string | null;
-    fields: Partial<Record<(typeof JOIN_FILLS)[number], string | null>> & { next_due_at?: Date | null };
+    fields: Partial<Record<(typeof JOIN_FILLS)[number], string | null>> & { next_due_at?: Date | null; all_day?: boolean };
     note?: string | null;
     documentIds?: string[];
   }
@@ -224,7 +227,7 @@ export async function joinTask(
   if (opts.fields.next_due_at && new Date(opts.fields.next_due_at) < new Date(existing['next_due_at'] as string)) {
     update['next_due_at'] = opts.fields.next_due_at;
     previous['next_due_at'] = existing['next_due_at'];
-    update['all_day'] = false;
+    update['all_day'] = !!opts.fields.all_day;
     previous['all_day'] = existing['all_day'];
   }
   if (Object.keys(update).length) await conn('reminders').where({ id: existing.id }).update(update);
@@ -330,7 +333,8 @@ export async function createTask(
 ): Promise<CreateTaskResult> {
   const { profileId, input } = opts;
   const accountId = (await accountIdForProfile(profileId, conn))!;
-  const due = resolveDue(input, await ownerZone(conn, profileId, opts.timeZone));
+  const zone = await ownerZone(conn, profileId, isValidTimeZone(input.tz) ? input.tz : opts.timeZone);
+  const due = resolveDue(input, zone);
   if (!due) throw new TaskProblem('Pick the day it is due.');
   const problem = (await contactProblem(conn, profileId, input.provider_id)) ?? (await assigneeProblem(conn, profileId, input));
   if (problem) throw new TaskProblem(problem, 'PROVIDER_NOT_LINKED');
@@ -373,7 +377,7 @@ export async function createTask(
         actorId: opts.actorId,
         fields: {
           provider_id: providerId, next_step_type_id: typeId, medical_condition_id: input.medical_condition_id ?? null,
-          appointment_id: input.appointment_id ?? null, next_due_at: due.next_due_at,
+          appointment_id: input.appointment_id ?? null, next_due_at: due.next_due_at, all_day: due.all_day,
         },
         note: opts.joinNote ?? `Added again as “${input.title}”${input.body?.trim() ? `: ${input.body.trim()}` : ''}`,
         documentIds: input.document_ids,
@@ -392,7 +396,7 @@ export async function createTask(
       next_due_at: due.next_due_at,
       all_day: due.all_day,
       reminder_type: repeat.reminder_type,
-      rrule: repeat.rrule,
+      rrule: withMonthDay(repeat.rrule, due.next_due_at, zone),
       assigned_to: input.assigned_account_id ? null : input.assigned_to ?? null,
       assigned_account_id: input.assigned_account_id ?? null,
       desired_outcome: input.desired_outcome?.trim() || null,
@@ -429,12 +433,18 @@ export async function updateTask(
   if (input.title !== undefined) update['title'] = input.title.slice(0, 255);
   if (input.body !== undefined) update['body'] = input.body?.trim() || null;
   if (input.desired_outcome !== undefined) update['desired_outcome'] = input.desired_outcome?.trim() || null;
+  const zone = await ownerZone(conn, profileId, isValidTimeZone(input.tz) ? input.tz : opts.timeZone);
   if (input.due_on !== undefined || input.next_due_at !== undefined) {
-    const due = resolveDue(input, await ownerZone(conn, profileId, opts.timeZone));
+    const due = resolveDue(input, zone);
     if (due) Object.assign(update, due);
   } else if (input.all_day !== undefined) update['all_day'] = input.all_day;
   const repeat = repeatFrom(input);
   if (repeat) Object.assign(update, repeat);
+  // The day a monthly or yearly repeat comes back on follows the due date.
+  if (repeat || update['next_due_at']) {
+    const rule = repeat ? repeat.rrule : (before['rrule'] as string | null);
+    update['rrule'] = withMonthDay(rule, new Date((update['next_due_at'] ?? before['next_due_at']) as string), zone);
+  }
   if (input.assigned_to !== undefined || input.assigned_account_id !== undefined) {
     update['assigned_account_id'] = input.assigned_account_id ?? null;
     update['assigned_to'] = input.assigned_account_id ? null : input.assigned_to ?? null;
@@ -500,7 +510,7 @@ export async function mergeTasks(conn: Conn, opts: { profileId: string; fromId: 
     fields: {
       provider_id: from['provider_id'] as string | null, next_step_type_id: from['next_step_type_id'] as string | null,
       medical_condition_id: from['medical_condition_id'] as string | null, appointment_id: from['appointment_id'] as string | null,
-      next_due_at: from['next_due_at'] as Date,
+      next_due_at: from['next_due_at'] as Date, all_day: !!from['all_day'],
     },
     note: `Joined from “${String(from['title'])}”${from['body'] ? `: ${String(from['body'])}` : ''}`,
   });

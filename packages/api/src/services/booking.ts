@@ -207,7 +207,7 @@ export async function syncPreparationTask(conn: Conn, appointmentId: string, tim
   const eve = new Date(`${day}T12:00:00Z`);
   eve.setUTCDate(eve.getUTCDate() - 1);
   const eveDay = eve.toISOString().slice(0, 10);
-  const due = parseZonedTime(`${eveDay}T19:00:00`, zone) ?? new Date(`${eveDay}T19:00:00Z`);
+  const due = (zone ? parseZonedTime(`${eveDay}T19:00:00`, zone) : null) ?? new Date(`${eveDay}T19:00:00Z`);
   const fields = {
     title: `Get ready for ${String(a['title'])} tomorrow`.slice(0, 255),
     body: prep,
@@ -216,11 +216,15 @@ export async function syncPreparationTask(conn: Conn, appointmentId: string, tim
     medical_condition_id: a['medical_condition_id'] ?? null,
     provider_id: a['provider_id'] ?? null,
   };
-  const existing = taskId ? await conn('reminders').where({ id: taskId }).first('id') : null;
+  const existing = (taskId ? await conn('reminders').where({ id: taskId }).first('id', 'next_due_at') : null) as { id: string; next_due_at: Date } | null;
   if (existing) {
-    await conn('reminders').where({ id: taskId! }).update({ ...fields, completed: false, completed_at: null, last_notified_at: null });
+    // Ticked off stays ticked off; only a new date makes it due again.
+    const moved = new Date(existing.next_due_at).getTime() !== due.getTime();
+    await conn('reminders').where({ id: taskId! }).update({ ...fields, ...(moved ? { completed: false, completed_at: null, last_notified_at: null } : {}) });
     return;
   }
+  // Deleted by the person: not made again until the preparation changes.
+  if (a['preparation_reminder_off']) return;
   const [row] = await conn('reminders')
     .insert({ care_profile_id: a['care_profile_id'], reminder_type: 'once', ...fields })
     .returning('id');
@@ -449,6 +453,8 @@ export async function updateAppointment(
   const zone = await ownerZone(conn, profileId, input.tz ?? opts.timeZone);
   const filed: Array<{ id: string; name: string }> = [];
   const cols = await appointmentColumns(conn, profileId, input, filed);
+  // New preparation wording brings back a night-before reminder that was deleted.
+  if (input.preparation !== undefined && (input.preparation ?? '').trim() !== String(before['preparation'] ?? '').trim()) cols['preparation_reminder_off'] = false;
   const nowBooked = !before.starts_at && !!input.starts_at;
   if (nowBooked && (!input.status || input.status === 'to_book')) cols['status'] = 'scheduled';
   if (!before.starts_at && !input.starts_at && input.status === undefined) cols['status'] = before.status;
@@ -500,6 +506,8 @@ export async function updateAppointment(
           const later = await laterCleanOccurrences(conn, after);
           const past = later.filter((l) => dateInZone(new Date(l.starts_at), zone) > input.repeat_until!);
           if (past.length) await conn('appointments').whereIn('id', past.map((l) => l.id)).delete();
+          const pastPrep = past.map((l) => l.preparation_task_id).filter((v): v is string => !!v);
+          if (pastPrep.length) await conn('reminders').whereIn('id', pastPrep).delete();
         } else await extendSeries(conn, after.series_id, zone);
       }
     }
