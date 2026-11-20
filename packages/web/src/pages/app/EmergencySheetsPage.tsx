@@ -78,7 +78,7 @@ function SheetView({ sheet }: { sheet: Sheet }) {
               {sheet.allergies.map((a, i) => (
                 <tr key={i}>
                   <td className="py-0.5 font-bold text-red-700">{a.substance}</td>
-                  <td className="py-0.5">{a.reaction ?? ''}</td>
+                  <td className="py-0.5">{a.reaction ? <><span className="text-muted">Reaction: </span>{a.reaction}</> : ''}</td>
                 </tr>
               ))}
             </tbody>

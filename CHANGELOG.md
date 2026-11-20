@@ -6,6 +6,15 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.50.1] - 2026-11-20
+
+### Fixed
+
+- **Allergies read clearly.** Each allergy shows on its own, with the reaction after it, such as Penicillin: rash, so a reaction never reads as a second allergy. This is on the medicine round, Before you start and the medication record. Emergency sheets label the Allergy and Reaction columns.
+- **Who said so picks before it adds.** Typing part of a name on Record a change offers the matching contacts first. A new contact is only filed after choosing Add as a new contact.
+- **The medication record counts scheduled doses only.** As-needed doses no longer count towards the scheduled doses given. They show on a line of their own.
+- **Raise question always answers.** With the question box empty, Raise question now says what to write instead of sitting greyed out.
+
 ## [0.50.0] - 2026-11-20
 
 ### Added

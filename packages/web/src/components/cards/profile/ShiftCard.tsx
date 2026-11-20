@@ -10,7 +10,7 @@ import { ContactStrip } from '../../ContactStrip';
 import { LinkedText } from '../../LinkedText';
 import { PhoneLink } from './links';
 import { browserTimeZone } from '../../../lib/datetime';
-import type { ContactSummary } from '../../../lib/care';
+import { ALLERGY_CHIP, reactionWords, type ContactSummary } from '../../../lib/care';
 import { CardShell, CardTrouble, CardWaiting } from '../CardShell';
 import type { CardProps } from '../types';
 
@@ -66,9 +66,10 @@ export function ShiftCard({ profileId, canEdit, careName }: CardProps) {
         <div className="space-y-3">
           <Row label="Allergies">
             {s.allergies.length > 0 ? (
-              <div className="rounded-md border-l-4 border-red-500 bg-red-50 dark:bg-red-900/10 px-3 py-2 font-medium text-red-700 dark:text-red-300">
+              <div className="flex flex-wrap items-center gap-2 rounded-md border-l-4 border-red-500 bg-red-50 dark:bg-red-900/10 px-3 py-2 font-medium text-red-700 dark:text-red-300">
+                <span>Allergic to</span>
                 {s.allergies.map((a) => (
-                  <p key={a.id}>Allergic to {a.substance}{a.reaction ? `: ${a.reaction}` : ''}.</p>
+                  <span key={a.id} className={ALLERGY_CHIP}><span className="font-semibold">{a.substance}</span>{reactionWords(a.reaction) ? <span>: {reactionWords(a.reaction)}</span> : null}</span>
                 ))}
               </div>
             ) : (

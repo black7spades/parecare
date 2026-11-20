@@ -1589,6 +1589,22 @@ export const MED_STATUSES = [
   { value: 'not_in_stock', label: 'Not in stock', description: 'There was none to give. The alert says who to call.' },
 ] as const;
 
+/**
+ * An allergy's reaction as it reads after the substance: "rash", but
+ * "SJS" and "Stevens-Johnson syndrome" kept as typed.
+ */
+export function reactionWords(reaction: string | null | undefined): string | null {
+  const r = (reaction ?? '').trim();
+  if (!r) return null;
+  // Lower the first letter only when the rest of the first word is lower
+  // case, so names and short forms keep their capitals.
+  const firstWord = r.split(/\s/)[0] ?? '';
+  return /^[A-Z][^A-Z]*$/.test(firstWord) ? `${r.charAt(0).toLowerCase()}${r.slice(1)}` : r;
+}
+
+/** The red chip each allergy is shown in, one chip per allergy. */
+export const ALLERGY_CHIP = 'inline-block rounded px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200';
+
 /** "As needed for breakthrough pain. At least 4 hours apart. No more than 8 in 24 hours." */
 export function asNeededLine(m: Pick<MedicationRecord, 'as_needed' | 'as_needed_for' | 'min_hours_between_doses' | 'max_doses_per_day'>): string | null {
   // Only an as-needed medicine has limits: a scheduled one runs to its times.

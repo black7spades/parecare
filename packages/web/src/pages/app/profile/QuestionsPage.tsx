@@ -93,17 +93,21 @@ export function QuestionsPage() {
     filters: [STATUS_FILTER],
   });
 
+  // Raise question always answers: an empty question says what to write.
+  const [raiseError, setRaiseError] = useState('');
   const createMutation = useMutation({
     mutationFn: () => api.post(`/care-profiles/${profile.id}/questions`, { title: title.trim(), body: body.trim() || null }),
     onSuccess: () => {
       setTitle('');
       setBody('');
       setToneBlock(null);
+      setRaiseError('');
       invalidate();
     },
     onError: (err) => {
       const block = extractToneBlock(err);
       if (block) setToneBlock(block);
+      else setRaiseError(err instanceof Error ? err.message : 'The question was not saved. Try again in a moment.');
     },
   });
 
@@ -133,16 +137,23 @@ export function QuestionsPage() {
           className="card space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
-            if (title.trim()) createMutation.mutate();
+            if (!title.trim()) {
+              setRaiseError('Write the question first, then raise it. For example: Who takes the visits next month?');
+              document.getElementById('question-title')?.focus();
+              return;
+            }
+            setRaiseError('');
+            createMutation.mutate();
           }}
         >
           <h2 className="text-base font-semibold text-ink">Raise a question</h2>
           <EditableSubheader copyKey="profile.questions.subheader" className="-mt-2" />
-          <Input label="Question" value={title} onChange={(e) => { setTitle(e.target.value); if (toneBlock) setToneBlock(null); }} required />
+          <Input id="question-title" label="Question" value={title} onChange={(e) => { setTitle(e.target.value); if (toneBlock) setToneBlock(null); if (raiseError) setRaiseError(''); }} />
           <Textarea label="Context (optional)" value={body} onChange={(e) => { setBody(e.target.value); if (toneBlock) setToneBlock(null); }} rows={2} />
           {toneBlock ? <ToneBlockNotice careName={careName} block={toneBlock} onDismiss={() => setToneBlock(null)} /> : null}
+          {raiseError ? <p className="text-sm text-red-600" role="alert">{raiseError}</p> : null}
           <div className="flex justify-end">
-            <Button type="submit" loading={createMutation.isPending} disabled={!title.trim()}>
+            <Button type="submit" loading={createMutation.isPending}>
               Raise question
             </Button>
           </div>
