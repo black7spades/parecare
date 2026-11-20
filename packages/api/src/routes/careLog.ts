@@ -7,6 +7,19 @@ import type { CareLogEntry } from '../types';
 
 export const careLogRouter = Router({ mergeParams: true });
 
+/**
+ * Entries as every list reads them: with who wrote them, by their login's
+ * name, else the circle member's name.
+ */
+const withAuthor = () =>
+  db('care_log_entries as e')
+    .leftJoin('accounts as acc', 'acc.id', 'e.author_account_id')
+    .leftJoin('care_circle_members as m', 'm.id', 'e.author_member_id')
+    .select('e.*', db.raw('coalesce(acc.display_name, m.display_name) as author_name'));
+
+/** One entry with its author, for the replies to a write. */
+const entryOut = (id: string) => withAuthor().where('e.id', id).first();
+
 const entrySchema = z.object({
   entry_type: z.enum([
     'visit',
@@ -44,18 +57,18 @@ careLogRouter.get('/', requireAuth, async (req, res) => {
   const to = String(req.query['to'] ?? '').trim();
   const sort = req.query['sort'] === 'asc' ? 'asc' : 'desc';
 
-  const filtered = () => {
-    let query = db<CareLogEntry>('care_log_entries').where({ care_profile_id: req.params['id'] });
-    if (types.length > 0) query = query.whereIn('entry_type', types);
-    if (q) query = query.where((qb) => qb.whereILike('title', `%${q}%`).orWhereILike('body', `%${q}%`));
-    if (/^\d{4}-\d{2}-\d{2}$/.test(from)) query = query.where('occurred_at', '>=', from);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(to)) query = query.where('occurred_at', '<', `${to}T23:59:59.999Z`);
+  const filtered = <T extends import('knex').Knex.QueryBuilder>(query: T): T => {
+    query.where('e.care_profile_id', req.params['id']);
+    if (types.length > 0) query.whereIn('e.entry_type', types);
+    if (q) query.where((qb) => qb.whereILike('e.title', `%${q}%`).orWhereILike('e.body', `%${q}%`));
+    if (/^\d{4}-\d{2}-\d{2}$/.test(from)) query.where('e.occurred_at', '>=', from);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(to)) query.where('e.occurred_at', '<', `${to}T23:59:59.999Z`);
     return query;
   };
 
   const [entries, countResult] = await Promise.all([
-    filtered().orderBy('occurred_at', sort).limit(limit).offset(offset),
-    filtered().count<{ count: string }[]>('id as count'),
+    filtered(withAuthor()).orderBy('e.occurred_at', sort).limit(limit).offset(offset),
+    filtered(db('care_log_entries as e')).count<{ count: string }[]>('e.id as count'),
   ]);
 
   res.json({ entries, total: Number(countResult[0]?.count ?? 0), page, limit });
@@ -91,6 +104,9 @@ careLogRouter.post('/', requireAuth, async (req, res) => {
       .insert({
         care_profile_id: profileId,
         ...fields,
+        // Who wrote it, from the session: never typed, never guessed.
+        author_account_id: req.account!.id,
+        author_member_id: req.careAccess?.member?.id ?? null,
         ...(client_key ? { client_key } : {}),
         ...(manualSentiment ? { sentiment, sentiment_source: 'manual' } : {}),
       })
@@ -117,7 +133,7 @@ careLogRouter.post('/', requireAuth, async (req, res) => {
     void analyseCareLogSentiment(entry.id, entry.entry_type, entry.title, entry.body);
   }
 
-  res.status(201).json({ entry });
+  res.status(201).json({ entry: (await entryOut(entry.id)) ?? entry });
 });
 
 // Bulk edit: apply the same change (e.g. a new entry type) to many entries
@@ -158,8 +174,8 @@ careLogRouter.post('/bulk-delete', requireAuth, async (req, res) => {
 });
 
 careLogRouter.get('/:entryId', requireAuth, async (req, res) => {
-  const entry = await db<CareLogEntry>('care_log_entries')
-    .where({ id: req.params['entryId'], care_profile_id: req.params['id'] })
+  const entry = await withAuthor()
+    .where({ 'e.id': req.params['entryId'], 'e.care_profile_id': req.params['id'] })
     .first();
   if (!entry) {
     res.status(404).json({ error: 'Entry not found', code: 'NOT_FOUND' });
@@ -193,7 +209,7 @@ careLogRouter.patch('/:entryId', requireAuth, async (req, res) => {
     res.status(404).json({ error: 'Entry not found', code: 'NOT_FOUND' });
     return;
   }
-  res.json({ entry: updated });
+  res.json({ entry: (await entryOut(updated.id)) ?? updated });
 });
 
 // Re-read the tone of an entry with the assistant, on demand. This overrides

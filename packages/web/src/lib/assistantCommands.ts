@@ -30,6 +30,12 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
     expand: (a) => `Log this in the care log: ${a}`,
   },
   {
+    name: 'handover',
+    hint: 'what the next carer needs to know',
+    description: 'Write a handover for the next shift, e.g. /handover refused her 8pm tablets, daughter rang at 7',
+    expand: (a) => `Add this to the care log as a handover: ${a}`,
+  },
+  {
     name: 'task',
     hint: 'the task and when it is due',
     description: 'Add a task, e.g. /task book the neurologist Dr Chen, 03 9345 6677, by Friday',

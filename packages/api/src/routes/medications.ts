@@ -4,11 +4,14 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { requireAccountRight } from '../middleware/accountRights';
 import { requireProfileOwner, type AuditEntry } from '../middleware/permissions';
-import { DOSE_AUDIT_ENTITY, GIVEN_STATUSES, doseSummary } from '../lib/doseOutcome';
+import { DOSE_AUDIT_ENTITY, DOSE_STATUSES, GIVEN_STATUSES, doseSummary } from '../lib/doseOutcome';
+import { limitsFromText } from '../lib/asNeeded';
+import { DoseProblem, doseHistory, noteOptional, recordDoses } from '../services/doses';
 import { exportRecords, importRecords, type PortDescriptor, type PortFormat } from '../services/dataPort';
 import { resolveCatalogueId } from './medicationCatalogue';
 import { getMarRetentionMonths } from '../config/settings';
 import { drawDownOnHand, perDoseDrawdown } from '../services/medicationSupply';
+import { ownerOnlyMessage } from '../middleware/permissions';
 import { contactSummaries, linkSupplierToContact, mainContact, resolveContactInput, supplierContacts } from '../services/professionals';
 import { STOP_REASONS, changesFor, recordMedicationChange, restartMedication, stopMedication, type ChangeSource } from '../services/medicationChanges';
 import { COURSE_RUNNING_SQL } from '../lib/course';
@@ -37,14 +40,18 @@ type MedOut = Record<string, unknown> & { id: string; prescriber_provider_id: st
  */
 async function withContacts<T extends Record<string, unknown>>(meds: T[], profileId: string): Promise<Array<T & Record<string, unknown>>> {
   const rows = meds as unknown as MedOut[];
-  const [prescribers, suppliers] = await Promise.all([
+  const [prescribers, suppliers, history] = await Promise.all([
     contactSummaries(db, rows.map((m) => m.prescriber_provider_id), profileId),
     supplierContacts(db, rows.map((m) => m.supplier_id), profileId),
+    doseHistory(db, rows.filter(limitedOrAsNeeded).map((m) => m.id)),
   ]);
   return meds.map((m) => {
     const r = m as unknown as MedOut;
     return {
       ...m,
+      // Last given, with who and how many in 24 hours, for as-needed and
+      // limited medicines.
+      dose_history: history.get(r.id) ?? null,
       prescriber: (r.prescriber_provider_id && prescribers.get(r.prescriber_provider_id)) || null,
       supplier_contact: (r.supplier_id && suppliers.get(r.supplier_id)) || null,
       source_appointment: r['source_appointment_id']
@@ -53,6 +60,9 @@ async function withContacts<T extends Record<string, unknown>>(meds: T[], profil
     };
   });
 }
+
+/** As-needed, or with a gap or daily most: the screens say when it was last given. */
+const limitedOrAsNeeded = (m: Record<string, unknown>): boolean => !!m['as_needed'];
 
 /** One medicine as every screen reads it. */
 async function medOut(id: string, profileId: string) {
@@ -81,6 +91,12 @@ const medSchema = z.object({
   // Recorded only when true; unchecked simply means false.
   with_food: z.boolean().optional(),
   as_needed: z.boolean().optional(),
+  // As-needed limits: what it is for, the least hours between doses and the
+  // most in 24 hours. Each its own field; read from the instructions when
+  // nobody typed them.
+  as_needed_for: z.string().trim().max(255).optional().nullable(),
+  min_hours_between_doses: z.coerce.number().min(0).max(168).optional().nullable(),
+  max_doses_per_day: z.coerce.number().int().min(0).max(50).optional().nullable(),
   medical_condition_id: z.string().uuid().optional().nullable(),
   // Free-typed condition, resolved to an existing one or created.
   medical_condition_name: z.string().max(255).optional().nullable(),
@@ -114,6 +130,11 @@ const medSchema = z.object({
   change_reason: z.string().trim().max(2000).optional().nullable(),
   change_source_appointment_id: z.string().uuid().optional().nullable(),
   change_source_document_id: z.string().uuid().optional().nullable(),
+  // Who said so: a contact, when a carer records a change a doctor asked for.
+  change_source_provider_id: z.string().uuid().optional().nullable(),
+  change_source_provider_name: z.string().trim().max(255).optional().nullable(),
+  change_source_provider_type: z.string().trim().max(100).optional().nullable(),
+  change_source_provider_phone: z.string().trim().max(50).optional().nullable(),
   // Dangerous to miss (stopping suddenly is harmful): overdue and
   // out-of-stock alerts for this medication are urgent.
   critical: z.boolean().optional(),
@@ -203,6 +224,10 @@ interface MedRow {
   course_ends_on?: string | null;
   stopped_on?: string | null;
   stop_reason?: string | null;
+  instructions?: string | null;
+  as_needed_for?: string | null;
+  min_hours_between_doses?: unknown;
+  max_doses_per_day?: unknown;
   active: boolean;
 }
 
@@ -227,6 +252,10 @@ interface MedInsert {
   course_ends_on: string | null;
   stopped_on: string | null;
   stop_reason: string | null;
+  instructions: string | null;
+  as_needed_for: string | null;
+  min_hours_between_doses: number | null;
+  max_doses_per_day: number | null;
   active: boolean;
 }
 
@@ -258,6 +287,8 @@ const serializeMed = <T extends Record<string, unknown>>(m: T): T =>
     supply_remaining: numOrNull(m['supply_remaining']),
     packs_on_hand: numOrNull(m['packs_on_hand']),
     units_per_dose: numOrNull(m['units_per_dose']),
+    min_hours_between_doses: numOrNull(m['min_hours_between_doses']),
+    max_doses_per_day: numOrNull(m['max_doses_per_day']),
     repeats_due: dateOrNull(m['repeats_due']),
   });
 
@@ -301,6 +332,10 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
     { key: 'with_food', header: 'With food', aliases: ['food'], toCell: (r) => (r.with_food ? 'true' : 'false') },
     { key: 'as_needed', header: 'As needed', aliases: ['prn'], toCell: (r) => (r.as_needed ? 'true' : 'false') },
     { key: 'schedule_times', header: 'Times', aliases: ['schedule', 'schedule times', 'time'], toCell: (r) => (r.schedule_times ?? []).join('; ') },
+    { key: 'instructions', header: 'Instructions', aliases: ['directions', 'how to take'], toCell: (r) => r.instructions ?? '' },
+    { key: 'as_needed_for', header: 'As needed for', aliases: ['prn for', 'what it is for'], toCell: (r) => r.as_needed_for ?? '' },
+    { key: 'min_hours_between_doses', header: 'Hours between doses', aliases: ['minimum hours', 'gap', 'hours apart'], toCell: (r) => (r.min_hours_between_doses == null ? '' : String(Number(r.min_hours_between_doses))) },
+    { key: 'max_doses_per_day', header: 'Most in 24 hours', aliases: ['max per day', 'maximum per day', 'most per day'], toCell: (r) => (r.max_doses_per_day == null ? '' : String(r.max_doses_per_day)) },
     { key: 'supply', header: 'A full pack provides', aliases: ['supply', 'stock', 'quantity', 'on hand', 'supply in units', 'pack size'], toCell: (r) => (r.supply ?? '').toString() },
     { key: 'supply_remaining', header: 'Units left', aliases: ['remaining', 'supply remaining'], toCell: (r) => (r.supply_remaining ?? '').toString() },
     { key: 'packs_on_hand', header: 'Packs on hand', aliases: ['packs', 'packs left', 'unopened packs'], toCell: (r) => (r.packs_on_hand ?? '').toString() },
@@ -345,6 +380,16 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
         as_needed: ['true', 'yes', '1', 'prn', 'as needed', 'y'].includes((raw['as_needed'] ?? '').trim().toLowerCase()),
         frequency: blank(raw['frequency']),
         schedule_times: parseTimes(raw['schedule_times']),
+        instructions: blank(raw['instructions']),
+        as_needed_for: blank(raw['as_needed_for']),
+        min_hours_between_doses: (() => {
+          const n = parseFloat(String(raw['min_hours_between_doses'] ?? '').replace(/[^0-9.]/g, ''));
+          return Number.isFinite(n) && n > 0 && n <= 168 ? Math.round(n * 10) / 10 : null;
+        })(),
+        max_doses_per_day: (() => {
+          const n = parseInt(String(raw['max_doses_per_day'] ?? '').replace(/[^0-9]/g, ''), 10);
+          return Number.isFinite(n) && n > 0 && n <= 50 ? n : null;
+        })(),
         supply: Number.isFinite(supplyNum) ? supplyNum : null,
         packs_on_hand: (() => {
           const packsNum = parseFloat(String(raw['packs_on_hand'] ?? '').replace(/[^0-9.]/g, ''));
@@ -451,6 +496,11 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner('import medic
       route: r.route,
       with_food: r.with_food,
       as_needed: r.as_needed,
+      instructions: r.instructions,
+      as_needed_for: r.as_needed_for,
+      // Typed limits win; otherwise they are read from the instructions.
+      min_hours_between_doses: r.as_needed ? r.min_hours_between_doses ?? limitsFromText(r.instructions, r.units_per_dose).min_hours_between_doses : null,
+      max_doses_per_day: r.as_needed ? r.max_doses_per_day ?? limitsFromText(r.instructions, r.units_per_dose).max_doses_per_day : null,
       frequency: r.frequency,
       supply: r.supply,
       supply_remaining: r.supply,
@@ -492,6 +542,10 @@ async function medFieldsFrom(data: z.infer<typeof medSchema> | Partial<z.infer<t
   if ('route' in data) fields['route'] = data.route ?? null;
   if ('with_food' in data) fields['with_food'] = data.with_food ?? false;
   if ('as_needed' in data) fields['as_needed'] = data.as_needed ?? false;
+  if ('as_needed_for' in data) fields['as_needed_for'] = data.as_needed_for || null;
+  if ('min_hours_between_doses' in data) fields['min_hours_between_doses'] = data.min_hours_between_doses || null;
+  if ('max_doses_per_day' in data) fields['max_doses_per_day'] = data.max_doses_per_day || null;
+  if ('instructions' in data) fields['instructions'] = data.instructions ?? null;
   if ('frequency' in data) fields['frequency'] = data.frequency ?? null;
   if ('repeats_due' in data) fields['repeats_due'] = data.repeats_due ?? null;
   if ('course_ends_on' in data) fields['course_ends_on'] = data.course_ends_on ?? null;
@@ -565,6 +619,47 @@ async function medFieldsFrom(data: z.infer<typeof medSchema> | Partial<z.infer<t
   return fields;
 }
 
+/**
+ * Limits read from the instructions, for the ones nobody typed. A limit that
+ * was itself worked out from the old instructions follows the new ones; a
+ * limit someone typed stays.
+ */
+function workedOutLimits(
+  data: Partial<z.infer<typeof medSchema>>,
+  current: { instructions: string | null; min_hours_between_doses: unknown; max_doses_per_day: unknown; as_needed?: boolean; units_per_dose?: unknown } | null
+): Record<string, unknown> {
+  // Only an as-needed medicine has limits: a scheduled one runs to its times.
+  const asNeeded = 'as_needed' in data ? !!data.as_needed : !!current?.as_needed;
+  if (!asNeeded) {
+    return 'as_needed' in data ? { min_hours_between_doses: null, max_doses_per_day: null } : {};
+  }
+  if (!('instructions' in data)) return {};
+  const per = 'units_per_dose' in data ? data.units_per_dose : current?.units_per_dose == null ? null : Number(current.units_per_dose);
+  const next = limitsFromText(data.instructions, per);
+  const before = limitsFromText(current?.instructions ?? null, per);
+  const out: Record<string, unknown> = {};
+  const follows = (now: unknown, was: number | null) => now == null || (was != null && Number(now) === was);
+  if (!('min_hours_between_doses' in data) && follows(current?.min_hours_between_doses, before.min_hours_between_doses)) {
+    out['min_hours_between_doses'] = next.min_hours_between_doses;
+  }
+  if (!('max_doses_per_day' in data) && follows(current?.max_doses_per_day, before.max_doses_per_day)) {
+    out['max_doses_per_day'] = next.max_doses_per_day;
+  }
+  return out;
+}
+
+/**
+ * What a contributor may change on a medicine: the dose, times,
+ * instructions, units per dose and with food, through the change flow with
+ * a reason. Adding, deleting, importing and changing several at once stay
+ * with the owner.
+ */
+const CONTRIBUTOR_FIELDS = new Set([
+  'dose', 'dose_amount', 'dose_unit', 'schedule_times', 'instructions', 'units_per_dose', 'with_food',
+  'change_reason', 'change_source_appointment_id', 'change_source_document_id', 'change_source_provider_id',
+  'change_source_provider_name', 'change_source_provider_type', 'change_source_provider_phone',
+]);
+
 medicationsRouter.post('/', requireAuth, requireProfileOwner('add a medication'), async (req, res) => {
   const parsed = medSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -586,6 +681,7 @@ medicationsRouter.post('/', requireAuth, requireProfileOwner('add a medication')
     }
     throw err;
   }
+  Object.assign(fields, workedOutLimits(parsed.data, null));
   const [med] = await db('medications')
     .insert({
       care_profile_id: req.params['id'],
@@ -621,11 +717,29 @@ medicationsRouter.post('/', requireAuth, requireProfileOwner('add a medication')
   res.status(201).json({ medication: await medOut(medId, req.params['id']!) });
 });
 
-medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner("change a medication's dose, times or details"), async (req, res) => {
+medicationsRouter.patch('/:medId', requireAuth, async (req, res) => {
   const parsed = medSchema.partial().safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
+  }
+  // A contributor records a change the doctor or pharmacist asked for: the
+  // dose, times, instructions, units per dose or with food, with why.
+  const level = req.careAccess?.level;
+  const contributor = level === 'contributor';
+  if (level !== 'owner' && level !== 'admin') {
+    const outside = Object.keys(parsed.data).filter((k) => !CONTRIBUTOR_FIELDS.has(k));
+    if (!contributor || outside.length > 0) {
+      res.status(403).json({
+        error: await ownerOnlyMessage(req.params['id'], "add or delete medicines, or change a medicine's name, supplier or supply"),
+        code: 'OWNER_ONLY',
+      });
+      return;
+    }
+    if (!parsed.data.change_reason?.trim()) {
+      res.status(400).json({ error: 'Say why it changed, then save the change again.', code: 'REASON_REQUIRED', field: 'change_reason' });
+      return;
+    }
   }
   if (!(await conditionBelongsToProfile(parsed.data.medical_condition_id, req.params['id']!))) {
     res.status(400).json({ error: 'Condition not found', code: 'VALIDATION_ERROR' });
@@ -658,30 +772,56 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner("change a me
     (parsed.data.packs_on_hand != null && parsed.data.packs_on_hand > 0)
   ) {
     update['reorder_ordered_at'] = null;
+    // Restocked: a dose found not in stock no longer says it has run out.
+    update['not_in_stock_admin_id'] = null;
   }
   // Changing the drug identity re-points the medication at a catalogue entry.
   if (parsed.data.name !== undefined) {
     update['medication_catalogue_id'] = await resolveCatalogueId(parsed.data.name, parsed.data.form ?? null, req.account!.id);
   }
-  const med = (await db('medications').where({ id: req.params['medId'], care_profile_id: req.params['id'] }).first('id')) as { id: string } | undefined;
+  const med = (await db('medications').where({ id: req.params['medId'], care_profile_id: req.params['id'] }).first('id', 'instructions', 'min_hours_between_doses', 'max_doses_per_day', 'units_per_dose', 'with_food', 'as_needed')) as
+    | { id: string; instructions: string | null; min_hours_between_doses: unknown; max_doses_per_day: unknown; units_per_dose: unknown; with_food: boolean; as_needed: boolean }
+    | undefined;
   if (!med) {
     res.status(404).json({ error: 'Medication not found', code: 'NOT_FOUND' });
     return;
   }
+  Object.assign(update, workedOutLimits(parsed.data, med));
+  // A change from a contributor is always kept, even when it is only the
+  // instructions, units per dose or with food.
+  const otherMoved =
+    contributor &&
+    (('instructions' in parsed.data && (parsed.data.instructions ?? null) !== med.instructions) ||
+      ('units_per_dose' in parsed.data && Number(parsed.data.units_per_dose ?? 0) !== Number(med.units_per_dose ?? 0)) ||
+      ('with_food' in parsed.data && !!parsed.data.with_food !== !!med.with_food));
+  // Who said so: picked from Contacts, or a new name filed there.
+  let saidBy = parsed.data.change_source_provider_id ?? null;
+  if (!saidBy && parsed.data.change_source_provider_name) {
+    const who = await resolveContactInput(
+      db,
+      req.params['id']!,
+      { name: parsed.data.change_source_provider_name, type: parsed.data.change_source_provider_type, phone: parsed.data.change_source_provider_phone },
+      'gp'
+    );
+    if ('error' in who) {
+      res.status(400).json({ error: who.error, code: 'VALIDATION_ERROR' });
+      return;
+    }
+    saidBy = who.id;
+  }
   // A new dose or new times go in its history with why and where from.
-  await db.transaction((trx) =>
-    recordMedicationChange(trx, {
-      medicationId: med.id,
-      profileId: req.params['id']!,
-      actorId: req.account!.id,
-      patch: update,
-      source: {
-        reason: parsed.data.change_reason,
-        source_appointment_id: parsed.data.change_source_appointment_id,
-        source_document_id: parsed.data.change_source_document_id,
-      },
-    })
-  );
+  await db.transaction(async (trx) => {
+    const source = {
+      reason: parsed.data.change_reason,
+      source_appointment_id: parsed.data.change_source_appointment_id,
+      source_document_id: parsed.data.change_source_document_id,
+      source_provider_id: saidBy,
+    };
+    const kept = await recordMedicationChange(trx, { medicationId: med.id, profileId: req.params['id']!, actorId: req.account!.id, patch: update, source });
+    if (!kept.change_id && otherMoved) {
+      await recordMedicationChange(trx, { medicationId: med.id, profileId: req.params['id']!, actorId: req.account!.id, kind: 'other', source });
+    }
+  });
   if (typeof activeChange === 'boolean') {
     // Stopped or started from a letter or a visit: the stop or start cites it.
     await setActive(db, req.params['id']!, req.account!.id, [med.id], activeChange, {
@@ -854,7 +994,9 @@ const reorderSchema = z.object({
   amount_paid: z.coerce.number().min(0).max(1e9).optional().nullable(),
 });
 
-medicationsRouter.post('/:medId/reorder', requireAuth, requireProfileOwner('mark a medication as ordered or restocked'), async (req, res) => {
+// Anyone helping with care, not only the owner, marks a repeat as ordered or
+// arrived: whoever is on shift is the one who rings the pharmacy.
+medicationsRouter.post('/:medId/reorder', requireAuth, async (req, res) => {
   const parsed = reorderSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
@@ -866,6 +1008,7 @@ medicationsRouter.post('/:medId/reorder', requireAuth, requireProfileOwner('mark
   } else {
     // Replenished: the order has arrived. Clear it and record what came in.
     update['reorder_ordered_at'] = null;
+    update['not_in_stock_admin_id'] = null;
     if (parsed.data.packs_on_hand !== undefined) update['packs_on_hand'] = parsed.data.packs_on_hand;
     if (parsed.data.supply_remaining !== undefined) update['supply_remaining'] = parsed.data.supply_remaining;
   }
@@ -911,7 +1054,12 @@ medicationsRouter.get('/chart', requireAuth, async (req, res) => {
       qb.whereBetween('administered_at', [from, to]).orWhereBetween('scheduled_for', [from, to])
     )
     .orderBy('administered_at', 'asc');
-  res.json({ medications: medications.map(serializeMed), administrations });
+  // Last given and the count in 24 hours, for the as-needed line on each row.
+  const history = await doseHistory(db, medications.filter(limitedOrAsNeeded).map((m) => m.id as string));
+  res.json({
+    medications: medications.map((m) => ({ ...serializeMed(m), dose_history: history.get(m.id as string) ?? null })),
+    administrations,
+  });
 });
 
 // A window's adherence summary — expected slots vs recorded outcomes.
@@ -950,7 +1098,7 @@ medicationsRouter.get('/administrations', requireAuth, async (req, res) => {
     .select(
       'a.id', 'a.medication_id', 'a.care_profile_id', 'c.name as medication_name',
       'a.administered_at', 'a.scheduled_for', 'a.administered_by_name', 'a.status',
-      'a.dose_given', 'a.route_given', 'a.notes',
+      'a.dose_given', 'a.route_given', 'a.notes', 'a.reason', 'a.outside_limits', 'a.outside_limits_reason',
       'a.right_patient', 'a.right_medication', 'a.right_dose', 'a.right_route', 'a.right_time', 'a.right_documentation',
       db.raw('false as archived')
     );
@@ -962,7 +1110,7 @@ medicationsRouter.get('/administrations', requireAuth, async (req, res) => {
       .select(
         'a.id', 'a.medication_id', 'a.care_profile_id', 'a.medication_name',
         'a.administered_at', 'a.scheduled_for', 'a.administered_by_name', 'a.status',
-        'a.dose_given', 'a.route_given', 'a.notes',
+        'a.dose_given', 'a.route_given', 'a.notes', 'a.reason', 'a.outside_limits', 'a.outside_limits_reason',
         'a.right_patient', 'a.right_medication', 'a.right_dose', 'a.right_route', 'a.right_time', 'a.right_documentation',
         db.raw('true as archived')
       );
@@ -970,7 +1118,7 @@ medicationsRouter.get('/administrations', requireAuth, async (req, res) => {
   }
 
   base = base.modify((qb) => {
-    if (q) qb.where((w) => w.whereILike('medication_name', `%${q}%`).orWhereILike('notes', `%${q}%`).orWhereILike('administered_by_name', `%${q}%`));
+    if (q) qb.where((w) => w.whereILike('medication_name', `%${q}%`).orWhereILike('notes', `%${q}%`).orWhereILike('reason', `%${q}%`).orWhereILike('administered_by_name', `%${q}%`));
     if (status) qb.where('status', status);
     if (medicationId) qb.where('medication_id', medicationId);
     if (from) qb.where('administered_at', '>=', from);
@@ -986,10 +1134,14 @@ medicationsRouter.get('/administrations', requireAuth, async (req, res) => {
 const adminSchema = z.object({
   scheduled_for: z.string().optional().nullable(),
   administered_at: z.string().optional().nullable(),
-  status: z.enum(['given', 'refused', 'omitted', 'held', 'self_administered']).default('given'),
+  status: z.enum(DOSE_STATUSES).default('given'),
   dose_given: z.string().max(255).optional().nullable(),
   route_given: z.string().max(100).optional().nullable(),
   notes: z.string().optional().nullable(),
+  // Why an as-needed dose was needed now.
+  reason: z.string().max(2000).optional().nullable(),
+  // Why it had to be given inside the gap or over the most in 24 hours.
+  outside_limits_reason: z.string().max(2000).optional().nullable(),
   // Only the dose, route and time rights are verified at the point of care.
   // Patient, medication and documentation are guaranteed by the context
   // (you are on this person's record, you picked this medication, and the
@@ -999,7 +1151,6 @@ const adminSchema = z.object({
   right_time: z.boolean().optional(),
 });
 
-const NOTE_OPTIONAL = GIVEN_STATUSES;
 const GIVEN = GIVEN_STATUSES;
 
 // One activity line per dose, saying the outcome: "Metoprolol as refused".
@@ -1035,57 +1186,33 @@ async function restoreSupply(
     .update({ supply_remaining: db.raw('LEAST(COALESCE(supply, supply_remaining + ?), supply_remaining + ?)', [amount, amount]) });
 }
 
-// Build the insert row for one administration, deriving the context rights.
-function buildAdminRow(
-  data: z.infer<typeof adminSchema>,
-  med: { id: string; dose: string | null; route: string | null },
-  profileId: string,
-  account: { id: string; display_name: string }
-): Record<string, unknown> {
-  return {
-    medication_id: med.id,
-    care_profile_id: profileId,
-    scheduled_for: data.scheduled_for ? new Date(data.scheduled_for) : null,
-    administered_at: data.administered_at ? new Date(data.administered_at) : db.fn.now(),
-    administered_by_account_id: account.id,
-    administered_by_name: account.display_name,
-    status: data.status,
-    dose_given: data.dose_given ?? med.dose ?? null,
-    route_given: data.route_given ?? med.route ?? null,
-    notes: data.notes ?? null,
-    right_patient: true,
-    right_medication: true,
-    right_documentation: true,
-    right_dose: data.right_dose ?? false,
-    right_route: data.right_route ?? false,
-    right_time: data.right_time ?? true,
-  };
+/** A dose that could not be recorded, said plainly with what to fix. */
+function sendDoseProblem(res: import('express').Response, err: unknown): boolean {
+  if (!(err instanceof DoseProblem)) return false;
+  const status = err.code === 'OUTSIDE_LIMITS' ? 409 : err.code === 'UNKNOWN_MEDICATION' ? 404 : 400;
+  res.status(status).json({ error: err.message, code: err.code, limits: err.limits ?? null });
+  return true;
 }
 
 medicationsRouter.post('/:medId/administrations', requireAuth, async (req, res) => {
-  // medSelect joins the catalogue so `form` (which lives there) is set,
-  // and supply draws down in the right unit for the form.
-  const med = await medSelect().where('m.id', req.params['medId']).andWhere('m.care_profile_id', req.params['id']).first();
-  if (!med) {
-    res.status(404).json({ error: 'Medication not found', code: 'NOT_FOUND' });
-    return;
-  }
   const parsed = adminSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
-  if (!NOTE_OPTIONAL.has(parsed.data.status) && !parsed.data.notes?.trim()) {
-    res.status(400).json({ error: 'A note is required when the outcome is not "given" or "self-administered".', code: 'NOTE_REQUIRED' });
-    return;
+  let result;
+  try {
+    result = await db.transaction((trx) =>
+      recordDoses(trx, { profileId: req.params['id']!, account: req.account!, entries: [{ ...parsed.data, medication_id: String(req.params['medId']) }] })
+    );
+  } catch (err) {
+    if (sendDoseProblem(res, err)) return;
+    throw err;
   }
-  if (isFutureTime(parsed.data.administered_at)) {
-    res.status(400).json({ error: 'You cannot log a dose in the future.', code: 'FUTURE_TIME' });
-    return;
-  }
-  const [record] = await db('medication_administrations').insert(buildAdminRow(parsed.data, med, req.params['id']!, req.account!)).returning('*');
-  if (GIVEN.has(parsed.data.status)) await drawDownSupply(med.id, 1, med);
-  res.locals['auditEntries'] = [doseAudit('created', record.id, med.name, parsed.data.status)];
+  const dose = result.doses[0]!;
+  const med = result.meds.get(dose.medication_id)!;
+  const record = await db('medication_administrations').where({ id: dose.id }).first();
+  res.locals['auditEntries'] = [doseAudit('created', dose.id, med.name, dose.status)];
   res.status(201).json({ administration: record });
 });
 
@@ -1100,40 +1227,15 @@ medicationsRouter.post('/administrations/batch', requireAuth, async (req, res) =
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
-  const medIds = [...new Set(parsed.data.entries.map((e) => e.medication_id))];
-  const meds = await medSelect().where('m.care_profile_id', req.params['id']).whereIn('m.id', medIds);
-  const byId = new Map(meds.map((m) => [m.id, m]));
-  for (const e of parsed.data.entries) {
-    if (!byId.has(e.medication_id)) {
-      res.status(400).json({ error: 'Unknown medication in batch.', code: 'VALIDATION_ERROR' });
-      return;
-    }
-    if (!NOTE_OPTIONAL.has(e.status) && !e.notes?.trim()) {
-      res.status(400).json({ error: 'A note is required for any dose not given or self-administered.', code: 'NOTE_REQUIRED' });
-      return;
-    }
-    if (isFutureTime(e.administered_at)) {
-      res.status(400).json({ error: 'You cannot log a dose in the future.', code: 'FUTURE_TIME' });
-      return;
-    }
+  let result;
+  try {
+    result = await db.transaction((trx) => recordDoses(trx, { profileId: req.params['id']!, account: req.account!, entries: parsed.data.entries }));
+  } catch (err) {
+    if (sendDoseProblem(res, err)) return;
+    throw err;
   }
-  const rows = parsed.data.entries.map((e) => buildAdminRow(e, byId.get(e.medication_id)!, req.params['id']!, req.account!));
-  const inserted = (await db('medication_administrations').insert(rows).returning(['id', 'medication_id', 'status'])) as Array<{
-    id: string;
-    medication_id: string;
-    status: string;
-  }>;
-  res.locals['auditEntries'] = inserted.map((r) => doseAudit('created', r.id, byId.get(r.medication_id)!.name, r.status));
-  // Draw down supply for each given dose, aggregated per medication.
-  const drawdowns = new Map<string, number>();
-  for (const e of parsed.data.entries) {
-    if (!GIVEN.has(e.status)) continue;
-    drawdowns.set(e.medication_id, (drawdowns.get(e.medication_id) ?? 0) + 1);
-  }
-  for (const [medId, doses] of drawdowns) {
-    await drawDownSupply(medId, doses, byId.get(medId)!);
-  }
-  res.status(201).json({ recorded: inserted.length });
+  res.locals['auditEntries'] = result.doses.map((r) => doseAudit('created', r.id, result.meds.get(r.medication_id)!.name, r.status));
+  res.status(201).json({ recorded: result.doses.length });
 });
 
 // Delete a recorded dose (e.g. logged twice by mistake). Any non-viewer
@@ -1163,7 +1265,7 @@ function adminLogRow(profileId: string, adminId: string) {
     .select(
       'a.id', 'a.medication_id', 'a.care_profile_id', 'c.name as medication_name',
       'a.administered_at', 'a.scheduled_for', 'a.administered_by_name', 'a.status',
-      'a.dose_given', 'a.route_given', 'a.notes',
+      'a.dose_given', 'a.route_given', 'a.notes', 'a.reason', 'a.outside_limits', 'a.outside_limits_reason',
       'a.right_patient', 'a.right_medication', 'a.right_dose', 'a.right_route', 'a.right_time', 'a.right_documentation',
       db.raw('false as archived')
     )
@@ -1183,12 +1285,26 @@ async function reconcileSupplyForStatus(oldStatus: string, newStatus: string, me
   else await drawDownSupply(med.id, 1, med);
 }
 
+/**
+ * A dose corrected to Not in stock raises the out-of-stock alert; one
+ * corrected away from it takes the alert back, without touching the stock.
+ */
+async function syncNotInStock(adminId: string, medicationId: string, status: string): Promise<void> {
+  if (status === 'not_in_stock') {
+    await db('medications').where({ id: medicationId }).update({ not_in_stock_admin_id: adminId });
+    await db('attention_dismissals').where({ item_key: `out_of_stock:${medicationId}` }).delete();
+  } else {
+    await db('medications').where({ id: medicationId, not_in_stock_admin_id: adminId }).update({ not_in_stock_admin_id: null });
+  }
+}
+
 // Fields the record can be corrected on: when it happened, the outcome, and
 // the note. Each is its own data point, edited on its own.
 const adminEditSchema = z.object({
   administered_at: z.string().optional(),
-  status: z.enum(['given', 'refused', 'omitted', 'held', 'self_administered']).optional(),
+  status: z.enum(DOSE_STATUSES).optional(),
   notes: z.string().optional().nullable(),
+  reason: z.string().max(2000).optional().nullable(),
 });
 
 // Build the update patch (and validate the note rule) for one administration
@@ -1201,11 +1317,12 @@ function buildAdminEdit(
   const update: Record<string, unknown> = {};
   if (data.administered_at !== undefined) update['administered_at'] = new Date(data.administered_at);
   if (data.notes !== undefined) update['notes'] = data.notes?.trim() ? data.notes.trim() : null;
+  if (data.reason !== undefined) update['reason'] = data.reason?.trim() ? data.reason.trim() : null;
   if (data.status !== undefined) {
     update['status'] = data.status;
     // A not-given outcome still needs its reason; use the new note if one was
     // supplied, otherwise the note already on the record.
-    if (!NOTE_OPTIONAL.has(data.status)) {
+    if (!noteOptional(data.status)) {
       const note = data.notes !== undefined ? data.notes : current.notes;
       if (!note?.trim()) return { ok: false, code: 'NOTE_REQUIRED' };
     }
@@ -1213,7 +1330,7 @@ function buildAdminEdit(
   return { ok: true, update };
 }
 
-const NOTE_REQUIRED_MSG = 'A note is required when the outcome is not "given" or "self-administered".';
+const NOTE_REQUIRED_MSG = 'A note is required when the outcome is refused, omitted or held.';
 
 // Correct a single dose record: its time, outcome or note. A change of outcome
 // reconciles supply, and archived history stays immutable.
@@ -1239,7 +1356,10 @@ medicationsRouter.patch('/administrations/:adminId', requireAuth, async (req, re
   if (Object.keys(built.update).length > 0) {
     await db('medication_administrations').where({ id: admin.id }).update(built.update);
   }
-  if (parsed.data.status !== undefined) await reconcileSupplyForStatus(admin.status, parsed.data.status, admin.medication_id);
+  if (parsed.data.status !== undefined) {
+    await reconcileSupplyForStatus(admin.status, parsed.data.status, admin.medication_id);
+    await syncNotInStock(admin.id, admin.medication_id, parsed.data.status);
+  }
   const row = await adminLogRow(req.params['id']!, admin.id);
   res.locals['auditEntries'] = [doseAudit('updated', admin.id, row?.medication_name ?? 'A medication', row?.status ?? admin.status)];
   res.json({ administration: row });
@@ -1253,7 +1373,7 @@ const adminBulkSchema = z
     action: z.enum(['update', 'delete']),
     ids: z.array(z.string().uuid()).min(1).max(500),
     administered_at: z.string().optional(),
-    status: z.enum(['given', 'refused', 'omitted', 'held', 'self_administered']).optional(),
+    status: z.enum(DOSE_STATUSES).optional(),
     notes: z.string().optional().nullable(),
   })
   .refine(
@@ -1307,7 +1427,10 @@ medicationsRouter.post('/administrations/bulk', requireAuth, async (req, res) =>
   }
   for (const e of edits) {
     if (Object.keys(e.update).length > 0) await db('medication_administrations').where({ id: e.id }).update(e.update);
-    if (parsed.data.status !== undefined) await reconcileSupplyForStatus(e.oldStatus, parsed.data.status, e.medicationId);
+    if (parsed.data.status !== undefined) {
+      await reconcileSupplyForStatus(e.oldStatus, parsed.data.status, e.medicationId);
+      await syncNotInStock(e.id, e.medicationId, parsed.data.status);
+    }
   }
   res.locals['auditEntries'] = edits.map((e) => doseAudit('updated', e.id, medName(e.medicationId), parsed.data.status ?? e.oldStatus));
   res.json({ updated: edits.length });

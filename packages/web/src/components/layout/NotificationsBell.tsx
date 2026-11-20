@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CONTACT_LINK } from '../ContactStrip';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import { api } from '../../api/client';
 import { browserTimeZone } from '../../lib/datetime';
 import { DOSE_ENTITY, doseActivityWords } from '../../lib/care';
@@ -32,6 +32,8 @@ interface NotificationItem {
   /** Supply alerts: who to call, the next thing to do, and about how many days are left. */
   contact?: { name: string; phone: string | null } | null;
   next_action?: { kind: string; label: string; href: string | null } | null;
+  /** A dose found not in stock: the alert says who to call. */
+  not_in_stock?: boolean;
   days_left?: number | null;
 }
 
@@ -71,6 +73,12 @@ function itemText(item: NotificationItem): string {
     return n === 1
       ? `${item.profile_name}'s dose of ${item.medication_name} is due and has not been given.`
       : `${item.profile_name} has ${n} doses of ${item.medication_name} due today that have not been given.`;
+  }
+  if (item.kind === 'dose_not_given' && item.not_in_stock) {
+    const at = format(new Date(item.created_at), 'HH:mm');
+    return item.contact
+      ? `${item.profile_name}'s ${item.medication_name} was not in stock at ${at}. Call ${[item.contact.name, item.contact.phone].filter(Boolean).join(', ')}.`
+      : `${item.profile_name}'s ${item.medication_name} was not in stock at ${at}. No supplier on file. Add one so the alert can say who to call.`;
   }
   if (item.kind === 'dose_not_given') {
     return `${item.actor_name ?? 'Someone'} recorded ${item.profile_name}'s ${item.medication_name} as ${item.summary ?? 'not given'}.`;

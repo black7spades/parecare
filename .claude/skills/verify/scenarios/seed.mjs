@@ -215,8 +215,19 @@ for (let i = 0; i < R.length; i++) {
   if (i < 6) await condition(manT, R[i], { name: ['Dementia', 'Heart failure', 'COPD', 'Parkinsons disease', 'Osteoarthritis', 'Type 2 diabetes'][i], status: 'managed' });
   await appt(manT, R[i], { title: 'GP round', appointment_type: 'consultation', provider_id: gp.id, starts_at: at(1 + (i % 9), 10) });
   if (i < 5) await task(manT, R[i], { title: 'Review care plan', reminder_type: 'once', next_due_at: at(3 + i) });
+  // Wave 4: a dose due half an hour ago, whenever the bench runs, so the
+  // medicine round and Before you start always have something due now.
+  if (i < 7) {
+    const due = new Date(Date.now() - 30 * 60000);
+    const hm = `${String(due.getHours()).padStart(2, '0')}:${String(due.getMinutes()).padStart(2, '0')}`;
+    await med(manT, R[i], { name: 'Vitamin D', dose_amount: '1000', dose_unit: 'IU', form: 'Capsule', route: 'Oral', schedule_times: [hm], with_food: true, supply: 30, supply_remaining: 25, instructions: 'Swallow whole with a meal.' });
+  }
 }
+// Wave 4: Margaret's pharmacy, so a medicine not in stock says who to call.
+await provider(manT, R[0], { provider_type: 'Pharmacy', name: 'Glen Waverley Pharmacy', phone: '03 9560 1000', email: 'orders@gwpharmacy.example' });
 await logEntry(manT, R[0], { entry_type: 'handover', title: 'Evening handover', body: 'Margaret refused her 8pm tablets. Daughter Helen rang at 7pm. Skin check due.' });
+// Wave 4: how Margaret eats, moves and talks, for the Before you start card.
+await call('PUT', `/care-profiles/${R[0]}/plan`, manT, { dietary_requirements: ['Soft diet', 'Thickened fluids'], mobility_aids: ['Walking frame'], communication_needs: ['Hard of hearing, speak clearly on her left side'], advance_care_directive: true, advance_care_directive_location: 'Nurses station, top drawer' });
 await upload(manT, R[0], 'Advance care directive', 'Advance care directive', 'Advance care directive for Margaret Hughes. Not for resuscitation.');
 
 // 5. Support worker --------------------------------------------------------

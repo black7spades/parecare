@@ -10,8 +10,9 @@ import { CartIcon, CheckIcon, PackageIcon, PencilIcon, PillIcon, TrashIcon } fro
 import { useProfile } from './ProfileLayout';
 import { MedicationForm } from './medications/MedicationForm';
 import { ReplenishModal } from './medications/ReplenishModal';
+import { RecordChangeModal } from './medications/RecordChangeModal';
 import { BulkEditModal } from './medications/BulkEditModal';
-import { AdministerModal } from './medications/AdministerModal';
+import { AdministerModal, lastGivenLine } from './medications/AdministerModal';
 import { StopModal } from './medications/StopModal';
 import { localNow } from './medications/shared';
 import { ImportExport } from '../../../components/ImportExport';
@@ -129,6 +130,8 @@ export function MedicationsPage() {
   const [recording, setRecording] = useState<MedicationRecord | null>(null);
   // Recording that an ordered repeat has arrived, topping up the supply.
   const [replenishing, setReplenishing] = useState<MedicationRecord | null>(null);
+  // A contributor records a change the doctor or pharmacist asked for.
+  const [changing, setChanging] = useState<MedicationRecord | null>(null);
   // Stopping a medicine, from its panel or a finished course.
   const [stopping, setStopping] = useState<{ med: MedicationRecord; reason: StopReason | ''; day: string | null } | null>(null);
   // Said after a stop, with Undo.
@@ -273,8 +276,10 @@ export function MedicationsPage() {
     // Under five days of supply left (and still some in stock): worth reordering.
     const low = m.active && remaining != null && remaining > 0 && isLowSupply(m);
     // Reorder workflow: depleted (low/out and not ordered), ordered (awaiting),
-    // or replenished (ordered cleared). Out of stock counts as depleted too.
-    const depleted = m.active && remaining != null && (remaining <= 0 || low);
+    // or replenished (ordered cleared). Out of stock counts as depleted too,
+    // and so does a dose found not in stock on a round.
+    const foundOut = m.active && !!m.not_in_stock_admin_id;
+    const depleted = foundOut || (m.active && remaining != null && (remaining <= 0 || low));
     const ordered = !!m.reorder_ordered_at;
     const orderedDays = ordered ? Math.floor((Date.now() - new Date(m.reorder_ordered_at!).getTime()) / 86400000) : 0;
     const orderedOverdue = ordered && orderedDays >= 5;
@@ -316,7 +321,9 @@ export function MedicationsPage() {
         </td>
         <td className="px-4 py-3 text-muted">{m.packs_on_hand != null ? fmtNum(m.packs_on_hand) : '—'}</td>
         <td className="px-4 py-3">
-          {remaining == null ? (
+          {foundOut ? (
+            <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">Not in stock on the last round</span>
+          ) : remaining == null ? (
             <span className="text-muted">—</span>
           ) : remaining <= 0 ? (
             <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">Out of stock</span>
@@ -377,10 +384,10 @@ export function MedicationsPage() {
                 </a>
               );
             })() : null}
-            {canManageMeds && depleted && !ordered ? (
+            {canAdminister && depleted && !ordered ? (
               <Button size="xs" variant="ghost" aria-label={`Mark ${m.name} as ordered`} title="Mark as ordered" loading={markOrdered.isPending && markOrdered.variables === m.id} onClick={() => markOrdered.mutate(m.id)}><PackageIcon /></Button>
             ) : null}
-            {canManageMeds && ordered ? (
+            {canAdminister && ordered ? (
               <Button size="xs" variant="ghost" aria-label={`Mark ${m.name} as replenished`} title="Mark as replenished (arrived)" onClick={() => setReplenishing(m)}><CheckIcon /></Button>
             ) : null}
             {canAdminister ? <Button size="xs" variant="ghost" aria-label={`Record dose of ${m.name}`} title="Record dose" onClick={() => setRecording(m)}><PillIcon /></Button> : null}
@@ -425,6 +432,12 @@ export function MedicationsPage() {
           </div>
         ) : null}
       </div>
+
+      {canAdminister && !canManageMeds ? (
+        <p className="text-xs text-muted">
+          Only the profile owner or an admin can add or delete medicines.{profile.manager_name ? ` ${profile.manager_name} can do it.` : ''} Record a change to a dose or its times from the medicine itself.
+        </p>
+      ) : null}
 
       {stopped ? (
         <div className="mb-3 flex items-start justify-between gap-3 rounded-md border-l-4 border-primary bg-primary-50 px-4 py-2 text-sm text-ink" role="status">
@@ -550,6 +563,15 @@ export function MedicationsPage() {
         />
       ) : null}
 
+      {changing ? (
+        <RecordChangeModal
+          profileId={profile.id}
+          med={changing}
+          onClose={() => setChanging(null)}
+          onSaved={() => { setChanging(null); invalidate(); }}
+        />
+      ) : null}
+
       {replenishing ? (
         <ReplenishModal
           profileId={profile.id}
@@ -569,14 +591,15 @@ export function MedicationsPage() {
         const remaining = totalOnHand(m);
         const days = daysOfSupply(m);
         const low = m.active && remaining != null && remaining > 0 && isLowSupply(m);
-        const depleted = m.active && remaining != null && (remaining <= 0 || low);
+        const depleted = (m.active && !!m.not_in_stock_admin_id) || (m.active && remaining != null && (remaining <= 0 || low));
         const ordered = !!m.reorder_ordered_at;
         const extra: RecordAction[] = [
           ...(canAdminister ? [{ label: 'Record a dose', onRun: () => setRecording(m) }] : []),
-          ...(canManageMeds && depleted && !ordered
+          ...(canAdminister && !canManageMeds && m.active ? [{ label: 'Record a change', onRun: () => setChanging(m) }] : []),
+          ...(canAdminister && depleted && !ordered
             ? [{ label: 'Mark as ordered', onRun: () => markOrdered.mutate(m.id), pending: markOrdered.isPending && markOrdered.variables === m.id }]
             : []),
-          ...(canManageMeds && ordered ? [{ label: 'Mark as arrived', onRun: () => setReplenishing(m) }] : []),
+          ...(canAdminister && ordered ? [{ label: 'Mark as arrived', onRun: () => setReplenishing(m) }] : []),
           ...(canManageMeds && m.active ? [{ label: 'Stop this medicine', onRun: () => setStopping({ med: m, reason: '', day: null }) }] : []),
           ...(canManageMeds && !m.active
             ? [{ label: 'Start again', onRun: () => restart.mutate({ id: m.id }), pending: restart.isPending && restart.variables?.id === m.id }]
@@ -615,6 +638,10 @@ export function MedicationsPage() {
               { label: 'Times', value: !m.as_needed && m.schedule_times?.length ? m.schedule_times.join(', ') : null },
               { label: 'How often', value: m.frequency },
               { label: 'Instructions', value: m.instructions },
+              { label: 'As needed for', value: m.as_needed ? m.as_needed_for ?? null : null },
+              { label: 'Hours between doses', value: m.min_hours_between_doses != null ? `At least ${m.min_hours_between_doses}` : null },
+              { label: 'Most in 24 hours', value: m.max_doses_per_day != null ? String(m.max_doses_per_day) : null },
+              { label: 'Last given', value: m.dose_history ? lastGivenLine(m) : null },
               { label: 'Pack size', value: m.supply != null ? supplyLabel(m.supply, m) : null },
               { label: 'Loose units left', value: m.supply_remaining != null ? supplyLabel(m.supply_remaining, m) : null },
               { label: 'Packs on hand', value: m.packs_on_hand != null ? fmtNum(m.packs_on_hand) : null },
@@ -661,6 +688,8 @@ export function MedicationsPage() {
                       ) : c.source_document_id && c.source_document_label ? (
                         <> From <Link to={`/app/${profile.id}/documents?record=${c.source_document_id}`} className={CONTACT_LINK}>{c.source_document_label}</Link>.</>
                       ) : null}
+                      {c.source_provider_name ? ` ${c.source_provider_name} said so.` : ''}
+                      {c.changed_by_name ? <span className="text-xs text-muted"> Recorded by {c.changed_by_name}.</span> : null}
                     </li>
                   ))}
                 </ul>

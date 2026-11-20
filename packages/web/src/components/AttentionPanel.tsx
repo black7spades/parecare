@@ -14,6 +14,7 @@ import { severityLabel } from '../pages/app/profile/ConditionSymptoms';
 import { coverMedDay, type ChartAdmin } from '../lib/marCoverage';
 import type { ContactSummary, MedicationRecord } from '../lib/care';
 import { ContactStrip, CONTACT_LINK } from './ContactStrip';
+import { usePareOn } from '../lib/aiStatus';
 
 export interface AttentionItem {
   profile_id: string;
@@ -32,6 +33,8 @@ export interface AttentionItem {
   contact?: ContactSummary | null;
   /** The next thing to do: call, email, order online, book, or open. */
   next_action?: { kind: string; label: string; href: string | null } | null;
+  /** Out of stock, and a repeat is already on order. */
+  on_order?: boolean;
 }
 
 /** Where a row opens: the record itself when there is one. */
@@ -149,6 +152,11 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
   const [confirmDismiss, setConfirmDismiss] = useState<{ key: string; who: string; what: string; warning: string } | null>(null);
   const [addGpFor, setAddGpFor] = useState<string | null>(null);
   const [ingestFor, setIngestFor] = useState<string | null>(null);
+  // Doses not yet recorded for several people show as one row, with the
+  // per-person detail one tap away.
+  const [showDoseDetail, setShowDoseDetail] = useState(false);
+  // With no assistant attached, the Pare buttons give way to the plain way.
+  const pareOn = usePareOn();
 
   const tz = browserTimeZone();
   const { data: attentionData } = useQuery({
@@ -208,13 +216,50 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
     },
   });
 
+  // Mark a medicine as ordered straight from its alert: the plain next step
+  // once the pharmacy has been rung.
+  const [orderError, setOrderError] = useState<{ key: string; text: string } | null>(null);
+  const markOrdered = useMutation({
+    mutationFn: (it: AttentionItem) => api.post(`/care-profiles/${it.profile_id}/medications/${it.record_id}/reorder`, { action: 'ordered' }),
+    onSuccess: () => {
+      setOrderError(null);
+      void queryClient.invalidateQueries({ queryKey: ['pare-attention'] });
+    },
+    // Silence is not success: say it did not happen, and what to do.
+    onError: (err, it) =>
+      setOrderError({ key: it.key, text: err instanceof Error ? `${err.message} It is still not marked as ordered.` : 'It was not marked as ordered. Try again in a moment.' }),
+  });
+
+  const doseItems = items.filter((i) => i.kind === 'unrecorded_dose');
+  const groupDoses = !profileId && doseItems.length >= 2;
+  const firstDoseKey = doseItems[0]?.key;
+  const listed = groupDoses ? items.filter((i) => i.kind !== 'unrecorded_dose' || i.key === firstDoseKey) : items;
+  const shownCount = groupDoses ? count - doseItems.length + 1 : count;
+
   if (count === 0) return null;
+
+  const doseActions = (it: AttentionItem) => (
+    <>
+      <Link to={`/app/${it.profile_id}/mar`} className="text-xs text-primary hover:underline whitespace-nowrap px-1">
+        Check records
+      </Link>
+      <Button
+        size="xs"
+        variant="secondary"
+        className="whitespace-nowrap"
+        loading={logAllDoses.isPending && logAllDoses.variables === it.profile_id}
+        onClick={() => logAllDoses.mutate(it.profile_id)}
+      >
+        Log all doses
+      </Button>
+    </>
+  );
 
   return (
     <div className="card py-3 px-4">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="text-sm font-semibold text-ink">Needs attention today</span>
-        <span className="text-xs text-muted">{count === 1 ? '1 thing' : `${count} things`}</span>
+        <span className="text-xs text-muted">{shownCount === 1 ? '1 thing' : `${shownCount} things`}</span>
         <div className="ml-auto">
           <Button size="sm" variant="ghost" onClick={() => setCollapsed((v) => !v)} aria-expanded={!collapsed}>
             {collapsed ? 'Show' : 'Hide'}
@@ -264,14 +309,16 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                   >
                     <CrossIcon />
                   </Button>
-                  <Button
-                    size="xs"
-                    variant="secondary"
-                    className="whitespace-nowrap"
-                    onClick={() => openWithMessage(alertBrief(a), a.profile_id)}
-                  >
-                    Ask Pare
-                  </Button>
+                  {pareOn ? (
+                    <Button
+                      size="xs"
+                      variant="secondary"
+                      className="whitespace-nowrap"
+                      onClick={() => openWithMessage(alertBrief(a), a.profile_id)}
+                    >
+                      Ask Pare
+                    </Button>
+                  ) : null}
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1.5 pl-7 text-sm">
@@ -294,7 +341,40 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
               </div>
             </li>
           ))}
-          {items.map((it) => (
+          {listed.map((it) => groupDoses && it.kind === 'unrecorded_dose' ? (
+            <li key="unrecorded_dose:group" className="py-2 -mx-2 px-2 space-y-2">
+              <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+                <span className="flex items-start gap-2 min-w-0 flex-1 text-sm">
+                  <span aria-hidden className="mt-0.5">{ATTENTION_ICON.unrecorded_dose}</span>
+                  <span className="min-w-0">
+                    <span className="font-medium text-ink">Doses not yet recorded</span>
+                    <span className="text-muted"> · for {doseItems.length} people</span>
+                  </span>
+                </span>
+                <div className="flex flex-wrap items-center justify-end gap-1 shrink-0 ml-auto">
+                  <Button size="xs" variant="ghost" className="whitespace-nowrap" aria-expanded={showDoseDetail} onClick={() => setShowDoseDetail((v) => !v)}>
+                    {showDoseDetail ? 'Hide who' : 'Show who'}
+                  </Button>
+                  <Button size="xs" variant="secondary" className="whitespace-nowrap" onClick={() => navigate('/app/round')}>
+                    Start the medicine round
+                  </Button>
+                </div>
+              </div>
+              {showDoseDetail ? (
+                <ul className="pl-7 divide-y divide-border">
+                  {doseItems.map((d) => (
+                    <li key={d.key} className="flex flex-wrap items-start gap-x-3 gap-y-1 py-1.5">
+                      <Link to={itemPath(d)} className="min-w-0 flex-1 text-sm hover:underline">
+                        <span className="font-medium text-ink">{d.profile_name}</span>
+                        {d.detail ? <span className="text-muted"> ({d.detail})</span> : null}
+                      </Link>
+                      <div className="flex items-center gap-1 shrink-0 ml-auto">{doseActions(d)}</div>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </li>
+          ) : (
             <li
               key={it.key}
               className={`flex flex-wrap items-start gap-x-3 gap-y-2 py-2 -mx-2 px-2 rounded ${
@@ -317,6 +397,9 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                   ) : null}
                 </span>
               </Link>
+              {orderError?.key === it.key ? (
+                <p className="basis-full order-last pl-7 text-sm text-red-600" role="alert">{orderError.text}</p>
+              ) : null}
               {it.contact ? (
                 <div className="basis-full order-last pl-7">
                   <ContactStrip
@@ -344,22 +427,7 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                     {it.next_action.label}
                   </Button>
                 ) : null}
-                {it.kind === 'unrecorded_dose' ? (
-                  <>
-                    <Link to={`/app/${it.profile_id}/mar`} className="text-xs text-primary hover:underline whitespace-nowrap px-1">
-                      Check records
-                    </Link>
-                    <Button
-                      size="xs"
-                      variant="secondary"
-                      className="whitespace-nowrap"
-                      loading={logAllDoses.isPending && logAllDoses.variables === it.profile_id}
-                      onClick={() => logAllDoses.mutate(it.profile_id)}
-                    >
-                      Log all doses
-                    </Button>
-                  </>
-                ) : null}
+                {it.kind === 'unrecorded_dose' ? doseActions(it) : null}
                 {it.dismissible ? (
                   <Button
                     size="xs"
@@ -384,7 +452,7 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                     <CrossIcon />
                   </Button>
                 ) : null}
-                {it.kind === 'out_of_stock' || it.kind === 'reorder_overdue' || it.kind === 'appointment_cost' ? (
+                {pareOn && (it.kind === 'out_of_stock' || it.kind === 'reorder_overdue' || it.kind === 'appointment_cost') ? (
                   <Button
                     size="xs"
                     variant="secondary"
@@ -395,14 +463,33 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                     File with Pare
                   </Button>
                 ) : null}
-                <Button
-                  size="xs"
-                  variant="secondary"
-                  className="whitespace-nowrap"
-                  onClick={() => openWithMessage(itemBrief(it), it.profile_id)}
-                >
-                  Ask Pare
-                </Button>
+                {/* The plain next step, with or without Pare: the order is in. */}
+                {it.kind === 'out_of_stock' && it.record_id && !it.on_order ? (
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    className="whitespace-nowrap"
+                    loading={markOrdered.isPending && markOrdered.variables?.key === it.key}
+                    onClick={() => markOrdered.mutate(it)}
+                  >
+                    Mark as ordered
+                  </Button>
+                ) : null}
+                {!pareOn && (it.kind === 'reorder_overdue' || it.kind === 'appointment_cost') ? (
+                  <Link to={itemPath(it)} className="text-xs text-primary hover:underline whitespace-nowrap px-1">
+                    {it.kind === 'reorder_overdue' ? 'Mark as arrived' : 'Add what it cost'}
+                  </Link>
+                ) : null}
+                {pareOn ? (
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    className="whitespace-nowrap"
+                    onClick={() => openWithMessage(itemBrief(it), it.profile_id)}
+                  >
+                    Ask Pare
+                  </Button>
+                ) : null}
               </div>
             </li>
           ))}

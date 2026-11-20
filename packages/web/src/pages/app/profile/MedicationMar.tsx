@@ -9,10 +9,10 @@ import { Button } from '../../../components/ui/Button';
 import { PencilIcon, CrossIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
-import { MED_STATUSES, medStatusDescription, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
+import { MED_STATUSES, asNeededLine, medStatusDescription, type Allergy, type MedicationRecord, type MedicationAdministration } from '../../../lib/care';
+import { AdministerModal, lastGivenLine } from './medications/AdministerModal';
 import { coverMedDay } from '../../../lib/marCoverage';
 import { C64_PALETTE, contrastText } from '../../../components/ui/Avatar';
-import { AdministerModal } from './medications/AdministerModal';
 import { SortableTh } from '../../../components/data/SortableTh';
 import { RecordPanel } from '../../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
@@ -48,6 +48,7 @@ const STATUS_HEX: Record<string, string> = {
   refused: C64.orange,
   omitted: C64.red,
   held: C64.yellow,
+  not_in_stock: C64.lightRed,
 };
 
 const statusColorFor = (s: string): string => STATUS_HEX[s] ?? C64_PALETTE[12];
@@ -79,6 +80,7 @@ export function MedicationMar({ profileId, personName, canAdminister }: { profil
   const [tab, setTab] = useState<'chart' | 'log'>(() => (searchParams.get('record') ? 'log' : 'chart'));
   return (
     <div className="space-y-3">
+      <AllergyBanner profileId={profileId} />
       <div className="flex items-center gap-2 border-b border-border">
         <button type="button" onClick={() => setTab('chart')} className={`px-3 py-2 text-sm font-medium border-b-2 ${tab === 'chart' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-ink'}`}>Chart</button>
         <button type="button" onClick={() => setTab('log')} className={`px-3 py-2 text-sm font-medium border-b-2 ${tab === 'log' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-ink'}`}>Full record</button>
@@ -86,6 +88,34 @@ export function MedicationMar({ profileId, personName, canAdminister }: { profil
       {tab === 'chart'
         ? <MarChart profileId={profileId} personName={personName} canAdminister={canAdminister} />
         : <MarLog profileId={profileId} canAdminister={canAdminister} />}
+    </div>
+  );
+}
+
+/**
+ * What not to give, above every dose: red when there is an allergy, amber
+ * when nobody has recorded any yet.
+ */
+export function AllergyBanner({ profileId }: { profileId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['allergies', profileId],
+    queryFn: () => api.get<{ allergies: Allergy[] }>(`/care-profiles/${profileId}/allergies`),
+  });
+  if (isLoading || !data) return null;
+  const list = data.allergies ?? [];
+  if (list.length === 0) {
+    return (
+      <div className="rounded-md border-l-4 border-amber-400 bg-amber-50 dark:bg-amber-900/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200" role="note">
+        Allergies not recorded yet. Ask before giving anything new.
+      </div>
+    );
+  }
+  const one = (a: Allergy) => (a.reaction ? `${a.substance}, ${a.reaction}` : a.substance);
+  return (
+    <div className="rounded-md border-l-4 border-red-500 bg-red-50 dark:bg-red-900/10 px-3 py-2 text-sm font-medium text-red-700 dark:text-red-300" role="alert">
+      {list.length === 1
+        ? `Allergic to ${list[0]!.substance}${list[0]!.reaction ? `: ${list[0]!.reaction}` : ''}.`
+        : `Allergies: ${list.map(one).join('. ')}.`}
     </div>
   );
 }
@@ -290,6 +320,10 @@ function DayGrid({ meds, admins, day, now, canAdminister, onQuick, onLogAllDue, 
               <div className="min-w-[9rem] mr-auto">
                 <div className="font-medium text-ink text-sm">{m.name}</div>
                 <div className="text-xs text-muted">{[m.dose, m.route].filter(Boolean).join(' · ')}</div>
+                {m.instructions ? <div className="text-xs text-ink">{m.instructions}</div> : null}
+                {m.with_food ? <div className="text-xs font-medium text-ink">Take with food</div> : null}
+                {asNeededLine(m) ? <div className="text-xs text-muted">{asNeededLine(m)}</div> : null}
+                {m.dose_history ? <div className="text-xs text-muted">{lastGivenLine(m)}</div> : null}
               </div>
               {slots.map((sv) => {
                 const a = sv.admin;
@@ -397,12 +431,12 @@ function MonthGrid({ meds, days, admins, now, onPickDay }: {
 }
 
 // Outcomes that stand on their own; anything else needs an explanatory note.
-const statusNeedsNote = (s: string): boolean => !['given', 'self_administered'].includes(s);
+const statusNeedsNote = (s: string): boolean => !['given', 'self_administered', 'not_in_stock'].includes(s);
 
 // How the record can be grouped for collapsing: by day, month or year.
 type GroupBy = 'day' | 'month' | 'year';
 const GROUP_KEY_FMT: Record<GroupBy, string> = { day: 'yyyy-MM-dd', month: 'yyyy-MM', year: 'yyyy' };
-type LogSortKey = 'when' | 'medication' | 'dose' | 'route' | 'by' | 'outcome';
+type LogSortKey = 'when' | 'medication' | 'dose' | 'route' | 'by' | 'outcome' | 'reason';
 const byText = (a: string | null | undefined, b: string | null | undefined) => (a ?? '').localeCompare(b ?? '');
 const LOG_SORTS: Record<LogSortKey, (a: MedicationAdministration, b: MedicationAdministration) => number> = {
   when: (a, b) => new Date(a.administered_at).getTime() - new Date(b.administered_at).getTime(),
@@ -411,6 +445,7 @@ const LOG_SORTS: Record<LogSortKey, (a: MedicationAdministration, b: MedicationA
   route: (a, b) => byText(a.route_given, b.route_given),
   by: (a, b) => byText(a.administered_by_name, b.administered_by_name),
   outcome: (a, b) => byText(statusLabel(a.status), statusLabel(b.status)),
+  reason: (a, b) => byText(a.reason, b.reason),
 };
 const RIGHTS: { key: 'right_patient' | 'right_medication' | 'right_dose' | 'right_route' | 'right_time' | 'right_documentation'; label: string }[] = [
   { key: 'right_patient', label: 'right person' },
@@ -436,7 +471,7 @@ function csvCell(v: string): string {
 // Export the given records to CSV. Every data point is its own column, and
 // the date and time of a dose are two columns, never one.
 function exportAdminsCsv(rows: MedicationAdministration[]): void {
-  const headers = ['Date', 'Time', 'Medication', 'Dose', 'Route', 'Given by', 'Outcome', 'Notes'];
+  const headers = ['Date', 'Time', 'Medication', 'Dose', 'Route', 'Given by', 'Outcome', 'Why it was needed', 'Outside the limits', 'Why it was given anyway', 'Notes'];
   const cells = rows.map((a) => [
     format(new Date(a.administered_at), 'yyyy-MM-dd'),
     format(new Date(a.administered_at), 'HH:mm'),
@@ -445,6 +480,9 @@ function exportAdminsCsv(rows: MedicationAdministration[]): void {
     a.route_given ?? '',
     a.administered_by_name ?? '',
     statusLabel(a.status),
+    a.reason ?? '',
+    a.outside_limits ? 'Yes' : 'No',
+    a.outside_limits_reason ?? '',
     a.notes ?? '',
   ]);
   const body = [headers, ...cells].map((r) => r.map(csvCell).join(',')).join('\r\n');
@@ -602,7 +640,7 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
     return n;
   });
 
-  const colCount = 6 + (canAdminister ? 2 : 0);
+  const colCount = 7 + (canAdminister ? 2 : 0);
 
   return (
     <div className="space-y-3">
@@ -658,6 +696,7 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
               <SortableTh label="Route" sortKey="route" activeKey={sortKey} dir={sortDir} onToggle={toggleSort} className="px-4 py-3" />
               <SortableTh label="By" sortKey="by" activeKey={sortKey} dir={sortDir} onToggle={toggleSort} className="px-4 py-3" />
               <SortableTh label="Outcome" sortKey="outcome" activeKey={sortKey} dir={sortDir} onToggle={toggleSort} className="px-4 py-3" />
+              <SortableTh label="Why it was needed" sortKey="reason" activeKey={sortKey} dir={sortDir} onToggle={toggleSort} className="px-4 py-3" />
               {canAdminister ? <th className="px-4 py-3 font-medium text-right">Actions</th> : null}
             </tr>
           </thead>
@@ -708,6 +747,7 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
                       <td className="px-4 py-3 text-muted">{a.route_given || '—'}</td>
                       <td className="px-4 py-3 text-muted whitespace-nowrap">{a.administered_by_name ?? '—'}</td>
                       <td className="px-4 py-3"><span className="badge text-xs font-medium" style={swatch(statusColorFor(a.status))} title={medStatusDescription(a.status)}>{statusLabel(a.status)}</span></td>
+                      <td className="px-4 py-3 text-muted">{a.reason || '—'}</td>
                       {canAdminister ? (
                         <td className="px-4 py-3 text-right whitespace-nowrap">
                           {archived ? (
@@ -768,6 +808,9 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
                   </>
                 ),
               },
+              { label: 'Why it was needed', value: a.reason ?? null },
+              { label: 'Outside the limits', value: a.outside_limits ? 'Yes, given inside the gap or over the most in 24 hours' : null },
+              { label: 'Why it was given anyway', value: a.outside_limits_reason ?? null },
               { label: 'Checks done', value: checks.length > 0 ? checks.join(', ') : null },
               { label: 'Notes', value: a.notes },
               { label: 'Archived', value: archived ? 'Yes, kept as a permanent history and no longer changed' : null },

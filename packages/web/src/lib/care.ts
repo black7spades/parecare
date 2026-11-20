@@ -64,6 +64,8 @@ export const petRelationshipFor = (species: string): string =>
   species && species !== 'Other' ? `pet ${species.toLowerCase()}` : 'pet';
 
 export interface CareProfile {
+  /** Who manages this profile, by name, so a helper is told who can change what they cannot. */
+  manager_name?: string | null;
   id: string;
   /** Person or pet: the top-level category the profile belongs to. */
   kind: ProfileKind;
@@ -224,6 +226,9 @@ export interface CareLogEntry {
   sentiment_source: 'ai' | 'manual' | null;
   occurred_at: string;
   created_at: string;
+  /** Who wrote it, by name. */
+  author_name?: string | null;
+  author_account_id?: string | null;
 }
 
 export const POA_TYPES = [
@@ -1290,6 +1295,23 @@ export interface MedicationRecord {
   repeats_left?: number | null;
   /** Its history, newest first. */
   changes?: MedicationChange[];
+  /** What an as-needed medicine is for, e.g. breakthrough pain. */
+  as_needed_for?: string | null;
+  /** At least this many hours between doses. */
+  min_hours_between_doses?: number | null;
+  /** No more than this many in 24 hours. */
+  max_doses_per_day?: number | null;
+  /** Last given, by whom, and the given times lately, for as-needed medicines. */
+  dose_history?: DoseHistory | null;
+  /** Set when a dose found it not in stock, until it is restocked. */
+  not_in_stock_admin_id?: string | null;
+}
+
+export interface DoseHistory {
+  last_given_at: string | null;
+  last_given_by: string | null;
+  given_24h: number;
+  recent_given: string[];
 }
 
 export const STOP_REASONS = [
@@ -1323,6 +1345,9 @@ export interface MedicationChange {
   source_document_id: string | null;
   source_document_label: string | null;
   changed_by_name: string | null;
+  /** Who said so, when a carer recorded a change a doctor asked for. */
+  source_provider_id?: string | null;
+  source_provider_name?: string | null;
 }
 
 const doseText = (amount: string | null, unit: string | null): string => `${amount ?? ''}${unit ?? ''}`.trim();
@@ -1561,7 +1586,19 @@ export const MED_STATUSES = [
   { value: 'omitted', label: 'Omitted', description: 'The dose was skipped this time, for example the person was asleep, unwell or fasting.' },
   { value: 'held', label: 'Held', description: 'The dose was deliberately paused, for example on a doctor or pharmacist instruction.' },
   { value: 'self_administered', label: 'Self-administered', description: 'The person took the dose themselves.' },
+  { value: 'not_in_stock', label: 'Not in stock', description: 'There was none to give. The alert says who to call.' },
 ] as const;
+
+/** "As needed for breakthrough pain. At least 4 hours apart. No more than 8 in 24 hours." */
+export function asNeededLine(m: Pick<MedicationRecord, 'as_needed' | 'as_needed_for' | 'min_hours_between_doses' | 'max_doses_per_day'>): string | null {
+  // Only an as-needed medicine has limits: a scheduled one runs to its times.
+  if (!m.as_needed) return null;
+  const parts: string[] = [];
+  if (m.as_needed) parts.push(m.as_needed_for ? `As needed for ${m.as_needed_for}.` : 'As needed.');
+  if (m.min_hours_between_doses != null) parts.push(`At least ${m.min_hours_between_doses} hours apart.`);
+  if (m.max_doses_per_day != null) parts.push(`No more than ${m.max_doses_per_day} in 24 hours.`);
+  return parts.length ? parts.join(' ') : null;
+}
 
 export const medStatusLabel = (s: string) => MED_STATUSES.find((x) => x.value === s)?.label ?? s;
 export const medStatusDescription = (s: string) => MED_STATUSES.find((x) => x.value === s)?.description ?? '';
@@ -1588,6 +1625,12 @@ export interface MedicationAdministration {
   dose_given: string | null;
   route_given: string | null;
   notes: string | null;
+  /** Why an as-needed dose was needed now. */
+  reason?: string | null;
+  /** Given inside the gap or over the most in 24 hours. */
+  outside_limits?: boolean;
+  /** Why it had to be given anyway. */
+  outside_limits_reason?: string | null;
   right_patient: boolean;
   right_medication: boolean;
   right_dose: boolean;

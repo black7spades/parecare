@@ -57,7 +57,7 @@ const TOOLS_NAV: NavItemDef[] = [
 // First-segment names under /app that are top-level sections, not a care
 // profile id. On these the sidebar keeps the main nav instead of switching to
 // a profile's sub-nav.
-const RESERVED_APP_SECTIONS = new Set(['profiles', 'directory', 'reports', 'whats-new']);
+const RESERVED_APP_SECTIONS = new Set(['profiles', 'directory', 'reports', 'whats-new', 'updates', 'round', 'emergency-sheets']);
 
 type PinArrangement = 'recent' | 'az' | 'za' | 'custom';
 

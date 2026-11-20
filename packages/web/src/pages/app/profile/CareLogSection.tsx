@@ -6,6 +6,7 @@ import { Button } from '../../../components/ui/Button';
 import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
+import { LinkedText } from '../../../components/LinkedText';
 import { RecordPanel } from '../../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
@@ -198,7 +199,14 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
           className="space-y-3 mb-6"
           onSubmit={(e) => {
             e.preventDefault();
-            if (body.trim()) addMutation.mutate();
+            // Save always answers: an empty entry says what to write.
+            if (!body.trim()) {
+              setFormError('Write what happened, then add the entry.');
+              document.getElementById('care-log-body')?.focus();
+              return;
+            }
+            setFormError('');
+            addMutation.mutate();
           }}
         >
           <div className="flex gap-2">
@@ -213,10 +221,10 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
               <Input placeholder="Title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />
             </div>
           </div>
-          <Textarea placeholder="What happened?" value={body} onChange={(e) => setBody(e.target.value)} rows={2} required />
+          <Textarea id="care-log-body" aria-label="What happened?" placeholder="What happened?" value={body} onChange={(e) => setBody(e.target.value)} rows={2} />
           {formError ? <p className="text-sm text-red-600">{formError}</p> : null}
           <div className="flex justify-end">
-            <Button type="submit" size="sm" loading={addMutation.isPending} disabled={!body.trim()}>
+            <Button type="submit" size="sm" loading={addMutation.isPending}>
               Add entry
             </Button>
           </div>
@@ -365,7 +373,9 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 mb-1">
                             <span className="badge bg-primary-50 text-primary text-xs">{entryTypeLabel(entry.entry_type)}</span>
-                            <span className="text-xs text-muted">{format(new Date(entry.occurred_at), 'd MMM yyyy, HH:mm')}</span>
+                            <span className="text-xs text-muted">
+                              {entry.author_name ? `${entry.author_name}, ` : ''}{format(new Date(entry.occurred_at), 'd MMM yyyy, HH:mm')}
+                            </span>
                             <SentimentControl
                               entry={entry}
                               canEdit={canEdit}
@@ -373,7 +383,7 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
                             />
                           </div>
                           {entry.title ? <p className="text-sm font-medium text-ink">{entry.title}</p> : null}
-                          <p className="text-sm text-ink whitespace-pre-wrap">{entry.body}</p>
+                          <div className="text-sm text-ink whitespace-pre-wrap"><LinkedText text={entry.body} profileId={profileId} canEdit={canEdit} /></div>
                         </div>
                         {canEdit ? (
                           <div className="flex flex-col items-end gap-1 shrink-0">
@@ -423,6 +433,7 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
           fields={[
             { label: 'Kind', value: entryTypeLabel(panel.current.entry_type) },
             { label: 'When it happened', value: format(new Date(panel.current.occurred_at), 'EEE d MMM yyyy, HH:mm') },
+            { label: 'Written by', value: panel.current.author_name ?? null },
             { label: 'Title', value: panel.current.title },
             { label: 'What happened', value: panel.current.body },
             {

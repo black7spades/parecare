@@ -20,6 +20,31 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.50.0',
+    date: '2026-11-20',
+    summary: 'The shift: Before you start, the medicine round, as-needed limits, and a home full of residents found, printed and invited at once.',
+    groups: [
+      { heading: 'Added', items: [
+        'Before you start. Someone starting a shift sees, on one card, what not to give, the GP, who to call in an emergency, the doses due now, how the person eats, moves and talks, and the last handover with who wrote it. It leads for helpers and comes second for the person who manages the profile, with Start the medicine round and Write a handover.',
+        'The medicine round. Every dose due from two hours ago to two hours ahead, for everyone you give medicines to, grouped by room. Each dose is one tap: Given, Refused with why, Not in stock, or More for the full form, and each can be undone.',
+        'As-needed medicines say their limits. An as-needed medicine keeps what it is for, the least hours between doses and the most in 24 hours, worked out from the instructions when nobody typed them. The medication record shows when it was last given, by whom, and how many in the last 24 hours.',
+        'A dose given too soon asks first. A dose inside the gap or over the most in 24 hours shows a red notice with Wait until, or Give it now with why it must be given now. It never stops a dose. An as-needed dose asks why it is needed now.',
+        'Not in stock. A dose with none to give is its own outcome. The person managing the profile is told, with the pharmacy to call.',
+        'Helpers record a change. A support worker or nurse records a new dose or new times a doctor asked for, with why and who said so, and marks a repeat as ordered or arrived. Adding or deleting medicines stays with the person who manages the profile.',
+        'Who wrote it. Every care log entry and every reply to a question shows who wrote it and when.',
+        'Find anyone in a home. The Homeboard has a search by name or room, and the table has Room, GP, GP phone, Next of kin, Relationship and Next of kin phone columns, all sortable. The People directory has the same columns.',
+        'Emergency sheets in bulk. Choose several people on the Homeboard and print their emergency sheets in one go, one to a page.',
+        'One invite for many people. Choose several people on the Homeboard and invite one new carer to all of them. They accept once and see everyone.',
+        'Bring residents in by spreadsheet. The people spreadsheet has Room, GP name, GP phone, GP practice and Next of kin columns. Importing it files each GP in Contacts and links them, and anyone who may add a person may import.',
+      ] },
+      { heading: 'Changed', items: [
+        'Doses not yet recorded, once. When several people have doses not yet recorded, Needs attention shows one row that says how many people, with Start the medicine round. Show who opens the detail for each person.',
+        'Without Pare. On these screens, when no assistant is attached, the Pare buttons step aside and the plain next step shows instead, such as Mark as ordered on a medicine that has run out.',
+        'The medication form has Instructions. Instructions now save, and an as-needed medicine has What it is for, Hours between doses and Most in 24 hours.',
+      ] },
+    ],
+  },
+  {
     version: '0.49.1',
     date: '2026-11-20',
     summary: 'Documents link both ways: Attached to opens each record, and a letter lists the medicines it changed.',

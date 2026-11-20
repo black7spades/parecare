@@ -11,7 +11,10 @@ import { applyDeathChange } from '../services/death';
 import { getStorageConfig } from '../config/settings';
 import { requireAuth } from '../middleware/auth';
 import { requireAccountRight } from '../middleware/accountRights';
-import { getCareAccess, requireCountBelow } from '../middleware/subscriptionGate';
+import { PLAN_LIMITS, getCareAccess, getEffectiveTier, requireCountBelow } from '../middleware/subscriptionGate';
+import { createInvitation, InviteError } from '../services/invitations';
+import { composeEmergencySheet } from '../services/emergencySheet';
+import { CIRCLE_ROLE_VALUES } from '../lib/circleRoles';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
 import { resolveAddress, linkAddressToProfile } from '../services/addresses';
 import {
@@ -412,6 +415,18 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
       emergency: emergencyMap.get(p.id) ?? null,
     });
     const primaryEmail = cp.contact_email || contactProvider?.email || carerProfile?.contact_email || linked?.email || null;
+    // Next of kin: the person on their profile to contact about them, never
+    // a care home or the person themselves.
+    const kinName =
+      cp.contact_kind === 'contact' ? cp.contact_name?.trim() || null
+        : cp.contact_kind === 'user' ? linked?.display_name ?? null
+          : cp.contact_kind === 'profile' ? carerProfile?.full_name ?? null
+            : null;
+    const kinPhone =
+      cp.contact_kind === 'contact' ? cp.contact_phone?.trim() || null
+        : cp.contact_kind === 'user' ? linked?.phone?.trim() || null
+          : cp.contact_kind === 'profile' ? carerProfile?.contact_phone?.trim() || null
+            : null;
     const contactName =
       cp.contact_kind === 'self'
         ? p.full_name
@@ -441,7 +456,9 @@ careProfilesRouter.get('/summary', requireAuth, async (req, res) => {
       primary_email: primaryEmail,
       primary_phone: primaryPhone,
       primary_phone_owner: primaryPhoneOwner,
-      gp: gp ? { name: gp.name, phone: gp.phone } : null,
+      gp: gp ? { name: gp.name, phone: gp.phone, practice: gp.organisation?.name ?? null } : null,
+      room_number: cp.room_number ?? null,
+      next_of_kin: kinName ? { name: kinName, relationship: cp.contact_relationship?.trim() || null, phone: kinPhone } : null,
       poa_holders: (poaMap.get(p.id) ?? []).map((m) => ({
         display_name: m['display_name'],
         poa_type: m['poa_type'],
@@ -496,6 +513,116 @@ function whosePhone(o: {
   }
   return { phone: null, owner: null };
 }
+
+/** Profiles in a list this account may act on as the one who set them up, or as an admin. */
+async function ownedOrAdministered(account: NonNullable<import('express').Request['account']>, ids: string[]): Promise<string[]> {
+  const clean = [...new Set(ids.filter((id) => UUID_RE.test(id)))];
+  if (clean.length === 0) return [];
+  let q = db('care_profiles').whereIn('id', clean).where({ archived: false });
+  if (account.role !== 'admin' && account.role !== 'super_admin') q = q.where({ account_id: account.id });
+  return (await q.pluck('id')) as string[];
+}
+
+/**
+ * Emergency sheets for many people at once, to print in one go for a wing.
+ * Each is checked against the account's own access, and anyone it cannot
+ * reach is left out and named as left out, never silently.
+ */
+careProfilesRouter.get('/emergency-sheets', requireAuth, async (req, res) => {
+  const ids = String(req.query['ids'] ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 200);
+  const sheets = [];
+  let left_out = 0;
+  for (const id of ids) {
+    const access = await getCareAccess(req.account!, id);
+    if (!access) {
+      left_out += 1;
+      continue;
+    }
+    const sheet = await composeEmergencySheet(id);
+    if (sheet) sheets.push(sheet);
+    else left_out += 1;
+  }
+  res.json({ sheets, left_out });
+});
+
+const bulkInviteSchema = z.object({
+  profile_ids: z.array(z.string().uuid()).min(1).max(500),
+  email: z.string().trim().email(),
+  display_name: z.string().trim().min(1).max(255),
+  role: z.enum(CIRCLE_ROLE_VALUES).default('support_worker'),
+  permission: z.enum(['viewer', 'contributor']).default('contributor'),
+});
+
+/**
+ * One invite for many people: a new carer for a wing accepts once and joins
+ * every circle. Only profiles the requester set up, or administers, are
+ * included; anyone already in a circle is skipped and said so.
+ */
+careProfilesRouter.post('/bulk-invite', requireAuth, requireAccountRight('can_invite_members'), async (req, res) => {
+  const parsed = bulkInviteSchema.safeParse(req.body);
+  if (!parsed.success) {
+    const missing = [
+      !req.body?.display_name?.toString().trim() ? 'their name' : null,
+      !req.body?.email?.toString().trim() ? 'their email' : null,
+    ].filter(Boolean);
+    res.status(400).json({
+      error: missing.length ? `Add ${missing.join(' and ')}, then send the invite.` : 'Check the email address, then send the invite.',
+      code: 'VALIDATION_ERROR',
+    });
+    return;
+  }
+  const allowed = await ownedOrAdministered(req.account!, parsed.data.profile_ids);
+  const notYours = parsed.data.profile_ids.length - allowed.length;
+  // A plan that caps circle sizes leaves out any circle already full.
+  const limit = PLAN_LIMITS.care_circle_members[getEffectiveTier(req.account!)];
+  let room = allowed;
+  if (limit !== Infinity && allowed.length) {
+    const counts = (await db('care_circle_members')
+      .whereIn('care_profile_id', allowed)
+      .where((qb) => qb.whereNotNull('account_id').orWhereNotNull('invitation_id'))
+      .groupBy('care_profile_id')
+      .select('care_profile_id')
+      .count('id as n')) as Array<{ care_profile_id: string; n: string | number }>;
+    const full = new Set(counts.filter((c) => Number(c.n) >= limit).map((c) => c.care_profile_id));
+    room = allowed.filter((id) => !full.has(id));
+  }
+  if (room.length === 0) {
+    res.status(403).json({
+      error: notYours > 0
+        ? 'Only the person who set up a profile can invite someone to it. None of those chosen were set up by you.'
+        : 'Each of those circles is full on your plan.',
+      code: 'NOTHING_TO_INVITE',
+    });
+    return;
+  }
+  try {
+    const result = await createInvitation({
+      email: parsed.data.email,
+      display_name: parsed.data.display_name,
+      invitedBy: req.account!,
+      assignments: room.map((id) => ({ care_profile_id: id, role: parsed.data.role, permission: parsed.data.permission })),
+      onConflict: 'skip',
+    });
+    res.status(201).json({
+      invited: result.members.length,
+      email: result.invitation.email,
+      invite_url: result.invite_url,
+      skipped: result.skipped,
+      not_yours: notYours,
+      full: allowed.length - room.length,
+    });
+  } catch (err) {
+    if (err instanceof InviteError) {
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
+    throw err;
+  }
+});
 
 // Lightweight pinned list for the left nav. Returns the custom order and the
 // last-activity timestamp so the nav can arrange by recent activity, name, or
@@ -800,9 +927,13 @@ careProfilesRouter.get('/:id', requireAuth, async (req, res) => {
           .first()) ?? null
       : null;
 
+  // Who manages the profile, so a helper who cannot do something is told who can.
+  const manager = (await db('accounts').where({ id: profile.account_id }).first('display_name')) as { display_name: string | null } | undefined;
+
   res.json({
     profile: {
       ...profile,
+      manager_name: manager?.display_name ?? null,
       contact_account_name: contactAccount?.display_name ?? null,
       contact_account_email: contactAccount?.email ?? null,
       contact_provider: contactProvider,

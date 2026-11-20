@@ -42,11 +42,11 @@ const linkOf = (item: NotificationItem) => `${env.APP_URL}${notificationPath(ite
 /** Deliver a batch of items over one channel. Throws on a hard failure. */
 export async function sendToChannel(
   channel: NotificationChannel,
-  account: Pick<Account, 'email' | 'display_name'>,
+  account: Pick<Account, 'email' | 'display_name'> & { timezone?: string | null },
   items: NotificationItem[],
   heading: string
 ): Promise<void> {
-  const lines = items.map((i) => ({ text: notificationText(i), url: linkOf(i) }));
+  const lines = items.map((i) => ({ text: notificationText(i, account.timezone), url: linkOf(i) }));
 
   switch (channel.kind) {
     case 'email': {
@@ -62,7 +62,7 @@ export async function sendToChannel(
       for (const item of items) {
         const alive = await sendPush(subscription, {
           title: item.urgent ? 'PareCare: urgent' : 'PareCare',
-          body: notificationText(item),
+          body: notificationText(item, account.timezone),
           url: linkOf(item),
         });
         if (!alive) {
@@ -116,7 +116,7 @@ export async function sendToChannel(
             key: i.key,
             kind: i.kind,
             urgent: i.urgent,
-            text: notificationText(i),
+            text: notificationText(i, account.timezone),
             url: linkOf(i),
             profile_id: i.profile_id,
             created_at: i.created_at,

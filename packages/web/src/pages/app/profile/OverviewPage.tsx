@@ -61,8 +61,8 @@ function readSavedOrder(storageKey: string): string[] | null {
  * is on screen into a saved order, so the adaptive default and a saved
  * arrangement never fight.
  */
-function cardOrderFor(storageKey: string, situation: Situation | null, fresh: Set<string>): string[] {
-  return readSavedOrder(storageKey) ?? orderBySituation(PROFILE_CARD_KEYS, situation, fresh);
+function cardOrderFor(storageKey: string, situation: Situation | null, fresh: Set<string>, access?: string): string[] {
+  return readSavedOrder(storageKey) ?? orderBySituation(PROFILE_CARD_KEYS, situation, fresh, access);
 }
 
 function loadCollapsed(storageKey: string): Set<string> {
@@ -87,7 +87,7 @@ export function OverviewPage() {
   const recent = useRecentActivity(profile.id);
   const fresh = freshCardKeys(recent.data?.entries);
   const freshSig = [...fresh].sort().join(',');
-  const [cardOrder, setCardOrder] = useState<string[]>(() => cardOrderFor(orderKey, situation, fresh));
+  const [cardOrder, setCardOrder] = useState<string[]>(() => cardOrderFor(orderKey, situation, fresh, access));
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(collapsedKey));
 
   // Moving from one person to another keeps this component mounted, so the
@@ -96,12 +96,12 @@ export function OverviewPage() {
   // person's acuity or end-of-life status changes, while a saved order does not.
   const situationSig = `${situation?.acuity ?? ''}|${situation?.ended ?? ''}`;
   useEffect(() => {
-    setCardOrder(cardOrderFor(orderKey, situation, fresh));
+    setCardOrder(cardOrderFor(orderKey, situation, fresh, access));
     setCollapsed(loadCollapsed(collapsedKey));
     // situation and fresh are read through their signatures to avoid
     // re-running on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderKey, collapsedKey, situationSig, freshSig]);
+  }, [orderKey, collapsedKey, situationSig, freshSig, access]);
 
   const [confirmText, setConfirmText] = useState('');
   const [deleteError, setDeleteError] = useState('');

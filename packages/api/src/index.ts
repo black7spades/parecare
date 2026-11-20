@@ -68,6 +68,8 @@ import { activityRouter } from './routes/activity';
 import { healthStatusesRouter } from './routes/healthStatuses';
 import { overviewSummariesRouter } from './routes/overviewSummaries';
 import { appointmentsRouter } from './routes/appointments';
+import { shiftRouter } from './routes/shift';
+import { medicineRoundRouter } from './routes/medicineRound';
 import { navPinsRouter } from './routes/navPins';
 import { reportsRouter } from './routes/reports';
 import { ensureSuperAdmin, runMigrations } from './services/bootstrap';
@@ -225,6 +227,10 @@ v1.use('/care-profiles/:id/activity', ...profileAccess, activityRouter);
 v1.use('/care-profiles/:id/health-statuses', ...profileAccess, healthStatusesRouter);
 v1.use('/care-profiles/:id/overview-summaries', ...profileAccess, overviewSummariesRouter);
 v1.use('/care-profiles/:id/appointments', ...profileAccess, appointmentsRouter);
+// Starting a shift: allergies, who to call, what is due, the last handover.
+v1.use('/care-profiles/:id/shift', ...profileAccess, shiftRouter);
+// The medicine round across everyone this account records doses for.
+v1.use('/medicine-round', medicineRoundRouter);
 // Pins are each carer's personal navigation order, not a change to the care
 // record: no audit entry, and viewers may arrange their own pins too.
 v1.use('/care-profiles/:id/nav-pins', requireAuth, requireCareProfileAccess, navPinsRouter);

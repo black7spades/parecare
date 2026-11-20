@@ -4,7 +4,7 @@ import { contactLine, supplyContext, type NextAction } from './alertContacts';
 import type { ContactSummary } from './professionals';
 import { dateInZone, hmInZone, startOfDayInZone } from '../lib/timezone';
 import { coveredTimes, doseAnchor } from '../lib/doseSlots';
-import { DOSE_AUDIT_ENTITY, doseOutcomeWord, isGivenStatus } from '../lib/doseOutcome';
+import { DOSE_AUDIT_ENTITY, NOT_IN_STOCK, doseOutcomeWord, isGivenStatus } from '../lib/doseOutcome';
 import type { Account } from '../types';
 
 /**
@@ -56,6 +56,8 @@ export interface NotificationItem {
   contact?: ContactSummary | null;
   /** The next thing to do: order online, call or email, or open the record. */
   next_action?: NextAction | null;
+  /** A dose found not in stock: the alert says who to call. */
+  not_in_stock?: boolean;
   /** Supply alerts: about how many days are left. */
   days_left?: number | null;
 }
@@ -274,9 +276,12 @@ export async function gatherNotifications(
       summary: doseOutcomeWord(r.status),
       medication_name: med.name,
       missed_count: null,
-      urgent: !!med.critical,
+      urgent: !!med.critical || r.status === NOT_IN_STOCK,
       created_at: new Date(r.administered_at).toISOString(),
       read: read.has(key),
+      record_id: String(r.medication_id),
+      record_kind: 'medications',
+      not_in_stock: r.status === NOT_IN_STOCK,
     });
   }
 
@@ -418,14 +423,21 @@ export async function gatherNotifications(
     }
   }
 
+  // A medicine found not in stock on the round already says it has run out,
+  // with who to call, so the run-out alert for it does not say it twice.
+  const notInStockMeds = new Set(items.filter((i) => i.not_in_stock && i.record_id).map((i) => i.record_id!));
+  for (let k = items.length - 1; k >= 0; k--) {
+    if (items[k]!.kind === 'supply_out' && items[k]!.record_id && notInStockMeds.has(items[k]!.record_id!)) items.splice(k, 1);
+  }
+
   // Supply alerts name who to call and what to do: order online, call or
   // email the supplier, else their main pharmacy.
-  const supplyIds = items.filter((i) => (i.kind === 'supply_low' || i.kind === 'supply_out') && i.record_id).map((i) => i.record_id!);
+  const supplyIds = items.filter((i) => (i.kind === 'supply_low' || i.kind === 'supply_out' || i.not_in_stock) && i.record_id).map((i) => i.record_id!);
   if (supplyIds.length) {
     const ctx = await supplyContext(supplyIds);
     for (const i of items) {
       const c = i.record_id ? ctx.get(i.record_id) : undefined;
-      if (!c || (i.kind !== 'supply_low' && i.kind !== 'supply_out')) continue;
+      if (!c || (i.kind !== 'supply_low' && i.kind !== 'supply_out' && !i.not_in_stock)) continue;
       i.contact = c.contact;
       i.next_action = c.next_action;
       i.days_left = c.days_left;
@@ -498,8 +510,20 @@ const ENTITY_NOUNS: Record<string, string> = {
   records: 'a note',
 };
 
+/**
+ * "Margaret's Paracetamol was not in stock at 08:05. Call Terry White
+ * Chemmart Box Hill, 03 9890 1234." With no supplier it says what to add.
+ */
+export function notInStockText(item: Pick<NotificationItem, 'profile_name' | 'medication_name' | 'created_at' | 'contact'>, timeZone?: string | null): string {
+  const at = hmInZone(new Date(item.created_at), timeZone ?? null);
+  const head = `${item.profile_name}'s ${item.medication_name} was not in stock at ${at}.`;
+  const c = item.contact;
+  if (!c) return `${head} No supplier on file. Add one so the alert can say who to call.`;
+  return `${head} Call ${[c.name, c.phone].filter(Boolean).join(', ')}.`;
+}
+
 /** One plain sentence per notification, shared by every outbound channel. */
-export function notificationText(item: NotificationItem): string {
+export function notificationText(item: NotificationItem, timeZone?: string | null): string {
   if (item.key.startsWith('test:')) {
     return 'If you can read this, this channel works.';
   }
@@ -512,6 +536,7 @@ export function notificationText(item: NotificationItem): string {
       ? `${item.profile_name}'s dose of ${item.medication_name} is due and has not been given.`
       : `${item.profile_name} has ${n} doses of ${item.medication_name} due today that have not been given.`;
   }
+  if (item.kind === 'dose_not_given' && item.not_in_stock) return notInStockText(item, timeZone);
   if (item.kind === 'dose_not_given') {
     return `${item.actor_name ?? 'Someone'} recorded ${item.profile_name}'s ${item.medication_name} as ${item.summary ?? 'not given'}.`;
   }

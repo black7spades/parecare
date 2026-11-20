@@ -57,7 +57,7 @@ export function CardShell({ children, title }: { children: React.ReactNode; titl
   const { cardKey, label, fresh, collapsed, editView, onToggle, onMove, isFirst, isLast } = slot;
 
   return (
-    <div className="card">
+    <div className="card scroll-mt-4" id={`card-${cardKey}`}>
       <div className="flex items-center justify-between gap-2">
         <button
           type="button"
