@@ -36,6 +36,7 @@ export const ORGANISATION_TYPES = [
   'Health hub', 'Hospital', 'Medical centre', 'Health centre', 'Pathology', 'Radiology',
   'Government department', 'Government agency', 'Community organisation', 'Charity',
   'Law firm', 'Insurer', 'School', 'Disability service', 'Aged care service',
+  'Aged care home', 'Nursing home', 'Care home', 'Retirement village', 'Group home', 'Hospice',
 ];
 
 const ORG_TYPE_SET = new Set(ORGANISATION_TYPES.map((t) => t.toLowerCase()));
@@ -45,7 +46,7 @@ const PERSON_BUILT_INS = new Set(['gp', 'specialist', 'psychologist', 'vet', 'al
 export const isOrganisationType = (type: string | null | undefined): boolean => ORG_TYPE_SET.has(String(type ?? '').trim().toLowerCase());
 
 const PERSON_TITLE = /^(dr|prof|professor|mr|mrs|ms|miss|mx|sister)\.?\s/i;
-const ORG_WORDS = /\b(clinic|hospital|centre|center|hub|practice|pharmacy|chemist|department|dept|agency|services|council|commission|ministry|office|authority|tribunal|court|association|foundation|society|trust|charity|institute|university|school|college|group|partners|pty|ltd|limited|inc|corporation|company|network|medical|radiology|pathology|imaging|ndis|centrelink|medicare|government|lawyers|solicitors|insurance)\b/i;
+const ORG_WORDS = /\b(clinic|hospital|centre|center|hub|practice|pharmacy|chemist|department|dept|agency|services|council|commission|ministry|office|authority|tribunal|court|association|foundation|society|trust|charity|institute|university|school|college|group|partners|pty|ltd|limited|inc|corporation|company|network|medical|radiology|pathology|imaging|ndis|centrelink|medicare|government|lawyers|solicitors|insurance|aged care|nursing home|care home|hospice|retirement village)\b/i;
 
 /**
  * Whether a record is an organisation or a professional, worked out from its

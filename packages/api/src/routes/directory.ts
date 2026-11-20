@@ -24,13 +24,28 @@ import type { AccountRole, CareProfile, Provider, ProfileKind } from '../types';
 
 export const directoryRouter = Router();
 
+// ── Who an ordinary account can see ─────────────────────────
+
+/**
+ * The care profiles an ordinary account can see: every one it set up, plus
+ * every one it was invited to and accepted. Most owners are not members of
+ * their own profiles, so a directory scoped by membership alone came up
+ * empty for the very person who filled it in.
+ */
+const VISIBLE_PROFILE_IDS_SQL = `(
+  SELECT vp.id FROM care_profiles vp WHERE vp.account_id = ?
+  UNION
+  SELECT vm.care_profile_id FROM care_circle_members vm WHERE vm.account_id = ? AND vm.invite_accepted = true
+)`;
+const visibleProfileBindings = (accountId: string) => [accountId, accountId];
+
 // ── Care profiles (people & pets) ─────────────────────────
 
 /**
  * List care profiles of a given kind for the directory.
  *   super_admin  => every profile of that kind in the system
  *   admin        => profiles belonging to their account
- *   user/viewer  => profiles they can access via care circle (read-only)
+ *   user/viewer  => profiles they set up, and those shared with them
  */
 function profilesEndpoint(kind: ProfileKind) {
   return async (req: import('express').Request, res: import('express').Response) => {
@@ -74,11 +89,7 @@ function profilesEndpoint(kind: ProfileKind) {
     } else if (roleAtLeast(account.role, 'admin')) {
       query = query.where('cp.account_id', account.id);
     } else {
-      query = query
-        .join('care_circle_members as ccm2', 'ccm2.care_profile_id', 'cp.id')
-        .where('ccm2.account_id', account.id)
-        .where('ccm2.invite_accepted', true)
-        .groupBy('cp.id');
+      query = query.whereRaw(`cp.id IN ${VISIBLE_PROFILE_IDS_SQL}`, visibleProfileBindings(account.id));
     }
 
     const rows = await query;
@@ -210,12 +221,13 @@ directoryRouter.get('/providers', requireAuth, async (req, res) => {
   } else if (roleAtLeast(account.role, 'admin')) {
     query = query.where('p.account_id', account.id);
   } else {
-    query = query
-      .join('care_profile_providers as cpp', 'cpp.provider_id', 'p.id')
-      .join('care_circle_members as ccm', 'ccm.care_profile_id', 'cpp.care_profile_id')
-      .where('ccm.account_id', account.id)
-      .where('ccm.invite_accepted', true)
-      .groupBy('p.id');
+    // Their own contacts, and any linked to a profile they can see.
+    query = query.where((qb) =>
+      qb.where('p.account_id', account.id).orWhereRaw(
+        `EXISTS (SELECT 1 FROM care_profile_providers cpp WHERE cpp.provider_id = p.id AND cpp.care_profile_id IN ${VISIBLE_PROFILE_IDS_SQL})`,
+        visibleProfileBindings(account.id)
+      )
+    );
   }
 
   const providers = await query;
@@ -596,27 +608,20 @@ directoryRouter.get('/suppliers', requireAuth, async (req, res) => {
   } else if (roleAtLeast(account.role, 'admin')) {
     query = query.where('s.account_id', account.id);
   } else {
-    // A non-admin sees a supplier connected to any profile they can access,
-    // whether by a manual link or by a medication that names it.
-    query = query.whereExists(function () {
-      this.select(db.raw('1'))
-        .from('care_circle_members as ccm')
-        .where('ccm.account_id', account.id)
-        .where('ccm.invite_accepted', true)
-        .where(function () {
-          this.whereExists(function () {
-            this.select(db.raw('1'))
-              .from('care_profile_suppliers as cps')
-              .whereRaw('cps.supplier_id = s.id')
-              .whereRaw('cps.care_profile_id = ccm.care_profile_id');
-          }).orWhereExists(function () {
-            this.select(db.raw('1'))
-              .from('medications as m2')
-              .whereRaw('m2.supplier_id = s.id')
-              .whereRaw('m2.care_profile_id = ccm.care_profile_id');
-          });
-        });
-    });
+    // A non-admin sees their own suppliers, and any connected to a profile
+    // they can see, whether by a manual link or by a medication that names it.
+    query = query.where((qb) =>
+      qb
+        .where('s.account_id', account.id)
+        .orWhereRaw(
+          `EXISTS (SELECT 1 FROM care_profile_suppliers cps WHERE cps.supplier_id = s.id AND cps.care_profile_id IN ${VISIBLE_PROFILE_IDS_SQL})`,
+          visibleProfileBindings(account.id)
+        )
+        .orWhereRaw(
+          `EXISTS (SELECT 1 FROM medications m2 WHERE m2.supplier_id = s.id AND m2.care_profile_id IN ${VISIBLE_PROFILE_IDS_SQL})`,
+          visibleProfileBindings(account.id)
+        )
+    );
   }
 
   const suppliers = await query;
@@ -866,14 +871,13 @@ directoryRouter.get('/assets', requireAuth, async (req, res) => {
   } else if (roleAtLeast(account.role, 'admin')) {
     query = query.where('a.account_id', account.id);
   } else {
-    query = query.whereExists(function () {
-      this.select(db.raw('1'))
-        .from('care_profile_assets as cpa')
-        .join('care_circle_members as ccm', 'ccm.care_profile_id', 'cpa.care_profile_id')
-        .whereRaw('cpa.asset_id = a.id')
-        .where('ccm.account_id', account.id)
-        .where('ccm.invite_accepted', true);
-    });
+    // Their own equipment, and any linked to a profile they can see.
+    query = query.where((qb) =>
+      qb.where('a.account_id', account.id).orWhereRaw(
+        `EXISTS (SELECT 1 FROM care_profile_assets cpa WHERE cpa.asset_id = a.id AND cpa.care_profile_id IN ${VISIBLE_PROFILE_IDS_SQL})`,
+        visibleProfileBindings(account.id)
+      )
+    );
   }
 
   const assets = await query;
@@ -1025,12 +1029,13 @@ directoryRouter.get('/addresses', requireAuth, async (req, res) => {
   } else if (roleAtLeast(account.role, 'admin')) {
     query = query.where('a.account_id', account.id);
   } else {
-    query = query
-      .join('care_profile_addresses as cpa', 'cpa.address_id', 'a.id')
-      .join('care_circle_members as ccm', 'ccm.care_profile_id', 'cpa.care_profile_id')
-      .where('ccm.account_id', account.id)
-      .where('ccm.invite_accepted', true)
-      .groupBy('a.id');
+    // Their own addresses, and any linked to a profile they can see.
+    query = query.where((qb) =>
+      qb.where('a.account_id', account.id).orWhereRaw(
+        `EXISTS (SELECT 1 FROM care_profile_addresses cpa WHERE cpa.address_id = a.id AND cpa.care_profile_id IN ${VISIBLE_PROFILE_IDS_SQL})`,
+        visibleProfileBindings(account.id)
+      )
+    );
   }
 
   const addresses = (await query).map(withReadableWifi);

@@ -18,6 +18,7 @@ import {
   revertToVersion,
 } from '../services/carePlanUpdater';
 import { renderPlanPdf } from '../services/carePlanPdf';
+import { reviewDueOn, setReviewDue } from '../services/carePlanReview';
 import type { CarePlan } from '../types';
 
 export const carePlanRouter = Router({ mergeParams: true });
@@ -217,6 +218,37 @@ carePlanRouter.get('/versions', requireAuth, async (req, res) => {
     ),
     permissions: perms,
   });
+});
+
+/**
+ * The next standard review of the plan: set once when the plan is first
+ * built and kept through every rebuild. Anyone who can edit the plan may move
+ * it; the reminder task ahead of it moves too, and the next plan update
+ * carries the new date.
+ */
+carePlanRouter.get('/review-date', requireAuth, async (req, res) => {
+  const perms = await planPermissions(req);
+  if (!perms.view) {
+    forbidden(res, 'view');
+    return;
+  }
+  res.json({ due_on: await reviewDueOn(String(req.params['id'])), can_change: perms.edit });
+});
+
+carePlanRouter.put('/review-date', requireAuth, async (req, res) => {
+  const perms = await planPermissions(req);
+  if (!perms.edit) {
+    forbidden(res, 'update');
+    return;
+  }
+  const parsed = z.object({ due_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).safeParse(req.body);
+  if (!parsed.success || Number.isNaN(new Date(`${parsed.data.due_on}T12:00:00Z`).getTime())) {
+    res.status(400).json({ error: 'Choose the day the review is due.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  await setReviewDue(String(req.params['id']), parsed.data.due_on);
+  res.locals['auditEntries'] = [{ action: 'updated', entity_type: 'plan', summary: `Care plan review due by ${parsed.data.due_on}` }];
+  res.json({ due_on: parsed.data.due_on, can_change: true });
 });
 
 /**

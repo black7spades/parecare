@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { format, isToday, isYesterday } from 'date-fns';
 import { api } from '../../../api/client';
-import { entityLabel } from '../../../lib/care';
+import { DOSE_ENTITY, doseActivityWords, entityLabel } from '../../../lib/care';
 import { useAuthStore } from '../../../stores/auth';
 import { CardEmpty, CardShell, CardTrouble, CardWaiting } from '../CardShell';
 import type { CardProps } from '../types';
@@ -80,6 +80,7 @@ const SECTION: Record<string, string> = {
   journeys: 'journey',
   'memory-book': 'memory-book',
   'health-statuses': 'health-status',
+  doses: 'mar',
   'care-needs': 'care-needs',
   neurotypes: 'neurotypes',
   'substance-use': 'substance-use',
@@ -167,7 +168,9 @@ export function RecentActivityCard({ profileId }: CardProps) {
                   e.source === 'pare' ? 'Pare' : e.actor_account_id && e.actor_account_id === myId ? 'You' : e.actor_name ?? 'Someone';
                 const kind = entityLabel(e.entity_type);
                 const section = SECTION[e.entity_type];
-                const what = e.summary ? (
+                const what = e.entity_type === DOSE_ENTITY ? (
+                  <span className="text-ink">{capitalise(doseActivityWords(e.action, e.summary))}</span>
+                ) : e.summary ? (
                   <>
                     <span className="font-medium text-ink">{e.summary}</span>{' '}
                     <span className="text-muted">{kind} {VERB[e.action]}</span>
@@ -178,7 +181,7 @@ export function RecentActivityCard({ profileId }: CardProps) {
                 // Every list opens its records by ?record=<id>, so a line goes
                 // straight to the record it is about while that record exists.
                 const target = section
-                  ? `/app/${profileId}/${section}${e.entity_id && e.action !== 'deleted' ? `?record=${e.entity_id}` : ''}`
+                  ? `/app/${profileId}/${section}${e.entity_id && e.action !== 'deleted' && e.entity_type !== DOSE_ENTITY ? `?record=${e.entity_id}` : ''}`
                   : null;
                 return (
                   <li key={e.id} className="flex items-baseline justify-between gap-3 text-sm">

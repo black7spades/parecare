@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { EditableSubheader } from '../../../components/ui/EditableSubheader';
@@ -21,6 +20,7 @@ import {
   type MedicalCondition,
   type Provider,
 } from '../../../lib/care';
+import { formatDateOnly } from '../../../lib/datetime';
 
 const inputClass =
   'w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -135,7 +135,7 @@ function NeurotypeCard({
             {condition.diagnosis_date ? (
               <div>
                 <span className="text-muted">Diagnosed: </span>
-                <span className="text-ink">{format(new Date(condition.diagnosis_date), 'd MMM yyyy')}</span>
+                <span className="text-ink">{formatDateOnly(condition.diagnosis_date, 'd MMM yyyy')}</span>
               </div>
             ) : null}
             {condition.diagnosing_provider ? (

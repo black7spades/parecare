@@ -39,6 +39,20 @@ export function blockViewerWrites(req: Request, res: Response, next: NextFunctio
 const AUDITED_ACTIONS: Record<string, string> = { POST: 'created', PUT: 'updated', PATCH: 'updated', DELETE: 'deleted' };
 
 /**
+ * A route that knows better than the generic guess what it changed sets
+ * res.locals.auditEntries to these, and they are written instead of the one
+ * default line. Recording a dose uses it so the activity reads "Jess
+ * recorded Metoprolol as refused" rather than "Medication added", and a
+ * round of several doses writes one line per dose.
+ */
+export interface AuditEntry {
+  action?: 'created' | 'updated' | 'deleted';
+  entity_type?: string;
+  entity_id?: string | null;
+  summary?: string | null;
+}
+
+/**
  * Append-only activity trail for every successful change under a care
  * profile. Captures who, what kind of record, and a short summary — not
  * record contents.
@@ -71,6 +85,23 @@ export function auditTrail(req: Request, res: Response, next: NextFunction): voi
 
   res.on('finish', () => {
     if (res.statusCode >= 400 || !profileId) return;
+    const custom = res.locals['auditEntries'] as AuditEntry[] | undefined;
+    if (Array.isArray(custom)) {
+      if (custom.length === 0) return;
+      void db('audit_log')
+        .insert(
+          custom.map((e) => ({
+            care_profile_id: profileId,
+            actor_account_id: actorId,
+            action: e.action ?? action,
+            entity_type: e.entity_type ?? resourceOf(req),
+            entity_id: e.entity_id ?? null,
+            summary: e.summary ? e.summary.slice(0, 255) : null,
+          }))
+        )
+        .catch((err) => console.warn('Audit log write failed:', (err as Error).message));
+      return;
+    }
     const body = (req.body ?? {}) as Record<string, unknown>;
     // The best available one-line description of what was touched, checked
     // in order of specificity across every record type the API accepts.
@@ -105,16 +136,40 @@ export function auditTrail(req: Request, res: Response, next: NextFunction): voi
 }
 
 /**
- * Circle management (invites, roles, POA, removal, edit-access grants) is
- * limited to the profile owner and platform admins / super admins.
+ * Some changes are kept for the profile owner and platform admins: who is in
+ * the care circle, the medication list, treatments and care costs. A blocked
+ * person is told plainly what they cannot do and who can, by name, so they
+ * know who to ask: "Only Linda Kowalski, who manages this profile, or an
+ * admin can change a medication's dose or times."
+ *
+ * Pass what the route does, written to follow "can": "change a medication's
+ * dose or times".
  */
-export function requireProfileOwner(req: Request, res: Response, next: NextFunction): void {
-  if (req.careAccess?.level !== 'owner' && req.careAccess?.level !== 'admin') {
-    res.status(403).json({
-      error: 'Only the profile owner or an admin can manage the care circle',
-      code: 'OWNER_ONLY',
-    });
-    return;
+export function requireProfileOwner(what: string) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (req.careAccess?.level === 'owner' || req.careAccess?.level === 'admin') {
+      next();
+      return;
+    }
+    res.status(403).json({ error: await ownerOnlyMessage(req.params['id'], what), code: 'OWNER_ONLY' });
+  };
+}
+
+/** "Only Linda Kowalski, who manages this profile, or an admin can <what>." */
+export async function ownerOnlyMessage(profileId: string | undefined, what: string): Promise<string> {
+  let owner: string | null = null;
+  try {
+    if (profileId) {
+      const row = await db('care_profiles as cp')
+        .join('accounts as a', 'cp.account_id', 'a.id')
+        .where('cp.id', profileId)
+        .first('a.display_name');
+      owner = (row?.display_name as string | undefined)?.trim() || null;
+    }
+  } catch {
+    owner = null;
   }
-  next();
+  return owner
+    ? `Only ${owner}, who manages this profile, or an admin can ${what}. Ask ${owner} if it needs changing.`
+    : `Only the person who manages this profile, or an admin, can ${what}.`;
 }

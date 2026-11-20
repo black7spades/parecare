@@ -9,7 +9,6 @@ import { PencilIcon } from '../../../components/ui/icons';
 import { RouteFallback } from '../../../components/layout/RouteFallback';
 import { RelationshipSelect } from '../../../components/RelationshipSelect';
 import { EditProfileModal } from './EditProfileModal';
-import { format } from 'date-fns';
 import {
   SELF_RELATIONSHIP,
   ageFrom,
@@ -21,6 +20,7 @@ import {
 } from '../../../lib/care';
 import type { Situation } from '../../../lib/situation';
 import { useAuthStore } from '../../../stores/auth';
+import { formatDateOnly, todayDateOnly } from '../../../lib/datetime';
 
 export interface ProfileContext {
   profile: CareProfile;
@@ -152,7 +152,7 @@ export function ProfileLayout() {
               {age !== null ? (
                 <span
                   className="text-muted font-normal"
-                  title={profile.date_of_birth ? `Born ${format(new Date(profile.date_of_birth), 'd MMM yyyy')}` : undefined}
+                  title={profile.date_of_birth ? `Born ${formatDateOnly(profile.date_of_birth, 'd MMM yyyy')}` : undefined}
                 >
                   {' · '}
                   {age}
@@ -165,7 +165,7 @@ export function ProfileLayout() {
                   profile.preferred_name ? `Known as ${profile.preferred_name}` : null,
                   profile.kind === 'pet' ? profile.breed : null,
                   profile.pronouns,
-                  profile.date_of_birth ? `Born ${format(new Date(profile.date_of_birth), 'd MMM yyyy')}` : null,
+                  profile.date_of_birth ? `Born ${formatDateOnly(profile.date_of_birth, 'd MMM yyyy')}` : null,
                   profile.kind === 'pet' ? null : profile.primary_language,
                 ]
                   .filter(Boolean)
@@ -246,7 +246,7 @@ function HealthAlertBar({
 
   const dismiss = useMutation({
     mutationFn: (statusId: string) =>
-      api.patch(`/care-profiles/${profileId}/health-statuses/${statusId}`, { status: 'resolved', actual_resolution_date: new Date().toISOString().slice(0, 10) }),
+      api.patch(`/care-profiles/${profileId}/health-statuses/${statusId}`, { status: 'resolved', actual_resolution_date: todayDateOnly() }),
     onSuccess: () => {
       setConfirmId(null);
       void queryClient.invalidateQueries({ queryKey: ['health-statuses', profileId] });

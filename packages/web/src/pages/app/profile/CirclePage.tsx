@@ -798,7 +798,9 @@ function EditMemberModal({
       setPhone(member.phone ?? '');
       setEmail(member.email ?? '');
       setRelationship(member.relationship ?? '');
-      setRole(member.role);
+      // A role typed by hand before the list existed is shown as its listed
+      // twin when there is one, so saving puts it in the listed form.
+      setRole(CIRCLE_ROLES.find((r) => r.value === member.role.trim().toLowerCase())?.value ?? member.role);
       setPermission(member.permission ?? 'contributor');
       setDescription(member.role_description ?? '');
       setPoaType(member.poa_type ?? '');
@@ -835,7 +837,25 @@ function EditMemberModal({
         }}
       >
         {added ? <Input label="Their name" value={name} onChange={(e) => setName(e.target.value)} required /> : null}
-        <Input label="Role" value={role} onChange={(e) => setRole(e.target.value)} required />
+        <div>
+          <label htmlFor="edit-role" className="block text-sm font-medium text-ink mb-1">
+            Role
+          </label>
+          {/* A fixed choice, so a document shared with carers reaches every carer. */}
+          <select
+            id="edit-role"
+            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+          >
+            {CIRCLE_ROLES.map((r) => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+            {role && !CIRCLE_ROLES.some((r) => r.value === role) ? (
+              <option value={role}>{circleRoleLabel(role)}</option>
+            ) : null}
+          </select>
+        </div>
         {added ? (
           <RelationshipSelect label={`Who is the person in care to them? Optional`} value={relationship} onChange={setRelationship} />
         ) : (

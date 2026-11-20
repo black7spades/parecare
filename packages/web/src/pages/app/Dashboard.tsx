@@ -8,7 +8,29 @@ import { useAssistantStore } from '../../stores/assistant';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { Avatar } from '../../components/ui/Avatar';
-import { POA_TYPES, PET_SPECIES, conditionStatusLabel } from '../../lib/care';
+import { DOSE_ENTITY, POA_TYPES, PET_SPECIES, conditionStatusLabel, doseActivityWords, type DeathChange } from '../../lib/care';
+
+/** One sentence for a date of death recorded or cleared on several people at once. */
+function deathsSentence(deaths: DeathChange[]): string {
+  const stopped = deaths.filter((d) => d.kind === 'stopped');
+  const restored = deaths.filter((d) => d.kind === 'restored');
+  const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+  const out: string[] = [];
+  if (stopped.length > 0) {
+    const tasks = stopped.reduce((s, d) => s + d.tasks, 0);
+    const appts = stopped.reduce((s, d) => s + d.appointments, 0);
+    out.push(
+      `For ${n(stopped.length, 'person', 'people')}, task reminders, dose and supply alerts and the calendar feed have stopped` +
+        (tasks ? `, ${n(tasks, 'open task is', 'open tasks are')} closed` : '') +
+        (appts ? ` and ${n(appts, 'future appointment is', 'future appointments are')} cancelled but kept as history` : '') +
+        '. Clearing the date of death puts everything back.'
+    );
+  }
+  if (restored.length > 0) {
+    out.push(`For ${n(restored.length, 'person', 'people')}, reminders, alerts and the calendar feed are running again.`);
+  }
+  return out.join(' ');
+}
 import { AttentionPanel } from '../../components/AttentionPanel';
 import { useAiStatus, AI_WARMING_MESSAGE } from '../../lib/aiStatus';
 import { BulkLinkProviderPicker, BulkLinkAddressPicker, BulkLinkOwnerPicker, BulkLinkCarerPicker } from './homeboard/BulkLinkPickers';
@@ -103,6 +125,7 @@ export function Dashboard() {
   const [bulkCarerOpen, setBulkCarerOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [archiveNote, setArchiveNote] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Only platform staff may permanently delete profiles; everyone can act on
   // their own records for the reversible actions.
@@ -134,19 +157,33 @@ export function Dashboard() {
     [profiles, selectedProfileIds]
   );
   const selectedPetIds = useMemo(() => selectedProfiles.filter((p) => p.kind === 'pet').map((p) => p.id), [selectedProfiles]);
+  // Only the person who set up a profile, or a platform admin, may archive it.
+  const archivable = useMemo(() => selectedProfiles.filter((p) => isAdmin || p.access === 'owner'), [selectedProfiles, isAdmin]);
+  const notArchivable = selectedProfiles.length - archivable.length;
   const selectedPersonIds = useMemo(() => selectedProfiles.filter((p) => p.kind !== 'pet').map((p) => p.id), [selectedProfiles]);
 
   // Bulk archive and permanent delete each fan out one request per profile
   // so per-profile permission checks still apply; the server silently skips
   // any the user may not touch.
   const bulkArchive = useMutation({
-    mutationFn: () => Promise.allSettled([...selectedProfileIds].map((id) => api.delete(`/care-profiles/${id}`))),
-    onSuccess: () => {
+    mutationFn: () => Promise.allSettled(archivable.map((p) => api.delete(`/care-profiles/${p.id}`))),
+    onSuccess: (results) => {
       void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
       void queryClient.invalidateQueries({ queryKey: ['care-profiles'] });
       setConfirmArchive(false);
       setSelectedProfileIds(new Set());
+      // Say plainly what did not happen, and why, rather than nothing.
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      const archived = results.length - failed;
+      const parts: string[] = [];
+      parts.push(`Archived ${archived} ${archived === 1 ? 'profile' : 'profiles'}.`);
+      if (notArchivable > 0) {
+        parts.push(`${notArchivable} ${notArchivable === 1 ? 'was' : 'were'} left as ${notArchivable === 1 ? 'it is' : 'they are'}: only the person who set up a profile can archive it.`);
+      }
+      if (failed > 0) parts.push(`${failed} could not be archived just now. Try again.`);
+      setArchiveNote(notArchivable > 0 || failed > 0 ? parts.join(' ') : '');
     },
+    onError: () => setArchiveNote('The profiles could not be archived just now. Try again.'),
   });
 
   const bulkDelete = useMutation({
@@ -298,15 +335,26 @@ export function Dashboard() {
             </div>
           </div>
 
+          {archiveNote ? (
+            <div className="flex items-start justify-between gap-3 rounded-md border border-border bg-card px-4 py-2.5 text-sm text-ink">
+              <span>{archiveNote}</span>
+              <Button size="xs" variant="ghost" onClick={() => setArchiveNote('')}>
+                Dismiss
+              </Button>
+            </div>
+          ) : null}
+
           {selectedProfileIds.size > 0 ? (
             <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 bg-primary-50 dark:bg-primary-900/20 border border-primary/30 rounded-lg text-sm">
               <span className="font-medium text-ink mr-1">{selectedProfileIds.size} selected</span>
               <Button size="sm" variant="secondary" onClick={() => setBulkEditOpen(true)}>
                 Edit
               </Button>
-              <Button size="sm" variant="secondary" onClick={() => setConfirmArchive(true)}>
-                Archive
-              </Button>
+              {archivable.length > 0 ? (
+                <Button size="sm" variant="secondary" onClick={() => setConfirmArchive(true)}>
+                  Archive
+                </Button>
+              ) : null}
               {canEdit ? (
                 <>
                   <Button size="sm" variant="secondary" onClick={() => setBulkLinkOpen(true)}>
@@ -462,9 +510,16 @@ export function Dashboard() {
 
           <Modal open={confirmArchive} onClose={() => setConfirmArchive(false)} title="Archive selected profiles">
             <p className="text-sm text-muted mb-4">
-              Archive {selectedProfileIds.size} {selectedProfileIds.size === 1 ? 'profile' : 'profiles'}? This hides
+              Archive {archivable.length} {archivable.length === 1 ? 'profile' : 'profiles'}? This hides
               them and their records from the homeboard. Nothing is deleted, and they can be brought back later.
             </p>
+            {notArchivable > 0 ? (
+              <p className="text-sm text-muted mb-4">
+                {notArchivable} of those chosen {notArchivable === 1 ? 'was' : 'were'} set up by someone else, so{' '}
+                {notArchivable === 1 ? 'it stays' : 'they stay'} as {notArchivable === 1 ? 'it is' : 'they are'}. Only the
+                person who set up a profile can archive it.
+              </p>
+            ) : null}
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setConfirmArchive(false)}>Cancel</Button>
               <Button variant="secondary" loading={bulkArchive.isPending} onClick={() => bulkArchive.mutate()}>
@@ -717,7 +772,9 @@ function ProfileCard({
         {p.last_activity ? (
           <Row label="Last update">
             <span className="text-muted">
-              {p.last_activity.summary || `${p.last_activity.action} ${p.last_activity.entity_type}`}
+              {p.last_activity.entity_type === DOSE_ENTITY
+                ? `${p.last_activity.actor_name ?? 'Someone'} ${doseActivityWords(p.last_activity.action, p.last_activity.summary)}`
+                : p.last_activity.summary || `${p.last_activity.action} ${p.last_activity.entity_type}`}
               {' · '}
               {formatDistanceToNow(new Date(p.last_activity.created_at), { addSuffix: true })}
             </span>
@@ -983,17 +1040,25 @@ function BulkEditModal({
   const save = useMutation({
     mutationFn: async () => {
       const patch = buildPatch();
-      const results = await Promise.allSettled(profiles.map((p) => api.patch(`/care-profiles/${p.id}`, patch)));
-      return results.filter((r) => r.status === 'rejected').length;
+      const results = await Promise.allSettled(
+        profiles.map((p) => api.patch<{ death_change: DeathChange | null }>(`/care-profiles/${p.id}`, patch))
+      );
+      const deaths = results
+        .map((r) => (r.status === 'fulfilled' ? r.value?.death_change ?? null : null))
+        .filter((d): d is DeathChange => !!d);
+      return { failed: results.filter((r) => r.status === 'rejected').length, deaths };
     },
-    onSuccess: (failed) => {
+    onSuccess: ({ failed, deaths }) => {
       void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
       for (const p of profiles) void queryClient.invalidateQueries({ queryKey: ['care-profile', p.id] });
-      if (failed > 0) {
-        setResult(`Saved to ${profiles.length - failed} of ${profiles.length}. The rest could not be changed, perhaps a record you cannot edit.`);
-      } else {
-        onDone();
-      }
+      for (const key of ['tasks', 'appointments', 'notifications', 'pare-attention']) void queryClient.invalidateQueries({ queryKey: [key] });
+      const parts: string[] = [];
+      if (failed > 0) parts.push(`Saved to ${profiles.length - failed} of ${profiles.length}. The rest could not be changed, perhaps a record you cannot edit.`);
+      // A recorded or cleared death changes a lot at once, so say what.
+      if (deaths.length === 1) parts.push(deaths[0].message);
+      else if (deaths.length > 1) parts.push(deathsSentence(deaths));
+      if (parts.length > 0) setResult(parts.join(' '));
+      else onDone();
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not save.'),
   });
@@ -1058,7 +1123,17 @@ function BulkEditModal({
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button loading={save.isPending} disabled={patchSize === 0} onClick={() => save.mutate()}>
+            <Button
+              loading={save.isPending}
+              onClick={() => {
+                if (patchSize === 0) {
+                  setError('Tick at least one box to choose what to change.');
+                  return;
+                }
+                setError('');
+                save.mutate();
+              }}
+            >
               Apply to {count}
             </Button>
           </div>

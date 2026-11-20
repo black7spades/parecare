@@ -1,6 +1,7 @@
 import { db } from '../config/database';
 import { formatInZone } from '../lib/timezone';
 import { withCategory } from './documentCategories';
+import { roleMaySee } from '../lib/circleRoles';
 import type { CareAccess, CareProfile } from '../types';
 
 /**
@@ -23,11 +24,14 @@ const MAR_DAYS = 14;
 
 function age(dob: string | Date | null): number | null {
   if (!dob) return null;
-  const d = new Date(dob);
-  if (Number.isNaN(d.getTime())) return null;
+  // A date of birth is a plain day, "1943-02-19": read its parts directly
+  // rather than through a time zone.
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(typeof dob === 'string' ? dob : dob.toISOString());
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
   const now = new Date();
-  let years = now.getFullYear() - d.getFullYear();
-  if (now.getMonth() < d.getMonth() || (now.getMonth() === d.getMonth() && now.getDate() < d.getDate())) years--;
+  let years = now.getFullYear() - y;
+  if (now.getMonth() + 1 < mo || (now.getMonth() + 1 === mo && now.getDate() < d)) years--;
   return years;
 }
 
@@ -450,8 +454,7 @@ export async function buildProfileContext(
     const roles = Array.isArray(d.visible_to_roles) ? d.visible_to_roles : [];
     if (roles.length === 0) return true;
     if (access.level === 'owner' || access.level === 'admin') return true;
-    const memberRole = access.member?.role;
-    return !!memberRole && roles.includes(memberRole);
+    return roleMaySee(roles, access.member?.role);
   });
   if (visibleDocs.length) {
     sections.push(

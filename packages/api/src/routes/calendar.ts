@@ -117,6 +117,15 @@ async function expandMedicationEvents(
   to: Date,
   timeZone: string | null = null
 ): Promise<CalendarEvent[]> {
+  // Medicine times end on the day someone died.
+  const person = await db('care_profiles').where({ id: profileId }).first('died_on');
+  if (person?.died_on) {
+    const day = String(person.died_on).slice(0, 10);
+    const zoneForDay = isValidTimeZone(timeZone) ? timeZone : 'UTC';
+    const lastDay = parseZonedTime(`${day}T23:59:59`, zoneForDay) ?? new Date(`${day}T23:59:59Z`);
+    if (lastDay < to) to = lastDay;
+    if (from > to) return [];
+  }
   const meds = await db('medications as m')
     .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
     .where({ 'm.care_profile_id': profileId, 'm.active': true })
@@ -276,6 +285,9 @@ function icsDate(d: Date): string {
 
 const FREQ: Record<string, string> = { daily: 'DAILY', weekly: 'WEEKLY', monthly: 'MONTHLY' };
 
+/** Calendar files end every line with a carriage return and line feed. */
+const ICS_EOL = String.fromCharCode(13, 10);
+
 icsRouter.get('/:token.ics', async (req, res) => {
   const profile = await db<CareProfile & { ics_token: string }>('care_profiles')
     .where({ ics_token: req.params['token'], archived: false })
@@ -301,6 +313,16 @@ icsRouter.get('/:token.ics', async (req, res) => {
     'METHOD:PUBLISH',
     `X-WR-CALNAME:${icsEscape(`PareCare — ${profile.full_name}`)}`,
   ];
+
+  // Once a death is recorded the feed stops: an empty calendar clears every
+  // event from the calendars subscribed to it. Clearing the date restores it.
+  if (profile.died_on) {
+    lines.push('END:VCALENDAR');
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', 'inline; filename="parecare.ics"');
+    res.send(lines.join(ICS_EOL) + ICS_EOL);
+    return;
+  }
 
   for (const r of reminders) {
     const start = new Date(r.next_due_at);

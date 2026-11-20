@@ -174,11 +174,12 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
       );
       const now = new Date();
       const dayStr = format(now, 'yyyy-MM-dd');
-      const entries: Array<{ medication_id: string; scheduled_for: string; administered_at: string; status: string }> = [];
+      const entries: Array<{ medication_id: string; scheduled_for: string; administered_at: string; status: string; right_dose: boolean; right_route: boolean }> = [];
       for (const m of chart.medications) {
         for (const sv of coverMedDay(m, dayStr, chart.administrations, now).slots) {
           if (sv.past && !sv.covered) {
-            entries.push({ medication_id: m.id, scheduled_for: sv.iso, administered_at: sv.iso, status: 'given' });
+            // Logged as prescribed, so the dose and route checks are confirmed.
+            entries.push({ medication_id: m.id, scheduled_for: sv.iso, administered_at: sv.iso, status: 'given', right_dose: true, right_route: true });
           }
         }
       }

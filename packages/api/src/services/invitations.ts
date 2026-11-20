@@ -1,6 +1,7 @@
 import { db } from '../config/database';
 import { env } from '../config/env';
 import { sendInviteEmail } from './email';
+import { canonicalRole } from '../lib/circleRoles';
 import type { Account, CareCircleMember, Invitation } from '../types';
 
 /**
@@ -140,7 +141,7 @@ export async function createInvitation(opts: {
           invitation_id: invitation.id,
           invited_email: email,
           display_name: opts.display_name,
-          role: a.role,
+          role: canonicalRole(a.role) || 'other',
           permission: a.permission,
           relationship: a.relationship ?? null,
           role_description: a.role_description ?? null,

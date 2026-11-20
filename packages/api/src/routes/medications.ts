@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { requireAccountRight } from '../middleware/accountRights';
-import { requireProfileOwner } from '../middleware/permissions';
+import { requireProfileOwner, type AuditEntry } from '../middleware/permissions';
+import { DOSE_AUDIT_ENTITY, GIVEN_STATUSES, doseSummary } from '../lib/doseOutcome';
 import { exportRecords, importRecords, type PortDescriptor, type PortFormat } from '../services/dataPort';
 import { resolveCatalogueId } from './medicationCatalogue';
 import { getMarRetentionMonths } from '../config/settings';
@@ -310,7 +311,7 @@ const importSchema = z.object({
   data: z.string().min(1),
 });
 
-medicationsRouter.post('/import', requireAuth, requireProfileOwner, async (req, res) => {
+medicationsRouter.post('/import', requireAuth, requireProfileOwner('import medications'), async (req, res) => {
   let text: string;
   let format: PortFormat;
   if (typeof req.body === 'string') {
@@ -434,7 +435,7 @@ async function medFieldsFrom(data: z.infer<typeof medSchema> | Partial<z.infer<t
   return fields;
 }
 
-medicationsRouter.post('/', requireAuth, requireProfileOwner, async (req, res) => {
+medicationsRouter.post('/', requireAuth, requireProfileOwner('add a medication'), async (req, res) => {
   const parsed = medSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
@@ -468,7 +469,7 @@ medicationsRouter.post('/', requireAuth, requireProfileOwner, async (req, res) =
   res.status(201).json({ medication: serializeMed(await medWithName((med as { id: string }).id)) });
 });
 
-medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner, async (req, res) => {
+medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner("change a medication's dose, times or details"), async (req, res) => {
   const parsed = medSchema.partial().safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
@@ -531,7 +532,7 @@ const bulkSchema = z.object({
   fields: medSchema.partial().optional(),
 });
 
-medicationsRouter.post('/bulk', requireAuth, requireProfileOwner, async (req, res) => {
+medicationsRouter.post('/bulk', requireAuth, requireProfileOwner('change several medications at once'), async (req, res) => {
   const parsed = bulkSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
@@ -559,7 +560,7 @@ medicationsRouter.post('/bulk', requireAuth, requireProfileOwner, async (req, re
   res.json({ updated });
 });
 
-medicationsRouter.delete('/:medId', requireAuth, requireProfileOwner, async (req, res) => {
+medicationsRouter.delete('/:medId', requireAuth, requireProfileOwner('delete a medication'), async (req, res) => {
   const affected = await db('medications').where({ id: req.params['medId'], care_profile_id: req.params['id'] }).del();
   if (!affected) {
     res.status(404).json({ error: 'Medication not found', code: 'NOT_FOUND' });
@@ -581,7 +582,7 @@ const reorderSchema = z.object({
   amount_paid: z.coerce.number().min(0).max(1e9).optional().nullable(),
 });
 
-medicationsRouter.post('/:medId/reorder', requireAuth, requireProfileOwner, async (req, res) => {
+medicationsRouter.post('/:medId/reorder', requireAuth, requireProfileOwner('mark a medication as ordered or restocked'), async (req, res) => {
   const parsed = reorderSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
@@ -725,8 +726,16 @@ const adminSchema = z.object({
   right_time: z.boolean().optional(),
 });
 
-const NOTE_OPTIONAL = new Set(['given', 'self_administered']);
-const GIVEN = new Set(['given', 'self_administered']);
+const NOTE_OPTIONAL = GIVEN_STATUSES;
+const GIVEN = GIVEN_STATUSES;
+
+// One activity line per dose, saying the outcome: "Metoprolol as refused".
+const doseAudit = (
+  action: AuditEntry['action'],
+  entityId: string | null,
+  medicationName: string,
+  status: string
+): AuditEntry => ({ action, entity_type: DOSE_AUDIT_ENTITY, entity_id: entityId, summary: doseSummary(medicationName, status) });
 const FUTURE_SKEW_MS = 60 * 1000;
 const isFutureTime = (s?: string | null): boolean => !!s && new Date(s).getTime() > Date.now() + FUTURE_SKEW_MS;
 
@@ -803,6 +812,7 @@ medicationsRouter.post('/:medId/administrations', requireAuth, async (req, res) 
   }
   const [record] = await db('medication_administrations').insert(buildAdminRow(parsed.data, med, req.params['id']!, req.account!)).returning('*');
   if (GIVEN.has(parsed.data.status)) await drawDownSupply(med.id, 1, med);
+  res.locals['auditEntries'] = [doseAudit('created', record.id, med.name, parsed.data.status)];
   res.status(201).json({ administration: record });
 });
 
@@ -835,7 +845,12 @@ medicationsRouter.post('/administrations/batch', requireAuth, async (req, res) =
     }
   }
   const rows = parsed.data.entries.map((e) => buildAdminRow(e, byId.get(e.medication_id)!, req.params['id']!, req.account!));
-  const inserted = await db('medication_administrations').insert(rows).returning('id');
+  const inserted = (await db('medication_administrations').insert(rows).returning(['id', 'medication_id', 'status'])) as Array<{
+    id: string;
+    medication_id: string;
+    status: string;
+  }>;
+  res.locals['auditEntries'] = inserted.map((r) => doseAudit('created', r.id, byId.get(r.medication_id)!.name, r.status));
   // Draw down supply for each given dose, aggregated per medication.
   const drawdowns = new Map<string, number>();
   for (const e of parsed.data.entries) {
@@ -859,11 +874,10 @@ medicationsRouter.delete('/administrations/:adminId', requireAuth, async (req, r
     res.status(404).json({ error: 'That dose record was not found, or has been archived and cannot be changed.', code: 'NOT_FOUND' });
     return;
   }
-  if (GIVEN.has(admin.status)) {
-    const med = await medSelect().where('m.id', admin.medication_id).first();
-    if (med) await restoreSupply(med, 1);
-  }
+  const med = await medSelect().where('m.id', admin.medication_id).first();
+  if (GIVEN.has(admin.status) && med) await restoreSupply(med, 1);
   await db('medication_administrations').where({ id: admin.id }).delete();
+  res.locals['auditEntries'] = [doseAudit('deleted', admin.id, med?.name ?? 'A medication', admin.status)];
   res.json({ message: 'Dose record removed.' });
 });
 
@@ -953,7 +967,9 @@ medicationsRouter.patch('/administrations/:adminId', requireAuth, async (req, re
     await db('medication_administrations').where({ id: admin.id }).update(built.update);
   }
   if (parsed.data.status !== undefined) await reconcileSupplyForStatus(admin.status, parsed.data.status, admin.medication_id);
-  res.json({ administration: await adminLogRow(req.params['id']!, admin.id) });
+  const row = await adminLogRow(req.params['id']!, admin.id);
+  res.locals['auditEntries'] = [doseAudit('updated', admin.id, row?.medication_name ?? 'A medication', row?.status ?? admin.status)];
+  res.json({ administration: row });
 });
 
 // Bulk correction or removal across selected records. Update applies the same
@@ -981,6 +997,13 @@ medicationsRouter.post('/administrations/bulk', requireAuth, async (req, res) =>
   const records = await db('medication_administrations')
     .where('care_profile_id', req.params['id'])
     .whereIn('id', parsed.data.ids);
+  // The medicine names, for one activity line per dose changed.
+  const nameRows = (await db('medications as m')
+    .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
+    .whereIn('m.id', [...new Set(records.map((r) => r.medication_id as string))])
+    .select('m.id', 'c.name')) as Array<{ id: string; name: string }>;
+  const nameOf = new Map(nameRows.map((r) => [r.id, r.name]));
+  const medName = (id: string) => nameOf.get(id) ?? 'A medication';
 
   if (parsed.data.action === 'delete') {
     for (const admin of records) {
@@ -993,6 +1016,7 @@ medicationsRouter.post('/administrations/bulk', requireAuth, async (req, res) =>
       .where('care_profile_id', req.params['id'])
       .whereIn('id', records.map((r) => r.id))
       .delete();
+    res.locals['auditEntries'] = records.map((r) => doseAudit('deleted', r.id, medName(r.medication_id), r.status));
     res.json({ deleted });
     return;
   }
@@ -1012,5 +1036,6 @@ medicationsRouter.post('/administrations/bulk', requireAuth, async (req, res) =>
     if (Object.keys(e.update).length > 0) await db('medication_administrations').where({ id: e.id }).update(e.update);
     if (parsed.data.status !== undefined) await reconcileSupplyForStatus(e.oldStatus, parsed.data.status, e.medicationId);
   }
+  res.locals['auditEntries'] = edits.map((e) => doseAudit('updated', e.id, medName(e.medicationId), parsed.data.status ?? e.oldStatus));
   res.json({ updated: edits.length });
 });

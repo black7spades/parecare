@@ -1,5 +1,6 @@
 import { db } from '../config/database';
 import { dateInZone, hmInZone, startOfDayInZone } from '../lib/timezone';
+import { DOSE_AUDIT_ENTITY } from '../lib/doseOutcome';
 import { perDoseDrawdown } from './medicationSupply';
 
 /**
@@ -266,6 +267,7 @@ const ENTITY_PAGE: Record<string, string> = {
   providers: 'providers',
   reminders: 'tasks',
   medications: 'medications',
+  doses: 'mar',
   calendar: 'calendar',
 };
 
@@ -318,6 +320,11 @@ async function auditHits(
     let text: string;
     if (r.entity_type === 'messages' && r.action === 'created') {
       text = `${who} posted in ${name}'s messages.`;
+    } else if (r.entity_type === DOSE_AUDIT_ENTITY) {
+      text =
+        r.action === 'created'
+          ? `${who} recorded ${name}'s ${r.summary ?? 'dose'}.`
+          : `${who} ${r.action === 'deleted' ? 'removed' : 'corrected'} a dose record for ${name}${r.summary ? `: ${r.summary}` : ''}.`;
     } else {
       const noun = NOUNS[r.entity_type ?? ''] ?? 'a record';
       const verb = VERBS[r.action ?? ''] ?? 'changed';

@@ -23,7 +23,7 @@ import {
   type SubstanceUse,
 } from '../../../lib/care';
 import { useProfile } from './ProfileLayout';
-import { format } from 'date-fns';
+import { formatDateOnly } from '../../../lib/datetime';
 
 const byText = (a: string | null | undefined, b: string | null | undefined) => (a ?? '').localeCompare(b ?? '', undefined, { numeric: true });
 
@@ -170,7 +170,7 @@ export function SubstanceUsePage() {
                   <td className="px-3 py-2 text-muted">{r.quantity_unit || '-'}</td>
                   <td className="px-3 py-2 text-muted">{r.frequency || '-'}</td>
                   <td className="px-3 py-2 text-muted">
-                    {r.started_on ? format(new Date(r.started_on), 'MMM yyyy') : '-'}
+                    {r.started_on ? formatDateOnly(r.started_on, 'MMM yyyy') : '-'}
                   </td>
                   {canEdit ? (
                     <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -212,8 +212,8 @@ export function SubstanceUsePage() {
               { label: 'Amount', value: r.quantity },
               { label: 'Unit', value: r.quantity_unit },
               { label: 'How often', value: r.frequency },
-              { label: 'Started', value: r.started_on ? format(new Date(r.started_on), 'd MMM yyyy') : null },
-              { label: 'Stopped', value: r.quit_on ? format(new Date(r.quit_on), 'd MMM yyyy') : null },
+              { label: 'Started', value: r.started_on ? formatDateOnly(r.started_on, 'd MMM yyyy') : null },
+              { label: 'Stopped', value: r.quit_on ? formatDateOnly(r.quit_on, 'd MMM yyyy') : null },
               { label: 'Notes', value: r.notes },
             ]}
             onEdit={() => setEditing(r)}

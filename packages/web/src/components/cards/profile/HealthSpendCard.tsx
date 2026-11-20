@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import { formatDateOnly, todayDateOnly } from '../../../lib/datetime';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
@@ -99,7 +99,7 @@ function HealthSpendOverview({ profileId, careName }: { profileId: string; careN
 
   const sym = data?.summary.currency_symbol ?? '$';
   const money = (n: number): string => `${sym}${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const fmtDay = (d: string) => { try { return format(new Date(d), 'd MMM yyyy'); } catch { return d; } };
+  const fmtDay = (d: string) => formatDateOnly(d, 'd MMM yyyy') || d;
 
   const exportCsv = async () => {
     const blob = await api.blob(`/care-profiles/${profileId}/health-spend/export${spendRangeParams(range)}`);
@@ -221,7 +221,7 @@ function EntryModal({ mode, profileId, careName, currencySymbol, entry, onClose,
   onClosed?: () => void;
 }) {
   const [amount, setAmount] = useState(entry ? String(entry.amount) : '');
-  const [spentOn, setSpentOn] = useState(entry?.spent_on ?? new Date().toISOString().slice(0, 10));
+  const [spentOn, setSpentOn] = useState(entry?.spent_on ?? todayDateOnly());
   const [note, setNote] = useState(entry?.description ?? '');
   const [tax, setTax] = useState(entry?.tax_amount != null ? String(entry.tax_amount) : '');
   const [funding, setFunding] = useState(entry?.funding_source ?? '');

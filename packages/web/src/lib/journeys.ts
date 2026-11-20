@@ -1,3 +1,4 @@
+import { parseDateOnly } from './datetime';
 /** Care journeys: the library (life stages, templates) and per-person instances. */
 
 export interface LifeStage {
@@ -98,7 +99,8 @@ export interface Achievement {
 
 /** Age in whole years at today, from an ISO date of birth. */
 export function ageInYears(dateOfBirth: string): number {
-  const dob = new Date(dateOfBirth);
+  // A plain day, read as that day here, not as midnight UTC.
+  const dob = parseDateOnly(dateOfBirth) ?? new Date(dateOfBirth);
   const now = new Date();
   let years = now.getFullYear() - dob.getFullYear();
   const anniversary = new Date(dob);

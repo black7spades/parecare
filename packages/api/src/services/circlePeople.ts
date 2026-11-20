@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { db } from '../config/database';
+import { canonicalRole } from '../lib/circleRoles';
 
 /**
  * People in someone's care circle who were added rather than invited: a
@@ -36,7 +37,7 @@ export async function addCirclePerson(profileId: string, input: CirclePersonInpu
       invited_email: null,
       invite_accepted: false,
       display_name: input.display_name.trim(),
-      role: input.role || 'other',
+      role: canonicalRole(input.role) || 'other',
       relationship: blankToNull(input.relationship),
       role_description: blankToNull(input.role_description),
       phone: blankToNull(input.phone),

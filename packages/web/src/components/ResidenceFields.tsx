@@ -70,11 +70,10 @@ function residencePayloadWith(v: ResidenceValue, providerId: string | null): Rec
   const facility = isFacilityResidence(v.residence_type);
   return {
     residence_type: v.residence_type || null,
-    // A facility resident's address is the facility's; a private resident
+    // The home address is kept while they stay in a facility, such as a
+    // hospital, so it is still there when they go home. A private resident
     // clears any facility link and room.
-    ...(facility
-      ? { address_line1: null, address_line2: null, address_suburb: null, address_state: null, address_postcode: null, address_country: null }
-      : addressPayload(v.address)),
+    ...addressPayload(v.address),
     residence_provider_id: facility ? providerId : null,
     room_number: facility ? v.room_number.trim() || null : null,
     room_area_name: facility ? v.room_area_name.trim() || null : null,
@@ -96,7 +95,7 @@ export function residencePayload(v: ResidenceValue): Record<string, string | nul
 export async function persistResidence(
   profileId: string,
   v: ResidenceValue
-): Promise<{ payload: Record<string, string | null>; contact?: Record<string, string | null> }> {
+): Promise<{ payload: Record<string, string | null>; contact?: Record<string, string> }> {
   let providerId = v.residence_provider_id || null;
   if (isFacilityResidence(v.residence_type) && v.add_new_facility && v.new_facility_name.trim()) {
     const created = await api.post<{ provider: Provider }>(`/care-profiles/${profileId}/providers`, {
@@ -108,9 +107,12 @@ export async function persistResidence(
     providerId = created.provider.id;
   }
   const payload = residencePayloadWith(v, providerId);
+  // Reaching them through the facility changes only who to contact first. A
+  // personal contact already saved, such as a daughter, keeps every detail,
+  // so switching back later loses nothing.
   const contact =
     isFacilityResidence(v.residence_type) && v.use_facility_as_contact && providerId
-      ? { contact_kind: 'provider', contact_provider_id: providerId, contact_account_id: null, contact_profile_id: null, contact_name: null, contact_relationship: null, contact_phone: null, contact_phone_type: null, contact_email: null }
+      ? { contact_kind: 'provider', contact_provider_id: providerId }
       : undefined;
   return { payload, contact };
 }
@@ -207,6 +209,12 @@ export function ResidenceFields({
                 ))}
               </select>
             </div>
+          </div>
+
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-ink">Home address</p>
+            <p className="text-xs text-muted">Kept while they stay here, so it is ready when they go home.</p>
+            <AddressFields value={value.address} onChange={(a) => set({ address: a })} findLabel="Find home address" />
           </div>
 
           <label className="flex items-center gap-2 text-sm text-ink">

@@ -18,6 +18,7 @@ import { ItemNotesThread } from './JourneysSection';
 import { ToneBlockNotice, extractToneBlock, type ToneBlock } from '../../../components/ToneBlockNotice';
 import type { MemoryEntry } from '../../../lib/care';
 import type { Achievement, CareJourney } from '../../../lib/journeys';
+import { formatDateOnly } from '../../../lib/datetime';
 
 /**
  * The Memory Book: written memories interleaved with milestone
@@ -175,7 +176,7 @@ function BookView({
         {storyOf ? (
           <p className="text-sm text-muted -mt-2">
             The story behind <span className="font-medium text-ink">{storyOf.title}</span>
-            {storyOf.achieved_on ? `, ${format(new Date(storyOf.achieved_on), 'd MMM yyyy')}` : ''}. It stays linked to
+            {storyOf.achieved_on ? `, ${formatDateOnly(storyOf.achieved_on, 'd MMM yyyy')}` : ''}. It stays linked to
             the achievement.{' '}
             <Button size="xs" variant="ghost" onClick={onStoryDone}>
               Write a plain memory instead
@@ -406,7 +407,7 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
         a.title,
         a.journey_name ?? '',
         a.phase_name ?? a.legacy_phase ?? '',
-        a.achieved_on ? format(new Date(a.achieved_on), 'yyyy-MM-dd') : '',
+        a.achieved_on ? formatDateOnly(a.achieved_on, 'yyyy-MM-dd') : '',
         format(new Date(a.completed_at), 'yyyy-MM-dd'),
         a.recorded_by_name ?? '',
         a.is_milestone ? 'yes' : 'no',
@@ -530,7 +531,7 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
             { label: 'What it was', value: panel.current.description },
             { label: 'Journey', value: panel.current.journey_name },
             { label: 'Phase', value: panel.current.phase_name ?? panel.current.legacy_phase },
-            { label: 'Happened', value: panel.current.achieved_on ? format(new Date(panel.current.achieved_on), 'd MMM yyyy') : null },
+            { label: 'Happened', value: panel.current.achieved_on ? formatDateOnly(panel.current.achieved_on, 'd MMM yyyy') : null },
             { label: 'Recorded', value: format(new Date(panel.current.completed_at), 'd MMM yyyy') },
             { label: 'Recorded by', value: panel.current.recorded_by_name },
             { label: 'Milestone', value: panel.current.is_milestone ? 'Yes' : null },

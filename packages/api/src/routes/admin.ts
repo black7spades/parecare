@@ -5,6 +5,7 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { requireRole, roleAtLeast } from '../middleware/requireRole';
 import { archiveOldAdministrations } from '../services/marArchive';
+import { canonicalRole } from '../lib/circleRoles';
 import { updateSettings, isMessageToneGuardEnabled, getAiConfig } from '../config/settings';
 import { localModelState, isLocalProvider } from '../services/aiProvider';
 import { snapshot as aiMetricsSnapshot, health as aiHealth } from '../services/aiMetrics';
@@ -587,7 +588,7 @@ adminRouter.post('/assignments', async (req, res) => {
       account_id: target.id,
       invited_email: target.email,
       display_name: target.display_name,
-      role: parsed.data.role,
+      role: canonicalRole(parsed.data.role) || 'carer',
       permission: parsed.data.permission,
       invite_accepted: true,
     });

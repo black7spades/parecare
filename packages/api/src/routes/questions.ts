@@ -108,10 +108,25 @@ questionsRouter.post('/bulk', requireAuth, async (req, res) => {
   }
 });
 
+// A reply belongs to a question, and the question to one profile. Every
+// reply route checks the question is on this profile first, so an id from
+// someone else's profile can never be read or written through this one.
+async function questionOnProfile(questionId: unknown, profileId: unknown): Promise<OpenQuestion | undefined> {
+  if (typeof questionId !== 'string' || !/^[0-9a-f-]{36}$/i.test(questionId)) return undefined;
+  return db<OpenQuestion>('open_questions')
+    .where({ id: questionId, care_profile_id: String(profileId) })
+    .first();
+}
+
 questionsRouter.get('/:questionId/responses', requireAuth, async (req, res) => {
+  const question = await questionOnProfile(req.params['questionId'], req.params['id']);
+  if (!question) {
+    res.status(404).json({ error: 'Question not found', code: 'NOT_FOUND' });
+    return;
+  }
   const responses = await db('open_question_responses')
     .leftJoin('care_circle_members', 'open_question_responses.author_member_id', 'care_circle_members.id')
-    .where({ question_id: req.params['questionId'] })
+    .where({ question_id: question.id })
     .orderBy('open_question_responses.created_at', 'asc')
     .select(
       'open_question_responses.id',
@@ -126,9 +141,7 @@ questionsRouter.get('/:questionId/responses', requireAuth, async (req, res) => {
 // Neutral AI mediation for a disputed question: summarises common ground,
 // each position, options, and a next step, and posts it into the thread.
 questionsRouter.post('/:questionId/mediate', requireAuth, requireAccountRight('can_use_ai'), requireFeature('ai_access'), async (req, res) => {
-  const question = await db<OpenQuestion>('open_questions')
-    .where({ id: req.params['questionId'], care_profile_id: req.params['id'] })
-    .first();
+  const question = await questionOnProfile(req.params['questionId'], req.params['id']);
   if (!question) {
     res.status(404).json({ error: 'Question not found', code: 'NOT_FOUND' });
     return;
@@ -177,9 +190,14 @@ questionsRouter.post('/:questionId/responses', requireAuth, async (req, res) => 
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
+  const question = await questionOnProfile(req.params['questionId'], req.params['id']);
+  if (!question) {
+    res.status(404).json({ error: 'Question not found', code: 'NOT_FOUND' });
+    return;
+  }
 
   const [response] = await db('open_question_responses')
-    .insert({ question_id: req.params['questionId'], body: parsed.data.body })
+    .insert({ question_id: question.id, body: parsed.data.body })
     .returning('*');
 
   res.status(201).json({ response });

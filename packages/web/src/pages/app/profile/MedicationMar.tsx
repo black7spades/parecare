@@ -90,7 +90,19 @@ export function MedicationMar({ profileId, personName, canAdminister }: { profil
   );
 }
 
-interface Entry { medication_id: string; scheduled_for?: string; administered_at: string; status: string }
+interface Entry {
+  medication_id: string;
+  scheduled_for?: string;
+  administered_at: string;
+  status: string;
+  right_dose?: boolean;
+  right_route?: boolean;
+}
+
+// A one-tap dose is the prescribed dose by the prescribed route, given by the
+// person tapping it, so both checks are confirmed. Anything different is
+// recorded through the full form.
+const AS_PRESCRIBED = { right_dose: true, right_route: true } as const;
 
 function MarChart({ profileId, personName, canAdminister }: { profileId: string; personName: string; canAdminister: boolean }) {
   const queryClient = useQueryClient();
@@ -175,14 +187,14 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
   // on the right day (not "now").
   const quick = (medId: string, scheduledFor: string) => {
     if (new Date(scheduledFor) > now) return; // never log a future dose
-    recordDose.mutate([{ medication_id: medId, scheduled_for: scheduledFor, administered_at: scheduledFor, status: 'given' }]);
+    recordDose.mutate([{ medication_id: medId, scheduled_for: scheduledFor, administered_at: scheduledFor, status: 'given', ...AS_PRESCRIBED }]);
   };
   const logAllDue = () => {
     const dayStr = format(anchor, 'yyyy-MM-dd');
     const entries: Entry[] = [];
     for (const m of meds) {
       for (const sv of coverMedDay(m, dayStr, admins, now).slots) {
-        if (sv.past && !sv.covered) entries.push({ medication_id: m.id, scheduled_for: sv.iso, administered_at: sv.iso, status: 'given' });
+        if (sv.past && !sv.covered) entries.push({ medication_id: m.id, scheduled_for: sv.iso, administered_at: sv.iso, status: 'given', ...AS_PRESCRIBED });
       }
     }
     if (entries.length) recordDose.mutate(entries);

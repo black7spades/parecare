@@ -27,7 +27,7 @@ import {
  */
 export const healthSpendRouter = Router({ mergeParams: true });
 
-healthSpendRouter.use(requireAuth, requireProfileOwner);
+healthSpendRouter.use(requireAuth, requireProfileOwner('see or change care costs'));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 

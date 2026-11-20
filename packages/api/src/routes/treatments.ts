@@ -152,7 +152,7 @@ async function conditionBelongsToProfile(conditionId: string | null | undefined,
   return !!row;
 }
 
-treatmentsRouter.post('/', requireAuth, requireProfileOwner, async (req, res) => {
+treatmentsRouter.post('/', requireAuth, requireProfileOwner('add a treatment'), async (req, res) => {
   const parsed = treatmentSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
@@ -181,7 +181,7 @@ treatmentsRouter.post('/', requireAuth, requireProfileOwner, async (req, res) =>
   res.status(201).json({ treatment: await treatmentWithMetrics(treatmentId) });
 });
 
-treatmentsRouter.patch('/:treatmentId', requireAuth, requireProfileOwner, async (req, res) => {
+treatmentsRouter.patch('/:treatmentId', requireAuth, requireProfileOwner('change a treatment'), async (req, res) => {
   const parsed = treatmentSchema.partial().safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
@@ -203,7 +203,7 @@ treatmentsRouter.patch('/:treatmentId', requireAuth, requireProfileOwner, async 
   res.json({ treatment: await treatmentWithMetrics((updated as { id: string }).id) });
 });
 
-treatmentsRouter.delete('/:treatmentId', requireAuth, requireProfileOwner, async (req, res) => {
+treatmentsRouter.delete('/:treatmentId', requireAuth, requireProfileOwner('delete a treatment'), async (req, res) => {
   const deleted = await db('treatments')
     .where({ id: req.params['treatmentId'], care_profile_id: req.params['id'] })
     .delete();
@@ -221,7 +221,7 @@ async function findTreatment(treatmentId: string | undefined, profileId: string 
 
 // ---- Measures -------------------------------------------------------------
 
-treatmentsRouter.post('/:treatmentId/metrics', requireAuth, requireProfileOwner, async (req, res) => {
+treatmentsRouter.post('/:treatmentId/metrics', requireAuth, requireProfileOwner('add a measurement to a treatment'), async (req, res) => {
   const treatment = await findTreatment(req.params['treatmentId'], req.params['id']);
   if (!treatment) {
     res.status(404).json({ error: 'Treatment not found', code: 'NOT_FOUND' });
@@ -244,7 +244,7 @@ treatmentsRouter.post('/:treatmentId/metrics', requireAuth, requireProfileOwner,
   res.status(201).json({ metric });
 });
 
-treatmentsRouter.patch('/:treatmentId/metrics/:metricId', requireAuth, requireProfileOwner, async (req, res) => {
+treatmentsRouter.patch('/:treatmentId/metrics/:metricId', requireAuth, requireProfileOwner("change a treatment's measurement"), async (req, res) => {
   const treatment = await findTreatment(req.params['treatmentId'], req.params['id']);
   if (!treatment) {
     res.status(404).json({ error: 'Treatment not found', code: 'NOT_FOUND' });
@@ -266,7 +266,7 @@ treatmentsRouter.patch('/:treatmentId/metrics/:metricId', requireAuth, requirePr
   res.json({ metric });
 });
 
-treatmentsRouter.delete('/:treatmentId/metrics/:metricId', requireAuth, requireProfileOwner, async (req, res) => {
+treatmentsRouter.delete('/:treatmentId/metrics/:metricId', requireAuth, requireProfileOwner("delete a treatment's measurement"), async (req, res) => {
   const treatment = await findTreatment(req.params['treatmentId'], req.params['id']);
   if (!treatment) {
     res.status(404).json({ error: 'Treatment not found', code: 'NOT_FOUND' });
@@ -511,7 +511,7 @@ const deviceKeyView = (k: Record<string, unknown>) => ({
   created_at: k['created_at'],
 });
 
-treatmentsRouter.get('/:treatmentId/device-keys', requireAuth, requireProfileOwner, async (req, res) => {
+treatmentsRouter.get('/:treatmentId/device-keys', requireAuth, requireProfileOwner('see the devices connected to a treatment'), async (req, res) => {
   const treatment = await findTreatment(req.params['treatmentId'], req.params['id']);
   if (!treatment) {
     res.status(404).json({ error: 'Treatment not found', code: 'NOT_FOUND' });
@@ -523,7 +523,7 @@ treatmentsRouter.get('/:treatmentId/device-keys', requireAuth, requireProfileOwn
 
 const deviceKeySchema = z.object({ name: z.string().min(1).max(255) });
 
-treatmentsRouter.post('/:treatmentId/device-keys', requireAuth, requireProfileOwner, async (req, res) => {
+treatmentsRouter.post('/:treatmentId/device-keys', requireAuth, requireProfileOwner('connect a device to a treatment'), async (req, res) => {
   const treatment = await findTreatment(req.params['treatmentId'], req.params['id']);
   if (!treatment) {
     res.status(404).json({ error: 'Treatment not found', code: 'NOT_FOUND' });
@@ -554,7 +554,7 @@ const deviceKeyEditSchema = z.object({
   active: z.boolean().optional(),
 });
 
-treatmentsRouter.patch('/:treatmentId/device-keys/:keyId', requireAuth, requireProfileOwner, async (req, res) => {
+treatmentsRouter.patch('/:treatmentId/device-keys/:keyId', requireAuth, requireProfileOwner("change a treatment's connected device"), async (req, res) => {
   const parsed = deviceKeyEditSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
@@ -571,7 +571,7 @@ treatmentsRouter.patch('/:treatmentId/device-keys/:keyId', requireAuth, requireP
   res.json({ device_key: deviceKeyView(key) });
 });
 
-treatmentsRouter.delete('/:treatmentId/device-keys/:keyId', requireAuth, requireProfileOwner, async (req, res) => {
+treatmentsRouter.delete('/:treatmentId/device-keys/:keyId', requireAuth, requireProfileOwner("disconnect a treatment's device"), async (req, res) => {
   const deleted = await db('device_keys')
     .where({ id: req.params['keyId'], treatment_id: req.params['treatmentId'], care_profile_id: req.params['id'] })
     .delete();

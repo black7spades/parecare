@@ -8,6 +8,7 @@ import { requireAuth } from '../middleware/auth';
 import { requireFeature } from '../middleware/subscriptionGate';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
 import type { Document } from '../types';
+import { canonicalRole, roleMaySee } from '../lib/circleRoles';
 import { accountIdForProfile, resolveCategoryByName, withCategory } from '../services/documentCategories';
 
 const upload = multer({
@@ -46,13 +47,18 @@ const documentUpdate = z.object({
 
 // Empty visible_to_roles = visible to the whole circle; otherwise only the
 // owner and members whose circle role is in the list can see the document.
+// Roles are compared without case, so a document shared with "Carer" is
+// seen by someone whose role is "carer".
 export function canSeeDocument(req: { careAccess?: { level: string; member: { role: string } | null } }, doc: Document): boolean {
   const roles = Array.isArray(doc.visible_to_roles) ? doc.visible_to_roles : [];
   if (roles.length === 0) return true;
   if (req.careAccess?.level === 'owner') return true;
-  const memberRole = req.careAccess?.member?.role;
-  return !!memberRole && roles.includes(memberRole);
+  return roleMaySee(roles, req.careAccess?.member?.role);
 }
+
+/** The roles a document is shared with, in the listed form and without repeats. */
+const tidyRoles = (roles: string[] | undefined): string[] | undefined =>
+  roles === undefined ? undefined : [...new Set(roles.map(canonicalRole).filter(Boolean))];
 
 documentsRouter.get('/', requireAuth, async (req, res) => {
   const docs = (await withCategory(db('documents'))
@@ -101,7 +107,7 @@ documentsRouter.post(
         file_url: fileUrl,
         file_size_bytes: req.file.size,
         mime_type: req.file.mimetype,
-        visible_to_roles: parsed.data.visible_to_roles ?? [],
+        visible_to_roles: tidyRoles(parsed.data.visible_to_roles) ?? [],
       })
       .returning('id');
     const docId = (inserted as { id: string }).id;
@@ -179,6 +185,7 @@ documentsRouter.patch('/:docId', requireAuth, async (req, res) => {
 
   const { category, ...rest } = parsed.data;
   const changes: Record<string, unknown> = { ...rest };
+  if (rest.visible_to_roles !== undefined) changes['visible_to_roles'] = tidyRoles(rest.visible_to_roles);
   if (category !== undefined) {
     const accountId = (await accountIdForProfile(String(req.params['id'])))!;
     changes['category_id'] = await resolveCategoryByName(accountId, category);

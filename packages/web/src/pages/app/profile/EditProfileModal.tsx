@@ -8,7 +8,7 @@ import { AvatarEditor } from '../../../components/ui/AvatarEditor';
 import { Avatar } from '../../../components/ui/Avatar';
 import { ContactDetails, contactPayload, emptyContact, type ContactValue } from '../../../components/ContactDetails';
 import { ResidenceFields, residenceFrom, residencePayload, persistResidence, residenceNeedsPersist, emptyResidence, type ResidenceValue } from '../../../components/ResidenceFields';
-import { PET_SPECIES, type CareProfile, type Provider } from '../../../lib/care';
+import { PET_SPECIES, type CareProfile, type DeathChange, type Provider } from '../../../lib/care';
 
 /** Edit the person or pet in care, and their photo. Shown only to those with edit access. */
 export function EditProfileModal({
@@ -42,6 +42,8 @@ export function EditProfileModal({
   const [contact, setContact] = useState<ContactValue>(emptyContact);
   const [residence, setResidence] = useState<ResidenceValue>(emptyResidence);
   const [error, setError] = useState('');
+  // What recording or clearing a death stopped or put back, said once saved.
+  const [deathNote, setDeathNote] = useState<DeathChange | null>(null);
   const [photoOpen, setPhotoOpen] = useState(false);
   const [photoError, setPhotoError] = useState('');
 
@@ -92,6 +94,12 @@ export function EditProfileModal({
     setError('');
   }, [open, profile]);
 
+  // The note about a recorded death is cleared only when the modal opens
+  // afresh: saving refetches the profile, and that must not wipe the note.
+  useEffect(() => {
+    if (open) setDeathNote(null);
+  }, [open]);
+
   const displayName = (isPet ? [firstName, lastName] : [title, firstName, middleName, lastName, suffix])
     .map((p) => p.trim())
     .filter(Boolean)
@@ -108,7 +116,8 @@ export function EditProfileModal({
       if (residenceNeedsPersist(residence)) {
         const { payload, contact: contactOverride } = await persistResidence(profile.id, residence);
         residenceBody = payload;
-        if (contactOverride) contactBody = contactOverride;
+        // The facility becomes who to contact; the personal contact's details stay.
+        if (contactOverride) contactBody = { ...contactBody, ...contactOverride };
       }
       const identity = isPet
         ? {
@@ -136,15 +145,39 @@ export function EditProfileModal({
             died_on: diedOn || null,
             pronouns: pronouns.trim() || null,
           };
-      return api.patch(`/care-profiles/${profile.id}`, { ...identity, ...contactBody, ...residenceBody });
+      return api.patch<{ death_change: DeathChange | null }>(`/care-profiles/${profile.id}`, { ...identity, ...contactBody, ...residenceBody });
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       invalidate();
+      invalidateDeathEffects();
       void refetchProviders();
       void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
-      onClose();
+      // A recorded or cleared death changes a lot at once, so say what.
+      if (res?.death_change) setDeathNote(res.death_change);
+      else onClose();
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Failed to save'),
+  });
+
+  // Tasks, appointments, alerts and the calendar all move with a death.
+  const invalidateDeathEffects = () => {
+    for (const key of ['tasks', 'reminders', 'appointments', 'calendar-events', 'calendar-upcoming', 'notifications', 'pare-attention']) {
+      void queryClient.invalidateQueries({ queryKey: [key] });
+    }
+  };
+
+  // Clearing the date of death straight from the note: nothing is lost.
+  const undoDeath = useMutation({
+    mutationFn: () => api.patch<{ death_change: DeathChange | null }>(`/care-profiles/${profile.id}`, { died_on: null }),
+    onSuccess: (res) => {
+      setDiedOn('');
+      invalidate();
+      invalidateDeathEffects();
+      void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
+      setDeathNote(res?.death_change ?? null);
+      if (!res?.death_change) onClose();
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'The date of death could not be cleared. Try again.'),
   });
 
   const photoMutation = useMutation({
@@ -187,6 +220,20 @@ export function EditProfileModal({
 
   return (
     <Modal open={open} onClose={onClose} title={isPet ? 'Edit pet' : 'Edit profile'}>
+      {deathNote ? (
+        <div className="space-y-4">
+          <p className="text-sm text-ink">{deathNote.message}</p>
+          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          <div className="flex justify-end gap-2">
+            {deathNote.kind === 'stopped' ? (
+              <Button variant="ghost" loading={undoDeath.isPending} onClick={() => undoDeath.mutate()}>
+                Undo
+              </Button>
+            ) : null}
+            <Button onClick={onClose}>Done</Button>
+          </div>
+        </div>
+      ) : (
       <form
         className="space-y-4"
         onSubmit={(e) => {
@@ -251,7 +298,7 @@ export function EditProfileModal({
                 type="date"
                 value={diedOn}
                 onChange={(e) => setDiedOn(e.target.value)}
-                hint="Left blank unless they have died. Recording it gives a power of attorney in the care circle access to the secrets kept for them."
+                hint="Left blank unless they have died. Recording it stops reminders, alerts and the calendar feed for them, and gives a power of attorney in the care circle access to the secrets kept for them."
               />
               <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
             </div>
@@ -310,7 +357,7 @@ export function EditProfileModal({
                 type="date"
                 value={diedOn}
                 onChange={(e) => setDiedOn(e.target.value)}
-                hint="Left blank unless they have died. Recording it gives a power of attorney in the care circle access to the secrets kept for them."
+                hint="Left blank unless they have died. Recording it stops reminders, alerts and the calendar feed for them, and gives a power of attorney in the care circle access to the secrets kept for them."
               />
             </div>
             <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
@@ -327,6 +374,7 @@ export function EditProfileModal({
           <Button type="submit" loading={saveMutation.isPending}>Save</Button>
         </div>
       </form>
+      )}
 
       <AvatarEditor
         open={photoOpen}

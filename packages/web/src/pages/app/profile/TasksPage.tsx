@@ -497,7 +497,9 @@ export function TasksPage() {
                     ) : null}
                   </td>
                   <td className="px-3 py-3 whitespace-nowrap">
-                    {t.completed ? (
+                    {t.completed && t.stopped_by_death_at && !t.completed_by_name ? (
+                      <span className="text-muted">Stopped when their death was recorded</span>
+                    ) : t.completed ? (
                       <span className="text-muted">
                         Done{t.completed_at ? ` ${format(new Date(t.completed_at), 'd MMM yyyy')}` : ''}
                         {t.completed_by_name ? ` · ${t.completed_by_name}` : ''}
@@ -666,7 +668,7 @@ export function TasksPage() {
               { label: 'Assigned to', value: memberName(t.assigned_to) ?? 'Anyone' },
               { label: 'Shared with', value: (t.co_owners ?? []).map((c) => c.display_name).join(', ') },
               { label: 'Claimed by', value: t.claimed_by && !t.completed ? (t.claimed_by === account?.id ? 'You' : t.claimed_by_name) : null },
-              { label: 'Status', value: t.completed ? 'Done' : isOverdue(t) ? 'Overdue' : 'Open' },
+              { label: 'Status', value: t.completed && t.stopped_by_death_at && !t.completed_by_name ? 'Stopped when their death was recorded' : t.completed ? 'Done' : isOverdue(t) ? 'Overdue' : 'Open' },
               { label: 'Goal', value: t.desired_outcome },
               { label: 'Next step kind', value: t.appointment_id ? t.next_step_type_name ?? 'Other' : null },
               { label: 'Done on', value: t.completed && t.completed_at ? format(new Date(t.completed_at), 'd MMM yyyy, HH:mm') : null },

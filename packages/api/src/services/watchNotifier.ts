@@ -98,7 +98,12 @@ export async function deliverWatchesForAccount(account: Account, channels: Notif
     .whereNotNull('channel_id')) as WatchRow[];
   if (watches.length === 0) return;
 
-  const profiles = await accessibleProfiles(account.id);
+  // Watches stop for someone who has died, along with every other alert.
+  const all = await accessibleProfiles(account.id);
+  const died = new Set(
+    (await db('care_profiles').whereIn('id', all.map((p) => p.id)).whereNotNull('died_on').select('id')).map((r) => String(r.id))
+  );
+  const profiles = all.filter((p) => !died.has(p.id));
   const now = new Date();
 
   // Names for medication-scoped watches, for the section headings.

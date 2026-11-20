@@ -10,6 +10,8 @@ import { drawDownOnHand, perDoseDrawdown } from './medicationSupply';
 import { resolveSupplierId } from '../routes/medications';
 import { resolveConditionCatalogueId } from '../routes/conditionCatalogue';
 import { CONDITION_RESOLUTION_REASONS } from '../lib/conditionResolution';
+import { DOSE_AUDIT_ENTITY, doseSummary } from '../lib/doseOutcome';
+import { roleMaySee } from '../lib/circleRoles';
 import { resolveSubstanceCatalogueId, SUBSTANCE_CLASSES } from '../routes/substanceCatalogue';
 import { SUBSTANCE_STATUSES, SUBSTANCE_ROUTES } from '../routes/substanceUse';
 import { resolveSymptomCatalogueId } from '../routes/symptomCatalogue';
@@ -529,7 +531,13 @@ const updateAppointmentSchema = z.object({
  */
 const recordAppointmentOutcomeSchema = z.object({
   type: z.literal('record_appointment_outcome'),
+  // An appointment already on file, by its title. Never guessed: with no
+  // title, or one that matches nothing, the outcome is filed as its own visit.
   appointment_title: z.string().max(255).optional().nullable(),
+  // What the visit was when it is not on file, e.g. "Box Hill Hospital stay",
+  // and the day it happened.
+  visit_title: z.string().max(255).optional().nullable(),
+  visited_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   outcome: z.string().max(4000).optional().nullable(),
   next_steps: z
     .array(
@@ -1123,7 +1131,7 @@ async function recordOneMedication(
     return `Could not record the ${entry.status} dose of ${med.name}: a note explaining why is required.`;
   }
   const administeredAt = parseWhen(entry.administered_at, timeZone);
-  await db('medication_administrations').insert({
+  const [doseRow] = await db('medication_administrations').insert({
     medication_id: med.id,
     care_profile_id: profileId,
     administered_at: administeredAt,
@@ -1141,13 +1149,13 @@ async function recordOneMedication(
     right_dose: false,
     right_route: false,
     right_time: false,
-  });
+  }).returning('id');
   if (GIVEN.has(entry.status)) {
     // Draw supply down by units taken each time; the dose volume only counts
     // for measured, liquid-style forms. Shared with the REST record path.
     await drawDownOnHand(med.id, perDoseDrawdown(med));
   }
-  await audit(profileId, account.id, 'medications', `${med.name} ${entry.status}`);
+  await audit(profileId, account.id, DOSE_AUDIT_ENTITY, doseSummary(med.name, entry.status), (doseRow as { id: string } | undefined)?.id ?? null);
   const at = formatInZone(administeredAt, timeZone);
   return `Recorded ${med.name}${entry.dose_given ?? med.dose ? ` ${entry.dose_given ?? med.dose}` : ''} as ${entry.status.replace(/_/g, ' ')} at ${at}.`;
 }
@@ -1180,8 +1188,9 @@ async function resolveProviderForAppointment(
  */
 /**
  * The appointment an outcome belongs to: one that has already started, found
- * by title (exact first, then partial), most recent first. With no title,
- * the most recent appointment that has happened.
+ * by title (exact first, then partial), most recent first. Never a guess:
+ * with no title there is no match, so a letter is never filed against
+ * whatever visit happened to be last.
  */
 async function findPastAppointment(
   title: string,
@@ -1194,7 +1203,7 @@ async function findPastAppointment(
     .select('id', 'title', 'status')
     .orderBy('starts_at', 'desc')) as Array<{ id: string; title: string; status: string }>;
   const needle = title.trim().toLowerCase();
-  if (!needle) return rows[0];
+  if (!needle) return undefined;
   return (
     rows.find((r) => r.title.toLowerCase() === needle) ??
     rows.find((r) => r.title.toLowerCase().includes(needle) || needle.includes(r.title.toLowerCase()))
@@ -1749,7 +1758,7 @@ async function executeOne(
       const visible = docs.filter((d) => {
         const roles = Array.isArray(d.visible_to_roles) ? d.visible_to_roles : [];
         if (roles.length === 0 || access.level === 'owner' || access.level === 'admin') return true;
-        return !!access.member?.role && roles.includes(access.member.role);
+        return roleMaySee(roles, access.member?.role);
       });
       let doc = action.document_id ? visible.find((d) => d.id === action.document_id) : undefined;
       if (!doc && action.document) {
@@ -2025,11 +2034,48 @@ async function executeOne(
       return `Updated "${name}".${providerNote}`;
     }
     case 'record_appointment_outcome': {
-      const appointment = await findPastAppointment(action.appointment_title ?? '', profileId);
-      if (!appointment) {
-        return action.appointment_title
-          ? `${CLARIFY_MARK} I could not find a past appointment called "${action.appointment_title}". Which one was it?`
-          : `${CLARIFY_MARK} I could not find a past appointment to record this against. Which one was it?`;
+      const named = action.appointment_title?.trim() || '';
+      const found = named ? await findPastAppointment(named, profileId) : undefined;
+      // No visit on file matches: file the outcome as a visit of its own,
+      // already attended, rather than on an unrelated appointment. The next
+      // steps are never dropped.
+      let appointment: { id: string; title: string; status: string };
+      let filedNew = false;
+      if (found) {
+        appointment = found;
+      } else {
+        // Told in conversation with no name for the visit, while one happened
+        // today: ask which, rather than guess it or file a second visit.
+        if (!named && !action.visit_title?.trim()) {
+          const recent = (await db('appointments')
+            .where({ care_profile_id: profileId })
+            .whereNot('status', 'cancelled')
+            .where('starts_at', '<=', new Date())
+            .where('starts_at', '>=', new Date(Date.now() - 18 * 3600 * 1000))
+            .orderBy('starts_at', 'desc')
+            .select('title')) as Array<{ title: string }>;
+          if (recent.length > 0) {
+            const names = [...new Set(recent.map((r) => `"${r.title}"`))].join(' or ');
+            return `${CLARIFY_MARK} Which visit was this: ${names}, or a different one? Say its name and I will record how it went.`;
+          }
+        }
+        const title = (action.visit_title?.trim() || named || 'Visit').slice(0, 255);
+        const startsAt = action.visited_on ? parseWhen(`${action.visited_on}T12:00:00`, timeZone) : new Date();
+        const [row] = await db('appointments')
+          .insert({
+            care_profile_id: profileId,
+            title,
+            appointment_type: 'consultation',
+            starts_at: startsAt,
+            status: 'completed',
+            notes: action.visited_on
+              ? 'Filed from a letter about this visit. The letter gave the day, not the time.'
+              : 'Filed from a letter about this visit.',
+            created_by_account_id: account.id,
+          })
+          .returning(['id', 'title', 'status']);
+        appointment = row as { id: string; title: string; status: string };
+        filedNew = true;
       }
       const steps = await db.transaction(async (trx) => {
         const fields: Record<string, unknown> = { updated_at: trx.fn.now() };
@@ -2054,8 +2100,15 @@ async function executeOne(
           source: 'pare',
         });
       });
-      await audit(profileId, account.id, 'appointments', `outcome of ${appointment.title}`);
+      await audit(profileId, account.id, 'appointments', `outcome of ${appointment.title}`, appointment.id);
       const parts: string[] = [];
+      if (filedNew) {
+        parts.push(
+          named
+            ? `No appointment called "${named}" is on file, so I filed this as its own visit, "${appointment.title}".`
+            : `I filed this as its own visit, "${appointment.title}", so it is not mixed up with another appointment.`
+        );
+      }
       if (action.outcome?.trim()) parts.push(`Noted how "${appointment.title}" went.`);
       if (steps.length) {
         parts.push(`Added ${steps.length === 1 ? 'a next step' : `${steps.length} next steps`} to track: ${steps.map((s) => (s.title === s.type_name ? s.title : `${s.title} (${s.type_name})`)).join(', ')}.`);

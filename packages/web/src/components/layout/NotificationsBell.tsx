@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 import { api } from '../../api/client';
 import { browserTimeZone } from '../../lib/datetime';
+import { DOSE_ENTITY, doseActivityWords } from '../../lib/care';
 
 /**
  * The notification bell. Counts everything new across every care profile
@@ -14,7 +15,7 @@ import { browserTimeZone } from '../../lib/datetime';
 
 interface NotificationItem {
   key: string;
-  kind: 'activity' | 'supply_low' | 'supply_out' | 'dose_overdue' | 'care_plan_ready' | 'outcome_due';
+  kind: 'activity' | 'supply_low' | 'supply_out' | 'dose_overdue' | 'dose_not_given' | 'care_plan_ready' | 'outcome_due';
   record_id?: string | null;
   profile_id: string;
   profile_name: string;
@@ -59,8 +60,11 @@ function itemText(item: NotificationItem): string {
   if (item.kind === 'dose_overdue') {
     const n = item.missed_count ?? 1;
     return n === 1
-      ? `${item.profile_name}'s dose of ${item.medication_name} is due and not yet recorded.`
-      : `${item.profile_name} has ${n} doses of ${item.medication_name} due and not yet recorded today.`;
+      ? `${item.profile_name}'s dose of ${item.medication_name} is due and has not been given.`
+      : `${item.profile_name} has ${n} doses of ${item.medication_name} due today that have not been given.`;
+  }
+  if (item.kind === 'dose_not_given') {
+    return `${item.actor_name ?? 'Someone'} recorded ${item.profile_name}'s ${item.medication_name} as ${item.summary ?? 'not given'}.`;
   }
   if (item.kind === 'supply_out') {
     return `${item.profile_name}'s prescription for ${item.medication_name} is out of stock.`;
@@ -75,6 +79,7 @@ function itemText(item: NotificationItem): string {
   if (item.entity_type === 'messages' && item.action === 'created') {
     return `${who} posted in Messages.`;
   }
+  if (item.entity_type === DOSE_ENTITY) return `${who} ${doseActivityWords(item.action, item.summary, item.profile_name)}.`;
   const target = ENTITY_TARGETS[item.entity_type ?? ''];
   const noun = target?.noun ?? 'a record';
   const verb = VERBS[item.action ?? ''] ?? 'changed';
@@ -83,7 +88,7 @@ function itemText(item: NotificationItem): string {
 
 function itemPath(item: NotificationItem): string {
   // An unrecorded dose is logged on the Medication record page, not the list.
-  if (item.kind === 'dose_overdue') return `/app/${item.profile_id}/mar`;
+  if (item.kind === 'dose_overdue' || item.kind === 'dose_not_given' || item.entity_type === DOSE_ENTITY) return `/app/${item.profile_id}/mar`;
   // How an appointment went is recorded on the appointment itself.
   if (item.kind === 'outcome_due') return `/app/${item.profile_id}/appointments?outcome=${item.record_id ?? ''}`;
   const page = ENTITY_TARGETS[item.entity_type ?? '']?.page ?? '';
@@ -246,7 +251,7 @@ export function NotificationsBell() {
                       <span aria-hidden className="mt-1.5 h-2 w-2 shrink-0" />
                     )}
                     <span className="min-w-0">
-                      <span className={`block text-sm ${item.kind === 'supply_low' || item.kind === 'supply_out' || item.kind === 'dose_overdue' ? 'text-red-700 dark:text-red-300' : 'text-ink'}`}>
+                      <span className={`block text-sm ${item.kind === 'supply_low' || item.kind === 'supply_out' || item.kind === 'dose_overdue' || item.kind === 'dose_not_given' ? 'text-red-700 dark:text-red-300' : 'text-ink'}`}>
                         {item.urgent ? (
                           <span className="mr-1.5 align-middle rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">
                             Urgent
