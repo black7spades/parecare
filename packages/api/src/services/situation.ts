@@ -75,7 +75,8 @@ export async function buildSituation(profile: CareProfile): Promise<Situation> {
   // pressure without running the whole account-wide engine on a profile load.
   const overdue = (await db('reminders')
     .where({ care_profile_id: profile.id, completed: false })
-    .where('next_due_at', '<', new Date())
+    // Any time that day is overdue only once that day is over.
+    .whereRaw("((all_day = false AND next_due_at < now()) OR (all_day AND next_due_at + interval '1 day' <= now()))")
     .count('* as c')
     .first()) as { c?: string | number } | undefined;
   const total = Number(overdue?.c ?? 0);

@@ -49,6 +49,14 @@ export const APPOINTMENT_FIELD_LABELS: Record<string, string> = {
   notes: 'The notes',
   cost_estimate: 'The estimated cost',
   cost_actual: 'The actual cost',
+  preparation: 'How to get ready',
+  telehealth_link: 'The video call link',
+  interpreter_language: 'The language',
+  attendees: "Who's going",
+  bring_document_ids: 'Documents to bring',
+  repeat: 'Repeats',
+  repeat_until: 'Until',
+  provider_phone: 'Their phone',
 };
 
 /** How How did it go names its boxes. */

@@ -81,6 +81,7 @@ export async function down(knex: Knex): Promise<void> {
   await knex.schema.alterTable('medications', (t) => {
     t.dropColumn('supplier_id');
   });
-  await knex.schema.dropTable('care_profile_suppliers');
+  // 075's own down already drops the join table on a full rollback.
+  await knex.schema.dropTableIfExists('care_profile_suppliers');
   await knex.schema.dropTable('suppliers');
 }

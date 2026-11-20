@@ -32,8 +32,8 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
   {
     name: 'task',
     hint: 'the task and when it is due',
-    description: 'Add a task, e.g. /task book podiatrist for next Tuesday',
-    expand: (a) => `Add this task: ${a}`,
+    description: 'Add a task, e.g. /task book the neurologist Dr Chen, 03 9345 6677, by Friday',
+    expand: (a) => `Add this task, linked to who it is with and their phone number when given: ${a}`,
   },
   {
     name: 'symptom',
@@ -50,7 +50,7 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
   {
     name: 'book',
     hint: 'what the appointment is for and when',
-    description: 'Book an appointment, e.g. /book GP review with Dr Chen at 11:45 on Thursday',
+    description: 'Book an appointment, e.g. /book flu shot at the chemist on Saturday, any time',
     expand: (a) =>
       `Book this as a real appointment on the calendar, not a care log entry. Ask me only if the date or time is genuinely unclear: ${a}`,
   },

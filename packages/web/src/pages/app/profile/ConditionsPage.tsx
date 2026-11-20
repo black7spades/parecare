@@ -32,6 +32,8 @@ import { ResolveConditionModal, type ResolutionDetails } from './conditions/Reso
 import { RecordPanel, type RecordLink } from '../../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
+import { useNavigate } from 'react-router-dom';
+import { bookingHref } from '../../../lib/booking';
 
 
 const fmtDate = (d: string | null | undefined) => formatDateOnly(d, 'd MMM yyyy');
@@ -92,6 +94,7 @@ const STATUS_FILTER: DataFilter<MedicalCondition> = {
 export function ConditionsPage() {
   const { profile, careName, canEdit } = useProfile();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<MedicalCondition | null>(null);
   const [bulkEditQueue, setBulkEditQueue] = useState<MedicalCondition[]>([]);
@@ -491,6 +494,7 @@ export function ConditionsPage() {
             ]}
             links={links}
             onEdit={() => setEditing(c)}
+            extra={[{ label: 'Book an appointment for this', onRun: () => navigate(bookingHref(profile.id, { condition: c.id })) }]}
             done={
               isResolved(c)
                 ? null

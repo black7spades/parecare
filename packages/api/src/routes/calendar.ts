@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth';
 import type { CareProfile, Reminder } from '../types';
 import { dateInZone, isValidTimeZone, parseZonedTime } from '../lib/timezone';
 import { coveredTimes, doseAnchor } from '../lib/doseSlots';
+import { ruleFor } from '../lib/repeat';
 
 // Authenticated, per-profile calendar endpoints
 export const calendarRouter = Router({ mergeParams: true });
@@ -76,6 +77,7 @@ async function expandAppointmentEvents(profileId: string, from: Date, to: Date):
       'a.status',
       'a.location',
       'a.directions_link',
+      'a.all_day',
       'a.medical_condition_id',
       'mc.name as medical_condition_name',
       'p.name as provider_name',
@@ -103,6 +105,8 @@ async function expandAppointmentEvents(profileId: string, from: Date, to: Date):
       // Show a URL location only as a button, never as raw text.
       location: isUrl(a.location) ? null : (a.location ?? null),
       directions_link: directions,
+      // No set time: the day alone.
+      all_day: !!a.all_day,
     };
   });
 }
@@ -336,9 +340,10 @@ icsRouter.get('/:token.ics', async (req, res) => {
       `SUMMARY:${icsEscape(r.title)}`
     );
     if (r.body) lines.push(`DESCRIPTION:${icsEscape(r.body)}`);
-    if (r.reminder_type !== 'once' && FREQ[r.reminder_type]) {
-      lines.push(`RRULE:FREQ=${FREQ[r.reminder_type]}`);
-    }
+    // The stored rule is the truth, so every 2 weeks or every year repeats right.
+    const rule = ruleFor(r);
+    if (rule) lines.push(`RRULE:${rule}`);
+    else if (r.reminder_type !== 'once' && FREQ[r.reminder_type]) lines.push(`RRULE:FREQ=${FREQ[r.reminder_type]}`);
     if (r.completed) lines.push('STATUS:CANCELLED');
     lines.push('END:VEVENT');
   }

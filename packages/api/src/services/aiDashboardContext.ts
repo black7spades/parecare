@@ -117,7 +117,8 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
     db('reminders')
       .whereIn('care_profile_id', ids)
       .where({ completed: false })
-      .where('next_due_at', '<', now)
+      // Any time that day is overdue only once that day is over.
+      .whereRaw("((all_day = false AND next_due_at < ?) OR (all_day AND next_due_at + interval '1 day' <= ?))", [now, now])
       .orderBy('next_due_at', 'asc')
       .select('care_profile_id', 'title', 'next_due_at'),
     db.raw(

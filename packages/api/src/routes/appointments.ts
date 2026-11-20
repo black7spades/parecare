@@ -6,167 +6,36 @@ import { requireAuth } from '../middleware/auth';
 import { accountIdForProfile } from '../services/documentCategories';
 import { resolveNextStepTypeByName, stepBooks } from '../services/nextStepTypes';
 import { isValidTimeZone, parseZonedTime } from '../lib/timezone';
-import { createForwards, deliverForwards, forwardItemSchema, forwardsSentFor, takeBackForward } from '../services/noteForwards';
-import { appointmentPlaceColumns, ensureProfessional, fillProfessionalGaps, type KnownPlace } from '../services/professionals';
+import { createForwards, forwardItemSchema, forwardsSentFor, takeBackForward } from '../services/noteForwards';
+import { contactSummaries, ensureProfessional } from '../services/professionals';
 import { APPOINTMENT_FIELD_LABELS, OUTCOME_FIELD_LABELS, plainValidationError } from '../lib/plainValidation';
+import {
+  APPOINTMENT_STATUSES,
+  APPOINTMENT_TYPES,
+  BookingProblem,
+  addBookingTodo,
+  appointmentInputSchema,
+  bookAppointment,
+  enrichAppointments,
+  moveLater,
+  removePreparationTasks,
+  stopRepeating,
+  syncAppointmentSpend,
+  syncPreparationTask,
+  updateAppointment,
+} from '../services/booking';
+import { createTask, findSameBookingTask, joinTask } from '../services/tasks';
 
 /**
  * Appointments are a first-class record: who is being seen, what for,
  * where and when. They feed the profile calendar (which feeds the
- * overview) rather than living inside it.
+ * overview) rather than living inside it. Every write goes through
+ * services/booking, which Pare uses too.
  */
 
 export const appointmentsRouter = Router({ mergeParams: true });
 
-export const APPOINTMENT_TYPES = [
-  'consultation',
-  'test',
-  'procedure',
-  'therapy',
-  'review',
-  'vaccination',
-  'other',
-] as const;
-// to_book: everything is known except the date; it waits on a to-do.
-export const APPOINTMENT_STATUSES = ['scheduled', 'completed', 'cancelled', 'missed', 'to_book'] as const;
-
-const appointmentSchema = z.object({
-  title: z.string().min(1).max(255),
-  appointment_type: z.enum(APPOINTMENT_TYPES).default('consultation'),
-  provider_id: z.string().uuid().optional().nullable(),
-  // The condition this appointment arose from, so an x-ray booked for a sore
-  // ankle stays tied to the ankle in the record and on the calendar.
-  medical_condition_id: z.string().uuid().optional().nullable(),
-  // Where it is: the same segmented address as everywhere else, its own map
-  // link, and (from older callers) one line of text, which is split for them.
-  location: z.string().max(255).optional().nullable(),
-  address_line1: z.string().max(255).optional().nullable(),
-  address_line2: z.string().max(255).optional().nullable(),
-  address_suburb: z.string().max(120).optional().nullable(),
-  address_state: z.string().max(120).optional().nullable(),
-  address_postcode: z.string().max(20).optional().nullable(),
-  address_country: z.string().max(120).optional().nullable(),
-  directions_link: z.string().max(2000).optional().nullable(),
-  // A new name typed for who it is with: filed in Contacts automatically.
-  provider_name: z.string().max(255).optional().nullable(),
-  provider_type: z.string().max(100).optional().nullable(),
-  // Left out when it is not booked yet: the appointment waits as to_book.
-  starts_at: z.string().datetime().optional().nullable(),
-  ends_at: z.string().datetime().optional().nullable(),
-  status: z.enum(APPOINTMENT_STATUSES).default('scheduled'),
-  notes: z.string().max(4000).optional().nullable(),
-  // Cost is not stored on the appointment; it becomes a dated health-spend
-  // entry. An estimate is given when booking; the actual is confirmed after.
-  cost_estimate: z.coerce.number().min(0).max(1e9).optional().nullable(),
-  cost_actual: z.coerce.number().min(0).max(1e9).optional().nullable(),
-  // The next step this appointment carries out, such as the specialist visit
-  // a referral led to. Booking it ticks that next step off.
-  from_reminder_id: z.string().uuid().optional().nullable(),
-});
-
-/**
- * Keep an appointment's single spend entry in step with its cost. A confirmed
- * actual wins; otherwise an estimate is kept as pending; clearing both removes
- * the entry. The entry is dated to the appointment day. Exported so the
- * assistant books appointments through exactly this cost rule.
- */
-export async function syncAppointmentSpend(
-  appointmentId: string,
-  profileId: string,
-  accountId: string,
-  startsAt: string | Date | null,
-  cost: { estimate?: number | null; actual?: number | null }
-): Promise<void> {
-  // Not booked yet: dated today until the appointment has its own date.
-  const spentOn = new Date(startsAt ?? Date.now()).toISOString().slice(0, 10);
-  const hasActual = cost.actual != null;
-  const hasEstimate = cost.estimate != null;
-  if (!hasActual && !hasEstimate) {
-    if (cost.actual === null || cost.estimate === null) {
-      // An explicit clear removes the entry.
-      await db('health_spend_entries').where({ appointment_id: appointmentId }).del();
-    }
-    return;
-  }
-  const amount = hasActual ? cost.actual! : cost.estimate!;
-  const status = hasActual ? 'confirmed' : 'estimated';
-  await db('health_spend_entries')
-    .insert({
-      care_profile_id: profileId,
-      appointment_id: appointmentId,
-      amount,
-      spent_on: spentOn,
-      category: 'appointment',
-      status,
-      created_by_account_id: accountId,
-    })
-    .onConflict('appointment_id')
-    .merge({ amount, status, spent_on: spentOn, updated_at: db.fn.now() });
-}
-
-/**
- * The to-do that keeps an appointment that is not booked yet in view. It is
- * ticked off when the appointment is given its date.
- */
-export async function addBookingTodo(profileId: string, title: string, actorId: string, conn: Knex | Knex.Transaction = db): Promise<string> {
-  const [task] = await conn('reminders')
-    .insert({
-      care_profile_id: profileId,
-      title: `Book ${title}`.slice(0, 255),
-      reminder_type: 'once',
-      next_due_at: new Date(Date.now() + 7 * 24 * 3600 * 1000),
-    })
-    .returning('id');
-  const taskId = (task as { id: string }).id;
-  await conn('audit_log').insert({
-    care_profile_id: profileId,
-    actor_account_id: actorId,
-    action: 'created',
-    entity_type: 'reminders',
-    entity_id: taskId,
-    summary: `Book ${title}`.slice(0, 255),
-    source: 'person',
-  });
-  return taskId;
-}
-
-const PLACE_KEYS = ['location', 'address_line1', 'address_line2', 'address_suburb', 'address_state', 'address_postcode', 'address_country', 'directions_link'] as const;
-
-/**
- * The columns an appointment write stores: the place split into its parts
- * with the one-line location kept in step, and a new name for who it is with
- * filed in Contacts and linked.
- */
-async function appointmentColumns(
-  profileId: string,
-  data: Record<string, unknown> & { provider_id?: string | null; provider_name?: string | null; provider_type?: string | null },
-  /** Collects anyone newly filed in Contacts, so the screen can say so. */
-  filed: Array<{ id: string; name: string }> = []
-): Promise<Record<string, unknown>> {
-  const { provider_name, provider_type, ...fields } = data;
-  const place: Record<string, string | null | undefined> = {};
-  for (const k of PLACE_KEYS) {
-    if (k in fields) {
-      place[k] = fields[k] as string | null | undefined;
-      delete fields[k];
-    }
-  }
-  const placeCols = Object.keys(place).length ? appointmentPlaceColumns(place) : {};
-  const out: Record<string, unknown> = { ...fields, ...placeCols };
-  // The address typed for the appointment is where they are: Contacts gets it
-  // too, wherever Contacts does not already know.
-  const known: KnownPlace | null = Object.keys(placeCols).length ? (placeCols as KnownPlace) : null;
-  if (!data.provider_id && provider_name?.trim()) {
-    const pro = await ensureProfessional(db, { profileId, name: provider_name, providerType: provider_type, place: known });
-    if (pro) {
-      out['provider_id'] = pro.id;
-      if (pro.created) filed.push({ id: pro.id, name: pro.name });
-    }
-  } else if (data.provider_id && known) {
-    await fillProfessionalGaps(db, data.provider_id, known);
-  }
-  return out;
-}
+export { APPOINTMENT_TYPES, APPOINTMENT_STATUSES, syncAppointmentSpend, addBookingTodo };
 
 const appointmentSelect = (profileId: string) =>
   db('appointments as a')
@@ -176,6 +45,7 @@ const appointmentSelect = (profileId: string) =>
     .select(
       'a.*', 'p.name as provider_name', 'p.provider_type', 'p.organisation as provider_organisation',
       'p.address as provider_address', 'p.directions_link as provider_directions_link',
+      'p.phone as provider_phone', 'p.email as provider_email', 'p.booking_link as provider_booking_link',
       'e.amount as cost_amount', 'e.status as cost_status'
     );
 
@@ -192,6 +62,15 @@ const serializeAppointment = <T extends Record<string, unknown>>(a: T): T => {
   };
 };
 
+/** One appointment as the list returns it, everything included. */
+async function fullAppointment(profileId: string, id: string) {
+  const row = await appointmentSelect(profileId).andWhere('a.id', id).first();
+  if (!row) return null;
+  const [enriched] = await enrichAppointments(db, profileId, [serializeAppointment(row)]);
+  const [steps, forwarded] = await Promise.all([nextStepsFor([id]), forwardsSentFor([id])]);
+  return { ...enriched, next_steps: steps.get(id) ?? [], forwarded: forwarded.get(id) ?? [] };
+}
+
 /**
  * The next steps each appointment set off, with what each led to: the task
  * itself, its kind, and any appointment booked to carry it out.
@@ -201,6 +80,7 @@ export async function nextStepsFor(appointmentIds: string[]) {
   const rows = await db('reminders as r')
     .leftJoin('next_step_types as t', 'r.next_step_type_id', 't.id')
     .whereIn('r.appointment_id', appointmentIds)
+    .whereNull('r.merged_into_id')
     .orderBy('r.created_at', 'asc')
     .leftJoin('providers as p', 'r.provider_id', 'p.id')
     .select(
@@ -214,6 +94,7 @@ export async function nextStepsFor(appointmentIds: string[]) {
         .select('id', 'from_reminder_id', 'title', 'starts_at', 'status')
     : [];
   const ledToByTask = new Map(ledTo.map((a) => [a.from_reminder_id as string, a]));
+  const contacts = await contactSummaries(db, rows.map((r) => r.provider_id as string | null));
   const byAppointment = new Map<string, unknown[]>();
   for (const r of rows) {
     const list = byAppointment.get(r.appointment_id) ?? [];
@@ -230,6 +111,7 @@ export async function nextStepsFor(appointmentIds: string[]) {
       provider_id: r.provider_id ?? null,
       provider_name: r.provider_name ?? null,
       provider_type: r.provider_type ?? null,
+      provider: r.provider_id ? contacts.get(r.provider_id) ?? null : null,
       led_to: ledToByTask.get(r.id) ?? null,
     });
     byAppointment.set(r.appointment_id, list);
@@ -238,20 +120,27 @@ export async function nextStepsFor(appointmentIds: string[]) {
 }
 
 appointmentsRouter.get('/', requireAuth, async (req, res) => {
-  const query = appointmentSelect(String(req.params['id']));
+  const profileId = String(req.params['id']);
+  const query = appointmentSelect(profileId);
   if (req.query['from']) query.where('a.starts_at', '>=', new Date(String(req.query['from'])));
   if (req.query['to']) query.where('a.starts_at', '<=', new Date(String(req.query['to'])));
-  const appointments = await query.orderBy('a.starts_at', 'asc');
-  const ids = appointments.map((a: { id: string }) => a.id);
-  const [steps, forwarded] = await Promise.all([nextStepsFor(ids), forwardsSentFor(ids)]);
+  const appointments = (await query.orderBy('a.starts_at', 'asc')) as Array<Record<string, unknown> & { id: string }>;
+  const ids = appointments.map((a) => a.id);
+  const [steps, forwarded, enriched] = await Promise.all([
+    nextStepsFor(ids),
+    forwardsSentFor(ids),
+    enrichAppointments(db, profileId, appointments.map((a) => serializeAppointment(a))),
+  ]);
   res.json({
-    appointments: appointments.map((a: Record<string, unknown>) => ({
-      ...serializeAppointment(a),
-      next_steps: steps.get(a['id'] as string) ?? [],
-      forwarded: forwarded.get(a['id'] as string) ?? [],
+    appointments: enriched.map((a) => ({
+      ...a,
+      next_steps: steps.get(a.id) ?? [],
+      forwarded: forwarded.get(a.id) ?? [],
     })),
   });
 });
+
+const tzOf = (req: { account?: unknown }) => (req.account as { timezone?: string | null } | undefined)?.timezone ?? null;
 
 const outcomeSchema = z.object({
   outcome: z.string().max(4000).optional().nullable(),
@@ -267,9 +156,12 @@ const outcomeSchema = z.object({
         provider_id: z.string().uuid().optional().nullable(),
         provider_name: z.string().trim().max(255).optional().nullable(),
         provider_type: z.string().trim().max(100).optional().nullable(),
+        provider_phone: z.string().trim().max(50).optional().nullable(),
         // Pieces of this visit to send with the step, such as what happened
         // for the specialist a referral is to. They land when it is booked.
         forward: z.array(forwardItemSchema).max(50).default([]),
+        // Keep it as its own task even when an open task does the same booking.
+        no_join: z.boolean().optional(),
       })
     )
     .max(30)
@@ -287,9 +179,28 @@ const providerTypeWords = (t: string) => BUILT_IN_TYPE_WORDS[t] ?? t.toLowerCase
 /** A week from today, for a next step given no date. */
 const inAWeek = (): string => new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
 
+export interface AddedStep {
+  id: string;
+  title: string;
+  type_name: string;
+  provider_id: string | null;
+  filed: { id: string; name: string } | null;
+  /** Joined into an open task doing the same booking, rather than added. */
+  joined: null | {
+    into_id: string;
+    into_title: string;
+    name: string | null;
+    previous: Record<string, unknown>;
+    note_id: string | null;
+    document_ids: string[];
+    step: { title: string; next_due_at: string; next_step_type_id: string; provider_id: string | null; appointment_id: string };
+  };
+}
+
 /**
  * Add next steps to an appointment as tasks tied to it. Shared by the outcome
- * form and by Pare, so both file a next step the same way.
+ * form and by Pare, so both file a next step the same way. A step that books
+ * what an open task already books joins that task: one task per booking.
  */
 export async function addNextSteps(
   trx: Knex.Transaction,
@@ -305,15 +216,19 @@ export async function addNextSteps(
       provider_id?: string | null;
       provider_name?: string | null;
       provider_type?: string | null;
+      provider_phone?: string | null;
+      no_join?: boolean;
     }>;
     source?: 'person' | 'pare';
   }
-): Promise<Array<{ id: string; title: string; type_name: string; provider_id: string | null; filed: { id: string; name: string } | null }>> {
+): Promise<AddedStep[]> {
   const accountId = (await accountIdForProfile(opts.profileId, trx))!;
-  const out: Array<{ id: string; title: string; type_name: string; provider_id: string | null; filed: { id: string; name: string } | null }> = [];
+  const source = (await trx('appointments').where({ id: opts.appointmentId }).first('title', 'starts_at')) as { title: string; starts_at: Date | null } | undefined;
+  const out: AddedStep[] = [];
   for (const step of opts.steps) {
     const typeId = await resolveNextStepTypeByName(accountId, step.type || 'Other', trx);
-    const typeName = ((await trx('next_step_types').where({ id: typeId }).first('name')) as { name: string }).name;
+    const typeRow = (await trx('next_step_types').where({ id: typeId }).first('name', 'system_key')) as { name: string; system_key: string | null };
+    const typeName = typeRow.name;
     const dueOn = step.due_on || inAWeek();
     const due = parseZonedTime(`${dueOn}T09:00:00`, opts.timeZone) ?? new Date(`${dueOn}T09:00:00Z`);
     // Who it is with goes into Contacts, linked to this person, so the
@@ -328,9 +243,12 @@ export async function addNextSteps(
           .insert({ care_profile_id: opts.profileId, provider_id: provider.id })
           .onConflict(['care_profile_id', 'provider_id'])
           .ignore();
+        if (step.provider_phone?.trim()) {
+          await trx('providers').where({ id: provider.id }).where((w) => w.whereNull('phone').orWhereRaw("trim(phone) = ''")).update({ phone: step.provider_phone.trim() });
+        }
       }
     } else if (step.provider_name?.trim()) {
-      const pro = await ensureProfessional(trx, { profileId: opts.profileId, name: step.provider_name, providerType: step.provider_type });
+      const pro = await ensureProfessional(trx, { profileId: opts.profileId, name: step.provider_name, providerType: step.provider_type, phone: step.provider_phone });
       provider = pro;
       if (pro?.created) filedNew = { id: pro.id, name: pro.name };
     }
@@ -338,20 +256,39 @@ export async function addNextSteps(
       ? ((await trx('providers').where({ id: provider.id }).first('provider_type')) as { provider_type: string | null } | undefined)?.provider_type
       : null;
     const who = provider ? `${provider.name}${providerType && providerType !== 'other' ? `, ${providerTypeWords(providerType)}` : ''}` : '';
-    const title = step.details?.trim() || (who ? `See ${who}` : typeName);
-    const [task] = await trx('reminders')
-      .insert({
-        care_profile_id: opts.profileId,
-        title: title.slice(0, 255),
-        reminder_type: 'once',
-        next_due_at: due,
-        appointment_id: opts.appointmentId,
-        next_step_type_id: typeId,
-        provider_id: provider?.id ?? null,
-      })
-      .returning('id');
-    const taskId = (task as { id: string }).id;
-    out.push({ id: taskId, title, type_name: typeName, provider_id: provider?.id ?? null, filed: filedNew });
+    const title = (step.details?.trim() || (who ? `See ${who}` : typeName)).slice(0, 255);
+
+    if (stepBooks(typeRow.system_key) && !step.no_join) {
+      const same = await findSameBookingTask(trx, opts.profileId, {
+        providerId: provider?.id ?? null, providerName: provider?.name ?? null, providerType: providerType ?? null, kindKey: typeRow.system_key, title,
+      });
+      if (same) {
+        const when = source?.starts_at ? `, ${new Date(source.starts_at).toISOString().slice(0, 10)}` : '';
+        const joined = await joinTask(trx, {
+          profileId: opts.profileId,
+          intoId: same.id,
+          actorId: opts.actorId,
+          fields: { provider_id: provider?.id ?? null, next_step_type_id: typeId, appointment_id: opts.appointmentId, next_due_at: due },
+          note: `From ${source?.title ?? 'an appointment'}${when}: ${title}`,
+        });
+        out.push({
+          id: same.id, title: same.title, type_name: typeName, provider_id: provider?.id ?? null, filed: filedNew,
+          joined: {
+            into_id: same.id, into_title: same.title, name: provider?.name ?? null, previous: joined.previous, note_id: joined.note_id, document_ids: joined.document_ids,
+            step: { title, next_due_at: due.toISOString(), next_step_type_id: typeId, provider_id: provider?.id ?? null, appointment_id: opts.appointmentId },
+          },
+        });
+        continue;
+      }
+    }
+
+    const created = await createTask(trx, {
+      profileId: opts.profileId,
+      actorId: opts.actorId,
+      input: { title, next_due_at: due.toISOString(), appointment_id: opts.appointmentId, next_step_type_id: typeId, provider_id: provider?.id ?? null, no_infer: true, no_join: true },
+    });
+    const taskId = created.reminder.id;
+    out.push({ id: taskId, title, type_name: typeName, provider_id: provider?.id ?? null, filed: filedNew, joined: null });
     await trx('audit_log').insert({
       care_profile_id: opts.profileId,
       actor_account_id: opts.actorId,
@@ -386,7 +323,7 @@ appointmentsRouter.put('/:appointmentId/outcome', requireAuth, async (req, res) 
     return;
   }
   const tzIn = parsed.data.tz ?? null;
-  const tz = isValidTimeZone(tzIn) ? tzIn : (req.account as { timezone?: string | null } | undefined)?.timezone ?? null;
+  const tz = isValidTimeZone(tzIn) ? tzIn : tzOf(req);
 
   const created = await db.transaction(async (trx) => {
     const fields: Record<string, unknown> = { updated_at: trx.fn.now() };
@@ -399,6 +336,7 @@ appointmentsRouter.put('/:appointmentId/outcome', requireAuth, async (req, res) 
       fields['status'] = 'completed';
     }
     await trx('appointments').where({ id: appointment.id }).update(fields);
+    if (fields['status'] === 'completed') await syncPreparationTask(trx, appointment.id, tz);
     const added = await addNextSteps(trx, {
       profileId,
       appointmentId: appointment.id,
@@ -428,140 +366,89 @@ appointmentsRouter.put('/:appointmentId/outcome', requireAuth, async (req, res) 
   });
   if (!created) return;
 
-  const enriched = await appointmentSelect(profileId).andWhere('a.id', appointment.id).first();
-  const [steps, forwarded] = await Promise.all([nextStepsFor([appointment.id]), forwardsSentFor([appointment.id])]);
   res.json({
-    appointment: {
-      ...serializeAppointment(enriched),
-      next_steps: steps.get(appointment.id) ?? [],
-      forwarded: forwarded.get(appointment.id) ?? [],
-    },
+    appointment: await fullAppointment(profileId, appointment.id),
     created: created.map((c) => c.id),
     // Who each new step is with, so a booking made straight away starts there.
     created_steps: created.map((c) => ({ id: c.id, provider_id: c.provider_id })),
     // Anyone newly added to Contacts, so the screen can say so.
     filed: created.map((c) => c.filed).filter((f): f is { id: string; name: string } => !!f),
+    // Steps that joined an open task for the same booking.
+    joined: created.map((c) => c.joined).filter((j): j is NonNullable<AddedStep['joined']> => !!j),
   });
 });
 
 appointmentsRouter.post('/', requireAuth, async (req, res) => {
-  const parsed = appointmentSchema.safeParse(req.body);
+  const parsed = appointmentInputSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: plainValidationError(parsed.error, APPOINTMENT_FIELD_LABELS, 'The appointment did not save. Check each box and try again.'), code: 'VALIDATION_ERROR' });
     return;
   }
-  const { cost_estimate, cost_actual, ...rest } = parsed.data;
   const profileId = String(req.params['id']);
-  const filed: Array<{ id: string; name: string }> = [];
-  const appointmentFields = await appointmentColumns(profileId, rest, filed);
-  const dated = !!parsed.data.starts_at;
-  if (!dated) {
-    appointmentFields['starts_at'] = null;
-    appointmentFields['status'] = 'to_book';
-    // Not booked yet and not from a next step: a to-do keeps it in view.
-    if (!parsed.data.from_reminder_id) {
-      appointmentFields['from_reminder_id'] = await addBookingTodo(profileId, parsed.data.title, req.account!.id);
+  try {
+    const result = await db.transaction((trx) =>
+      bookAppointment(trx, { profileId, actorId: req.account!.id, input: parsed.data, timeZone: tzOf(req) })
+    );
+    res.status(201).json({ appointment: await fullAppointment(profileId, result.appointment.id), filed: result.filed });
+  } catch (err) {
+    if (err instanceof BookingProblem) {
+      res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
+      return;
     }
+    throw err;
   }
-  const [appointment] = await db('appointments')
-    .insert({
-      care_profile_id: req.params['id'],
-      ...appointmentFields,
-      created_by_account_id: req.account!.id,
-    })
-    .returning('*');
-  const appointmentId = (appointment as { id: string }).id;
-  // Booking the appointment a next step called for ticks that step off once
-  // it has a date. Anything forwarded to the step lands on it straight away,
-  // so the notes travel with the details even before it is booked.
-  if (parsed.data.from_reminder_id) {
-    if (dated) {
-      await db('reminders')
-        .where({ id: parsed.data.from_reminder_id, care_profile_id: req.params['id'], completed: false })
-        .update({ completed: true, completed_at: db.fn.now(), completed_by_account_id: req.account!.id });
-    }
-    await deliverForwards(db, {
-      profileId,
-      reminderId: parsed.data.from_reminder_id,
-      appointmentId,
-    });
-  }
-  await syncAppointmentSpend(
-    appointmentId,
-    String(req.params['id']),
-    req.account!.id,
-    parsed.data.starts_at ?? null,
-    { estimate: cost_estimate, actual: cost_actual }
-  );
-  const enriched = await appointmentSelect(String(req.params['id'])).andWhere('a.id', appointmentId).first();
-  res.status(201).json({ appointment: serializeAppointment(enriched), filed });
 });
 
 appointmentsRouter.patch('/:appointmentId', requireAuth, async (req, res) => {
-  const parsed = appointmentSchema.partial().safeParse(req.body);
+  const parsed = appointmentInputSchema.partial().safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: plainValidationError(parsed.error, APPOINTMENT_FIELD_LABELS, 'The appointment did not save. Check each box and try again.'), code: 'VALIDATION_ERROR' });
     return;
   }
-  const { cost_estimate, cost_actual, ...rest } = parsed.data;
-  const before = (await db('appointments')
-    .where({ id: req.params['appointmentId'], care_profile_id: req.params['id'] })
-    .first('id', 'starts_at', 'status', 'from_reminder_id')) as
-    | { id: string; starts_at: Date | null; status: string; from_reminder_id: string | null }
-    | undefined;
-  if (!before) {
-    res.status(404).json({ error: 'Appointment not found', code: 'NOT_FOUND' });
-    return;
-  }
-  if (parsed.data.starts_at === null && before.starts_at) {
-    res.status(400).json({ error: 'A booked appointment keeps its date. Change the date, or cancel the appointment.', code: 'VALIDATION_ERROR' });
-    return;
-  }
-  const filed: Array<{ id: string; name: string }> = [];
-  const appointmentFields = await appointmentColumns(String(req.params['id']), rest, filed);
-  // An existing appointment with a new place: whoever it is with learns it
-  // too, if Contacts had nothing for them.
-  const providerAfter = (parsed.data.provider_id ?? appointmentFields['provider_id'] ?? null) as string | null;
-  // Given its date, an appointment that was not booked yet is booked now.
-  const nowBooked = !before.starts_at && !!parsed.data.starts_at;
-  if (nowBooked && (!parsed.data.status || parsed.data.status === 'to_book')) appointmentFields['status'] = 'scheduled';
-  if (!before.starts_at && !parsed.data.starts_at && parsed.data.status === undefined) appointmentFields['status'] = before.status;
-  const [appointment] = await db('appointments')
-    .where({ id: before.id })
-    .update({ ...appointmentFields, updated_at: db.fn.now() })
-    .returning('*');
-  // Its to-do is done: the appointment is booked.
-  if (nowBooked && before.from_reminder_id) {
-    await db('reminders')
-      .where({ id: before.from_reminder_id, care_profile_id: req.params['id'], completed: false })
-      .update({ completed: true, completed_at: db.fn.now(), completed_by_account_id: req.account!.id });
-  }
-  // A cost already on the ledger moves to the appointment's new day.
-  if (parsed.data.starts_at && cost_estimate === undefined && cost_actual === undefined) {
-    await db('health_spend_entries')
-      .where({ appointment_id: before.id })
-      .update({ spent_on: new Date(parsed.data.starts_at).toISOString().slice(0, 10), updated_at: db.fn.now() });
-  }
-  // Update the spend entry when a cost was sent, dated to the appointment day.
-  if (cost_estimate !== undefined || cost_actual !== undefined) {
-    await syncAppointmentSpend(
-      req.params['appointmentId']!,
-      String(req.params['id']),
-      req.account!.id,
-      (appointment as { starts_at: string | Date }).starts_at,
-      { estimate: cost_estimate, actual: cost_actual }
+  const profileId = String(req.params['id']);
+  try {
+    const result = await db.transaction((trx) =>
+      updateAppointment(trx, { profileId, appointmentId: String(req.params['appointmentId']), actorId: req.account!.id, input: parsed.data, timeZone: tzOf(req) })
     );
+    if (!result) {
+      res.status(404).json({ error: 'Appointment not found', code: 'NOT_FOUND' });
+      return;
+    }
+    res.json({ appointment: await fullAppointment(profileId, result.appointment.id), filed: result.filed, series_move: result.series_move });
+  } catch (err) {
+    if (err instanceof BookingProblem) {
+      res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
+      return;
+    }
+    throw err;
   }
-  const enriched = await appointmentSelect(String(req.params['id'])).andWhere('a.id', req.params['appointmentId']!).first();
-  const currentProvider = providerAfter ?? (enriched?.provider_id as string | null) ?? null;
-  if (currentProvider && !parsed.data.provider_id && !appointmentFields['provider_id']) {
-    await fillProfessionalGaps(db, currentProvider, {
-      address_line1: enriched.address_line1, address_line2: enriched.address_line2, address_suburb: enriched.address_suburb,
-      address_state: enriched.address_state, address_postcode: enriched.address_postcode, address_country: enriched.address_country,
-      directions_link: enriched.directions_link,
-    });
+});
+
+/** Stop a repeating appointment here. Later ones nobody has added to are removed. */
+appointmentsRouter.post('/:appointmentId/stop-repeating', requireAuth, async (req, res) => {
+  const profileId = String(req.params['id']);
+  const result = await db.transaction((trx) => stopRepeating(trx, profileId, String(req.params['appointmentId'])));
+  if (!result) {
+    res.status(404).json({ error: 'That appointment does not repeat.', code: 'NOT_FOUND' });
+    return;
   }
-  res.json({ appointment: serializeAppointment(enriched), filed });
+  res.json(result);
+});
+
+/** After moving one in a series, move the later ones by the same change. */
+appointmentsRouter.post('/:appointmentId/move-later', requireAuth, async (req, res) => {
+  const parsed = z.object({ from_starts_at: z.string().datetime() }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Say where it moved from.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const profileId = String(req.params['id']);
+  const result = await db.transaction((trx) => moveLater(trx, profileId, String(req.params['appointmentId']), parsed.data.from_starts_at));
+  if (!result) {
+    res.status(404).json({ error: 'That appointment does not repeat.', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json(result);
 });
 
 const forwardSchema = z.object({
@@ -624,7 +511,10 @@ appointmentsRouter.post('/bulk', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
-  const scope = db('appointments').where({ care_profile_id: req.params['id'] }).whereIn('id', parsed.data.ids);
+  const ids = (await db('appointments').where({ care_profile_id: req.params['id'] }).whereIn('id', parsed.data.ids).pluck('id')) as string[];
+  // Attended, cancelled or gone: no night-before reminder.
+  await removePreparationTasks(db, ids);
+  const scope = db('appointments').whereIn('id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']);
   if (parsed.data.action === 'delete') {
     const deleted = await scope.del();
     res.json({ deleted });
@@ -638,9 +528,9 @@ appointmentsRouter.post('/bulk', requireAuth, async (req, res) => {
 });
 
 appointmentsRouter.delete('/:appointmentId', requireAuth, async (req, res) => {
-  const deleted = await db('appointments')
-    .where({ id: req.params['appointmentId'], care_profile_id: req.params['id'] })
-    .delete();
+  const scope = { id: req.params['appointmentId'], care_profile_id: req.params['id'] };
+  await removePreparationTasks(db, ((await db('appointments').where(scope).pluck('id')) as string[]));
+  const deleted = await db('appointments').where(scope).delete();
   if (!deleted) {
     res.status(404).json({ error: 'Appointment not found', code: 'NOT_FOUND' });
     return;

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
@@ -16,14 +16,22 @@ import { ForwardNotesModal, ForwardedText, type SentForward, pickedItems } from 
 import type { NextStep } from '../../../lib/nextSteps';
 import { MedicationForm } from './medications/MedicationForm';
 import { UploadDocumentModal } from './DocumentsPage';
-import { SELF_RELATIONSHIP, type CircleMember } from '../../../lib/care';
+import { SELF_RELATIONSHIP, personKey, type CircleMember, type ContactSummary, type Task } from '../../../lib/care';
 import { RecordPanel } from '../../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { useProfile } from './ProfileLayout';
 import { useHealthConfig } from '../../../lib/appConfig';
-import { noticeFiled, refreshContacts } from '../../../stores/notice';
+import { noticeFiled, refreshContacts, useNoticeStore } from '../../../stores/notice';
 import { AddressFields, addressFrom, addressPayload, emptyAddress, hasAddress, type AddressValue } from '../../../components/AddressFields';
+import { ContactStrip } from '../../../components/ContactStrip';
+import { ContactPicker } from '../../../components/ContactPicker';
+import { LinkedText } from '../../../components/LinkedText';
+import { DocumentAttach } from '../../../components/DocumentAttach';
+import { usePickablePeople, personOption } from '../../../components/PersonPicker';
+import { REPEAT_CHOICES, repeatLabel } from '../../../lib/repeat';
+import { bookingTitleFromTask } from '../../../lib/booking';
+import { browserTimeZone } from '../../../lib/datetime';
 
 const inputClass =
   'w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -38,6 +46,8 @@ export interface Appointment {
   provider_organisation: string | null;
   provider_address: string | null;
   provider_directions_link: string | null;
+  /** Who it is with, as someone to call. */
+  provider?: ContactSummary | null;
   /** One line for display, kept in step with the address parts below. */
   location: string | null;
   address_line1?: string | null;
@@ -51,6 +61,8 @@ export interface Appointment {
   /** Empty while it is not booked yet: every other detail can be filled in. */
   starts_at: string | null;
   ends_at: string | null;
+  /** No set time: starts_at is midnight that day. */
+  all_day?: boolean;
   status: string;
   notes: string | null;
   /** The estimate given at booking, if any (kept out of spend totals). */
@@ -63,6 +75,21 @@ export interface Appointment {
   next_steps?: NextStep[];
   /** What it passed on to other appointments, so the source shows where each piece went. */
   forwarded?: SentForward[];
+  preparation?: string | null;
+  telehealth_link?: string | null;
+  interpreter_needed?: boolean;
+  interpreter_language?: string | null;
+  from_reminder_id?: string | null;
+  attendees?: Array<{ circle_member_id: string | null; account_id: string | null; is_driver: boolean; name: string }>;
+  bring_documents?: Array<{ id: string; label: string; category_name: string | null }>;
+  series?: { id: string; repeat: string; repeat_until: string | null } | null;
+  from_task?: {
+    id: string;
+    title: string;
+    body: string | null;
+    completed_at: string | null;
+    notes: Array<{ id: string; body: string; created_at: string; author_name: string | null }>;
+  } | null;
 }
 
 const APPOINTMENT_TYPES = [
@@ -91,12 +118,17 @@ const byText = (x: string | null | undefined, y: string | null | undefined) => (
 
 const whenValue = (a: Appointment) => (a.starts_at ? new Date(a.starts_at).getTime() : Number.MAX_SAFE_INTEGER);
 
+/** "Mon 23 Nov 2026, 10:30", or "Mon 23 Nov 2026, any time" with no set time. */
+export const whenText = (a: Pick<Appointment, 'starts_at' | 'all_day'>, pattern = 'EEE d MMM yyyy') =>
+  a.starts_at ? `${format(new Date(a.starts_at), pattern)}, ${a.all_day ? 'any time' : format(new Date(a.starts_at), 'HH:mm')}` : 'Not booked yet';
+
 const SORTS: DataSort<Appointment>[] = [
   // Not booked yet sorts as the latest, so it leads the newest-first list.
   { key: 'when', label: 'By date', defaultDir: 'desc', compare: (a, b) => whenValue(a) - whenValue(b) },
   { key: 'title', label: 'By appointment', compare: (a, b) => a.title.localeCompare(b.title) },
   { key: 'kind', label: 'By kind', compare: (a, b) => typeLabel(a.appointment_type).localeCompare(typeLabel(b.appointment_type)) },
   { key: 'with', label: 'By who with', compare: (a, b) => byText(a.provider_name, b.provider_name) },
+  { key: 'phone', label: 'By their phone', compare: (a, b) => byText(a.provider?.phone, b.provider?.phone) },
   { key: 'location', label: 'By location', compare: (a, b) => byText(a.location, b.location) },
   { key: 'status', label: 'By status', compare: (a, b) => statusLabel(a.status).localeCompare(statusLabel(b.status)) },
   { key: 'outcome', label: 'By outcome', compare: (a, b) => byText(a.outcome, b.outcome) },
@@ -105,6 +137,8 @@ const SORTS: DataSort<Appointment>[] = [
 
 /** Finished, so it is time to ask how it went. */
 const isPast = (a: Appointment) => !!a.starts_at && new Date(a.ends_at ?? a.starts_at).getTime() < Date.now();
+/** Its start time has come. */
+const hasStarted = (a: Appointment) => !!a.starts_at && new Date(a.starts_at).getTime() <= Date.now();
 
 const STATUS_FILTER: DataFilter<Appointment> = {
   key: 'status',
@@ -120,18 +154,35 @@ const TYPE_FILTER: DataFilter<Appointment> = {
   match: (a, v) => a.appointment_type === v,
 };
 
+/** What a booking opened from a link starts with. */
+interface NewBooking {
+  providerId: string;
+  conditionId: string;
+  fromTask: string;
+  title: string;
+  type: string;
+}
+const noBooking: NewBooking = { providerId: '', conditionId: '', fromTask: '', title: '', type: '' };
+
 export function AppointmentsPage() {
   const { profile, careName, canEdit, isOwner, relationship } = useProfile();
   const queryClient = useQueryClient();
+  const notice = useNoticeStore((s) => s.show);
   const [adding, setAdding] = useState(false);
-  const [initialProviderId, setInitialProviderId] = useState('');
+  const [newBooking, setNewBooking] = useState<NewBooking>(noBooking);
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // A health alert's "Book appointment" arrives here with ?new=1 and the
-  // GP preselected, so booking is one step, not a hunt through the form.
+  // Book from anywhere: ?new=1 with who it is with, what it is for, the task
+  // it carries out, a title or a kind fills the form, so booking is one step.
   useEffect(() => {
     if (searchParams.get('new') === '1') {
-      setInitialProviderId(searchParams.get('provider') ?? '');
+      setNewBooking({
+        providerId: searchParams.get('provider') ?? '',
+        conditionId: searchParams.get('condition') ?? '',
+        fromTask: searchParams.get('from_task') ?? '',
+        title: searchParams.get('title') ?? '',
+        type: searchParams.get('type') ?? '',
+      });
       setAdding(true);
       setSearchParams({}, { replace: true });
     }
@@ -149,6 +200,8 @@ export function AppointmentsPage() {
   // Forwarding to a new appointment: book it, then the notes go to it.
   const [forwardingNew, setForwardingNew] = useState<{ sourceId: string; items: ReturnType<typeof pickedItems> } | null>(null);
   const [forwardError, setForwardError] = useState('');
+  // One in a series was moved: offer to move the later ones too.
+  const [seriesMove, setSeriesMove] = useState<{ id: string; from: string; later: number; to: string } | null>(null);
 
   const { data: conditionData } = useQuery({
     queryKey: ['conditions', profile.id],
@@ -158,6 +211,11 @@ export function AppointmentsPage() {
   const { data: circleData } = useQuery({
     queryKey: ['circle', profile.id],
     queryFn: () => api.get<{ members: CircleMember[] }>(`/care-profiles/${profile.id}/circle`),
+  });
+  const { data: taskData } = useQuery({
+    queryKey: ['tasks', profile.id],
+    queryFn: () => api.get<{ reminders: Task[] }>(`/care-profiles/${profile.id}/reminders?status=all`),
+    enabled: !!newBooking.fromTask,
   });
 
   // The thing a next step asked for is done, so tick the step off.
@@ -176,8 +234,25 @@ export function AppointmentsPage() {
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['appointments', profile.id] });
     void queryClient.invalidateQueries({ queryKey: ['calendar', profile.id] });
+    void queryClient.invalidateQueries({ queryKey: ['calendar-upcoming', profile.id] });
     void queryClient.invalidateQueries({ queryKey: ['tasks', profile.id] });
   };
+
+  // The task a booking came from: one already waiting with its details opens
+  // that appointment to give it a date, rather than making a second.
+  const fromTask = newBooking.fromTask ? (taskData?.reminders ?? []).find((t) => t.id === newBooking.fromTask) ?? null : null;
+  useEffect(() => {
+    if (!fromTask?.to_book_appointment_id || appointments.length === 0) return;
+    const waiting = appointments.find((a) => a.id === fromTask.to_book_appointment_id);
+    if (waiting) {
+      setAdding(false);
+      setNewBooking(noBooking);
+      setEditing(waiting);
+    }
+  }, [fromTask, appointments]);
+  const fromTaskCondition = fromTask
+    ? fromTask.medical_condition_id ?? (fromTask.appointment_id ? appointments.find((a) => a.id === fromTask.appointment_id)?.medical_condition_id ?? '' : '')
+    : '';
 
   // ?book=<id> arrives from a to-do: give that appointment its date.
   useEffect(() => {
@@ -231,6 +306,23 @@ export function AppointmentsPage() {
   const markAttended = useMutation({
     mutationFn: (a: Appointment) => api.patch(`/care-profiles/${profile.id}/appointments/${a.id}`, { status: 'completed' }),
     onSuccess: invalidate,
+  });
+
+  const stopRepeating = useMutation({
+    mutationFn: (a: Appointment) => api.post<{ removed: number }>(`/care-profiles/${profile.id}/appointments/${a.id}/stop-repeating`),
+    onSuccess: (res) => {
+      notice({ message: res.removed ? `Stopped repeating. The ${res.removed} after this one are off the calendar.` : 'Stopped repeating. This is the last one.' });
+      invalidate();
+    },
+  });
+
+  const moveLater = useMutation({
+    mutationFn: (m: { id: string; from: string }) => api.post<{ moved: number }>(`/care-profiles/${profile.id}/appointments/${m.id}/move-later`, { from_starts_at: m.from }),
+    onSuccess: (res) => {
+      setSeriesMove(null);
+      notice({ message: `Moved ${res.moved} more.` });
+      invalidate();
+    },
   });
 
   const bulkMutation = useMutation({
@@ -300,11 +392,13 @@ export function AppointmentsPage() {
     }
   };
 
+  const current = panel.current;
+
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-base font-semibold text-ink">Appointments</h2>
+          <h2 className="text-sm font-semibold text-ink">Appointments</h2>
           <EditableSubheader copyKey="profile.appointments.subheader" vars={{ name: careName }} />
         </div>
         {canEdit ? <Button size="sm" onClick={() => setAdding(true)}>Add appointment</Button> : null}
@@ -314,6 +408,16 @@ export function AppointmentsPage() {
         <div className="card flex items-start gap-3 border-red-200">
           <p className="flex-1 text-sm text-red-600">{forwardError}</p>
           <Button size="xs" variant="ghost" onClick={() => setForwardError('')}>Dismiss</Button>
+        </div>
+      ) : null}
+
+      {seriesMove ? (
+        <div className="card flex flex-wrap items-center gap-3" role="status">
+          <p className="flex-1 text-sm text-ink">
+            Moved this one. Move the {seriesMove.later} after it to {format(new Date(seriesMove.to), 'EEEE')}s at {format(new Date(seriesMove.to), 'HH:mm')} too?
+          </p>
+          <Button size="sm" variant="secondary" loading={moveLater.isPending} onClick={() => moveLater.mutate({ id: seriesMove.id, from: seriesMove.from })}>Move them too</Button>
+          <Button size="sm" variant="ghost" onClick={() => setSeriesMove(null)}>Leave them</Button>
         </div>
       ) : null}
 
@@ -358,6 +462,7 @@ export function AppointmentsPage() {
                 <SortableTh label="Appointment" sortKey="title" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Kind" sortKey="kind" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="hidden xl:table-cell" />
                 <SortableTh label="With" sortKey="with" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="hidden lg:table-cell" />
+                <SortableTh label="Their phone" sortKey="phone" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="hidden xl:table-cell" />
                 <SortableTh label="Location" sortKey="location" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} className="hidden 2xl:table-cell" />
                 <SortableTh label="Status" sortKey="status" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Outcome" sortKey="outcome" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
@@ -381,7 +486,7 @@ export function AppointmentsPage() {
                   ) : null}
                   <td className="px-3 py-2 text-ink whitespace-nowrap">
                     {a.starts_at ? (
-                      format(new Date(a.starts_at), 'EEE d MMM yyyy, HH:mm')
+                      whenText(a)
                     ) : canEdit ? (
                       <Button size="xs" variant="secondary" onClick={() => setEditing(a)}>Book it</Button>
                     ) : (
@@ -391,6 +496,13 @@ export function AppointmentsPage() {
                   <td className="px-3 py-2 font-medium text-ink">{a.title}</td>
                   <td className="px-3 py-2 text-ink hidden xl:table-cell">{typeLabel(a.appointment_type)}</td>
                   <td className="px-3 py-2 text-ink hidden lg:table-cell">{a.provider_name ?? ''}</td>
+                  <td className="px-3 py-2 whitespace-nowrap hidden xl:table-cell">
+                    {a.provider?.phone ? (
+                      <a href={`tel:${a.provider.phone.replace(/[^\d+]/g, '')}`} className="text-primary hover:underline" aria-label={`Call ${a.provider.name} on ${a.provider.phone}`}>
+                        {a.provider.phone}
+                      </a>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-2 text-muted hidden 2xl:table-cell">{a.location ?? ''}</td>
                   <td className="px-3 py-2 text-ink">
                     {!a.starts_at && canEdit ? (
@@ -435,90 +547,154 @@ export function AppointmentsPage() {
         </div>
       )}
 
-      {panel.current ? (
+      {current ? (
         <RecordPanel
-          key={panel.current.id}
+          key={current.id}
           kindLabel="Appointment"
-          title={panel.current.title}
-          subtitle={panel.current.starts_at ? format(new Date(panel.current.starts_at), 'EEEE d MMMM yyyy, HH:mm') : 'Not booked yet'}
+          title={current.title}
+          subtitle={current.starts_at ? whenText(current, 'EEEE d MMMM yyyy') : 'Not booked yet'}
           kind="appointments"
-          recordId={panel.current.id}
+          recordId={current.id}
           profileId={profile.id}
           canEdit={canEdit}
           fields={[
             {
               label: 'When',
-              value: panel.current.starts_at
-                ? format(new Date(panel.current.starts_at), 'EEE d MMM yyyy, HH:mm')
+              value: current.starts_at
+                ? whenText(current)
                 : canEdit
-                  ? <Button size="xs" variant="ghost" onClick={() => setEditing(panel.current)}>Not booked yet, book it</Button>
+                  ? <Button size="xs" variant="ghost" onClick={() => setEditing(current)}>Not booked yet, book it</Button>
                   : 'Not booked yet',
             },
-            { label: 'Ends', value: panel.current.ends_at ? format(new Date(panel.current.ends_at), 'HH:mm') : null },
-            { label: 'Kind', value: typeLabel(panel.current.appointment_type) },
-            { label: 'With', value: panel.current.provider_name },
-            { label: 'Practice', value: panel.current.provider_organisation },
-            { label: 'Location', value: panel.current.location ?? panel.current.provider_address },
+            { label: 'Ends', value: current.ends_at ? format(new Date(current.ends_at), 'HH:mm') : null },
+            { label: 'Kind', value: typeLabel(current.appointment_type) },
+            {
+              label: 'Repeats',
+              value: current.series ? `${repeatLabel(current.series.repeat)}${current.series.repeat_until ? `, until ${format(new Date(`${current.series.repeat_until}T00:00`), 'd MMM yyyy')}` : ''}` : null,
+            },
+            { label: 'Location', value: current.location ?? current.provider_address },
+            {
+              label: "Who's going",
+              value: (current.attendees ?? []).length
+                ? (current.attendees ?? []).map((p) => `${p.name}${p.is_driver ? ', driving' : ''}`).join('; ')
+                : null,
+            },
+            { label: 'Interpreter', value: current.interpreter_needed ? (current.interpreter_language ? `Needed, ${current.interpreter_language}` : 'Needed') : null },
+            { label: 'How to get ready', value: current.preparation ? <LinkedText text={current.preparation} canEdit={false} /> : null },
             {
               label: 'Status',
-              value: !panel.current.starts_at && canEdit
-                ? <Button size="xs" variant="ghost" onClick={() => setEditing(panel.current)}>Not booked yet, book it</Button>
-                : statusLabel(panel.current.status),
+              value: !current.starts_at && canEdit
+                ? <Button size="xs" variant="ghost" onClick={() => setEditing(current)}>Not booked yet, book it</Button>
+                : statusLabel(current.status),
             },
-            { label: 'Outcome', value: panel.current.outcome ? (
+            { label: 'Outcome', value: current.outcome ? (
               <ForwardedText
                 profileId={profile.id}
-                text={panel.current.outcome}
-                forwards={(panel.current.forwarded ?? []).filter((f) => f.part === 'outcome')}
+                text={current.outcome}
+                forwards={(current.forwarded ?? []).filter((f) => f.part === 'outcome')}
                 canEdit={canEdit}
               />
             ) : null },
-            { label: 'Notes', value: panel.current.notes ? (
-              <ForwardedText
-                profileId={profile.id}
-                text={panel.current.notes}
-                forwards={(panel.current.forwarded ?? []).filter((f) => f.part === 'details')}
-                canEdit={canEdit}
-              />
+            { label: 'Notes', value: current.notes ? (
+              (current.forwarded ?? []).some((f) => f.part === 'details') ? (
+                <ForwardedText
+                  profileId={profile.id}
+                  text={current.notes}
+                  forwards={(current.forwarded ?? []).filter((f) => f.part === 'details')}
+                  canEdit={canEdit}
+                />
+              ) : (
+                <LinkedText text={current.notes} profileId={profile.id} contact={current.provider ?? null} context={current.title} canEdit={canEdit} />
+              )
             ) : null },
-            { label: 'Cost estimate', value: panel.current.cost_estimate != null ? `$${panel.current.cost_estimate.toFixed(2)}` : null },
-            { label: 'Actual cost', value: panel.current.cost_actual != null ? `$${panel.current.cost_actual.toFixed(2)}` : null },
+            { label: 'Cost estimate', value: current.cost_estimate != null ? `$${current.cost_estimate.toFixed(2)}` : null },
+            { label: 'Actual cost', value: current.cost_actual != null ? `$${current.cost_actual.toFixed(2)}` : null },
           ]}
           links={[
-            ...(panel.current.medical_condition_id && conditionName(panel.current.medical_condition_id)
-              ? [{ label: 'Condition', value: conditionName(panel.current.medical_condition_id), to: `/app/${profile.id}/conditions?record=${panel.current.medical_condition_id}` }]
+            ...(current.telehealth_link ? [{ label: 'Video call', value: 'Join the video call', href: current.telehealth_link }] : []),
+            ...(current.medical_condition_id && conditionName(current.medical_condition_id)
+              ? [{ label: 'Condition', value: conditionName(current.medical_condition_id), to: `/app/${profile.id}/conditions?record=${current.medical_condition_id}` }]
               : []),
-            ...(panel.current.provider_id && panel.current.provider_name
-              ? [{ label: 'Provider', value: panel.current.provider_name, to: `/app/${profile.id}/providers?record=${panel.current.provider_id}` }]
+            ...(current.provider_id && current.provider_name
+              ? [{ label: 'Contact', value: current.provider_name, to: `/app/${profile.id}/providers?record=${current.provider_id}` }]
               : []),
-            ...((panel.current.directions_link || panel.current.provider_directions_link)
-              ? [{ label: 'Directions', value: 'Open map', href: (panel.current.directions_link || panel.current.provider_directions_link)! }]
+            ...((current.directions_link || current.provider_directions_link)
+              ? [{ label: 'Directions', value: 'Open map', href: (current.directions_link || current.provider_directions_link)! }]
               : []),
-            ...(panel.current.next_steps ?? []).map((st) => ({
+            ...(current.next_steps ?? []).map((st) => ({
               label: st.completed ? 'Next step, done' : 'Next step',
               value: st.title === st.type_name ? st.title : `${st.title}, ${st.type_name.toLowerCase()}`,
               to: `/app/${profile.id}/tasks?record=${st.id}`,
             })),
           ]}
-          onEdit={() => setEditing(panel.current)}
+          onEdit={() => setEditing(current)}
           done={
-            !panel.current.starts_at
-              ? { label: 'Book it', onRun: () => setEditing(panel.current) }
-              : panel.current.status === 'scheduled'
-                ? { label: 'Mark attended', onRun: () => markAttended.mutate(panel.current!), pending: markAttended.isPending }
+            !current.starts_at
+              ? { label: 'Book it', onRun: () => setEditing(current) }
+              : current.status === 'scheduled' && hasStarted(current)
+                ? { label: 'Mark attended', onRun: () => markAttended.mutate(current), pending: markAttended.isPending }
                 : null
           }
           extra={[
-            ...(panel.current.starts_at ? [{ label: 'How did it go?', onRun: () => setOutcomeFor(panel.current!.id) }] : []),
-            { label: 'Forward notes', onRun: () => setForwarding({ sourceId: panel.current!.id, noteId: null }) },
+            ...(current.starts_at ? [{ label: 'How did it go?', onRun: () => setOutcomeFor(current.id) }] : []),
+            { label: 'Forward notes', onRun: () => setForwarding({ sourceId: current.id, noteId: null }) },
+            ...(current.series ? [{ label: 'Stop repeating', onRun: () => stopRepeating.mutate(current), pending: stopRepeating.isPending }] : []),
           ]}
-          onForwardNote={(noteId) => setForwarding({ sourceId: panel.current!.id, noteId })}
+          onForwardNote={(noteId) => setForwarding({ sourceId: current.id, noteId })}
           onDelete={() => {
-            deleteAppointments([panel.current!]);
+            deleteAppointments([current]);
             panel.close();
           }}
           onClose={panel.close}
-        />
+        >
+          <section>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Who with</h3>
+            {current.provider ? (
+              <ContactStrip contact={current.provider} profileId={profile.id} book={false} />
+            ) : (
+              <p className="text-sm text-muted">No one linked yet.</p>
+            )}
+          </section>
+          <section>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Documents to bring</h3>
+            {(current.bring_documents ?? []).length === 0 ? (
+              <p className="text-sm text-muted">Nothing to bring yet.</p>
+            ) : (
+              <ul className="space-y-1">
+                {current.bring_documents!.map((d) => (
+                  <li key={d.id} className="text-sm">
+                    <Link to={`/app/${profile.id}/documents?doc=${d.id}`} className="text-primary hover:underline break-words">{d.label}</Link>
+                    {d.category_name ? <span className="ml-2 text-xs text-muted">{d.category_name}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          {current.from_task ? (
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">From the task</h3>
+              <p className="text-sm">
+                <Link to={`/app/${profile.id}/tasks?record=${current.from_task.id}`} className="text-primary hover:underline">{current.from_task.title}</Link>
+                {current.from_task.completed_at ? <span className="text-muted">, done {format(new Date(current.from_task.completed_at), 'd MMM yyyy')}</span> : null}
+              </p>
+              {current.from_task.body ? (
+                <div className="mt-1 text-sm text-ink">
+                  <LinkedText text={current.from_task.body} profileId={profile.id} contact={current.provider ?? null} context={current.from_task.title} canEdit={canEdit} />
+                </div>
+              ) : null}
+              {current.from_task.notes.length ? (
+                <ul className="mt-2 space-y-1">
+                  {current.from_task.notes.map((n) => (
+                    <li key={n.id} className="rounded-md border border-border px-3 py-2">
+                      <p className="text-sm text-ink"><LinkedText text={n.body} canEdit={false} /></p>
+                      <p className="text-xs text-muted">{n.author_name ?? 'Someone'}, {format(new Date(n.created_at), 'd MMM yyyy, HH:mm')}</p>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </section>
+          ) : null}
+        </RecordPanel>
       ) : null}
 
       {outcomeAppointment ? (
@@ -574,6 +750,7 @@ export function AppointmentsPage() {
           initialFile={null}
           initialLabel={uploadingFor.step.title === uploadingFor.step.type_name ? '' : uploadingFor.step.title}
           initialConditionId={uploadingFor.from.medical_condition_id ?? ''}
+          links={[{ kind: 'reminders', id: uploadingFor.step.id }, { kind: 'appointments', id: uploadingFor.from.id }]}
           onClose={() => setUploadingFor(null)}
           onUploaded={() => {
             finishStep.mutate(uploadingFor.step.id);
@@ -645,21 +822,30 @@ export function AppointmentsPage() {
         />
       ) : null}
 
-      {adding || editing ? (
+      {(adding && (!newBooking.fromTask || fromTask)) || editing ? (
         <AppointmentEditor
+          key={editing?.id ?? `new-${newBooking.fromTask}`}
           profileId={profile.id}
           appointment={editing}
-          initialProviderId={editing ? '' : initialProviderId}
+          initialProviderId={editing ? '' : newBooking.providerId || fromTask?.provider_id || ''}
+          initialConditionId={editing ? '' : newBooking.conditionId || fromTaskCondition || ''}
+          initialTitle={editing ? '' : newBooking.title || (fromTask ? bookingTitleFromTask(fromTask) : '')}
+          initialType={editing ? 'consultation' : newBooking.type || (fromTask?.kind ? kindForStep(fromTask.kind.name) : 'consultation')}
+          initialBringIds={editing ? [] : (fromTask?.documents ?? []).map((d) => d.id)}
+          fromReminderId={editing ? '' : fromTask?.id ?? ''}
           onClose={() => {
             setAdding(false);
             setEditing(null);
-            setInitialProviderId('');
+            setNewBooking(noBooking);
             setBulkEditQueue([]);
           }}
-          onSaved={() => {
+          onSaved={(saved, info) => {
             setAdding(false);
-            setInitialProviderId('');
+            setNewBooking(noBooking);
             invalidate();
+            if (saved && info?.series_move && info.starts_at) {
+              setSeriesMove({ id: saved.id, from: info.series_move.from_starts_at, later: info.series_move.later, to: info.starts_at });
+            }
             if (editing) advanceQueue();
           }}
         />
@@ -699,15 +885,28 @@ export interface AppointmentDraft {
   newProviderName: string;
   /** What that new person does, when known, e.g. from a referral. */
   newProviderType: string;
+  /** Their phone: for a new name, or a contact with no number yet. */
+  providerPhone: string;
   conditionId: string;
   /** Where it is, found with the same address finder as everywhere else. */
   address: AddressValue;
   /** Its own map link, if the place has one. */
   directionsLink: string;
+  /** Video call link for a telehealth appointment. */
+  telehealthLink: string;
   startDate: string;
+  /** Blank means any time that day. */
   startTime: string;
   endTime: string;
+  repeat: string;
+  repeatUntil: string;
   status: string;
+  /** Who is going, by personKey, and whether each is driving. */
+  attendees: Array<{ key: string; isDriver: boolean }>;
+  interpreterNeeded: boolean;
+  interpreterLanguage: string;
+  bringIds: string[];
+  preparation: string;
   notes: string;
   costEstimate: string;
   costActual: string;
@@ -720,13 +919,22 @@ export function newAppointmentDraft(init: Partial<AppointmentDraft> = {}): Appoi
     providerId: '',
     newProviderName: '',
     newProviderType: '',
+    providerPhone: '',
     conditionId: '',
     address: emptyAddress,
     directionsLink: '',
+    telehealthLink: '',
     startDate: '',
-    startTime: '09:00',
+    startTime: '',
     endTime: '',
+    repeat: 'once',
+    repeatUntil: '',
     status: 'scheduled',
+    attendees: [],
+    interpreterNeeded: false,
+    interpreterLanguage: '',
+    bringIds: [],
+    preparation: '',
     notes: '',
     costEstimate: '',
     costActual: '',
@@ -739,23 +947,32 @@ const pad = (n: number) => String(n).padStart(2, '0');
 function draftFromAppointment(a: Appointment): AppointmentDraft {
   const d = a.starts_at ? new Date(a.starts_at) : null;
   const e = a.ends_at ? new Date(a.ends_at) : null;
-  return {
+  return newAppointmentDraft({
     title: a.title,
     type: a.appointment_type,
     providerId: a.provider_id ?? '',
-    newProviderName: '',
-    newProviderType: '',
     conditionId: a.medical_condition_id ?? '',
     address: addressFrom(a),
     directionsLink: a.directions_link ?? '',
+    telehealthLink: a.telehealth_link ?? '',
     startDate: d ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` : '',
-    startTime: d ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : '09:00',
-    endTime: e ? `${pad(e.getHours())}:${pad(e.getMinutes())}` : '',
+    startTime: d && !a.all_day ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : '',
+    endTime: e && !a.all_day ? `${pad(e.getHours())}:${pad(e.getMinutes())}` : '',
+    repeat: a.series?.repeat ?? 'once',
+    repeatUntil: a.series?.repeat_until ?? '',
     status: a.status,
+    attendees: (a.attendees ?? []).map((p) => ({
+      key: p.account_id ? personKey({ account_id: p.account_id }) : personKey({ circle_member_id: p.circle_member_id! }),
+      isDriver: p.is_driver,
+    })),
+    interpreterNeeded: !!a.interpreter_needed,
+    interpreterLanguage: a.interpreter_language ?? '',
+    bringIds: (a.bring_documents ?? []).map((x) => x.id),
+    preparation: a.preparation ?? '',
     notes: a.notes ?? '',
     costEstimate: a.cost_estimate != null ? String(a.cost_estimate) : '',
     costActual: a.cost_actual != null ? String(a.cost_actual) : '',
-  };
+  });
 }
 
 /** What a booking still needs, box by box, in the words shown next to it. */
@@ -787,9 +1004,11 @@ export function missingSentence(errors: AppointmentDraftErrors, what = 'This app
 
 /** The draft as the appointments API takes it. */
 export function appointmentBody(d: AppointmentDraft, fromReminderId?: string) {
-  // No date: saved as Not booked yet, waiting on a to-do.
-  const startsAt = d.startDate ? new Date(`${d.startDate}T${d.startTime || '09:00'}`).toISOString() : null;
-  const endsAt = d.startDate && d.endTime ? new Date(`${d.startDate}T${d.endTime}`).toISOString() : null;
+  // No date: saved as Not booked yet, waiting on a to-do. A date with no time
+  // is any time that day.
+  const allDay = !!d.startDate && !d.startTime;
+  const startsAt = d.startDate ? new Date(`${d.startDate}T${d.startTime || '00:00'}`).toISOString() : null;
+  const endsAt = d.startDate && d.startTime && d.endTime ? new Date(`${d.startDate}T${d.endTime}`).toISOString() : null;
   return {
     title: d.title.trim(),
     appointment_type: d.type,
@@ -797,15 +1016,27 @@ export function appointmentBody(d: AppointmentDraft, fromReminderId?: string) {
     ...(!d.providerId && d.newProviderName.trim()
       ? { provider_name: d.newProviderName.trim(), provider_type: d.newProviderType.trim() || null }
       : {}),
+    ...(d.providerPhone.trim() && (d.providerId || d.newProviderName.trim()) ? { provider_phone: d.providerPhone.trim() } : {}),
     medical_condition_id: d.conditionId || null,
     ...addressPayload(d.address),
     directions_link: d.directionsLink.trim() || null,
+    telehealth_link: d.telehealthLink.trim() || null,
     starts_at: startsAt,
     ends_at: endsAt,
+    all_day: allDay,
     status: d.status,
+    attendees: d.attendees.map((a) =>
+      a.key.startsWith('a:') ? { account_id: a.key.slice(2), is_driver: a.isDriver } : { circle_member_id: a.key.slice(2), is_driver: a.isDriver }
+    ),
+    interpreter_needed: d.interpreterNeeded,
+    interpreter_language: d.interpreterNeeded ? d.interpreterLanguage.trim() || null : null,
+    bring_document_ids: d.bringIds,
+    preparation: d.preparation.trim() || null,
+    ...(d.startDate ? { repeat: d.repeat, repeat_until: d.repeat !== 'once' && d.repeatUntil ? d.repeatUntil : null } : {}),
     notes: d.notes.trim() || null,
     cost_estimate: d.costEstimate.trim() === '' ? null : Number(d.costEstimate),
     cost_actual: d.costActual.trim() === '' ? null : Number(d.costActual),
+    tz: browserTimeZone() ?? null,
     ...(fromReminderId ? { from_reminder_id: fromReminderId } : {}),
   };
 }
@@ -820,10 +1051,19 @@ export function kindForStep(typeName: string): string {
   return 'consultation';
 }
 
+function Group({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <fieldset className="space-y-3">
+      <legend className="text-sm font-semibold text-ink mb-1">{title}</legend>
+      {children}
+    </fieldset>
+  );
+}
+
 /**
- * The appointment form's fields: what for, kind, condition, who with (pick
- * one, or type a new name and save it to Providers), where, when, status,
- * notes and cost. Choosing who it is with fills in where.
+ * The appointment form's fields, grouped: what and who; when; where;
+ * getting there; bring and get ready; notes and cost. Choosing who it is
+ * with fills in where.
  */
 export function AppointmentFields({
   profileId,
@@ -845,6 +1085,7 @@ export function AppointmentFields({
 }) {
   const health = useHealthConfig();
   const set = (patch: Partial<AppointmentDraft>) => onChange({ ...value, ...patch });
+  const [sameAsLast, setSameAsLast] = useState(false);
 
   const { data: providersData } = useQuery({
     queryKey: ['providers', profileId],
@@ -859,6 +1100,17 @@ export function AppointmentFields({
     queryFn: () => api.get<{ conditions: { id: string; name: string }[] }>(`/care-profiles/${profileId}/conditions`),
   });
   const conditions = conditionData?.conditions ?? [];
+  const { data: peopleData } = usePickablePeople(profileId);
+  const people = peopleData?.people ?? [];
+  const { data: apptData } = useQuery({
+    queryKey: ['appointments', profileId],
+    queryFn: () => api.get<{ appointments: Appointment[] }>(`/care-profiles/${profileId}/appointments`),
+  });
+  const { data: profileData } = useQuery({
+    queryKey: ['care-profile', profileId],
+    queryFn: () => api.get<{ profile: { primary_language?: string | null } }>(`/care-profiles/${profileId}`),
+  });
+  const homeLanguage = profileData?.profile?.primary_language?.trim() ?? '';
 
   // Where they are is where it is: picking who it is with fills the address
   // and map link from Contacts, the same parts the address finder fills.
@@ -870,9 +1122,24 @@ export function AppointmentFields({
       ...(provider.directions_link ? { directionsLink: provider.directions_link } : {}),
     };
   };
-  const handleProviderChange = (newProviderId: string) => {
-    const provider = newProviderId ? providers.find((p) => p.id === newProviderId) : undefined;
-    set({ providerId: newProviderId, newProviderName: '', ...placeFrom(provider) });
+  /** The people who went to the last appointment with this contact. */
+  const lastPeople = (providerId: string) => {
+    const last = (apptData?.appointments ?? [])
+      .filter((a) => a.provider_id === providerId && (a.attendees ?? []).length > 0 && a.starts_at)
+      .sort((a, b) => new Date(b.starts_at!).getTime() - new Date(a.starts_at!).getTime())[0];
+    return last
+      ? last.attendees!.map((p) => ({ key: p.account_id ? personKey({ account_id: p.account_id }) : personKey({ circle_member_id: p.circle_member_id! }), isDriver: p.is_driver }))
+      : [];
+  };
+  const pickContact = (providerId: string, name: string, providerType: string, phone: string) => {
+    if (!providerId) {
+      set({ providerId: '', newProviderName: name, newProviderType: providerType, providerPhone: phone });
+      return;
+    }
+    const provider = providers.find((p) => p.id === providerId);
+    const going = value.attendees.length === 0 ? lastPeople(providerId) : [];
+    setSameAsLast(going.length > 0);
+    set({ providerId, newProviderName: '', newProviderType: '', providerPhone: phone, ...placeFrom(provider), ...(going.length ? { attendees: going } : {}) });
   };
 
   // Someone chosen before Contacts loaded (a follow-up, a health alert's GP)
@@ -884,33 +1151,36 @@ export function AppointmentFields({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [providers, value.providerId]);
 
-  // A typed name that is already in Contacts is simply picked.
-  const handleProviderNameBlur = () => {
-    const typed = value.newProviderName.trim().toLowerCase();
-    if (!typed || value.providerId) return;
-    const match = providers.find((p) => p.name.toLowerCase() === typed);
-    if (match) handleProviderChange(match.id);
+  const pickedName = value.providerId ? providers.find((p) => p.id === value.providerId)?.name ?? '' : value.newProviderName;
+  const going = new Map(value.attendees.map((a) => [a.key, a]));
+  const toggleGoing = (key: string) => {
+    setSameAsLast(false);
+    set({ attendees: going.has(key) ? value.attendees.filter((a) => a.key !== key) : [...value.attendees, { key, isDriver: false }] });
   };
+  const toggleDriver = (key: string) =>
+    set({ attendees: value.attendees.map((a) => (a.key === key ? { ...a, isDriver: !a.isDriver } : a)) });
 
   return (
-    <div className="space-y-4">
-      <div className="grid sm:grid-cols-2 gap-3">
-        <Input
-          id={`${idPrefix}-title`}
-          label="What for"
-          placeholder="e.g. Cardiology check-up"
-          value={value.title}
-          onChange={(e) => set({ title: e.target.value })}
-          error={errors.title}
-        />
-        <label className="block">
-          <span className="block text-sm font-medium text-ink mb-1">Kind</span>
-          <select className={inputClass} value={value.type} onChange={(e) => set({ type: e.target.value })}>
-            {APPOINTMENT_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>{t.label}</option>
-            ))}
-          </select>
-        </label>
+    <div className="space-y-6">
+      <Group title="What and who">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Input
+            id={`${idPrefix}-title`}
+            label="What for"
+            placeholder="e.g. Cardiology check-up"
+            value={value.title}
+            onChange={(e) => set({ title: e.target.value })}
+            error={errors.title}
+          />
+          <label className="block">
+            <span className="block text-sm font-medium text-ink mb-1">Kind</span>
+            <select className={inputClass} value={value.type} onChange={(e) => set({ type: e.target.value })}>
+              {APPOINTMENT_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         <label className="block">
           <span className="block text-sm font-medium text-ink mb-1">What is it for</span>
           <select className={inputClass} value={value.conditionId} onChange={(e) => set({ conditionId: e.target.value })}>
@@ -923,73 +1193,79 @@ export function AppointmentFields({
             Ties this appointment to that condition's tracking, and marks it on the calendar.
           </span>
         </label>
-        <div>
+        <ContactPicker
+          id={`${idPrefix}-with`}
+          label="With"
+          profileId={profileId}
+          value={{ providerId: value.providerId, name: pickedName, providerType: value.newProviderType, phone: value.providerPhone }}
+          onChange={(v) => pickContact(v.providerId, v.name, v.providerType, v.phone)}
+        />
+      </Group>
+
+      <Group title="When">
+        <div className="grid sm:grid-cols-3 gap-3">
+          <Input
+            id={`${idPrefix}-date`}
+            label="Start date"
+            type="date"
+            value={value.startDate}
+            onChange={(e) => set({ startDate: e.target.value })}
+            error={errors.startDate}
+            hint={dateOptional && !value.startDate ? 'No date yet? Leave it blank. It saves as Not booked yet, with a to-do to book it.' : undefined}
+          />
+          <Input
+            id={`${idPrefix}-start`}
+            label="Start time"
+            type="time"
+            value={value.startTime}
+            onChange={(e) => set({ startTime: e.target.value })}
+            hint={value.startDate && !value.startTime ? 'No time yet. It shows as any time that day.' : undefined}
+          />
+          <Input
+            id={`${idPrefix}-end`}
+            label="End time"
+            type="time"
+            value={value.endTime}
+            onChange={(e) => set({ endTime: e.target.value })}
+            hint="On the same day. Leave blank if unknown."
+          />
+        </div>
+        <div className="grid sm:grid-cols-3 gap-3">
           <label className="block">
-            <span className="block text-sm font-medium text-ink mb-1">With</span>
-            <select className={inputClass} value={value.providerId} onChange={(e) => handleProviderChange(e.target.value)}>
-              <option value="">Nobody linked</option>
-              {providers.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
+            <span className="block text-sm font-medium text-ink mb-1">Repeats</span>
+            <select className={inputClass} value={value.repeat} onChange={(e) => set({ repeat: e.target.value })}>
+              {REPEAT_CHOICES.map((r) => (
+                <option key={r.value} value={r.value}>{r.label}</option>
               ))}
             </select>
           </label>
-          {!value.providerId ? (
-            <div className="mt-1">
-              <input
-                type="text"
-                aria-label="Or type a new name"
-                className={inputClass}
-                placeholder="Or type a new name"
-                value={value.newProviderName}
-                onChange={(e) => set({ newProviderName: e.target.value })}
-                onBlur={handleProviderNameBlur}
-              />
-              {value.newProviderName.trim() ? (
-                <p className="mt-1 text-xs text-muted">New to Contacts. Filed there when you save.</p>
-              ) : null}
-            </div>
+          {value.repeat !== 'once' ? (
+            <Input
+              id={`${idPrefix}-until`}
+              label="Until"
+              type="date"
+              value={value.repeatUntil}
+              onChange={(e) => set({ repeatUntil: e.target.value })}
+              hint="Leave blank to keep going."
+            />
           ) : null}
+          <label className="block">
+            <span className="block text-sm font-medium text-ink mb-1">Status</span>
+            <select className={inputClass} value={value.status} onChange={(e) => set({ status: e.target.value })}>
+              {APPOINTMENT_STATUSES.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          </label>
         </div>
-        <Input
-          id={`${idPrefix}-date`}
-          label="Start date"
-          type="date"
-          value={value.startDate}
-          onChange={(e) => set({ startDate: e.target.value })}
-          error={errors.startDate}
-          hint={dateOptional && !value.startDate ? 'No date yet? Leave it blank. It saves as Not booked yet, with a to-do to book it.' : undefined}
-        />
-        <Input
-          id={`${idPrefix}-start`}
-          label="Start time"
-          type="time"
-          value={value.startTime}
-          onChange={(e) => set({ startTime: e.target.value })}
-        />
-        <Input
-          id={`${idPrefix}-end`}
-          label="End time"
-          type="time"
-          value={value.endTime}
-          onChange={(e) => set({ endTime: e.target.value })}
-          hint="On the same day. Leave blank if unknown."
-        />
-        <label className="block">
-          <span className="block text-sm font-medium text-ink mb-1">Status</span>
-          <select className={inputClass} value={value.status} onChange={(e) => set({ status: e.target.value })}>
-            {APPOINTMENT_STATUSES.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <div>
-        <p className="text-sm font-medium text-ink mb-1">Where</p>
+      </Group>
+
+      <Group title="Where">
         {value.providerId && (hasAddress(value.address) || value.directionsLink) ? (
-          <p className="text-xs text-muted mb-2">Filled in from who it is with. Change it if it is somewhere else.</p>
+          <p className="text-xs text-muted">Filled in from who it is with. Change it if it is somewhere else.</p>
         ) : null}
         <AddressFields value={value.address} onChange={(address) => set({ address })} findLabel="Find where it is" />
-        <div className="mt-3">
+        <div className="grid sm:grid-cols-2 gap-3">
           <Input
             id={`${idPrefix}-map`}
             label="Map link, optional"
@@ -998,31 +1274,133 @@ export function AppointmentFields({
             value={value.directionsLink}
             onChange={(e) => set({ directionsLink: e.target.value })}
           />
+          <Input
+            id={`${idPrefix}-video`}
+            label="Video call link"
+            type="url"
+            placeholder="Paste the link from the clinic"
+            value={value.telehealthLink}
+            onChange={(e) => set({ telehealthLink: e.target.value })}
+            hint="For a telehealth appointment. It shows as Join the video call."
+          />
         </div>
-      </div>
-      <Textarea id={`${idPrefix}-notes`} label="Notes" rows={2} value={value.notes} onChange={(e) => set({ notes: e.target.value })} />
-      <div className="grid sm:grid-cols-2 gap-3">
-        <Input
-          id={`${idPrefix}-estimate`}
-          label={`Estimated cost (${health.currency_symbol})`}
-          type="number"
-          min="0"
-          step="any"
-          value={value.costEstimate}
-          onChange={(e) => set({ costEstimate: e.target.value })}
-          hint="What you expect it to cost. Kept as an estimate until confirmed."
+      </Group>
+
+      <Group title="Getting there">
+        <div>
+          <p className="block text-sm font-medium text-ink mb-1">Who's going</p>
+          {people.length === 0 ? <p className="text-xs text-muted">Nobody to pick yet.</p> : null}
+          <ul className="space-y-1">
+            {people.map((p) => {
+              const key = personKey(p.ref);
+              const on = going.get(key);
+              return (
+                <li key={key} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                  <label htmlFor={`${idPrefix}-go-${key}`} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      id={`${idPrefix}-go-${key}`}
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                      checked={!!on}
+                      onChange={() => toggleGoing(key)}
+                    />
+                    <span className="text-ink">{personOption(p)}</span>
+                  </label>
+                  {on ? (
+                    <label htmlFor={`${idPrefix}-drive-${key}`} className="flex items-center gap-2 cursor-pointer text-muted">
+                      <input
+                        id={`${idPrefix}-drive-${key}`}
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                        checked={on.isDriver}
+                        onChange={() => toggleDriver(key)}
+                      />
+                      Driving
+                    </label>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+          {sameAsLast ? <p className="mt-1 text-xs text-muted">The same people as last time.</p> : null}
+        </div>
+        <div className="grid sm:grid-cols-2 gap-3 items-start">
+          <label htmlFor={`${idPrefix}-interp`} className="flex items-center gap-2 text-sm text-ink cursor-pointer sm:mt-7">
+            <input
+              id={`${idPrefix}-interp`}
+              type="checkbox"
+              className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+              checked={value.interpreterNeeded}
+              onChange={(e) =>
+                set({
+                  interpreterNeeded: e.target.checked,
+                  // Their own language, when it is not English, is the one to ask for.
+                  ...(e.target.checked && !value.interpreterLanguage && homeLanguage && !/^english$/i.test(homeLanguage)
+                    ? { interpreterLanguage: homeLanguage }
+                    : {}),
+                })
+              }
+            />
+            Interpreter needed
+          </label>
+          {value.interpreterNeeded ? (
+            <Input
+              id={`${idPrefix}-language`}
+              label="Language"
+              value={value.interpreterLanguage}
+              onChange={(e) => set({ interpreterLanguage: e.target.value })}
+              hint="Tell the clinic the language when you book. Most health services book the interpreter for free."
+            />
+          ) : null}
+        </div>
+      </Group>
+
+      <Group title="Bring and get ready">
+        <DocumentAttach
+          profileId={profileId}
+          idPrefix={`${idPrefix}-bring`}
+          label="Documents to bring"
+          value={value.bringIds}
+          onChange={(bringIds) => set({ bringIds })}
+          emptyText="Nothing to bring yet."
+          hint="They show on the appointment and on the day."
         />
-        <Input
-          id={`${idPrefix}-actual`}
-          label={`Actual cost (${health.currency_symbol})`}
-          type="number"
-          min="0"
-          step="any"
-          value={value.costActual}
-          onChange={(e) => set({ costActual: e.target.value })}
-          hint="What it actually cost. Counts as health spend once entered."
+        <Textarea
+          id={`${idPrefix}-prep`}
+          label="How to get ready"
+          rows={2}
+          placeholder="e.g. Fast from 10pm. Water is fine."
+          value={value.preparation}
+          onChange={(e) => set({ preparation: e.target.value })}
+          hint="A reminder goes out at 7pm the night before."
         />
-      </div>
+      </Group>
+
+      <Group title="Notes and cost">
+        <Textarea id={`${idPrefix}-notes`} label="Notes" rows={2} value={value.notes} onChange={(e) => set({ notes: e.target.value })} />
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Input
+            id={`${idPrefix}-estimate`}
+            label={`Estimated cost, ${health.currency_symbol}`}
+            type="number"
+            min="0"
+            step="any"
+            value={value.costEstimate}
+            onChange={(e) => set({ costEstimate: e.target.value })}
+            hint="What you expect it to cost. Kept as an estimate until confirmed."
+          />
+          <Input
+            id={`${idPrefix}-actual`}
+            label={`Actual cost, ${health.currency_symbol}`}
+            type="number"
+            min="0"
+            step="any"
+            value={value.costActual}
+            onChange={(e) => set({ costActual: e.target.value })}
+            hint="What it actually cost. Counts as health spend once entered."
+          />
+        </div>
+      </Group>
     </div>
   );
 }
@@ -1034,6 +1412,7 @@ export function AppointmentEditor({
   initialTitle = '',
   initialType = 'consultation',
   initialConditionId = '',
+  initialBringIds = [],
   fromReminderId = '',
   onClose,
   onSaved,
@@ -1048,18 +1427,20 @@ export function AppointmentEditor({
   initialType?: string;
   /** Preselect the condition this appointment is being booked for. */
   initialConditionId?: string;
-  /** The next step this appointment carries out; saving ticks it off. */
+  /** Documents to bring, ticked, e.g. the referral on the task it is booked from. */
+  initialBringIds?: string[];
+  /** The task or next step this appointment carries out; saving ticks it off. */
   fromReminderId?: string;
   onClose: () => void;
   /** Gets the saved appointment, e.g. so notes can be forwarded to a new one. */
-  onSaved: (saved?: { id: string }) => void;
+  onSaved: (saved?: { id: string }, info?: { series_move: { from_starts_at: string; later: number } | null; starts_at: string | null }) => void;
 }) {
   const isNew = appointment === null;
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<AppointmentDraft>(() =>
     appointment
       ? draftFromAppointment(appointment)
-      : newAppointmentDraft({ title: initialTitle, type: initialType, providerId: initialProviderId, conditionId: initialConditionId })
+      : newAppointmentDraft({ title: initialTitle, type: initialType, providerId: initialProviderId, conditionId: initialConditionId, bringIds: initialBringIds })
   );
   const [error, setError] = useState('');
   // Errors show once Save has been tried, never while someone is still typing.
@@ -1082,7 +1463,11 @@ export function AppointmentEditor({
   const saveMutation = useMutation({
     mutationFn: () => {
       const body = appointmentBody(draft, isNew && fromReminderId ? fromReminderId : undefined);
-      type Saved = { appointment: { id: string }; filed?: Array<{ id: string; name: string }> };
+      type Saved = {
+        appointment: { id: string; starts_at: string | null };
+        filed?: Array<{ id: string; name: string }>;
+        series_move?: { from_starts_at: string; later: number } | null;
+      };
       return isNew
         ? api.post<Saved>(`/care-profiles/${profileId}/appointments`, body)
         : api.patch<Saved>(`/care-profiles/${profileId}/appointments/${appointment.id}`, body);
@@ -1090,7 +1475,8 @@ export function AppointmentEditor({
     onSuccess: (res) => {
       noticeFiled(profileId, res?.filed);
       refreshContacts(queryClient);
-      onSaved(res?.appointment);
+      void queryClient.invalidateQueries({ queryKey: ['tasks', profileId] });
+      onSaved(res?.appointment, { series_move: res?.series_move ?? null, starts_at: res?.appointment?.starts_at ?? null });
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not save the appointment.'),
   });
@@ -1101,7 +1487,7 @@ export function AppointmentEditor({
         <AppointmentFields profileId={profileId} value={draft} onChange={setDraft} errors={errors} dateOptional={!requireDate} />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         {tried && !draftIsBookable(draft, requireDate) ? (
-          <p className="text-sm text-red-600">{missingSentence(appointmentDraftErrors(draft, requireDate))}</p>
+          <p className="text-sm text-red-600" role="alert">{missingSentence(appointmentDraftErrors(draft, requireDate))}</p>
         ) : null}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>

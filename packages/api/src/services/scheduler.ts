@@ -2,20 +2,19 @@ import { db } from '../config/database';
 import { getSchedulerConfig, onSettingsChange } from '../config/settings';
 import { sendReminderEmail } from './email';
 import type { Reminder } from '../types';
+import { nextAfter, ruleFor } from '../lib/repeat';
+import { topUpAllSeries } from './booking';
 
 interface DueReminder extends Reminder {
   profile_owner_id: string;
-}
-
-function advance(date: Date, type: Reminder['reminder_type']): Date {
-  const next = new Date(date);
-  if (type === 'daily') next.setDate(next.getDate() + 1);
-  else if (type === 'weekly') next.setDate(next.getDate() + 7);
-  else if (type === 'monthly') next.setMonth(next.getMonth() + 1);
-  return next;
+  owner_timezone: string | null;
 }
 
 async function resolveRecipient(reminder: DueReminder): Promise<{ email: string; name: string } | null> {
+  if (reminder.assigned_account_id) {
+    const acc = await db('accounts').where({ id: reminder.assigned_account_id }).first('email', 'display_name');
+    if (acc) return { email: acc.email, name: acc.display_name };
+  }
   if (reminder.assigned_to) {
     const member = await db('care_circle_members')
       .leftJoin('accounts', 'care_circle_members.account_id', 'accounts.id')
@@ -35,18 +34,31 @@ async function resolveRecipient(reminder: DueReminder): Promise<{ email: string;
   return owner ? { email: owner.email, name: owner.display_name } : null;
 }
 
+let lastSeriesTopUp = 0;
+
 async function tick(): Promise<void> {
   const now = new Date();
+  // Repeating appointments are kept a season ahead, checked once a day.
+  if (now.getTime() - lastSeriesTopUp > 24 * 3600 * 1000) {
+    lastSeriesTopUp = now.getTime();
+    await topUpAllSeries().catch((err) => console.warn('Repeating appointments top-up failed:', (err as Error).message));
+  }
   const due = await db<Reminder>('reminders')
     .join('care_profiles', 'reminders.care_profile_id', 'care_profiles.id')
     .where('reminders.completed', false)
     // No reminder emails about someone who has died.
     .whereNull('care_profiles.died_on')
-    .where('reminders.next_due_at', '<=', now)
+    // Any time that day: the reminder goes out at 8am that day, not midnight.
+    .where((qb) => {
+      qb.where((w) => w.where('reminders.all_day', false).where('reminders.next_due_at', '<=', now)).orWhere((w) =>
+        w.where('reminders.all_day', true).whereRaw("reminders.next_due_at + interval '8 hours' <= ?", [now])
+      );
+    })
     .where((qb) => {
       qb.whereNull('reminders.last_notified_at').orWhereRaw('reminders.last_notified_at < reminders.next_due_at');
     })
-    .select<DueReminder[]>('reminders.*', 'care_profiles.account_id as profile_owner_id')
+    .join('accounts as owner', 'care_profiles.account_id', 'owner.id')
+    .select<DueReminder[]>('reminders.*', 'care_profiles.account_id as profile_owner_id', 'owner.timezone as owner_timezone')
     .limit(100);
 
   for (const reminder of due) {
@@ -58,11 +70,11 @@ async function tick(): Promise<void> {
     }
 
     const updates: Record<string, unknown> = { last_notified_at: now };
-    if (reminder.reminder_type !== 'once') {
-      // Roll recurring reminders forward past now so they come due again
-      let next = new Date(reminder.next_due_at);
-      while (next <= now) next = advance(next, reminder.reminder_type);
-      updates.next_due_at = next;
+    const rule = ruleFor(reminder);
+    if (rule) {
+      // Roll recurring reminders forward past now so they come due again, on
+      // the same wall-clock time where the person lives.
+      updates.next_due_at = nextAfter(new Date(reminder.next_due_at), rule, now, reminder.owner_timezone);
       updates.last_notified_at = null;
     }
     await db('reminders').where({ id: reminder.id }).update(updates);

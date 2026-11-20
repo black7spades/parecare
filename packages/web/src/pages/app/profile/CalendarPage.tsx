@@ -21,7 +21,7 @@ import { useProfile } from './ProfileLayout';
 import { AppointmentEditor } from './AppointmentsPage';
 import type { Task } from '../../../lib/care';
 
-type CalendarEvent = Task & {
+type CalendarEvent = Omit<Task, 'kind'> & {
   kind?: string;
   medication_id?: string;
   // An appointment booked under a condition carries it, so the calendar can

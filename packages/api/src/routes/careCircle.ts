@@ -10,6 +10,7 @@ import { createInvitation, resendInvitation, revokeInvitation, inviteUrl, effect
 import { env } from '../config/env';
 import type { CareCircleMember, Invitation } from '../types';
 import { addCirclePerson, circlePersonSchema, isAddedPerson } from '../services/circlePeople';
+import { pickablePeople } from '../services/people';
 
 export const careCircleRouter = Router({ mergeParams: true });
 
@@ -73,6 +74,11 @@ careCircleRouter.get('/', requireAuth, async (req, res) => {
  * to people they already share care with, so the list is never a directory of
  * strangers.
  */
+/** Everyone who can be picked for a job: the account holder first, then the circle. */
+careCircleRouter.get('/people', requireAuth, async (req, res) => {
+  res.json({ people: await pickablePeople(String(req.params['id']), req.account?.id ?? null) });
+});
+
 careCircleRouter.get('/invitable-users', requireAuth, async (req, res) => {
   const account = req.account!;
   const profileId = req.params['id'];

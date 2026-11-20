@@ -35,8 +35,10 @@ const documentMeta = z.object({
     .optional(),
   // Attach the new document to a record as it is filed, e.g. a scan report
   // uploaded from the appointment it came out of.
-  link_entity_type: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/).optional(),
-  link_entity_id: z.string().uuid().optional(),
+  // Repeated pairs attach it to several records, such as a next step and
+  // the appointment it came from.
+  link_entity_type: z.preprocess((v) => (typeof v === 'string' ? [v] : v), z.array(z.string().regex(/^[a-z][a-z0-9-]{0,39}$/)).max(10)).optional(),
+  link_entity_id: z.preprocess((v) => (typeof v === 'string' ? [v] : v), z.array(z.string().uuid()).max(10)).optional(),
 });
 
 const documentUpdate = z.object({
@@ -111,11 +113,11 @@ documentsRouter.post(
       })
       .returning('id');
     const docId = (inserted as { id: string }).id;
-    if (parsed.data.link_entity_type && parsed.data.link_entity_id) {
-      await db('document_links')
-        .insert({ document_id: docId, entity_type: parsed.data.link_entity_type, entity_id: parsed.data.link_entity_id })
-        .onConflict(['document_id', 'entity_type', 'entity_id'])
-        .ignore();
+    const types = parsed.data.link_entity_type ?? [];
+    const ids = parsed.data.link_entity_id ?? [];
+    const pairs = types.slice(0, ids.length).map((t, i) => ({ document_id: docId, entity_type: t, entity_id: ids[i]! }));
+    if (pairs.length) {
+      await db('document_links').insert(pairs).onConflict(['document_id', 'entity_type', 'entity_id']).ignore();
     }
     const doc = await withCategory(db('documents')).where('documents.id', docId).first();
 

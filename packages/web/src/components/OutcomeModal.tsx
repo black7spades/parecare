@@ -10,8 +10,9 @@ import { Button } from './ui/Button';
 import { Input, Textarea } from './ui/Input';
 import { Modal } from './ui/Modal';
 import { NotePicker, pickedItems, useForwardCandidates, type PickState, type SentForward } from './ForwardNotes';
-import { ProfessionalPicker, type PickedProfessional } from './ProfessionalPicker';
-import { ProviderTypeField } from './ProviderFields';
+import { ContactPicker, emptyContact, type PickedContact } from './ContactPicker';
+import { ContactStrip } from './ContactStrip';
+import { JoinedNotice, type JoinedInfo } from '../pages/app/profile/TaskEditor';
 import { addressFrom } from './AddressFields';
 import { Link } from 'react-router-dom';
 import { noticeFiled, refreshContacts } from '../stores/notice';
@@ -56,7 +57,7 @@ interface DraftStep {
   details: string;
   dueOn: string;
   /** Who it is with, such as who a referral is to: from Contacts, or a new name filed there. */
-  who: PickedProfessional;
+  who: PickedContact;
   /** Booking it now, right here, with the same fields as Add appointment. */
   booking: AppointmentDraft | null;
   /** Pieces of this visit to send with it. */
@@ -111,6 +112,8 @@ export function OutcomeModal({
   const [error, setError] = useState('');
   // What still needs filling in, named once Save has been tried.
   const [tried, setTried] = useState(false);
+  // Steps that joined an open task for the same booking, with the way to keep them apart.
+  const [joined, setJoined] = useState<Array<{ info: JoinedInfo; create: Record<string, unknown> }>>([]);
   const existing = appointment.next_steps ?? [];
   const candidates = useForwardCandidates(profileId, appointment, outcome);
 
@@ -131,8 +134,8 @@ export function OutcomeModal({
         // A follow-up is usually with the same person.
         who:
           t?.system_key === 'follow_up' && appointment.provider_id
-            ? { providerId: appointment.provider_id, name: appointment.provider_name ?? '', providerType: '' }
-            : { providerId: '', name: '', providerType: '' },
+            ? { ...emptyContact, providerId: appointment.provider_id, name: appointment.provider_name ?? '' }
+            : emptyContact,
         booking: null,
         send: {},
         sendDefault: sendAll,
@@ -152,6 +155,7 @@ export function OutcomeModal({
         providerId: d.who.providerId,
         newProviderName: d.who.providerId ? '' : d.who.name.trim(),
         newProviderType: d.who.providerId ? '' : d.who.providerType,
+        providerPhone: d.who.phone,
         ...(d.systemKey === 'follow_up' && d.who.providerId === (appointment.provider_id ?? '')
           ? { address: addressFrom(appointment), directionsLink: appointment.directions_link ?? '' }
           : {}),
@@ -200,16 +204,20 @@ export function OutcomeModal({
 
   const save = useMutation({
     mutationFn: async () => {
-      const res = await api.put<{ created: string[]; filed?: Array<{ id: string; name: string }> }>(`/care-profiles/${profileId}/appointments/${appointment.id}/outcome`, {
+      const res = await api.put<{
+        created: string[];
+        filed?: Array<{ id: string; name: string }>;
+        joined?: Array<{ into_id: string; into_title: string; name: string | null; previous: Record<string, unknown>; note_id: string | null; document_ids: string[]; step: Record<string, unknown> }>;
+      }>(`/care-profiles/${profileId}/appointments/${appointment.id}/outcome`, {
         outcome: outcome.trim() || null,
         next_steps: drafts.map((d) => ({
           type: d.type,
           details: d.details.trim() || null,
           due_on: d.dueOn || null,
           ...(d.books && d.who.providerId
-            ? { provider_id: d.who.providerId }
+            ? { provider_id: d.who.providerId, provider_phone: d.who.phone.trim() || null }
             : d.books && d.who.name.trim()
-              ? { provider_name: d.who.name.trim(), provider_type: d.who.providerType || null }
+              ? { provider_name: d.who.name.trim(), provider_type: d.who.providerType || null, provider_phone: d.who.phone.trim() || null }
               : {}),
           forward: d.books ? pickedItems(candidates, picksFor(d)) : [],
         })),
@@ -232,14 +240,22 @@ export function OutcomeModal({
         }
       }
       noticeFiled(profileId, filed);
-      return failed;
+      return { failed, joined: res.joined ?? [] };
     },
-    onSuccess: (failed) => {
+    onSuccess: ({ failed, joined: joins }) => {
       refresh();
       void queryClient.invalidateQueries({ queryKey: ['calendar', profileId] });
       void queryClient.invalidateQueries({ queryKey: ['record-extras', profileId] });
+      if (joins.length > 0) {
+        // Say what joined, and keep the window open so they can be kept apart.
+        setDrafts([]);
+        setJoined(joins.map((j) => ({
+          info: { id: j.into_id, title: j.into_title, name: j.name, previous: j.previous, note_id: j.note_id, document_ids: j.document_ids },
+          create: { ...j.step, no_infer: true },
+        })));
+      }
       if (failed.length === 0) {
-        onClose();
+        if (joins.length === 0) onClose();
         return;
       }
       // How it went is saved; only the booking needs another go.
@@ -287,16 +303,16 @@ export function OutcomeModal({
                     <p className={`text-sm text-ink break-words ${s.completed ? 'line-through' : ''}`}>{s.title}</p>
                     <p className="text-xs text-muted">
                       {s.type_name}
-                      {s.provider_id && s.provider_name ? (
-                        <>
-                          {', with '}
-                          <Link to={`/app/${profileId}/providers?record=${s.provider_id}`} className="text-primary hover:underline">
-                            {s.provider_name}
-                          </Link>
-                          {' in Contacts'}
-                        </>
-                      ) : null}
                     </p>
+                    {s.provider ? (
+                      <div className="mt-1">
+                        <ContactStrip contact={s.provider} size="compact" book={false} />
+                      </div>
+                    ) : s.provider_id && s.provider_name ? (
+                      <Link to={`/app/${profileId}/providers?record=${s.provider_id}`} className="text-xs text-primary hover:underline">
+                        {s.provider_name}
+                      </Link>
+                    ) : null}
                   </div>
                   {s.led_to && !s.led_to.starts_at && canEdit && !s.completed ? (
                     <Button size="xs" variant="ghost" className="whitespace-nowrap" onClick={() => onAddDate(s.led_to!.id)}>
@@ -383,22 +399,14 @@ export function OutcomeModal({
                       </Button>
                     </div>
                     {d.books ? (
-                      <div className="grid gap-3 sm:grid-cols-2 mb-3">
-                        <ProfessionalPicker
+                      <div className="mb-3">
+                        <ContactPicker
                           id={`who-${d.key}`}
                           label={d.systemKey === 'referral' ? 'Who to' : 'Who with'}
+                          profileId={profileId}
                           value={d.who}
                           onChange={(who) => updateDraft(d.key, { who })}
                         />
-                        {d.who.providerId ? null : (
-                          <ProviderTypeField
-                            key={`type-${d.key}-${d.who.providerId}`}
-                            id={`what-${d.key}`}
-                            label="What they do"
-                            value={d.who.providerType}
-                            onChange={(providerType) => updateDraft(d.key, { who: { ...d.who, providerType } })}
-                          />
-                        )}
                       </div>
                     ) : null}
                     <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_11rem]">
@@ -463,6 +471,18 @@ export function OutcomeModal({
           </div>
         ) : null}
 
+        {joined.map((j) => (
+          <JoinedNotice
+            key={j.info.id}
+            profileId={profileId}
+            joined={j.info}
+            create={j.create}
+            onDone={() => {
+              refresh();
+              setJoined((all) => all.filter((x) => x.info.id !== j.info.id));
+            }}
+          />
+        ))}
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         {tried && problems.length > 0 ? (
           <div className="rounded-md border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800 px-3 py-2" role="alert">

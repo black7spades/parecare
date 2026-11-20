@@ -785,6 +785,7 @@ export function UploadDocumentModal({
   initialLabel = '',
   initialConditionId = '',
   link,
+  links,
   onClose,
   onUploaded,
 }: {
@@ -797,9 +798,12 @@ export function UploadDocumentModal({
   initialConditionId?: string;
   /** Attach the new document to a record as it is filed. */
   link?: { kind: string; id: string };
+  /** Attach it to several records at once, such as a next step and its appointment. */
+  links?: Array<{ kind: string; id: string }>;
   onClose: () => void;
   onUploaded: (doc: CareDocument) => void;
 }) {
+  const [tried, setTried] = useState(false);
   const [file, setFile] = useState<File | null>(initialFile);
   const [label, setLabel] = useState(initialLabel || (initialFile ? withoutExtension(initialFile.name) : ''));
   // A category name; one not on the list yet is added when the file is saved.
@@ -825,9 +829,9 @@ export function UploadDocumentModal({
       form.append('label', label.trim() || file!.name);
       if (conditionId) form.append('medical_condition_id', conditionId);
       if (restricted) for (const role of roles) form.append('visible_to_roles', role);
-      if (link) {
-        form.append('link_entity_type', link.kind);
-        form.append('link_entity_id', link.id);
+      for (const l of [...(link ? [link] : []), ...(links ?? [])]) {
+        form.append('link_entity_type', l.kind);
+        form.append('link_entity_id', l.id);
       }
       return api.upload<{ document: CareDocument }>(`/care-profiles/${profileId}/documents`, form);
     },
@@ -836,11 +840,25 @@ export function UploadDocumentModal({
       setUploadError(err instanceof Error ? err.message : 'The file did not upload. Check your connection and try again.'),
   });
 
-  const canSave = !!file && !!label.trim() && (!restricted || roles.length > 0);
+  // Upload always answers: what is missing is named beside it.
+  const missing = [
+    !file ? 'a file' : null,
+    !label.trim() ? 'a name' : null,
+    restricted && roles.length === 0 ? 'who can see it' : null,
+  ].filter(Boolean) as string[];
+  const canSave = missing.length === 0;
 
   return (
     <Modal open onClose={onClose} title="Upload a document">
-      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (canSave) mutation.mutate(); }}>
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setTried(true);
+          if (canSave) mutation.mutate();
+          else if (!file) document.getElementById('upload-doc-file')?.focus();
+        }}
+      >
         <div>
           <label htmlFor="upload-doc-file" className="block text-sm font-medium text-ink mb-1">File</label>
           {file && file === initialFile ? (
@@ -889,9 +907,12 @@ export function UploadDocumentModal({
           </div>
         </DocumentDetailsFields>
         {uploadError ? <p className="text-sm text-red-600">{uploadError}</p> : null}
+        {tried && !canSave ? (
+          <p className="text-sm text-red-600" role="alert">This upload needs {missing.join(' and ')}.</p>
+        ) : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={mutation.isPending} disabled={!canSave}>Upload</Button>
+          <Button type="submit" loading={mutation.isPending}>Upload</Button>
         </div>
       </form>
     </Modal>
