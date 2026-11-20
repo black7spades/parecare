@@ -1,4 +1,5 @@
 import { db } from '../config/database';
+import { COURSE_RUNNING_SQL } from '../lib/course';
 import { contactLine, supplyContext, type NextAction } from './alertContacts';
 import type { ContactSummary } from './professionals';
 import { dateInZone, hmInZone, startOfDayInZone } from '../lib/timezone';
@@ -168,6 +169,7 @@ export async function gatherNotifications(
       .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
       .whereIn('m.care_profile_id', livingIds)
       .where('m.active', true)
+      .whereRaw(COURSE_RUNNING_SQL)
       .select('m.id', 'm.care_profile_id', 'm.supply', 'm.supply_remaining', 'm.packs_on_hand', 'm.schedule_times', 'm.critical', 'm.updated_at', 'c.name'),
     // Yesterday onward, since a dose given for this morning may have been
     // recorded late last night or early, and is placed by the time it was for.

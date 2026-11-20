@@ -634,6 +634,8 @@ export function TasksPage() {
             recordId={t.id}
             profileId={profile.id}
             canEdit={canEdit}
+            // A next step's document also belongs to the appointment it came from.
+            attachAlso={t.appointment_id ? [{ kind: 'appointments', id: t.appointment_id }] : []}
             onEdit={() => setEditing({ task: t })}
             fields={[
               {

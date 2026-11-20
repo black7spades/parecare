@@ -387,8 +387,39 @@ export interface CareDocument {
   visible_to_roles: string[] | null;
   /** The condition it was filed against, if any. */
   medical_condition_id?: string | null;
+  /** The date it was written. */
+  issued_on?: string | null;
+  /** When it started counting, e.g. the first visit with the specialist. */
+  valid_from?: string | null;
+  valid_from_appointment_id?: string | null;
+  valid_until?: string | null;
+  no_expiry?: boolean;
+  /** The referral rule set Valid until, not a person. */
+  valid_until_worked_out?: boolean;
+  /** How the dates were worked out, in a sentence for the screen. */
+  validity_note?: string | null;
+  from_provider_id?: string | null;
+  to_provider_id?: string | null;
+  /** Who wrote it and who it is to, as someone to call. */
+  from?: ContactSummary | null;
+  to?: ContactSummary | null;
+  renewal_task_id?: string | null;
+  /** Every record it is attached to, named, with the page that opens it. */
+  attached_to?: AttachedTo[];
   created_at: string;
 }
+
+/** A record a document is attached to. */
+export interface AttachedTo {
+  kind: string;
+  id: string;
+  label: string;
+  kind_label: string;
+  path: string;
+}
+
+/** Categories whose documents usually run out, so Valid until is asked plainly. */
+export const EXPIRING_CATEGORY_KEYS = ['referral', 'prescription', 'test_request', 'service_agreement', 'behaviour_support_plan'];
 
 export const PROVIDER_TYPES = [
   { value: 'gp', label: 'GP' },
@@ -1249,6 +1280,73 @@ export interface MedicationRecord {
   /** The visit it started at. */
   source_appointment_id?: string | null;
   source_appointment?: { id: string; title: string; starts_at: string | null } | null;
+  /** The last day it was taken, why it stopped and their words. */
+  stopped_on?: string | null;
+  stop_reason?: StopReason | null;
+  stop_notes?: string | null;
+  /** The last day of a course, such as antibiotics. */
+  course_ends_on?: string | null;
+  /** Repeats left on the script. */
+  repeats_left?: number | null;
+  /** Its history, newest first. */
+  changes?: MedicationChange[];
+}
+
+export const STOP_REASONS = [
+  { value: 'finished', label: 'Course finished' },
+  { value: 'side_effects', label: 'Side effects' },
+  { value: 'not_working', label: 'Not working' },
+  { value: 'changed', label: 'Changed to another medicine' },
+  { value: 'doctor_stopped', label: 'Doctor stopped it' },
+  { value: 'no_longer_needed', label: 'No longer needed' },
+  { value: 'other', label: 'Other' },
+] as const;
+export type StopReason = (typeof STOP_REASONS)[number]['value'];
+export const stopReasonLabel = (v: string | null | undefined): string | null => STOP_REASONS.find((r) => r.value === v)?.label ?? null;
+
+/** One change in a medicine's history. */
+export interface MedicationChange {
+  id: string;
+  medication_id: string;
+  changed_on: string;
+  change_kind: 'started' | 'dose' | 'times' | 'stopped' | 'restarted' | 'other';
+  dose_amount_before: string | null;
+  dose_amount_after: string | null;
+  dose_unit_before: string | null;
+  dose_unit_after: string | null;
+  schedule_times_before: string[] | null;
+  schedule_times_after: string[] | null;
+  reason: string | null;
+  source_appointment_id: string | null;
+  source_appointment_title: string | null;
+  source_appointment_starts_at: string | null;
+  source_document_id: string | null;
+  source_document_label: string | null;
+  changed_by_name: string | null;
+}
+
+const doseText = (amount: string | null, unit: string | null): string => `${amount ?? ''}${unit ?? ''}`.trim();
+const timesText = (t: string[] | null): string => (t && t.length ? t.join(' and ') : 'as needed');
+
+/**
+ * What changed, in words: "50mg to 25mg", "08:00 and 20:00 to 08:00", or
+ * "Started at 50mg". The reason and source are said separately.
+ */
+export function medicationChangeWhat(c: MedicationChange): string {
+  if (c.change_kind === 'started') {
+    const dose = doseText(c.dose_amount_after, c.dose_unit_after);
+    return dose ? `Started at ${dose}` : 'Started';
+  }
+  if (c.change_kind === 'stopped') return 'Stopped';
+  if (c.change_kind === 'restarted') return 'Started again';
+  const parts: string[] = [];
+  const before = doseText(c.dose_amount_before, c.dose_unit_before);
+  const after = doseText(c.dose_amount_after, c.dose_unit_after);
+  if (before !== after) parts.push(`${before || 'no dose'} to ${after || 'no dose'}`);
+  const tb = timesText(c.schedule_times_before);
+  const ta = timesText(c.schedule_times_after);
+  if (tb !== ta) parts.push(`${tb} to ${ta}`);
+  return parts.join(', ') || 'Changed';
 }
 
 /** A pharmacy or shop a medication is reordered from, shared per account.

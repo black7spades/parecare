@@ -10,6 +10,8 @@ import { resolveCatalogueId } from './medicationCatalogue';
 import { getMarRetentionMonths } from '../config/settings';
 import { drawDownOnHand, perDoseDrawdown } from '../services/medicationSupply';
 import { contactSummaries, linkSupplierToContact, mainContact, resolveContactInput, supplierContacts } from '../services/professionals';
+import { STOP_REASONS, changesFor, recordMedicationChange, restartMedication, stopMedication } from '../services/medicationChanges';
+import { COURSE_RUNNING_SQL } from '../lib/course';
 
 export const medicationsRouter = Router({ mergeParams: true });
 
@@ -103,6 +105,15 @@ const medSchema = z.object({
   prescriber_type: z.string().trim().max(100).optional().nullable(),
   prescriber_phone: z.string().trim().max(50).optional().nullable(),
   source_appointment_id: z.string().uuid().optional().nullable(),
+  // The last day of a course, such as antibiotics, and the repeats left on
+  // the script. Two data points, two fields.
+  course_ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  repeats_left: z.coerce.number().int().min(0).max(99).optional().nullable(),
+  // Why the dose or times changed and where the change came from: a visit or
+  // a letter on file. Kept in the medicine's history, not on the medicine.
+  change_reason: z.string().trim().max(2000).optional().nullable(),
+  change_source_appointment_id: z.string().uuid().optional().nullable(),
+  change_source_document_id: z.string().uuid().optional().nullable(),
   // Dangerous to miss (stopping suddenly is harmful): overdue and
   // out-of-stock alerts for this medication are urgent.
   critical: z.boolean().optional(),
@@ -188,6 +199,10 @@ interface MedRow {
   supplier: string | null;
   supplier_order_url: string | null;
   prescriber_name?: string | null;
+  repeats_left?: number | null;
+  course_ends_on?: string | null;
+  stopped_on?: string | null;
+  stop_reason?: string | null;
   active: boolean;
 }
 
@@ -208,8 +223,18 @@ interface MedInsert {
   supplier: string | null;
   supplier_order_url: string | null;
   prescriber_name: string | null;
+  repeats_left: number | null;
+  course_ends_on: string | null;
+  stopped_on: string | null;
+  stop_reason: string | null;
   active: boolean;
 }
+
+/** A date cell as YYYY-MM-DD, or nothing. */
+const dayCell = (v: unknown): string | null => {
+  const s = String(v ?? '').trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+};
 
 // Postgres returns decimal columns as strings; hand the client real numbers so
 // supply/supply_remaining arrive as the numeric type the frontend expects.
@@ -283,7 +308,11 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
     { key: 'supplier', header: 'Supplier', aliases: ['pharmacy', 'supplied by'], toCell: (r) => r.supplier ?? '' },
     { key: 'supplier_order_url', header: 'Order link', aliases: ['order url', 'reorder link', 'order'], toCell: (r) => r.supplier_order_url ?? '' },
     { key: 'prescriber_name', header: 'Prescribed by', aliases: ['prescriber', 'prescribed by', 'doctor'], toCell: (r) => r.prescriber_name ?? '' },
+    { key: 'repeats_left', header: 'Repeats left', aliases: ['repeats left on the script', 'repeats'], toCell: (r) => (r.repeats_left ?? '').toString() },
+    { key: 'course_ends_on', header: 'Last day of the course', aliases: ['course ends', 'course end'], toCell: (r) => dayCell(r.course_ends_on) ?? '' },
     { key: 'active', header: 'Active', aliases: ['status'], toCell: (r) => (r.active ? 'true' : 'false') },
+    { key: 'stopped_on', header: 'Last day taken', aliases: ['stopped on', 'stopped'], toCell: (r) => dayCell(r.stopped_on) ?? '' },
+    { key: 'stop_reason', header: 'Why it stopped', aliases: ['stop reason'], toCell: (r) => r.stop_reason ?? '' },
   ],
   coerce: (raw, rowNumber) => {
     const name = (raw['name'] ?? '').trim();
@@ -328,6 +357,16 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
           return u && /^https?:\/\//i.test(u) ? u : null;
         })(),
         prescriber_name: blank(raw['prescriber_name']),
+        repeats_left: (() => {
+          const n = parseInt(String(raw['repeats_left'] ?? '').replace(/[^0-9]/g, ''), 10);
+          return Number.isFinite(n) && n <= 99 ? n : null;
+        })(),
+        course_ends_on: dayCell(raw['course_ends_on']),
+        stopped_on: dayCell(raw['stopped_on']),
+        stop_reason: (() => {
+          const v = (blank(raw['stop_reason']) ?? '').toLowerCase();
+          return (STOP_REASONS as readonly string[]).includes(v) ? v : null;
+        })(),
         active: parseActive(raw['active']),
       },
     };
@@ -343,8 +382,13 @@ medicationsRouter.get('/', requireAuth, async (req, res) => {
     .orderBy([{ column: 'm.active', order: 'desc' }, { column: 'c.name', order: 'asc' }]);
   // Their main pharmacy and GP stand in where a medicine names no supplier
   // or prescriber, so there is always someone to call.
-  const [main_pharmacy, main_gp] = await Promise.all([mainContact(db, profileId, 'pharmacy'), mainContact(db, profileId, 'gp')]);
-  res.json({ medications: await withContacts(meds.map(serializeMed), profileId), main_pharmacy, main_gp });
+  const [main_pharmacy, main_gp, changes] = await Promise.all([mainContact(db, profileId, 'pharmacy'), mainContact(db, profileId, 'gp'), changesFor(db, profileId)]);
+  const withPeople = await withContacts(meds.map(serializeMed), profileId);
+  res.json({
+    medications: withPeople.map((m) => ({ ...m, changes: changes.get(String(m['id'])) ?? [] })),
+    main_pharmacy,
+    main_gp,
+  });
 });
 
 // Export the medication list as CSV or JSON.
@@ -412,6 +456,10 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner('import medic
       supply_remaining: r.supply,
       packs_on_hand: r.packs_on_hand,
       repeats_due: r.repeats_due,
+      repeats_left: r.repeats_left,
+      course_ends_on: r.course_ends_on,
+      stopped_on: r.active ? null : r.stopped_on,
+      stop_reason: r.active ? null : r.stop_reason,
       supplier_id: supplierId,
       supplier: r.supplier,
       supplier_order_url: r.supplier_order_url,
@@ -446,6 +494,8 @@ async function medFieldsFrom(data: z.infer<typeof medSchema> | Partial<z.infer<t
   if ('as_needed' in data) fields['as_needed'] = data.as_needed ?? false;
   if ('frequency' in data) fields['frequency'] = data.frequency ?? null;
   if ('repeats_due' in data) fields['repeats_due'] = data.repeats_due ?? null;
+  if ('course_ends_on' in data) fields['course_ends_on'] = data.course_ends_on ?? null;
+  if ('repeats_left' in data) fields['repeats_left'] = data.repeats_left ?? null;
   // Supplier: an explicit link from the editor is authoritative and its name
   // and order link are derived from the supplier record; a bare name (import,
   // assistant) resolves to a shared supplier, created if new; clearing removes
@@ -555,7 +605,20 @@ medicationsRouter.post('/', requireAuth, requireProfileOwner('add a medication')
       schedule_times: parsed.data.schedule_times ? db.raw('?::jsonb', [JSON.stringify(parsed.data.schedule_times)]) : null,
     })
     .returning('id');
-  res.status(201).json({ medication: await medOut((med as { id: string }).id, req.params['id']!) });
+  const medId = (med as { id: string }).id;
+  // Its history starts here, with the visit or letter it came from.
+  await recordMedicationChange(db, {
+    medicationId: medId,
+    profileId: req.params['id']!,
+    actorId: req.account!.id,
+    kind: 'started',
+    source: {
+      reason: parsed.data.change_reason,
+      source_appointment_id: parsed.data.change_source_appointment_id ?? parsed.data.source_appointment_id,
+      source_document_id: parsed.data.change_source_document_id,
+    },
+  });
+  res.status(201).json({ medication: await medOut(medId, req.params['id']!) });
 });
 
 medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner("change a medication's dose, times or details"), async (req, res) => {
@@ -578,7 +641,9 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner("change a me
     }
     throw err;
   }
-  const update: Record<string, unknown> = { ...fields, updated_at: db.fn.now() };
+  // Active or not is a stop or a start, kept in its history, never a bare flag.
+  const { active: activeChange, ...rest } = fields;
+  const update: Record<string, unknown> = { ...rest, updated_at: db.fn.now() };
   if (parsed.data.schedule_times !== undefined) {
     update['schedule_times'] = parsed.data.schedule_times ? db.raw('?::jsonb', [JSON.stringify(parsed.data.schedule_times)]) : null;
   }
@@ -598,14 +663,26 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner("change a me
   if (parsed.data.name !== undefined) {
     update['medication_catalogue_id'] = await resolveCatalogueId(parsed.data.name, parsed.data.form ?? null, req.account!.id);
   }
-  const [med] = await db('medications')
-    .where({ id: req.params['medId'], care_profile_id: req.params['id'] })
-    .update(update)
-    .returning('id');
+  const med = (await db('medications').where({ id: req.params['medId'], care_profile_id: req.params['id'] }).first('id')) as { id: string } | undefined;
   if (!med) {
     res.status(404).json({ error: 'Medication not found', code: 'NOT_FOUND' });
     return;
   }
+  // A new dose or new times go in its history with why and where from.
+  await db.transaction((trx) =>
+    recordMedicationChange(trx, {
+      medicationId: med.id,
+      profileId: req.params['id']!,
+      actorId: req.account!.id,
+      patch: update,
+      source: {
+        reason: parsed.data.change_reason,
+        source_appointment_id: parsed.data.change_source_appointment_id,
+        source_document_id: parsed.data.change_source_document_id,
+      },
+    })
+  );
+  if (typeof activeChange === 'boolean') await setActive(db, req.params['id']!, req.account!.id, [med.id], activeChange);
   // Restocking clears any "out of stock" acknowledgement, so the urgent alert
   // recurs if this medication runs out again later.
   if (
@@ -660,12 +737,87 @@ medicationsRouter.post('/bulk', requireAuth, requireProfileOwner('change several
       res.status(400).json({ error: 'Choose at least one field to change.', code: 'VALIDATION_ERROR' });
       return;
     }
-    const updated = await scope.update({ ...fields, updated_at: db.fn.now() });
+    const { active: activeChange, ...rest } = fields;
+    const updated = Object.keys(rest).length ? await scope.clone().update({ ...rest, updated_at: db.fn.now() }) : parsed.data.ids.length;
+    if (typeof activeChange === 'boolean') await setActive(db, req.params['id']!, req.account!.id, parsed.data.ids, activeChange);
     res.json({ updated });
     return;
   }
-  const updated = await scope.update({ active: parsed.data.action === 'activate', updated_at: db.fn.now() });
+  // Marked inactive is stopped today; marked active is started again. Each
+  // goes in that medicine's history.
+  const updated = await setActive(db, req.params['id']!, req.account!.id, parsed.data.ids, parsed.data.action === 'activate');
   res.json({ updated });
+});
+
+/**
+ * Stop or start medicines again, each kept in its history. Ones already in
+ * the asked-for state are left alone.
+ */
+async function setActive(conn: typeof db, profileId: string, actorId: string, ids: string[], active: boolean): Promise<number> {
+  const rows = (await conn('medications').where({ care_profile_id: profileId }).whereIn('id', ids).select('id', 'active')) as Array<{ id: string; active: boolean }>;
+  let n = 0;
+  await conn.transaction(async (trx) => {
+    for (const r of rows) {
+      if (!active && r.active) {
+        await stopMedication(trx, { medicationId: r.id, profileId, actorId });
+        n += 1;
+      } else if (active && !r.active) {
+        await restartMedication(trx, { medicationId: r.id, profileId, actorId });
+        n += 1;
+      }
+    }
+  });
+  return n;
+}
+
+const stopSchema = z.object({
+  stopped_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  stop_reason: z.enum(STOP_REASONS).optional().nullable(),
+  stop_notes: z.string().trim().max(2000).optional().nullable(),
+  source_appointment_id: z.string().uuid().optional().nullable(),
+  source_document_id: z.string().uuid().optional().nullable(),
+});
+
+// Stop a medicine: it comes off the active list with the last day taken,
+// why it stopped and their words, and the stop goes in its history.
+medicationsRouter.post('/:medId/stop', requireAuth, requireProfileOwner('stop a medication'), async (req, res) => {
+  const parsed = stopSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Pick the last day it was taken and why it stopped, then try again.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const profileId = req.params['id']!;
+  const result = await db.transaction((trx) =>
+    stopMedication(trx, {
+      medicationId: String(req.params['medId']),
+      profileId,
+      actorId: req.account!.id,
+      stopped_on: parsed.data.stopped_on,
+      stop_reason: parsed.data.stop_reason,
+      stop_notes: parsed.data.stop_notes,
+      source: { source_appointment_id: parsed.data.source_appointment_id, source_document_id: parsed.data.source_document_id },
+    })
+  );
+  if (!result.change_id) {
+    res.status(404).json({ error: 'That medication could not be found. It may have been deleted.', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ medication: await medOut(String(req.params['medId']), profileId), change_id: result.change_id });
+});
+
+// Start a stopped medicine again. Undo straight after a stop takes the stop
+// back out of the history.
+medicationsRouter.post('/:medId/restart', requireAuth, requireProfileOwner('start a medication again'), async (req, res) => {
+  const undo = z.object({ undo_change_id: z.string().uuid().optional().nullable() }).safeParse(req.body ?? {});
+  const profileId = req.params['id']!;
+  const ok = await db.transaction((trx) =>
+    restartMedication(trx, { medicationId: String(req.params['medId']), profileId, actorId: req.account!.id, undoChangeId: undo.success ? undo.data.undo_change_id : null })
+  );
+  if (!ok) {
+    res.status(404).json({ error: 'That medication could not be found. It may have been deleted.', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ medication: await medOut(String(req.params['medId']), profileId) });
 });
 
 medicationsRouter.delete('/:medId', requireAuth, requireProfileOwner('delete a medication'), async (req, res) => {
@@ -739,7 +891,8 @@ medicationsRouter.post('/:medId/reorder', requireAuth, requireProfileOwner('mark
 medicationsRouter.get('/chart', requireAuth, async (req, res) => {
   const from = req.query['from'] ? new Date(String(req.query['from'])) : new Date(Date.now() - 24 * 3600 * 1000);
   const to = req.query['to'] ? new Date(String(req.query['to'])) : new Date(Date.now() + 24 * 3600 * 1000);
-  const medications = await medSelect().where('m.care_profile_id', req.params['id']).andWhere('m.active', true);
+  // A finished course has no doses due; it asks whether to stop it instead.
+  const medications = await medSelect().where('m.care_profile_id', req.params['id']).andWhere('m.active', true).whereRaw(COURSE_RUNNING_SQL);
   const administrations = await db('medication_administrations')
     .where('care_profile_id', req.params['id'])
     .andWhere((qb) =>

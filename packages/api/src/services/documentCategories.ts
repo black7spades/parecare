@@ -19,6 +19,13 @@ export const BUILT_IN_CATEGORIES: ReadonlyArray<{ key: string; name: string }> =
   { key: 'facility_contract', name: 'Facility contract' },
   { key: 'financial', name: 'Financial' },
   { key: 'care_plan', name: 'Care plan' },
+  { key: 'referral', name: 'Referral' },
+  { key: 'prescription', name: 'Prescription' },
+  { key: 'test_request', name: 'Test request' },
+  { key: 'results', name: 'Results' },
+  { key: 'letter', name: 'Letter' },
+  { key: 'service_agreement', name: 'Service agreement' },
+  { key: 'behaviour_support_plan', name: 'Behaviour support plan' },
   { key: 'other', name: 'Other' },
 ];
 
@@ -54,8 +61,21 @@ export async function ensureCategories(accountId: string, conn: Conn = db): Prom
   const have = await conn('document_categories').where({ account_id: accountId }).whereNotNull('system_key').pluck('system_key');
   const missing = BUILT_IN_CATEGORIES.filter((c) => !have.includes(c.key));
   if (missing.length === 0) return;
+  // A category the account already typed with the same name becomes the
+  // built-in, so "Referral" typed while filing is not listed twice.
+  const fresh: typeof missing = [];
+  for (const c of missing) {
+    const adopted = await conn('document_categories')
+      .where({ account_id: accountId })
+      .whereNull('system_key')
+      .whereNull('deleted_at')
+      .whereRaw('lower(name) = lower(?)', [c.name])
+      .update({ system_key: c.key });
+    if (!adopted) fresh.push(c);
+  }
+  if (fresh.length === 0) return;
   await conn('document_categories')
-    .insert(missing.map((c) => ({ account_id: accountId, system_key: c.key, name: c.name })))
+    .insert(fresh.map((c) => ({ account_id: accountId, system_key: c.key, name: c.name })))
     .onConflict()
     .ignore();
 }

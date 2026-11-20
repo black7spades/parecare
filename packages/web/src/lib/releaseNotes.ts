@@ -20,6 +20,37 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.49.0',
+    date: '2026-11-20',
+    summary: 'Documents follow the work: dates on every letter, referrals that warn before they run out, and a history for every medicine.',
+    groups: [
+      { heading: 'Added', items: [
+        'Dates on every document. A document has a Date written and a Valid until, each in its own box, with Does not expire. The documents list has Date written, Valid until and Attached to columns, and a document that has run out says so.',
+        'Referrals work out their own dates. A GP referral lasts 12 months and a referral from a specialist lasts 3 months, counted from the first visit with the specialist. Until that visit is booked, it counts from the date written. The referral says how its date was worked out, with Change.',
+        'A reminder before a referral runs out. Six weeks before, a Get a new referral task appears with the GP and the letter attached. It moves when the date moves.',
+        'Who a letter is from and who it is to. Each document can name who wrote it and who it is addressed to, picked from Contacts or added with their phone. A referral offers Book appointment with whoever it is to.',
+        'What a document is attached to. Every document lists the tasks, appointments, medicines and other records it belongs to, and each one opens that record.',
+        'New document categories. Referral, Prescription, Test request, Results, Letter, Service agreement and Behaviour support plan. A category with one of these names already becomes the built-in one, so nothing is listed twice.',
+        'A history for every medicine. Changing a dose or the times asks why it changed and where the change came from: a recent visit or a letter on file. Each medicine lists its changes, newest first.',
+        'Stop a medicine properly. Stop this medicine asks for the last day taken, why it stopped and anything in their words, then offers Undo. A stopped medicine offers Start again.',
+        'Courses that end. A medicine can have a last day of the course. After that day its doses are no longer due, and it asks Stop it or Still taking it. Repeats left on the script has its own box.',
+        'Pare files more from a letter. Everything Pare files from a letter is attached to it. A referral is filed with who wrote it and who it is to, with their phone, and joins the task already open for booking them. A letter that changes or stops a medicine already on the list changes it, with the reason, rather than adding a second copy. Pare also books appointments from booking letters with the letter to bring, and adds conditions, allergies and costs.',
+        'Long letters and scans. Pare reads a long letter part by part instead of stopping partway. When Pare uses Claude it reads scanned pages too; on other AI services it says plainly to photograph the pages.',
+        'Two new Pare commands. /stop for a medicine to stop and why, and /change for a medicine change and why.',
+      ] },
+      { heading: 'Changed', items: [
+        'The Supplier column names the main pharmacy. A medicine with no supplier of its own shows their main pharmacy, marked Main pharmacy, and sorts by it.',
+        'Inactive medicines are now stopped. The list says stopped, and Stop these medicines on several at once keeps each stop in its history.',
+        'A next step\'s document belongs to its visit too. Attaching a document to a task that came from an appointment attaches it to that appointment as well.',
+      ] },
+      { heading: 'Fixed', items: [
+        'Save on Edit document and Change category now says what is missing, instead of being greyed out.',
+        'Read the document and File without reading now say when no file is chosen.',
+        'A medicine Pare adds or changes keeps its dose amount and measure in their own columns.',
+      ] },
+    ],
+  },
+  {
     version: '0.48.0',
     date: '2026-11-20',
     summary: 'A contact on every record: who prescribes, who treats, who supplies, who to call in an emergency, and alerts that name the number.',

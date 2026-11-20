@@ -1,4 +1,5 @@
 import { db } from '../config/database';
+import { COURSE_RUNNING_SQL } from '../lib/course';
 import { contactLine, supplyContext } from './alertContacts';
 import { dateInZone, hmInZone, startOfDayInZone } from '../lib/timezone';
 import { DOSE_AUDIT_ENTITY } from '../lib/doseOutcome';
@@ -350,6 +351,7 @@ async function supplyHits(watch: WatchRow, ctx: EvalContext): Promise<WatchHit[]
     .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
     .whereIn('m.care_profile_id', profileIds)
     .where('m.active', true)
+    .whereRaw(COURSE_RUNNING_SQL)
     .whereNotNull('m.supply_remaining')
     .select(
       'm.id', 'm.care_profile_id', 'm.supply', 'm.supply_remaining', 'm.packs_on_hand',
@@ -413,6 +415,7 @@ async function doseOverdueHits(watch: WatchRow, ctx: EvalContext): Promise<Watch
     .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
     .whereIn('m.care_profile_id', profileIds)
     .where('m.active', true)
+    .whereRaw(COURSE_RUNNING_SQL)
     .select('m.id', 'm.care_profile_id', 'm.schedule_times', 'm.critical', 'c.name');
   if (watch.medication_id) medQ.where('m.id', watch.medication_id);
   if (watch.critical_only) medQ.where('m.critical', true);

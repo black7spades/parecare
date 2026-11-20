@@ -126,7 +126,7 @@ export function BulkEditModal({ profileId, meds, onClose, onSaved }: { profileId
           <div className={`flex-1 ${chActive ? '' : 'opacity-40 pointer-events-none'}`}>
             <select className={BULK_SELECT} aria-label="Status" value={active} onChange={(e) => setActive(e.target.value)}>
               <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
+              <option value="inactive">Stopped</option>
             </select>
           </div>
         </div>

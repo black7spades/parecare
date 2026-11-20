@@ -85,6 +85,7 @@ export function RecordPanel({
   deleteLabel = 'Delete',
   onClose,
   onForwardNote,
+  attachAlso = [],
   children,
 }: {
   /** What this is, in a word or two: "Appointment", "Medication". */
@@ -110,6 +111,8 @@ export function RecordPanel({
   onClose: () => void;
   /** Offers Forward on each note, for records whose notes can be passed on. */
   onForwardNote?: (noteId: string) => void;
+  /** Other records a document attached here also belongs to, e.g. the appointment a next step came from. */
+  attachAlso?: Array<{ kind: string; id: string }>;
   children?: ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -436,6 +439,7 @@ export function RecordPanel({
           members={circleData?.members ?? []}
           initialFile={null}
           link={{ kind, id: recordId }}
+          links={attachAlso}
           onClose={() => setUploading(false)}
           onUploaded={() => {
             setUploading(false);

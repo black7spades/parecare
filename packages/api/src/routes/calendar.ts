@@ -173,6 +173,8 @@ async function expandMedicationEvents(
   const events: CalendarEvent[] = [];
   for (const day of days) {
     for (const med of withTimes) {
+      // After the last day of a course, its doses are not due.
+      if (med.course_ends_on && day > String(med.course_ends_on).slice(0, 10)) continue;
       const times = [...new Set(med.schedule_times as string[])].sort();
       const covered = coveredTimes(times, dosesByMedDay.get(`${med.id}|${day}`) ?? [], zone);
       for (const t of times) {

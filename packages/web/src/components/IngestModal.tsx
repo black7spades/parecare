@@ -15,6 +15,8 @@ interface IngestResult {
   needs_attention?: boolean;
   actions: ProposedAction[];
   parse_errors?: string[];
+  /** A scan the AI service here cannot read: the pages need photographing. */
+  scan?: boolean;
 }
 
 /**
@@ -23,8 +25,9 @@ interface IngestResult {
  * confirmed. Owner and admin, via the profile's edit right.
  */
 const ACTION_TITLE: Record<string, string> = {
-  file_document: 'Document', add_asset: 'Asset', add_provider: 'Provider', add_medication: 'Medication', add_treatment: 'Treatment', add_task: 'Task', log_event: 'Note',
-  record_appointment_outcome: 'How an appointment went',
+  file_document: 'Document', add_asset: 'Equipment', add_provider: 'Contact', add_medication: 'New medicine', add_treatment: 'Treatment', add_task: 'Task', log_event: 'Note',
+  record_appointment_outcome: 'How an appointment went', update_medication: 'Change to a medicine', stop_medication: 'Stop a medicine',
+  book_appointment: 'Appointment', add_condition: 'Condition', add_allergy: 'Allergy', record_cost: 'Cost',
 };
 const humanize = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/, (c) => c.toUpperCase());
 const inputClass = 'w-full rounded-md border border-border bg-card px-2 py-1 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -32,7 +35,13 @@ const inputClass = 'w-full rounded-md border border-border bg-card px-2 py-1 tex
 /** The scalar fields of a proposed action, editable before filing. */
 // Fields that point at a record rather than describe it; never shown for editing.
 const HIDDEN_KEYS = new Set(['type', 'document_id', 'document']);
-const FIELD_LABEL: Record<string, string> = { label: 'Name', appointment_title: 'Appointment', due_on: 'Do by', kind: 'Next step' };
+const FIELD_LABEL: Record<string, string> = {
+  label: 'Name', appointment_title: 'Appointment', due_on: 'Do by', kind: 'Next step',
+  issued_on: 'Date written', valid_until: 'Valid until', from_name: 'From', from_type: 'What they do', to_name: 'To', to_type: 'What they do',
+  to_phone: 'Their phone', to_practice: 'Where they work', medication_name: 'Medicine', reason: 'Why it changed', changed_on: 'Changed on',
+  stopped_on: 'Last day taken', stop_reason: 'Why it stopped', stop_notes: 'In their words', course_ends_on: 'Last day of the course',
+  repeats_left: 'Repeats left on the script', starts_at: 'When', provider_name: 'Who with', with_phone: 'Their phone', with_type: 'What they do',
+};
 /** Lists inside a proposal, each item shown as its own editable row. */
 const LIST_LABEL: Record<string, string> = { next_steps: 'Next steps' };
 
@@ -140,6 +149,8 @@ export function IngestModal({
   const [outcomes, setOutcomes] = useState<string[] | null>(null);
   const [error, setError] = useState('');
   const [filedOnly, setFiledOnly] = useState(false);
+  // Read and File without reading always answer: a missing file is named.
+  const needFile = () => setError('Choose a file first, then try again.');
 
   const uploadMutation = useMutation({
     mutationFn: () => {
@@ -183,10 +194,11 @@ export function IngestModal({
   }, [initialFile, document]);
 
   const applyMutation = useMutation({
-    mutationFn: () => api.post<{ outcomes: string[] }>(`/care-profiles/${profileId}/ingest/apply`, { actions }),
+    // Everything filed from the document is attached to it.
+    mutationFn: () => api.post<{ outcomes: string[] }>(`/care-profiles/${profileId}/ingest/apply`, { actions, document_id: result?.document_id ?? null }),
     onSuccess: (r) => {
       setOutcomes(r.outcomes);
-      for (const key of ['directory-assets', 'providers', 'medications', 'documents', 'document-categories', 'health-spend']) {
+      for (const key of ['directory-assets', 'providers', 'medications', 'documents', 'document-categories', 'health-spend', 'reminders', 'appointments', 'conditions', 'allergies']) {
         void queryClient.invalidateQueries({ queryKey: [key] });
       }
     },
@@ -239,15 +251,13 @@ export function IngestModal({
                 <Button
                   variant="secondary"
                   loading={fileOnlyMutation.isPending}
-                  disabled={!file || uploadMutation.isPending}
-                  onClick={() => fileOnlyMutation.mutate()}
+                  onClick={() => (!file ? needFile() : uploadMutation.isPending ? undefined : fileOnlyMutation.mutate())}
                 >
                   File without reading
                 </Button>
                 <Button
                   loading={uploadMutation.isPending}
-                  disabled={!file || fileOnlyMutation.isPending}
-                  onClick={() => uploadMutation.mutate()}
+                  onClick={() => (!file ? needFile() : fileOnlyMutation.isPending ? undefined : uploadMutation.mutate())}
                 >
                   Read the document
                 </Button>
@@ -266,7 +276,7 @@ export function IngestModal({
           </>
         ) : (
           <>
-            <p className={`text-sm ${result.needs_attention ? 'text-red-600' : 'text-ink'}`}>{result.summary}</p>
+            <p className={`text-sm whitespace-pre-line ${result.needs_attention || result.scan ? 'text-red-600' : 'text-ink'}`}>{result.summary}</p>
             {result.needs_attention ? null : actions.length > 0 ? (
               <>
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted">Pare will file (check and edit before saving)</p>
@@ -282,6 +292,8 @@ export function IngestModal({
                   ))}
                 </div>
               </>
+            ) : result.scan ? (
+              <p className="text-sm text-muted">The scan is kept in documents in the meantime.</p>
             ) : (
               <p className="text-sm text-muted">
                 {document ? 'Nothing could be filed automatically. The document stays in documents.' : 'Nothing could be filed automatically. The file has been saved to documents.'}

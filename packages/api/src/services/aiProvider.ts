@@ -20,7 +20,10 @@ import { beginCall } from './aiMetrics';
 export type ChatPart =
   | { type: 'text'; text: string }
   | { type: 'image'; media_type: string; data: string }
-  | { type: 'audio'; media_type: string; data: string };
+  | { type: 'audio'; media_type: string; data: string }
+  // A whole PDF, read page by page, scanned pages included. Only Claude reads
+  // these; check readsScannedDocuments() before sending one.
+  | { type: 'document'; media_type: 'application/pdf'; data: string };
 
 export interface ChatTurn {
   role: 'user' | 'assistant';
@@ -130,6 +133,15 @@ export function supportsStructuredOutput(): boolean {
   return getAiConfig().provider !== 'google';
 }
 
+/**
+ * Whether the AI service set up here can read a scanned PDF itself. Claude
+ * reads every page of a PDF, scanned or not; the other services need the
+ * pages as photos.
+ */
+export function readsScannedDocuments(): boolean {
+  return getAiConfig().provider === 'anthropic';
+}
+
 /** Whether Pare runs on this machine (a local server) rather than in the cloud. */
 export function isLocalProvider(): boolean {
   const p = getAiConfig().provider;
@@ -188,6 +200,7 @@ async function completeAnthropic(
   const client = new Anthropic({ apiKey });
   const toAnthropicBlock = (p: ChatPart): unknown => {
     if (p.type === 'image') return { type: 'image', source: { type: 'base64', media_type: p.media_type, data: p.data } };
+    if (p.type === 'document') return { type: 'document', source: { type: 'base64', media_type: p.media_type, data: p.data } };
     // Claude has no audio input; keep the turn valid with a short note.
     if (p.type === 'audio') return { type: 'text', text: '[a voice note was attached]' };
     return { type: 'text', text: p.text };
@@ -268,6 +281,8 @@ async function completeOpenAiCompatible(
               ? t.content
               : t.content.map((p) => {
                   if (p.type === 'image') return { type: 'image_url', image_url: { url: dataUri(p) } };
+                  // Not read here; the document reader never sends one to this service.
+                  if (p.type === 'document') return { type: 'text', text: '[a PDF document was attached]' };
                   if (p.type === 'audio') {
                     return { type: 'input_audio', input_audio: { data: p.data, format: p.media_type.split('/')[1] || 'wav' } };
                   }
@@ -343,7 +358,11 @@ async function completeGoogle(
       contents: turns.map((t) => ({
         role: t.role === 'assistant' ? 'model' : 'user',
         parts: asParts(t.content).map((p) =>
-          p.type === 'text' ? { text: p.text } : { inlineData: { mimeType: p.media_type, data: p.data } }
+          p.type === 'text'
+            ? { text: p.text }
+            : p.type === 'document'
+              ? { text: '[a PDF document was attached]' }
+              : { inlineData: { mimeType: p.media_type, data: p.data } }
         ),
       })),
       generationConfig: { maxOutputTokens: maxTokens },

@@ -271,6 +271,8 @@ export async function buildProfileContext(
               m.route ? `route ${m.route}` : null,
               m.frequency ? `frequency ${m.frequency}` : null,
               Array.isArray(m.schedule_times) && m.schedule_times.length ? `scheduled at ${m.schedule_times.join(', ')}` : null,
+              m.course_ends_on ? `course ends ${String(m.course_ends_on).slice(0, 10)}` : null,
+              m.repeats_left != null ? `${m.repeats_left} repeats left on the script` : null,
               m.supply_remaining !== null && m.supply_remaining !== undefined && m.supply_remaining !== ''
                 ? `supply remaining ${m.supply_remaining}`
                 : null,
