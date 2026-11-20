@@ -191,7 +191,10 @@ export async function gatherHealthAlerts(
     .join('providers as p', 'cpp.provider_id', 'p.id')
     .whereIn('cpp.care_profile_id', profileIds)
     .where('p.provider_type', 'gp')
-    .orderBy('p.name', 'asc')
+    // Their main GP: the one marked main, else the first linked, never one
+    // they no longer see.
+    .whereNull('cpp.ended_on')
+    .orderBy([{ column: 'cpp.is_main', order: 'desc' }, { column: 'cpp.created_at', order: 'asc' }])
     .select('cpp.care_profile_id', 'p.id', 'p.name', 'p.organisation', 'p.phone', 'p.booking_link');
   // Who to call, in the same shape as every other contact.
   const summaries = await contactSummaries(db, gpRows.map((g) => g.id));

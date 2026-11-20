@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import type { ContactSummary } from '../lib/care';
 import { bookingHref } from '../lib/booking';
@@ -6,6 +6,14 @@ import { parseDateOnly } from '../lib/datetime';
 import { Button } from './ui/Button';
 
 const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
+
+/**
+ * How a number, an address or a site to tap looks everywhere a contact is
+ * shown: the deeper green, underlined, so a phone number never reads as
+ * plain grey text beside a label.
+ */
+export const CONTACT_LINK =
+  'font-medium text-primary-600 dark:text-primary underline decoration-1 underline-offset-2 hover:decoration-2';
 
 const DAY_NAMES = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -37,6 +45,7 @@ export function ContactStrip({
   size = 'full',
   book,
   onAddPhone,
+  recordHref,
 }: {
   contact: ContactSummary;
   /** Needed for Book appointment. */
@@ -47,6 +56,8 @@ export function ContactStrip({
   /** Book appointment opens the booking form; false leaves it out. */
   book?: false | { condition?: string | null; fromTask?: string | null; title?: string | null; type?: string | null };
   onAddPhone?: () => unknown;
+  /** Where their name leads: their own contact record. */
+  recordHref?: string;
 }) {
   const navigate = useNavigate();
   const canBook = book !== false && book !== undefined && contact.source === 'contact' && !!contact.id && !!profileId;
@@ -69,7 +80,7 @@ export function ContactStrip({
         <span className="font-semibold text-ink">{contact.name}</span>
         {contact.role_label ? <span className="text-xs text-muted">{contact.role_label}</span> : null}
         {contact.phone ? (
-          <a href={telHref(contact.phone)} className="text-primary hover:underline" aria-label={`Call ${contact.name} on ${contact.phone}`}>
+          <a href={telHref(contact.phone)} className={CONTACT_LINK} aria-label={`Call ${contact.name} on ${contact.phone}`}>
             {contact.phone}
           </a>
         ) : (
@@ -86,7 +97,15 @@ export function ContactStrip({
   return (
     <div className="space-y-1 text-sm">
       {lead ? <p className="text-xs text-muted">{lead}</p> : null}
-      <p className="text-sm font-semibold text-ink break-words">{contact.name}</p>
+      <p className="text-sm font-semibold text-ink break-words">
+        {recordHref ? (
+          <Link to={recordHref} className="text-ink hover:underline" aria-label={`Open ${contact.name} in Contacts`}>
+            {contact.name}
+          </Link>
+        ) : (
+          contact.name
+        )}
+      </p>
       {sub.length ? <p className="text-xs text-muted">{sub.join(' · ')}</p> : null}
       {ended ? (
         <p>
@@ -98,7 +117,7 @@ export function ContactStrip({
           <>
             <dt className="text-muted">Phone</dt>
             <dd>
-              <a href={telHref(contact.phone)} className="text-primary hover:underline" aria-label={`Call ${contact.name} on ${contact.phone}`}>
+              <a href={telHref(contact.phone)} className={CONTACT_LINK} aria-label={`Call ${contact.name} on ${contact.phone}`}>
                 {contact.phone}
               </a>
               {contact.inherited.includes('phone') ? <span className="ml-1 text-xs text-muted">the practice's number</span> : null}
@@ -109,7 +128,7 @@ export function ContactStrip({
           <>
             <dt className="text-muted">After hours</dt>
             <dd>
-              <a href={telHref(contact.after_hours_phone)} className="text-primary hover:underline" aria-label={`Call ${contact.name} after hours on ${contact.after_hours_phone}`}>
+              <a href={telHref(contact.after_hours_phone)} className={CONTACT_LINK} aria-label={`Call ${contact.name} after hours on ${contact.after_hours_phone}`}>
                 {contact.after_hours_phone}
               </a>
             </dd>
@@ -119,7 +138,7 @@ export function ContactStrip({
           <>
             <dt className="text-muted">Email</dt>
             <dd className="break-all">
-              <a href={`mailto:${contact.email}`} className="text-primary hover:underline" aria-label={`Email ${contact.name} at ${contact.email}`}>
+              <a href={`mailto:${contact.email}`} className={CONTACT_LINK} aria-label={`Email ${contact.name} at ${contact.email}`}>
                 {contact.email}
               </a>
             </dd>
@@ -148,17 +167,17 @@ export function ContactStrip({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1">
           {bookButton}
           {contact.booking_link ? (
-            <a href={contact.booking_link} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline" aria-label={`Book online with ${contact.name}`}>
+            <a href={contact.booking_link} target="_blank" rel="noopener noreferrer" className={CONTACT_LINK} aria-label={`Book online with ${contact.name}`}>
               Book online
             </a>
           ) : null}
           {contact.order_link ? (
-            <a href={contact.order_link} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline" aria-label={`Order online from ${contact.name}`}>
+            <a href={contact.order_link} target="_blank" rel="noopener noreferrer" className={CONTACT_LINK} aria-label={`Order online from ${contact.name}`}>
               Order online
             </a>
           ) : null}
           {contact.directions_link ? (
-            <a href={contact.directions_link} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline" aria-label={`Directions to ${contact.name}`}>
+            <a href={contact.directions_link} target="_blank" rel="noopener noreferrer" className={CONTACT_LINK} aria-label={`Directions to ${contact.name}`}>
               Directions
             </a>
           ) : null}

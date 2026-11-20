@@ -84,7 +84,7 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
   {
     name: 'med',
     hint: 'medication details',
-    description: 'Add a medication, e.g. /med perindopril 4mg tablet, one each morning at 8',
+    description: 'Add a medication, e.g. /med perindopril 4mg tablet, one each morning at 8, prescribed by Dr Okafor',
     expand: (a) => `Add this medication to the list: ${a}`,
   },
   {
@@ -142,6 +142,12 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
     description: 'Add someone to the care circle without an invite, e.g. /circle Joan next door, checks in most mornings, 0400 111 222',
     expand: (a) =>
       `Add this person to the care circle by name, with no invite and no login. If they are a doctor or other professional, add them as a contact instead: ${a}`,
+  },
+  {
+    name: 'emergency',
+    hint: 'who to call in an emergency',
+    description: 'Choose who to call in an emergency, e.g. /emergency me, or /emergency Helen, daughter, 0417 555 101',
+    expand: (a) => `Set this person as an emergency contact for them: ${a}`,
   },
   {
     name: 'practice',

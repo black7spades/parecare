@@ -299,6 +299,7 @@ authRouter.get('/me', requireAuth, (req, res) => {
     date_of_birth: account.date_of_birth ?? null,
     gender: account.gender ?? null,
     pronouns: account.pronouns ?? null,
+    phone: account.phone ?? null,
     subscription_tier: account.subscription_tier,
     subscription_status: account.subscription_status,
     current_period_end: account.current_period_end,
@@ -328,6 +329,7 @@ const updateMeSchema = z.object({
   date_of_birth: z.string().optional().nullable(),
   gender: z.string().max(50).optional().nullable(),
   pronouns: z.string().max(50).optional().nullable(),
+  phone: z.string().trim().max(50).optional().nullable(),
   avatar_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().nullable(),
 });
 
@@ -362,6 +364,7 @@ authRouter.patch('/me', requireAuth, async (req, res) => {
   if (parsed.data.date_of_birth !== undefined) updates.date_of_birth = parsed.data.date_of_birth || null;
   if (parsed.data.gender !== undefined) updates.gender = parsed.data.gender || null;
   if (parsed.data.pronouns !== undefined) updates.pronouns = parsed.data.pronouns || null;
+  if (parsed.data.phone !== undefined) updates.phone = parsed.data.phone?.trim() || null;
   if (parsed.data.avatar_color !== undefined) updates.avatar_color = parsed.data.avatar_color || null;
   if (parsed.data.email && parsed.data.email.toLowerCase() !== account.email.toLowerCase()) {
     const newEmail = parsed.data.email.toLowerCase();

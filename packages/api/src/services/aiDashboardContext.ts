@@ -1,4 +1,7 @@
 import { db } from '../config/database';
+import { reachAction, supplyContext, taskContacts, type NextAction } from './alertContacts';
+import type { ContactSummary } from './professionals';
+import { taskBooks } from './tasks';
 import { formatInZone, hmInZone, startOfDayInZone } from '../lib/timezone';
 import type { Account, CareProfile } from '../types';
 
@@ -13,7 +16,7 @@ import type { Account, CareProfile } from '../types';
 interface ProfileSummaryData {
   profile: CareProfile & { relationship: string | null };
   journeys: Array<{ name: string; phase_name: string | null }>;
-  overdueReminders: Array<{ title: string; next_due_at: Date }>;
+  overdueReminders: Array<{ id: string; title: string; next_due_at: Date; provider_id: string | null; kind_key: string | null }>;
   /** Every active medication, so "all my meds" can be resolved to real names. */
   medications: Array<{ name: string; dose: string | null; schedule_times: string[] }>;
   overdueMedications: string[];
@@ -22,6 +25,8 @@ interface ProfileSummaryData {
   /** Medications ordered but not replenished after the reorder-stale window. */
   reorderOverdueMedications: Array<{ id: string; name: string; days: number }>;
   staleQuestionCount: number;
+  /** The open question waiting longest for a reply, so the alert opens it. */
+  oldestStaleQuestionId: string | null;
   nextEvent: { title: string; next_due_at: Date } | null;
   lastLog: { entry_type: string; title: string | null; body: string; occurred_at: Date } | null;
   /** The most recent dose recorded as taken, of any medication. */
@@ -114,13 +119,15 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
        ORDER BY j.started_at ASC`,
       [ids]
     ),
-    db('reminders')
-      .whereIn('care_profile_id', ids)
-      .where({ completed: false })
+    db('reminders as r')
+      .leftJoin('next_step_types as nst', 'nst.id', 'r.next_step_type_id')
+      .whereIn('r.care_profile_id', ids)
+      .where({ 'r.completed': false })
+      .whereNull('r.merged_into_id')
       // Any time that day is overdue only once that day is over.
-      .whereRaw("((all_day = false AND next_due_at < ?) OR (all_day AND next_due_at + interval '1 day' <= ?))", [now, now])
-      .orderBy('next_due_at', 'asc')
-      .select('care_profile_id', 'title', 'next_due_at'),
+      .whereRaw("((r.all_day = false AND r.next_due_at < ?) OR (r.all_day AND r.next_due_at + interval '1 day' <= ?))", [now, now])
+      .orderBy('r.next_due_at', 'asc')
+      .select('r.care_profile_id', 'r.id', 'r.title', 'r.next_due_at', 'r.provider_id', 'nst.system_key as kind_key'),
     db.raw(
       `SELECT DISTINCT ON (care_profile_id) care_profile_id, title, next_due_at
        FROM reminders WHERE care_profile_id = ANY(?) AND completed = false AND next_due_at >= ? AND next_due_at <= ?
@@ -160,7 +167,7 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
     // Open questions where nothing has been said (question or response) for
     // 7 or more days.
     db.raw(
-      `SELECT q.care_profile_id, count(*)::int AS count
+      `SELECT q.care_profile_id, count(*)::int AS count, (array_agg(q.id ORDER BY q.created_at ASC))[1] AS oldest_id
        FROM open_questions q
        WHERE q.care_profile_id = ANY(?) AND q.status = 'open'
          AND q.created_at < ?
@@ -180,10 +187,11 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
     journeyMap.set(j.care_profile_id, arr);
   }
 
-  const overdueMap = new Map<string, Array<{ title: string; next_due_at: Date }>>();
-  for (const r of overdueRows as Array<{ care_profile_id: string; title: string; next_due_at: Date }>) {
+  type OverdueRow = { care_profile_id: string; id: string; title: string; next_due_at: Date; provider_id: string | null; kind_key: string | null };
+  const overdueMap = new Map<string, ProfileSummaryData['overdueReminders']>();
+  for (const r of overdueRows as OverdueRow[]) {
     const arr = overdueMap.get(r.care_profile_id) ?? [];
-    arr.push({ title: r.title, next_due_at: r.next_due_at });
+    arr.push({ id: r.id, title: r.title, next_due_at: r.next_due_at, provider_id: r.provider_id, kind_key: r.kind_key });
     overdueMap.set(r.care_profile_id, arr);
   }
 
@@ -243,6 +251,9 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
   const staleMap = new Map<string, number>(
     (questionRows.rows as Array<{ care_profile_id: string; count: number }>).map((r) => [r.care_profile_id, r.count])
   );
+  const staleOldest = new Map<string, string>(
+    (questionRows.rows as Array<{ care_profile_id: string; oldest_id: string }>).map((r) => [r.care_profile_id, r.oldest_id])
+  );
   const eventMap = new Map(
     (nextEventRows.rows as Array<{ care_profile_id: string; title: string; next_due_at: Date }>).map((r) => [r.care_profile_id, r])
   );
@@ -271,6 +282,7 @@ export async function gatherDashboardData(accountId: string, timeZone?: string |
       outOfStockMedications,
       reorderOverdueMedications,
       staleQuestionCount,
+      oldestStaleQuestionId: staleOldest.get(p.id) ?? null,
       nextEvent: ev ? { title: ev.title, next_due_at: ev.next_due_at } : null,
       lastLog: lg ? { entry_type: lg.entry_type, title: lg.title, body: lg.body, occurred_at: lg.occurred_at } : null,
       lastDose: lastDoseMap.get(p.id) ?? null,
@@ -389,7 +401,18 @@ export interface AttentionItem {
   urgent: boolean;
   /** Can be acknowledged and set aside (behind an "are you sure?" confirm). */
   dismissible: boolean;
+  /** The one record it is about, so the row opens that record. */
+  record_kind: string | null;
+  record_id: string | null;
+  /** Who to call about it. */
+  contact: ContactSummary | null;
+  /** The next thing to do, so the alert never stops at a list. */
+  next_action: NextAction | null;
 }
+
+/** Where the row opens: the record itself when there is one. */
+export const attentionPath = (it: Pick<AttentionItem, 'profile_id' | 'section' | 'record_id'>): string =>
+  `/app/${it.profile_id}/${it.section}${it.record_id ? `?record=${it.record_id}` : ''}`;
 
 /** Item keys an account has acknowledged and set aside. */
 export async function getDismissedKeys(accountId: string): Promise<Set<string>> {
@@ -437,6 +460,16 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
     arr.push({ id: r.id, title: r.title, starts_at: r.starts_at });
     apptCostByProfile.set(r.care_profile_id, arr);
   }
+  // Who to call for each medicine and task the list names.
+  const medIds = data.profiles.flatMap((s) => [...s.outOfStockMedications, ...s.reorderOverdueMedications].map((m) => m.id));
+  const supply = await supplyContext(medIds);
+  const overdue = data.profiles.flatMap((s) => s.overdueReminders.map((r) => ({ ...r, care_profile_id: s.profile.id })));
+  const taskContact = await taskContacts(overdue);
+  const open = (profileId: string, section: string, recordId: string | null): NextAction => ({
+    kind: 'open',
+    label: 'Open',
+    href: `/app/${profileId}/${section}${recordId ? `?record=${recordId}` : ''}`,
+  });
   const items: AttentionItem[] = [];
   for (const s of data.profiles) {
     const name = s.profile.preferred_name ?? s.profile.full_name;
@@ -454,6 +487,10 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
         key: `out_of_stock:${m.id}`,
         urgent: true,
         dismissible: true,
+        record_kind: 'medications',
+        record_id: m.id,
+        contact: supply.get(m.id)?.contact ?? null,
+        next_action: supply.get(m.id)?.next_action ?? open(s.profile.id, 'medications', m.id),
       });
     }
     // A repeat ordered but still not replenished after the stale window: the
@@ -469,9 +506,15 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
         key: `reorder_overdue:${m.id}`,
         urgent: true,
         dismissible: true,
+        record_kind: 'medications',
+        record_id: m.id,
+        contact: supply.get(m.id)?.contact ?? null,
+        next_action: supply.get(m.id)?.next_action ?? open(s.profile.id, 'medications', m.id),
       });
     }
     for (const r of s.overdueReminders) {
+      const contact = taskContact.get(r.id) ?? null;
+      const books = taskBooks(r.title, r.kind_key);
       items.push({
         profile_id: s.profile.id,
         profile_name: name,
@@ -482,6 +525,13 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
         key: `overdue_task:${s.profile.id}:${new Date(r.next_due_at).toISOString()}:${r.title}`,
         urgent: false,
         dismissible: false,
+        record_kind: 'reminders',
+        record_id: r.id,
+        contact,
+        // A booking task books; anything else calls whoever it is with.
+        next_action: books
+          ? { kind: 'book', label: 'Book it', href: `/app/${s.profile.id}/appointments?new=1&from_task=${r.id}` }
+          : reachAction(contact) ?? open(s.profile.id, 'tasks', r.id),
       });
     }
     if (s.overdueMedications.length > 0) {
@@ -496,6 +546,10 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
         key: `unrecorded_dose:${s.profile.id}`,
         urgent: false,
         dismissible: false,
+        record_kind: null,
+        record_id: null,
+        contact: null,
+        next_action: { kind: 'log_doses', label: 'Log all doses', href: null },
       });
     }
     if (s.staleQuestionCount > 0) {
@@ -512,6 +566,10 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
         key: `stale_question:${s.profile.id}`,
         urgent: false,
         dismissible: false,
+        record_kind: s.oldestStaleQuestionId ? 'questions' : null,
+        record_id: s.oldestStaleQuestionId,
+        contact: null,
+        next_action: open(s.profile.id, 'questions', s.oldestStaleQuestionId),
       });
     }
     const apptCostsForProfile = apptCostByProfile.get(s.profile.id) ?? [];
@@ -526,6 +584,10 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
         key: `appointment_cost:${a.id}`,
         urgent: false,
         dismissible: true,
+        record_kind: 'appointments',
+        record_id: a.id,
+        contact: null,
+        next_action: open(s.profile.id, 'appointments', a.id),
       });
     }
     const poor = poorByProfile.get(s.profile.id) ?? [];
@@ -540,6 +602,10 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
         key: `unresolved_outcome:${r.id}`,
         urgent: false,
         dismissible: true,
+        record_kind: 'reminders',
+        record_id: r.id,
+        contact: null,
+        next_action: open(s.profile.id, 'tasks', r.id),
       });
     }
   }

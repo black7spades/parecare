@@ -32,7 +32,13 @@ interface NotificationItem {
   urgent: boolean;
   created_at: string;
   read: boolean;
+  contact?: { name: string; phone: string | null } | null;
+  days_left?: number | null;
 }
+
+/** "Terry White Chemmart Box Hill, 03 9890 1234." after a supply alert. */
+const whoLine = (item: { contact?: { name: string; phone: string | null } | null }) =>
+  item.contact ? ` ${[item.contact.name, item.contact.phone].filter(Boolean).join(', ')}.` : '';
 
 const ENTITY_TARGETS: Record<string, { page: string; noun: string }> = {
   circle: { page: 'circle', noun: 'a care circle member' },
@@ -68,8 +74,12 @@ function itemText(item: NotificationItem): string {
   if (item.kind === 'dose_not_given') {
     return `${item.actor_name ?? 'Someone'} recorded ${item.profile_name}'s ${item.medication_name} as ${item.summary ?? 'not given'}.`;
   }
-  if (item.kind === 'supply_out') return `${item.profile_name}'s prescription for ${item.medication_name} is out of stock.`;
-  if (item.kind === 'supply_low') return `${item.profile_name}'s prescription for ${item.medication_name} is low.`;
+  if (item.kind === 'supply_out') return `${item.profile_name}'s ${item.medication_name} has run out.${whoLine(item)}`;
+  if (item.kind === 'supply_low') {
+    const d = item.days_left;
+    const left = d == null ? '' : d === 0 ? ', less than a day left' : `, about ${d} ${d === 1 ? 'day' : 'days'} left`;
+    return `${item.profile_name}'s ${item.medication_name} is running low${left}.${whoLine(item)}`;
+  }
   if (item.kind === 'care_plan_ready') return `${item.profile_name}'s care plan is ready to review.`;
   const who = item.actor_name ?? 'Someone';
   if (item.entity_type === 'messages' && item.action === 'created') return `${who} posted in ${item.profile_name}'s messages.`;

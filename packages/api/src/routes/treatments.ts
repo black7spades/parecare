@@ -5,6 +5,7 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { requireProfileOwner } from '../middleware/permissions';
 import { resolveConditionId } from './medications';
+import { contactSummaries, contactSummary, resolveContactInput } from '../services/professionals';
 
 /**
  * Treatments are the umbrella for everything done to manage a condition
@@ -59,7 +60,15 @@ const treatmentSchema = z.object({
   asset_id: z.string().uuid().optional().nullable(),
   // Accepted on create so a treatment and its measures are set up in one go.
   metrics: z.array(metricSchema).max(20).optional(),
+  // Who provides it: a contact picked by id, or a new name filed in Contacts.
+  practitioner_provider_id: z.string().uuid().optional().nullable(),
+  practitioner_name: z.string().trim().max(255).optional().nullable(),
+  practitioner_type: z.string().trim().max(100).optional().nullable(),
+  practitioner_phone: z.string().trim().max(50).optional().nullable(),
 });
+
+/** A write that names someone who cannot be used, said plainly. */
+class TreatmentInputError extends Error {}
 
 async function metricsFor(treatmentIds: string[]): Promise<Map<string, unknown[]>> {
   if (treatmentIds.length === 0) return new Map();
@@ -84,7 +93,8 @@ async function treatmentWithMetrics(id: string): Promise<Record<string, unknown>
   const treatment = await treatmentSelect().where('t.id', id).first();
   if (!treatment) return null;
   const metrics = await metricsFor([id]);
-  return { ...treatment, metrics: metrics.get(id) ?? [] };
+  const practitioner = await contactSummary(db, treatment.practitioner_provider_id, treatment.care_profile_id);
+  return { ...treatment, metrics: metrics.get(id) ?? [], practitioner };
 }
 
 // Shared field mapping for create and edit, resolving the condition tie
@@ -118,7 +128,34 @@ async function treatmentFieldsFrom(
   } else if ('medical_condition_id' in data) {
     fields['medical_condition_id'] = data.medical_condition_id ?? null;
   }
+  if ('practitioner_provider_id' in data || 'practitioner_name' in data) {
+    const who = await resolveContactInput(
+      db,
+      profileId,
+      { id: data.practitioner_provider_id, name: data.practitioner_name, type: data.practitioner_type, phone: data.practitioner_phone },
+      'allied_health'
+    );
+    if ('error' in who) throw new TreatmentInputError(who.error);
+    fields['practitioner_provider_id'] = who.id;
+  }
   return fields;
+}
+
+/** Treatment fields, or a plain 400 when a named contact cannot be used. */
+async function fieldsOrAnswer(
+  data: Partial<z.infer<typeof treatmentSchema>>,
+  profileId: string,
+  res: import('express').Response
+): Promise<Record<string, unknown> | null> {
+  try {
+    return await treatmentFieldsFrom(data, profileId);
+  } catch (err) {
+    if (err instanceof TreatmentInputError) {
+      res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
+      return null;
+    }
+    throw err;
+  }
 }
 
 treatmentsRouter.get('/', requireAuth, async (req, res) => {
@@ -136,9 +173,11 @@ treatmentsRouter.get('/', requireAuth, async (req, res) => {
         .groupBy('treatment_id')) as unknown as Array<{ treatment_id: string; last_observed_at: Date }>)
     : [];
   const lastByTreatment = new Map(lastObserved.map((r) => [r.treatment_id, r.last_observed_at]));
+  const practitioners = await contactSummaries(db, treatments.map((t) => t.practitioner_provider_id as string | null), req.params['id'] as string);
   res.json({
     treatments: treatments.map((t) => ({
       ...t,
+      practitioner: (t.practitioner_provider_id && practitioners.get(t.practitioner_provider_id)) || null,
       metrics: metrics.get(t.id) ?? [],
       last_observed_at: lastByTreatment.get(t.id) ?? null,
     })),
@@ -162,7 +201,8 @@ treatmentsRouter.post('/', requireAuth, requireProfileOwner('add a treatment'), 
     res.status(400).json({ error: 'Condition not found', code: 'VALIDATION_ERROR' });
     return;
   }
-  const fields = await treatmentFieldsFrom(parsed.data, req.params['id']!);
+  const fields = await fieldsOrAnswer(parsed.data, req.params['id']!, res);
+  if (!fields) return;
   const [created] = await db('treatments')
     .insert({ care_profile_id: req.params['id'], ...fields })
     .returning('id');
@@ -191,7 +231,8 @@ treatmentsRouter.patch('/:treatmentId', requireAuth, requireProfileOwner('change
     res.status(400).json({ error: 'Condition not found', code: 'VALIDATION_ERROR' });
     return;
   }
-  const fields = await treatmentFieldsFrom(parsed.data, req.params['id']!);
+  const fields = await fieldsOrAnswer(parsed.data, req.params['id']!, res);
+  if (!fields) return;
   const [updated] = await db('treatments')
     .where({ id: req.params['treatmentId'], care_profile_id: req.params['id'] })
     .update({ ...fields, updated_at: db.fn.now() })

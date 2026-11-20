@@ -11,7 +11,10 @@ import { resolveSupplierId } from '../routes/medications';
 import { resolveConditionCatalogueId } from '../routes/conditionCatalogue';
 import { CONDITION_RESOLUTION_REASONS } from '../lib/conditionResolution';
 import { DOSE_AUDIT_ENTITY, doseSummary } from '../lib/doseOutcome';
-import { roleMaySee } from '../lib/circleRoles';
+import { CIRCLE_ROLE_VALUES, roleMaySee } from '../lib/circleRoles';
+import { resolveAssetSupplier, resolveContactInput, setContactStanding } from './professionals';
+import { parseHoursList } from '../lib/openingHours';
+import { addEmergencyContact, EmergencyContactError, emergencyContactsFor, removeEmergencyContact, type EmergencyRef } from './emergencyContacts';
 import { resolveSubstanceCatalogueId, SUBSTANCE_CLASSES } from '../routes/substanceCatalogue';
 import { SUBSTANCE_STATUSES, SUBSTANCE_ROUTES } from '../routes/substanceUse';
 import { resolveSymptomCatalogueId } from '../routes/symptomCatalogue';
@@ -28,6 +31,7 @@ import { addCirclePerson, findCircleMemberByName, isAddedPerson } from './circle
 import { OBSERVATION_STATUSES } from '../routes/treatments';
 import { FUNDING_SOURCES, CLAIM_STATUSES } from './healthSpend';
 import { addPracticeMember, syncPracticeMembers, whereNamed } from './providerPractices';
+import { linkContactToSuppliers } from './professionals';
 import type { Knex } from 'knex';
 import { providerWriteColumns } from '../routes/providers';
 
@@ -143,6 +147,11 @@ const addMedicationSchema = z.object({
   with_food: z.boolean().optional(),
   as_needed: z.boolean().optional(),
   critical: z.boolean().optional(),
+  // Who writes the script: a contact by name, filed in Contacts when new.
+  prescriber: z.string().max(255).optional().nullable(),
+  prescriber_type: providerTypeField.optional().nullable(),
+  // The title of the visit it started at, matched among their appointments.
+  started_at_appointment: z.string().max(255).optional().nullable(),
 });
 
 const updateMedicationSchema = z.object({
@@ -162,6 +171,11 @@ const updateMedicationSchema = z.object({
   with_food: z.boolean().optional(),
   as_needed: z.boolean().optional(),
   critical: z.boolean().optional(),
+  // Who writes the script: a contact by name, filed in Contacts when new.
+  prescriber: z.string().max(255).optional().nullable(),
+  prescriber_type: providerTypeField.optional().nullable(),
+  // The title of the visit it started at, matched among their appointments.
+  started_at_appointment: z.string().max(255).optional().nullable(),
 });
 
 // "Picked up two packs of Perindopril": set what is on hand after a restock.
@@ -211,6 +225,20 @@ const addConditionSchema = z.object({
   severity: z.enum(CONDITION_SEVERITIES).optional().nullable(),
   status: z.enum(CONDITION_STATUSES).optional().nullable(),
   started_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  notes: z.string().optional().nullable(),
+  // Who treats it: a contact by name, filed in Contacts when new.
+  treated_by: z.string().max(255).optional().nullable(),
+  treated_by_type: providerTypeField.optional().nullable(),
+});
+
+// Change a condition already on file, found by its exact name.
+const updateConditionSchema = z.object({
+  type: z.literal('update_condition'),
+  name: z.string().min(1).max(255),
+  treated_by: z.string().max(255).optional().nullable(),
+  treated_by_type: providerTypeField.optional().nullable(),
+  severity: z.enum(CONDITION_SEVERITIES).optional().nullable(),
+  status: z.enum(CONDITION_STATUSES).optional().nullable(),
   notes: z.string().optional().nullable(),
 });
 
@@ -327,6 +355,9 @@ const addTreatmentSchema = z.object({
   name: z.string().min(1).max(255),
   category: z.enum(TREATMENT_CATEGORIES).default('other'),
   condition_name: z.string().max(255).optional().nullable(),
+  // Who provides it: a contact by name, filed in Contacts when new.
+  provided_by: z.string().max(255).optional().nullable(),
+  provided_by_type: providerTypeField.optional().nullable(),
 });
 
 const raiseQuestionSchema = z.object({
@@ -357,6 +388,18 @@ const addProviderSchema = z.object({
   email: z.string().max(255).optional().nullable(),
   booking_link: z.string().url().optional().nullable(),
   directions_link: z.string().url().optional().nullable(),
+  after_hours_phone: z.string().max(50).optional().nullable(),
+  fax: z.string().max(50).optional().nullable(),
+  // A row per open day: { "day": "mon".."sun", "opens": "HH:MM", "closes": "HH:MM" }.
+  opening_hours: z
+    .array(z.object({ day: z.string().max(10), opens: z.string().max(5), closes: z.string().max(5) }))
+    .max(21)
+    .optional()
+    .nullable(),
+  // The person's main contact of this kind (their GP, their pharmacy).
+  main: z.boolean().optional(),
+  // They no longer see this contact, from today.
+  no_longer_seeing: z.boolean().optional(),
 });
 
 const addAssetSchema = z.object({
@@ -399,6 +442,18 @@ const updateProviderSchema = z.object({
   email: z.string().max(255).optional().nullable(),
   booking_link: z.string().url().optional().nullable(),
   directions_link: z.string().url().optional().nullable(),
+  after_hours_phone: z.string().max(50).optional().nullable(),
+  fax: z.string().max(50).optional().nullable(),
+  // A row per open day: { "day": "mon".."sun", "opens": "HH:MM", "closes": "HH:MM" }.
+  opening_hours: z
+    .array(z.object({ day: z.string().max(10), opens: z.string().max(5), closes: z.string().max(5) }))
+    .max(21)
+    .optional()
+    .nullable(),
+  // The person's main contact of this kind (their GP, their pharmacy).
+  main: z.boolean().optional(),
+  // They no longer see this contact, from today.
+  no_longer_seeing: z.boolean().optional(),
 });
 
 const linkProviderSchema = z.object({
@@ -406,6 +461,19 @@ const linkProviderSchema = z.object({
   // The name of an existing provider in the account's directory to attach to
   // this profile, the same way providers can be shared across people.
   name: z.string().min(1).max(255),
+  main: z.boolean().optional(),
+});
+
+// Who to call in an emergency. "me" is whoever is speaking; otherwise a
+// circle person, a contact, or a new name with a phone.
+const setEmergencyContactSchema = z.object({
+  type: z.literal('set_emergency_contact'),
+  name: z.string().min(1).max(255),
+  relationship: z.string().max(100).optional().nullable(),
+  // Saved on their own record, so it changes everywhere.
+  phone: z.string().max(50).optional().nullable(),
+  first: z.boolean().optional(),
+  remove: z.boolean().optional(),
 });
 
 // File a practitioner at a practice in the account's directory: "add Dr
@@ -520,7 +588,7 @@ const forwardAppointmentNotesSchema = z.object({
 const addCirclePersonSchema = z.object({
   type: z.literal('add_circle_person'),
   name: z.string().min(1).max(255),
-  role: z.enum(['family', 'friend', 'carer', 'organisation', 'legal', 'other']).default('other'),
+  role: z.enum(CIRCLE_ROLE_VALUES).default('other'),
   relationship: z.string().max(100).optional().nullable(),
   description: z.string().max(2000).optional().nullable(),
   phone: z.string().max(50).optional().nullable(),
@@ -531,7 +599,7 @@ const updateCirclePersonSchema = z.object({
   type: z.literal('update_circle_person'),
   name: z.string().min(1).max(255),
   new_name: z.string().max(255).optional().nullable(),
-  role: z.enum(['family', 'friend', 'carer', 'organisation', 'legal', 'other']).optional(),
+  role: z.enum(CIRCLE_ROLE_VALUES).optional(),
   relationship: z.string().max(100).optional().nullable(),
   description: z.string().max(2000).optional().nullable(),
   phone: z.string().max(50).optional().nullable(),
@@ -676,6 +744,7 @@ export const actionSchema = z.discriminatedUnion('type', [
   addAllergySchema,
   removeAllergySchema,
   addConditionSchema,
+  updateConditionSchema,
   logConditionSchema,
   removeConditionSchema,
   addSubstanceSchema,
@@ -694,6 +763,7 @@ export const actionSchema = z.discriminatedUnion('type', [
   fileDocumentSchema,
   updateProviderSchema,
   linkProviderSchema,
+  setEmergencyContactSchema,
   addToPracticeSchema,
   linkAddressSchema,
   updateCarePlanSchema,
@@ -1318,6 +1388,41 @@ async function findDocumentsByNames(names: string[] | null | undefined, profileI
 }
 
 /** "With" a person by name: someone in Contacts, or a new name to file, with their phone. */
+/**
+ * Who a record is with, named by Pare: found in Contacts or filed there,
+ * linked to the person. Returns the contact id, or a sentence on why not.
+ */
+async function namedContact(profileId: string, name: string | null | undefined, type: string | null | undefined, defaultType: string): Promise<{ id: string | null; note: string }> {
+  if (!name?.trim()) return { id: null, note: '' };
+  const who = await resolveContactInput(db, profileId, { name, type }, defaultType);
+  if ('error' in who) return { id: null, note: ` ${who.error}` };
+  return { id: who.id, note: who.filed ? ` Added ${who.filed.name} to Contacts.` : '' };
+}
+
+/** The visit a medicine started at, by title: the latest one with that title. */
+async function appointmentByTitle(profileId: string, title: string | null | undefined): Promise<string | null> {
+  if (!title?.trim()) return null;
+  const row = (await db('appointments')
+    .where({ care_profile_id: profileId })
+    .whereRaw('lower(title) = lower(?)', [title.trim()])
+    .orderByRaw('starts_at DESC NULLS LAST')
+    .first('id')) ?? (await db('appointments')
+    .where({ care_profile_id: profileId })
+    .whereRaw('title ilike ?', [`%${title.trim()}%`])
+    .orderByRaw('starts_at DESC NULLS LAST')
+    .first('id'));
+  return (row as { id: string } | undefined)?.id ?? null;
+}
+
+/** Contact details Pare can set beyond the basics: after hours, fax, hours. */
+function extraContactColumns(a: { after_hours_phone?: string | null; fax?: string | null; opening_hours?: unknown }): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (a.after_hours_phone !== undefined) out['after_hours_phone'] = a.after_hours_phone?.trim() || null;
+  if (a.fax !== undefined) out['fax'] = a.fax?.trim() || null;
+  if (a.opening_hours !== undefined) out['opening_hours'] = parseHoursList(a.opening_hours);
+  return out;
+}
+
 function withFields(a: { with?: string | null; with_type?: string | null; with_phone?: string | null; body?: string | null }): Pick<TaskInput, 'provider_name' | 'provider_type' | 'provider_phone'> {
   if (!a.with?.trim()) return {};
   // A number given only in the notes still goes on their record.
@@ -1517,9 +1622,13 @@ async function executeOne(
       // Link a named supplier to the account's shared supplier list, creating
       // one where the name is new, so the assistant tracks the same model.
       const supplierId = await resolveSupplierId(action.supplier, action.supplier_order_url, account.id);
+      const prescriber = await namedContact(profileId, action.prescriber, action.prescriber_type, 'gp');
+      const sourceAppt = await appointmentByTitle(profileId, action.started_at_appointment);
       await db('medications').insert({
         care_profile_id: profileId,
         medication_catalogue_id: cat.id,
+        prescriber_provider_id: prescriber.id,
+        source_appointment_id: sourceAppt,
         dose: action.dose ?? null,
         route: action.route ?? null,
         frequency: action.frequency ?? null,
@@ -1538,7 +1647,7 @@ async function executeOne(
         active: true,
       });
       await audit(profileId, account.id, 'medications', `added ${name}`);
-      return `Added ${name}${action.dose ? ` ${action.dose}` : ''} to the medication list.`;
+      return `Added ${name}${action.dose ? ` ${action.dose}` : ''} to the medication list.${prescriber.note}`;
     }
     case 'update_medication': {
       const med = await db('medications as m')
@@ -1571,10 +1680,17 @@ async function executeOne(
       if (action.with_food !== undefined) patch['with_food'] = action.with_food;
       if (action.as_needed !== undefined) patch['as_needed'] = action.as_needed;
       if (action.critical !== undefined) patch['critical'] = action.critical;
+      let filed = '';
+      if (action.prescriber !== undefined) {
+        const who = await namedContact(profileId, action.prescriber, action.prescriber_type, 'gp');
+        patch['prescriber_provider_id'] = who.id;
+        filed = who.note;
+      }
+      if (action.started_at_appointment !== undefined) patch['source_appointment_id'] = await appointmentByTitle(profileId, action.started_at_appointment);
       await db('medications').where({ id: med.id }).update(patch);
       await audit(profileId, account.id, 'medications', `updated ${med.name}`);
       const when = action.schedule_times ? ` Scheduled at ${action.schedule_times.join(', ')}.` : '';
-      return `Updated ${med.name}.${when}`;
+      return `Updated ${med.name}.${when}${filed}`;
     }
     case 'stop_medication': {
       const med = await db('medications as m')
@@ -1639,10 +1755,12 @@ async function executeOne(
       // The shared catalogue keeps one entry per condition across the
       // instance, same as adding it by hand.
       const catalogueId = await resolveConditionCatalogueId(name, account.id).catch(() => null);
+      const treating = await namedContact(profileId, action.treated_by, action.treated_by_type, 'specialist');
       const [conditionRow] = await db('medical_conditions')
         .insert({
           care_profile_id: profileId,
           condition_catalogue_id: catalogueId,
+          treating_provider_id: treating.id,
           name,
           category: action.category ?? null,
           severity: action.severity ?? null,
@@ -1652,7 +1770,28 @@ async function executeOne(
         })
         .returning('id');
       await audit(profileId, account.id, 'conditions', `added condition ${name}`, conditionRow?.id);
-      return `Added the condition ${name}${action.category ? ` (${action.category.replace(/_/g, ' ')})` : ''}.`;
+      return `Added the condition ${name}${action.category ? ` (${action.category.replace(/_/g, ' ')})` : ''}.${treating.note}`;
+    }
+    case 'update_condition': {
+      const condition = await db('medical_conditions')
+        .where({ care_profile_id: profileId })
+        .whereRaw('lower(name) = lower(?)', [action.name.trim()])
+        .first('id', 'name');
+      if (!condition) return `${CLARIFY_MARK} I could not find a condition called "${action.name}". Which one did you mean?`;
+      const patch: Record<string, unknown> = {};
+      let filed = '';
+      if (action.treated_by !== undefined) {
+        const who = await namedContact(profileId, action.treated_by, action.treated_by_type, 'specialist');
+        patch['treating_provider_id'] = who.id;
+        filed = who.note;
+      }
+      if (action.severity !== undefined) patch['severity'] = action.severity;
+      if (action.status !== undefined && action.status) patch['status'] = action.status;
+      if (action.notes !== undefined) patch['notes'] = action.notes;
+      if (Object.keys(patch).length === 0) return `Nothing to change for ${condition.name}.`;
+      await db('medical_conditions').where({ id: condition.id }).update({ ...patch, updated_at: db.fn.now() });
+      await audit(profileId, account.id, 'conditions', `updated ${condition.name}`, condition.id);
+      return `Updated ${condition.name}.${filed}`;
     }
     case 'remove_condition': {
       const n = await db('medical_conditions')
@@ -1861,17 +2000,19 @@ async function executeOne(
         if (!condition) return `No condition called "${action.condition_name}" was on the record, so the treatment was not added.`;
         conditionId = condition.id;
       }
+      const practitioner = await namedContact(profileId, action.provided_by, action.provided_by_type, 'allied_health');
       const [treatmentRow] = await db('treatments')
         .insert({
           care_profile_id: profileId,
           medical_condition_id: conditionId,
+          practitioner_provider_id: practitioner.id,
           name: action.name.trim(),
           category: action.category,
           current_status: 'active',
         })
         .returning('id');
       await audit(profileId, account.id, 'treatments', `added treatment ${action.name}`, treatmentRow?.id);
-      return `Added the treatment ${action.name}${action.condition_name ? ` for ${action.condition_name}` : ''}.`;
+      return `Added the treatment ${action.name}${action.condition_name ? ` for ${action.condition_name}` : ''}.${practitioner.note}`;
     }
     case 'raise_question': {
       const [questionRow] = await db('open_questions')
@@ -1899,6 +2040,7 @@ async function executeOne(
         email: action.email ?? null,
         booking_link: action.booking_link ?? null,
         directions_link: action.directions_link ?? null,
+        ...extraContactColumns(action),
         ...(action.organisation?.trim() ? { organisation: action.organisation.trim() } : {}),
       });
       const [provider] = await db('providers')
@@ -1908,10 +2050,18 @@ async function executeOne(
         care_profile_id: profileId,
         provider_id: provider.id,
       });
+      await linkContactToSuppliers(db, provider.id);
+      const standing =
+        action.main || action.no_longer_seeing
+          ? await setContactStanding(db, profileId, provider.id, {
+              ...(action.main ? { is_main: true } : {}),
+              ...(action.no_longer_seeing ? { ended_on: new Date().toISOString().slice(0, 10) } : {}),
+            })
+          : null;
       await audit(profileId, account.id, 'providers', `added provider ${action.name}`);
       const at = columns['organisation'] ? ` at ${columns['organisation']}` : '';
       const filedAs = columns['kind'] === 'organisation' ? 'organisations' : 'professionals';
-      return `Added ${action.name}${at} to their ${filedAs}.${note ? ` ${note}` : ''}`;
+      return `Added ${action.name}${at} to their ${filedAs}.${note ? ` ${note}` : ''}${standing ? ` ${standing}` : ''}`;
     }
     case 'add_to_practice': {
       const profile = await db('care_profiles').where({ id: profileId }).select('account_id').first();
@@ -1959,8 +2109,11 @@ async function executeOne(
       return categoryName ? `Filed ${shown} under ${categoryName}.` : `Renamed the document to ${shown}.`;
     }
     case 'add_asset': {
+      // The supplier named is the supplier on file: found by name, or filed.
+      const supplier = action.supplier?.trim() ? await resolveAssetSupplier(db, account.id, { supplier: action.supplier }) : null;
       const [asset] = await db('assets')
         .insert({
+          supplier_id: supplier?.supplier_id ?? null,
           account_id: account.id,
           name: action.name.trim(),
           category: action.category ?? null,
@@ -1996,13 +2149,23 @@ async function executeOne(
       if (action.email !== undefined) updates.email = action.email;
       if (action.booking_link !== undefined) updates.booking_link = action.booking_link;
       if (action.directions_link !== undefined) updates.directions_link = action.directions_link;
-      if (Object.keys(updates).length === 0) return `No changes to make to ${action.name}.`;
-      const owner = await db('providers').where({ id: provider.id }).select('account_id').first();
-      const { columns, note } = await providerWriteColumns(owner?.account_id ?? account.id, updates, provider.id);
-      if (Object.keys(columns).length > 0) await db('providers').where({ id: provider.id }).update(columns);
-      await syncPracticeMembers(provider.id);
+      Object.assign(updates, extraContactColumns(action));
+      const standingChange = {
+        ...(action.main !== undefined ? { is_main: action.main } : {}),
+        ...(action.no_longer_seeing !== undefined ? { ended_on: action.no_longer_seeing ? new Date().toISOString().slice(0, 10) : null } : {}),
+      };
+      if (Object.keys(updates).length === 0 && Object.keys(standingChange).length === 0) return `No changes to make to ${action.name}.`;
+      let note: string | null = null;
+      if (Object.keys(updates).length > 0) {
+        const owner = await db('providers').where({ id: provider.id }).select('account_id').first();
+        const written = await providerWriteColumns(owner?.account_id ?? account.id, updates, provider.id);
+        note = written.note;
+        if (Object.keys(written.columns).length > 0) await db('providers').where({ id: provider.id }).update(written.columns);
+        await syncPracticeMembers(provider.id);
+      }
+      const standing = Object.keys(standingChange).length ? await setContactStanding(db, profileId, provider.id, standingChange) : null;
       await audit(profileId, account.id, 'providers', `updated provider ${action.name}`);
-      return `Updated ${action.name}'s details.${note ? ` ${note}` : ''}`;
+      return `Updated ${action.name}'s details.${note ? ` ${note}` : ''}${standing ? ` ${standing}` : ''}`;
     }
     case 'link_provider': {
       const profile = await db('care_profiles').where({ id: profileId }).select('account_id').first();
@@ -2014,10 +2177,65 @@ async function executeOne(
         .first();
       if (!provider) return `Could not find a provider called "${action.name}" in the directory. Add them first, then link.`;
       const already = await db('care_profile_providers').where({ care_profile_id: profileId, provider_id: provider.id }).first();
-      if (already) return `${provider.name} is already linked to this profile.`;
-      await db('care_profile_providers').insert({ care_profile_id: profileId, provider_id: provider.id });
+      if (!already) await db('care_profile_providers').insert({ care_profile_id: profileId, provider_id: provider.id });
+      const standing = action.main ? await setContactStanding(db, profileId, provider.id, { is_main: true }) : null;
+      if (already && !standing) return `${provider.name} is already linked to this profile.`;
       await audit(profileId, account.id, 'providers', `linked provider ${provider.name}`);
-      return `Linked ${provider.name} to this profile.`;
+      return `${already ? '' : `Linked ${provider.name} to this profile.`}${standing ? `${already ? '' : ' '}${standing}` : ''}`;
+    }
+    case 'set_emergency_contact': {
+      if (access.level !== 'owner' && access.level !== 'admin') {
+        return 'No change: only the profile owner can choose who to call in an emergency.';
+      }
+      const name = action.name.trim();
+      let ref: EmergencyRef | null = null;
+      let shown = name;
+      if (['me', 'myself', 'i', 'you'].includes(name.toLowerCase())) {
+        ref = { account_id: account.id };
+        shown = 'you';
+      } else {
+        const person = await findPickablePerson(profileId, account.id, name);
+        if (person) {
+          ref = person.ref as EmergencyRef;
+          shown = person.name;
+        } else {
+          const contact = (await db('care_profile_providers as cpp')
+            .join('providers as p', 'cpp.provider_id', 'p.id')
+            .where({ 'cpp.care_profile_id': profileId })
+            .where((w) => whereNamed(w as unknown as Knex.QueryBuilder, name, 'p'))
+            .first('p.id', 'p.name')) as { id: string; name: string } | undefined;
+          if (contact) {
+            ref = { provider_id: contact.id };
+            shown = contact.name;
+          }
+        }
+      }
+      if (action.remove) {
+        if (!ref) return `${name} is not one of their emergency contacts.`;
+        const list = await emergencyContactsFor(profileId);
+        const refId = Object.values(ref)[0];
+        const row = list.find((c) => !c.inferred && (c.id === refId || c.name.toLowerCase() === shown.toLowerCase()));
+        if (!row?.row_id) return `${shown} is not one of their emergency contacts.`;
+        await removeEmergencyContact(db, profileId, row.row_id);
+        await audit(profileId, account.id, 'emergency_contacts', `removed ${shown} as an emergency contact`);
+        return `Removed ${shown} from who to call in an emergency.`;
+      }
+      if (!ref) {
+        if (!action.phone?.trim()) {
+          return `${CLARIFY_MARK} ${name} is not in the care circle or Contacts. What is their phone number?`;
+        }
+        ref = { name, phone: action.phone };
+      }
+      try {
+        await db.transaction((trx) =>
+          addEmergencyContact(trx, profileId, { ref: ref!, relationship: action.relationship, phone: action.phone, first: action.first })
+        );
+      } catch (err) {
+        if (err instanceof EmergencyContactError) return `Could not add ${shown}: ${err.message}`;
+        throw err;
+      }
+      await audit(profileId, account.id, 'emergency_contacts', `set ${shown} as an emergency contact`);
+      return `${shown === 'you' ? 'You are' : `${shown} is`} now ${action.first ? 'the first' : 'an'} emergency contact.${action.phone ? ' Their phone is saved on their own record.' : ''}`;
     }
     case 'link_address': {
       const profile = await db('care_profiles').where({ id: profileId }).select('account_id').first();

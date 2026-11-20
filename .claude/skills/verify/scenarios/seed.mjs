@@ -98,6 +98,7 @@ const ids = {};
 // 1. Me, managing my own health ------------------------------------------
 console.log('Me');
 const meT = await register('me@bench.test', 'Sam', 'Nguyen');
+await call('PATCH', '/auth/me', meT, { phone: '0411 555 288' });
 const me = await profile(meT, { kind: 'person', first_name: 'Sam', last_name: 'Nguyen', date_of_birth: '1988-04-12', owner_relationship: 'self', primary_language: 'English', current_phase: 'home_with_support', contact_kind: 'self', address_line1: '14 Wattle Street', address_suburb: 'Fitzroy', address_state: 'VIC', address_postcode: '3065' });
 ids.me = me.id;
 const meGp = await provider(meT, me.id, { provider_type: 'GP', name: 'Dr Priya Raman', phone: '03 9417 2200', email: 'reception@fitzroymedical.example', practice_name: 'Fitzroy Medical Centre', booking_link: 'https://fitzroymedical.example/book' });
@@ -105,7 +106,7 @@ await provider(meT, me.id, { provider_type: 'Pharmacy', name: 'Fitzroy Amcal Pha
 await condition(meT, me.id, { name: 'Migraine with aura', status: 'active', started_on: '2019-06-01' });
 await allergy(meT, me.id, { substance: 'Penicillin', reaction: 'Hives' });
 await med(meT, me.id, { name: 'Sumatriptan', dose_amount: '50', dose_unit: 'mg', form: 'Tablet', route: 'Oral', as_needed: true, supply: 6, supply_remaining: 2, instructions: 'At onset of migraine. Max 2 doses in 24 hours.' });
-await med(meT, me.id, { name: 'Propranolol', dose_amount: '40', dose_unit: 'mg', form: 'Tablet', route: 'Oral', schedule_times: ['08:00', '20:00'], supply: 60, supply_remaining: 8, repeats_due: dateOnly(5) });
+await med(meT, me.id, { name: 'Propranolol', dose_amount: '40', dose_unit: 'mg', form: 'Tablet', route: 'Oral', schedule_times: ['08:00', '20:00'], supply: 60, supply_remaining: 8, repeats_due: dateOnly(5), prescriber_provider_id: meGp.id });
 await appt(meT, me.id, { title: 'GP review', appointment_type: 'consultation', provider_id: meGp.id, starts_at: at(-30, 10), status: 'completed' });
 await appt(meT, me.id, { title: 'Blood test', appointment_type: 'test', starts_at: at(3, 8) });
 await task(meT, me.id, { title: 'Book neurologist', body: 'Referral from Dr Raman. Phone Dr Chen on 03 9345 6677.', reminder_type: 'once', next_due_at: at(2) });
@@ -115,6 +116,7 @@ await upload(meT, me.id, 'Neurology referral letter', 'Referral', 'Referral to D
 // 2. Parent of a child with complex needs ---------------------------------
 console.log('Parent');
 const parT = await register('parent@bench.test', 'Karen', 'Mitchell');
+await call('PATCH', '/auth/me', parT, { phone: '0412 555 640', gender: 'Female' });
 const kid = await profile(parT, { kind: 'person', first_name: 'Oliver', last_name: 'Mitchell', date_of_birth: '2016-09-03', owner_relationship: 'son', current_phase: 'home_with_support', contact_kind: 'self', primary_language: 'English' });
 ids.kid = kid.id;
 const school = await provider(parT, kid.id, { provider_type: 'School', name: 'Mrs Julie Adams', phone: '03 9876 5400', email: 'office@brunswicksouth.example', practice_name: 'Brunswick South Primary School' });
@@ -139,6 +141,7 @@ await logEntry(parT, kid.id, { entry_type: 'observation', title: 'School pickup'
 // 3. Daughter caring for ageing mum ---------------------------------------
 console.log('Daughter and mum');
 const dauT = await register('daughter@bench.test', 'Linda', 'Kowalski');
+await call('PATCH', '/auth/me', dauT, { phone: '0412 555 777', gender: 'Female' });
 const mum = await profile(dauT, { kind: 'person', first_name: 'Dorothy', last_name: 'Kowalski', date_of_birth: '1943-02-19', owner_relationship: 'mother', current_phase: 'increased_dependency', contact_kind: 'self', primary_language: 'English', address_line1: '7 Banksia Court', address_suburb: 'Box Hill', address_state: 'VIC', address_postcode: '3128', residence_type: 'private_residence' });
 ids.mum = mum.id;
 const mumGp = await provider(dauT, mum.id, { provider_type: 'GP', name: 'Dr James Okafor', phone: '03 9890 3300', email: 'info@boxhillfamily.example', practice_name: 'Box Hill Family Practice', booking_link: 'https://boxhillfamily.example/book' });
@@ -150,9 +153,9 @@ await condition(dauT, mum.id, { name: 'Atrial fibrillation', status: 'managed' }
 await condition(dauT, mum.id, { name: 'Type 2 diabetes', status: 'managed' });
 await condition(dauT, mum.id, { name: 'Mild cognitive impairment', status: 'active' });
 await allergy(dauT, mum.id, { substance: 'Sulfa drugs', reaction: 'Rash' });
-await med(dauT, mum.id, { name: 'Warfarin', dose_amount: '3', dose_unit: 'mg', form: 'Tablet', route: 'Oral', schedule_times: ['18:00'], supply: 28, supply_remaining: 3, critical: true, supplier: 'Terry White Chemmart Box Hill' });
+await med(dauT, mum.id, { name: 'Warfarin', dose_amount: '3', dose_unit: 'mg', form: 'Tablet', route: 'Oral', schedule_times: ['18:00'], supply: 28, supply_remaining: 3, critical: true, supplier: 'Terry White Chemmart Box Hill', prescriber_provider_id: mumGp.id });
 await med(dauT, mum.id, { name: 'Metformin', dose_amount: '500', dose_unit: 'mg', form: 'Tablet', route: 'Oral', schedule_times: ['08:00', '18:00'], with_food: true, supply: 60, supply_remaining: 40 });
-await med(dauT, mum.id, { name: 'Metoprolol', dose_amount: '50', dose_unit: 'mg', form: 'Tablet', route: 'Oral', schedule_times: ['08:00', '20:00'], supply: 60, supply_remaining: 5, repeats_due: dateOnly(3) });
+await med(dauT, mum.id, { name: 'Metoprolol', dose_amount: '50', dose_unit: 'mg', form: 'Tablet', route: 'Oral', schedule_times: ['08:00', '20:00'], supply: 60, supply_remaining: 5, repeats_due: dateOnly(3), prescriber_provider_id: mumGp.id });
 await med(dauT, mum.id, { name: 'Paracetamol', dose_amount: '500', dose_unit: 'mg', form: 'Tablet', route: 'Oral', as_needed: true, supply: 50, supply_remaining: 30 });
 const mumOldAppt = await appt(dauT, mum.id, { title: 'Cardiology follow-up', appointment_type: 'consultation', provider_id: cardio.id, starts_at: at(-21, 14), status: 'completed' });
 await appt(dauT, mum.id, { title: 'GP visit for script repeats', appointment_type: 'consultation', provider_id: mumGp.id, starts_at: at(5, 10, 30) });

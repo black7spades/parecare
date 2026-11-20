@@ -620,7 +620,9 @@ export function AppointmentsPage() {
             ...(current.medical_condition_id && conditionName(current.medical_condition_id)
               ? [{ label: 'Condition', value: conditionName(current.medical_condition_id), to: `/app/${profile.id}/conditions?record=${current.medical_condition_id}` }]
               : []),
-            ...(current.provider_id && current.provider_name
+            // Who it is with shows under Who with, with their name opening
+            // their contact record, so it is not listed twice.
+            ...(current.provider_id && current.provider_name && !current.provider
               ? [{ label: 'Contact', value: current.provider_name, to: `/app/${profile.id}/providers?record=${current.provider_id}` }]
               : []),
             ...((current.directions_link || current.provider_directions_link)
@@ -641,7 +643,8 @@ export function AppointmentsPage() {
                 : null
           }
           extra={[
-            ...(current.starts_at ? [{ label: 'How did it go?', onRun: () => setOutcomeFor(current.id) }] : []),
+            // Only once it has happened.
+            ...(hasStarted(current) && current.status !== 'cancelled' ? [{ label: 'How did it go?', onRun: () => setOutcomeFor(current.id) }] : []),
             { label: 'Forward notes', onRun: () => setForwarding({ sourceId: current.id, noteId: null }) },
             ...(current.series ? [{ label: 'Stop repeating', onRun: () => stopRepeating.mutate(current), pending: stopRepeating.isPending }] : []),
           ]}
@@ -655,7 +658,12 @@ export function AppointmentsPage() {
           <section>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Who with</h3>
             {current.provider ? (
-              <ContactStrip contact={current.provider} profileId={profile.id} book={false} />
+              <ContactStrip
+                contact={current.provider}
+                profileId={profile.id}
+                book={false}
+                recordHref={current.provider.source === 'contact' && current.provider.id ? `/app/${profile.id}/providers?record=${current.provider.id}` : undefined}
+              />
             ) : (
               <p className="text-sm text-muted">No one linked yet.</p>
             )}
@@ -738,6 +746,8 @@ export function AppointmentsPage() {
           selfCare={relationship === SELF_RELATIONSHIP}
           initialName={addingMed.step.title === addingMed.step.type_name ? '' : addingMed.step.title}
           initialCondition={conditionName(addingMed.from.medical_condition_id)}
+          initialSourceAppointmentId={addingMed.from.id}
+          initialPrescriber={addingMed.from.provider ?? null}
           onClose={() => setAddingMed(null)}
           onSaved={() => {
             finishStep.mutate(addingMed.step.id);

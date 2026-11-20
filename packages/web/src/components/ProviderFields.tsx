@@ -88,7 +88,7 @@ export interface WorksAtValue {
 }
 
 /** Contact details everyone based at an organisation uses unless they have their own. */
-export const SHARED_FIELDS = ['phone', 'email', 'booking_link', 'directions_link'] as const;
+export const SHARED_FIELDS = ['phone', 'email', 'booking_link', 'directions_link', 'after_hours_phone', 'fax'] as const;
 export type SharedField = (typeof SHARED_FIELDS)[number];
 
 const contactOf = (p: Partial<Record<SharedField, string | null>>) =>
@@ -100,7 +100,7 @@ export const emptyWorksAt: WorksAtValue = { practiceId: null, practiceName: '', 
 export function ownValue(p: Provider | null, field: SharedField): string {
   if (!p) return '';
   if ((p.inherited_fields ?? []).includes(field)) return '';
-  return p[field] ?? '';
+  return (p[field] as string | null | undefined) ?? '';
 }
 
 /**
@@ -120,7 +120,7 @@ export function SharedContactNote({ worksAt }: { worksAt: WorksAtValue }) {
   if (!name) return null;
   return (
     <p className="text-xs text-muted">
-      Leave the phone, email, booking link or directions empty to use {name}&apos;s, and they change whenever {name}&apos;s do. Type one in to use their own instead.
+      Leave the phone, after-hours phone, fax, email, opening hours, booking link or directions empty to use {name}&apos;s, and they change whenever {name}&apos;s do. Type one in to use their own instead.
     </p>
   );
 }

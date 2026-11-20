@@ -1,4 +1,6 @@
 import { Router, type Request } from 'express';
+import { contactSummaries, contactSummary, personSummary, type ContactSummary } from '../services/professionals';
+import { emergencyContactLines } from '../services/emergencyContacts';
 import { createHash } from 'crypto';
 import { z } from 'zod';
 import { db } from '../config/database';
@@ -60,7 +62,55 @@ carePlanRouter.get('/', requireAuth, async (req, res) => {
     .where({ care_profile_id: req.params['id'] })
     .orderBy('updated_at', 'desc')
     .first();
-  res.json({ plan: plan ?? null });
+  // Emergency contacts live in their own list now, read live from each
+  // person's record; the plan carries them for older readers.
+  const emergency_contacts = await emergencyContactLines(String(req.params['id']));
+  res.json({ plan: plan ? { ...plan, emergency_contacts } : null });
+});
+
+/**
+ * Who and what supports each part of the plan, read live from the records a
+ * plan entry points at ("providers:<id>;medications:<id>"), so a changed
+ * phone shows at once. A reference whose record is gone comes back empty and
+ * the plan falls back to its written text.
+ */
+carePlanRouter.get('/refs', requireAuth, async (req, res) => {
+  const profileId = String(req.params['id']);
+  const wanted = String(req.query['refs'] ?? '')
+    .split(/[;,]/)
+    .map((r) => r.trim())
+    .filter((r) => /^(providers|medications|treatments|circle):[0-9a-f-]{36}$/i.test(r))
+    .slice(0, 200);
+  const ids = (kind: string) => wanted.filter((r) => r.startsWith(`${kind}:`)).map((r) => r.slice(kind.length + 1));
+  const out: Record<string, { label: string; contact: ContactSummary | null }> = {};
+  const contacts = await contactSummaries(db, ids('providers'), profileId);
+  for (const id of ids('providers')) {
+    const c = contacts.get(id);
+    const linked = await db('care_profile_providers').where({ care_profile_id: profileId, provider_id: id }).first('id');
+    if (c && linked) out[`providers:${id}`] = { label: c.name, contact: c };
+  }
+  const meds = ids('medications').length
+    ? ((await db('medications as m')
+        .join('medication_catalogue as c', 'c.id', 'm.medication_catalogue_id')
+        .whereIn('m.id', ids('medications'))
+        .where('m.care_profile_id', profileId)
+        .select('m.id', 'c.name', 'm.prescriber_provider_id')) as Array<{ id: string; name: string; prescriber_provider_id: string | null }>)
+    : [];
+  const prescribers = await contactSummaries(db, meds.map((m) => m.prescriber_provider_id), profileId);
+  for (const m of meds) out[`medications:${m.id}`] = { label: m.name, contact: (m.prescriber_provider_id && prescribers.get(m.prescriber_provider_id)) || null };
+  const treatments = ids('treatments').length
+    ? ((await db('treatments').whereIn('id', ids('treatments')).where({ care_profile_id: profileId }).select('id', 'name', 'practitioner_provider_id')) as Array<{
+        id: string; name: string; practitioner_provider_id: string | null;
+      }>)
+    : [];
+  const practitioners = await contactSummaries(db, treatments.map((t) => t.practitioner_provider_id), profileId);
+  for (const t of treatments) out[`treatments:${t.id}`] = { label: t.name, contact: (t.practitioner_provider_id && practitioners.get(t.practitioner_provider_id)) || null };
+  for (const id of ids('circle')) {
+    const m = await db('care_circle_members').where({ id, care_profile_id: profileId }).first('id');
+    const p = m ? await personSummary(db, { circle_member_id: id }) : null;
+    if (p) out[`circle:${id}`] = { label: p.name, contact: p };
+  }
+  res.json({ refs: out });
 });
 
 carePlanRouter.put('/', requireAuth, async (req, res) => {
@@ -82,7 +132,8 @@ carePlanRouter.put('/', requireAuth, async (req, res) => {
     dietary_requirements: parsed.data.dietary_requirements,
     mobility_aids: parsed.data.mobility_aids,
     communication_needs: db.raw('?::jsonb', [JSON.stringify(parsed.data.communication_needs)]),
-    emergency_contacts: db.raw('?::jsonb', [JSON.stringify(parsed.data.emergency_contacts)]),
+    // Emergency contacts are kept on their own list (/emergency-contacts),
+    // pointing at each person, so they are no longer written here.
   };
 
   let plan: CarePlan;
@@ -108,7 +159,7 @@ carePlanRouter.put('/', requireAuth, async (req, res) => {
     resolveOptions('directive_location', [parsed.data.advance_care_directive_location], req.account!.id),
   ]);
 
-  res.json({ plan });
+  res.json({ plan: { ...plan, emergency_contacts: await emergencyContactLines(String(req.params['id'])) } });
 });
 
 // ---------------------------------------------------------------------------
@@ -767,6 +818,10 @@ carePlanRouter.delete('/access/:accessId', requireAuth, async (req, res) => {
 const reviewSchema = z.object({
   invited_email: z.string().email().optional().nullable(),
   invited_name: z.string().max(255).optional().nullable(),
+  // Picked rather than typed: their name and email are read from their own
+  // record when the invite is made, and the address used is kept on the row.
+  provider_id: z.string().uuid().optional().nullable(),
+  circle_member_id: z.string().uuid().optional().nullable(),
   can_comment: z.boolean().default(true),
   can_approve: z.boolean().default(false),
 });
@@ -787,6 +842,28 @@ carePlanRouter.post('/versions/:versionId/reviews', requireAuth, async (req, res
     res.status(404).json({ error: 'Version not found', code: 'NOT_FOUND' });
     return;
   }
+  const profileId = String(req.params['id']);
+  let invitedName = parsed.data.invited_name?.trim() || null;
+  let invitedEmail = parsed.data.invited_email?.trim() || null;
+  if (parsed.data.provider_id) {
+    const c = await contactSummary(db, parsed.data.provider_id, profileId);
+    const linked = await db('care_profile_providers').where({ care_profile_id: profileId, provider_id: parsed.data.provider_id }).first('id');
+    if (!c || !linked) {
+      res.status(400).json({ error: "That contact is not in this person's contacts.", code: 'VALIDATION_ERROR' });
+      return;
+    }
+    invitedName = c.name;
+    invitedEmail = c.email ?? invitedEmail;
+  } else if (parsed.data.circle_member_id) {
+    const m = await db('care_circle_members').where({ id: parsed.data.circle_member_id, care_profile_id: profileId }).first('id');
+    const p = m ? await personSummary(db, { circle_member_id: parsed.data.circle_member_id }) : null;
+    if (!p) {
+      res.status(400).json({ error: 'That person is not in this care circle.', code: 'VALIDATION_ERROR' });
+      return;
+    }
+    invitedName = p.name;
+    invitedEmail = p.email ?? invitedEmail;
+  }
   const token = newReviewToken();
   const expires = new Date();
   expires.setDate(expires.getDate() + 14);
@@ -794,8 +871,10 @@ carePlanRouter.post('/versions/:versionId/reviews', requireAuth, async (req, res
     .insert({
       version_id: version.id,
       token,
-      invited_email: parsed.data.invited_email ?? null,
-      invited_name: parsed.data.invited_name ?? null,
+      invited_email: invitedEmail,
+      invited_name: invitedName,
+      provider_id: parsed.data.provider_id ?? null,
+      circle_member_id: parsed.data.circle_member_id ?? null,
       can_comment: parsed.data.can_comment,
       can_approve: parsed.data.can_approve,
       created_by: req.account!.id,
@@ -806,7 +885,7 @@ carePlanRouter.post('/versions/:versionId/reviews', requireAuth, async (req, res
     String(req.params['id']),
     req.account!.id,
     'created',
-    `Care plan review invited for version ${version.version}${parsed.data.invited_email ? `: ${parsed.data.invited_email}` : ''}`
+    `Care plan review invited for version ${version.version}${invitedName || invitedEmail ? `: ${invitedName ?? invitedEmail}` : ''}`
   );
   res.status(201).json({
     review: { id: review.id, expires_at: review.expires_at },

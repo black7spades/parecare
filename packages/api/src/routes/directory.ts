@@ -3,8 +3,10 @@ import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { roleAtLeast } from '../middleware/requireRole';
-import { providerAddressFields, providerKindField, providerOtherNames, providerPracticeFields, providerWriteColumns, withComposedAddress } from './providers';
+import { providerAddressFields, providerContactFields, providerKindField, providerOtherNames, providerPracticeFields, providerWriteColumns, withComposedAddress } from './providers';
 import { kindFor, type ProviderKind } from '../lib/providerTypes';
+import { linkContactToSuppliers, linkSupplierToContact, resolveAssetSupplier, supplierContacts } from '../services/professionals';
+import { hoursFromText, hoursToText } from '../lib/openingHours';
 import { dismissDuplicate, likelyDuplicates, mergeProviders, undoMerge } from '../services/providerMerge';
 import {
   addPracticeMember,
@@ -178,6 +180,7 @@ const providerSchema = z.object({
   ...providerPracticeFields,
   ...providerOtherNames,
   ...providerKindField,
+  ...providerContactFields,
   booking_link: z.string().url().optional().nullable(),
   directions_link: z.string().url().optional().nullable(),
 });
@@ -255,6 +258,7 @@ directoryRouter.post('/providers', requireAuth, async (req, res) => {
   const [provider] = await db<Provider>('providers')
     .insert({ account_id: account.id, ...columns })
     .returning('*');
+  await linkContactToSuppliers(db, provider.id);
 
   res.status(201).json({ provider, note });
 });
@@ -650,6 +654,7 @@ directoryRouter.post('/suppliers', requireAuth, async (req, res) => {
       directions_link: normaliseSupplierUrl(parsed.data.directions_link),
     })
     .returning('*');
+  await linkSupplierToContact(db, supplier.id);
   res.status(201).json({ supplier });
 });
 
@@ -768,6 +773,8 @@ const assetSchema = z.object({
   price: z.coerce.number().min(0).max(1e9).optional().nullable(),
   purchase_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   supplier: z.string().max(255).optional().nullable(),
+  // The supplier on file; a bare name above is found or filed as one.
+  supplier_id: z.string().uuid().optional().nullable(),
   warranty_expiry: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   condition: z.string().max(30).optional().nullable(),
   location: z.string().max(255).optional().nullable(),
@@ -834,13 +841,31 @@ function assetColumns(data: z.infer<typeof assetSchema> | Partial<z.infer<typeof
   if ('make_model' in data) out['make_model'] = cleanField(data.make_model);
   if ('price' in data) out['price'] = data.price ?? null;
   if ('purchase_date' in data) out['purchase_date'] = data.purchase_date ?? null;
-  if ('supplier' in data) out['supplier'] = cleanField(data.supplier);
   if ('warranty_expiry' in data) out['warranty_expiry'] = data.warranty_expiry ?? null;
   if ('condition' in data) out['condition'] = cleanField(data.condition);
   if ('location' in data) out['location'] = cleanField(data.location);
   if ('notes' in data) out['notes'] = cleanField(data.notes);
   if ('useful_life_years' in data) out['useful_life_years'] = data.useful_life_years ?? null;
   return out;
+}
+
+/**
+ * The supplier columns for an equipment write: the supplier picked, or the
+ * name found or filed as a supplier. Nothing when the write does not
+ * mention one; null when the picked supplier belongs elsewhere.
+ */
+async function assetSupplierColumns(
+  accountId: string,
+  data: Partial<z.infer<typeof assetSchema>>
+): Promise<Record<string, unknown> | null> {
+  if (!('supplier_id' in data) && !('supplier' in data)) return {};
+  return resolveAssetSupplier(db, accountId, { supplier_id: data.supplier_id, supplier: data.supplier });
+}
+
+/** One equipment record with who supplies it, as screens read it. */
+async function assetOut(asset: Record<string, unknown>) {
+  const contacts = await supplierContacts(db, [asset['supplier_id'] as string | null]);
+  return serializeAsset({ ...asset, supplier_contact: (asset['supplier_id'] && contacts.get(asset['supplier_id'] as string)) || null });
 }
 
 /**
@@ -881,9 +906,15 @@ directoryRouter.get('/assets', requireAuth, async (req, res) => {
   }
 
   const assets = await query;
+  const contacts = await supplierContacts(db, assets.map((a: Record<string, unknown>) => a['supplier_id'] as string | null));
   // Assets are account-scoped and managed here by any signed-in carer, the same
   // as suppliers, rather than gated behind a platform admin.
-  res.json({ assets: assets.map(serializeAsset), can_edit: true });
+  res.json({
+    assets: assets.map((a: Record<string, unknown>) =>
+      serializeAsset({ ...a, supplier_contact: (a['supplier_id'] && contacts.get(a['supplier_id'] as string)) || null })
+    ),
+    can_edit: true,
+  });
 });
 
 /** Create an asset at the account level. */
@@ -894,10 +925,15 @@ directoryRouter.post('/assets', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
     return;
   }
+  const supplier = await assetSupplierColumns(account.id, parsed.data);
+  if (!supplier) {
+    res.status(400).json({ error: 'That supplier is not in this account.', code: 'VALIDATION_ERROR' });
+    return;
+  }
   const [asset] = await db('assets')
-    .insert({ account_id: account.id, ...assetColumns(parsed.data) })
+    .insert({ account_id: account.id, ...assetColumns(parsed.data), ...supplier })
     .returning('*');
-  res.status(201).json({ asset: serializeAsset(asset) });
+  res.status(201).json({ asset: await assetOut(asset) });
 });
 
 /** Update an asset (its own account; super_admin for any). */
@@ -910,12 +946,22 @@ directoryRouter.patch('/assets/:id', requireAuth, async (req, res) => {
   }
   let query = db('assets').where({ id: req.params['id'] });
   if (!roleAtLeast(account.role, 'super_admin')) query = query.where({ account_id: account.id });
-  const [asset] = await query.update(assetColumns(parsed.data)).returning('*');
+  const current = await query.clone().first('account_id');
+  if (!current) {
+    res.status(404).json({ error: 'Asset not found', code: 'NOT_FOUND' });
+    return;
+  }
+  const supplier = await assetSupplierColumns(current.account_id, parsed.data);
+  if (!supplier) {
+    res.status(400).json({ error: 'That supplier is not in this account.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const [asset] = await query.update({ ...assetColumns(parsed.data), ...supplier }).returning('*');
   if (!asset) {
     res.status(404).json({ error: 'Asset not found', code: 'NOT_FOUND' });
     return;
   }
-  res.json({ asset: serializeAsset(asset) });
+  res.json({ asset: await assetOut(asset) });
 });
 
 /** Delete an asset. Its profile links cascade away. */
@@ -1237,6 +1283,9 @@ const providerPort: PortDescriptor<AnyRow, PortRecord> = {
     { key: 'organisation', header: 'Based at', aliases: ['works at', 'part of', 'organisation', 'organization', 'org', 'clinic', 'practice'], toCell: (r) => cell(r['organisation']) },
     { key: 'phone', header: 'Phone', toCell: (r) => cell(r['phone']) },
     { key: 'email', header: 'Email', toCell: (r) => cell(r['email']) },
+    { key: 'after_hours_phone', header: 'After-hours phone', aliases: ['after hours', 'after hours phone'], toCell: (r) => cell(r['after_hours_phone']) },
+    { key: 'fax', header: 'Fax', toCell: (r) => cell(r['fax']) },
+    { key: 'opening_hours', header: 'Opening hours', aliases: ['hours'], toCell: (r) => hoursToText(r['opening_hours']) },
     { key: 'address_line1', header: 'Address line 1', aliases: ['address', 'street'], toCell: (r) => cell(r['address_line1']) },
     { key: 'address_line2', header: 'Address line 2', toCell: (r) => cell(r['address_line2']) },
     { key: 'address_suburb', header: 'Suburb', aliases: ['city', 'town'], toCell: (r) => cell(r['address_suburb']) },
@@ -1266,6 +1315,12 @@ const providerPort: PortDescriptor<AnyRow, PortRecord> = {
         organisation: portBlank(raw['organisation']),
         phone: portBlank(raw['phone']),
         email: portEmail(raw['email']),
+        after_hours_phone: portBlank(raw['after_hours_phone']),
+        fax: portBlank(raw['fax']),
+        opening_hours: (() => {
+          const hours = hoursFromText(raw['opening_hours']);
+          return hours ? JSON.stringify(hours) : null;
+        })(),
         address_line1: portBlank(raw['address_line1']),
         address_line2: portBlank(raw['address_line2']),
         address_suburb: portBlank(raw['address_suburb']),
@@ -1583,8 +1638,25 @@ const afterProviderImport = async (ids: string[]) => {
 mountPort('providers', providerPort, { table: 'providers', canWrite: adminWrite, afterImport: afterProviderImport });
 mountPort('organisations', providerPort, { table: 'providers', providerKind: 'organisation', canWrite: adminWrite, afterImport: afterProviderImport });
 mountPort('professionals', providerPort, { table: 'providers', providerKind: 'person', canWrite: adminWrite, afterImport: afterProviderImport });
-mountPort('suppliers', supplierPort, { table: 'suppliers', canWrite: anyWrite });
-mountPort('assets', assetPort, { table: 'assets', canWrite: anyWrite });
+mountPort('suppliers', supplierPort, {
+  table: 'suppliers',
+  canWrite: anyWrite,
+  afterImport: async (ids) => {
+    for (const id of ids) await linkSupplierToContact(db, id);
+  },
+});
+mountPort('assets', assetPort, {
+  table: 'assets',
+  canWrite: anyWrite,
+  // The supplier named in the file becomes the supplier on file.
+  afterImport: async (ids) => {
+    const rows = (await db('assets').whereIn('id', ids).whereNotNull('supplier').select('id', 'account_id', 'supplier')) as Array<{ id: string; account_id: string; supplier: string }>;
+    for (const r of rows) {
+      const cols = await resolveAssetSupplier(db, r.account_id, { supplier: r.supplier });
+      if (cols) await db('assets').where({ id: r.id }).update(cols);
+    }
+  },
+});
 mountPort('addresses', addressPort, { table: 'addresses', canWrite: adminWrite });
 mountPort('people', personPort, { table: 'care_profiles', kind: 'person', canWrite: adminWrite });
 mountPort('pets', petPort, { table: 'care_profiles', kind: 'pet', canWrite: adminWrite });

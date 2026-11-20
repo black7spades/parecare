@@ -14,6 +14,9 @@ import { api } from '../../../../api/client';
 import { Button } from '../../../../components/ui/Button';
 import { Input } from '../../../../components/ui/Input';
 import { Modal } from '../../../../components/ui/Modal';
+import { ContactPicker, emptyContact, type PickedContact } from '../../../../components/ContactPicker';
+import { PersonPicker } from '../../../../components/PersonPicker';
+import type { PickablePerson } from '../../../../lib/care';
 
 export function InviteReviewerModal({
   profileId,
@@ -24,6 +27,11 @@ export function InviteReviewerModal({
   version: PlanVersionMeta;
   onClose: () => void;
 }) {
+  // Picked rather than typed: their email is read from their own record.
+  const [who, setWho] = useState<'contact' | 'circle' | 'other'>('contact');
+  const [contact, setContact] = useState<PickedContact>(emptyContact);
+  const [personKey, setPersonKey] = useState('');
+  const [person, setPerson] = useState<PickablePerson | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [canApprove, setCanApprove] = useState(false);
@@ -34,8 +42,13 @@ export function InviteReviewerModal({
   const inviteMutation = useMutation({
     mutationFn: () =>
       api.post<{ review_path: string }>(`/care-profiles/${profileId}/plan/versions/${version.id}/reviews`, {
-        invited_name: name.trim() || null,
-        invited_email: email.trim() || null,
+        ...(who === 'contact' && contact.providerId
+          ? { provider_id: contact.providerId }
+          : who === 'circle' && person && 'circle_member_id' in person.ref
+            ? { circle_member_id: person.ref.circle_member_id }
+            : who === 'circle' && person
+              ? { invited_name: person.name, invited_email: person.email }
+              : { invited_name: name.trim() || null, invited_email: email.trim() || null }),
         can_comment: true,
         can_approve: canApprove,
       }),
@@ -75,8 +88,41 @@ export function InviteReviewerModal({
               The reviewer opens a secure link to read this version and leave a comment, without needing an
               account. Every view and response is recorded in the activity log.
             </p>
-            <Input label="Reviewer name" value={name} onChange={(e) => setName(e.target.value)} />
-            <Input label="Reviewer email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} hint="Used to label their responses. The link itself is what grants access." />
+            <fieldset className="space-y-1 text-sm text-ink">
+              <legend className="block text-sm font-medium text-ink mb-1">Who reviews it</legend>
+              <label className="flex items-center gap-2">
+                <input type="radio" name="reviewer-who" checked={who === 'contact'} onChange={() => setWho('contact')} />
+                Someone in Contacts
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="radio" name="reviewer-who" checked={who === 'circle'} onChange={() => setWho('circle')} />
+                Someone in the care circle
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="radio" name="reviewer-who" checked={who === 'other'} onChange={() => setWho('other')} />
+                Someone else
+              </label>
+            </fieldset>
+            {who === 'contact' ? (
+              <ContactPicker id="reviewer-contact" label="Reviewer" profileId={profileId} value={contact} onChange={setContact} />
+            ) : who === 'circle' ? (
+              <PersonPicker
+                id="reviewer-person"
+                label="Reviewer"
+                profileId={profileId}
+                value={personKey}
+                emptyLabel="Choose someone"
+                onChange={(key, p) => {
+                  setPersonKey(key);
+                  setPerson(p);
+                }}
+              />
+            ) : (
+              <>
+                <Input label="Reviewer name" value={name} onChange={(e) => setName(e.target.value)} />
+                <Input label="Reviewer email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} hint="Used to label their responses. The link itself is what grants access." />
+              </>
+            )}
             <label className="flex items-center gap-2 text-sm text-ink">
               <input
                 type="checkbox"
@@ -91,7 +137,22 @@ export function InviteReviewerModal({
               <Button variant="ghost" onClick={onClose}>
                 Cancel
               </Button>
-              <Button loading={inviteMutation.isPending} onClick={() => inviteMutation.mutate()}>
+              <Button
+                loading={inviteMutation.isPending}
+                onClick={() => {
+                  // Create always answers: say who is still to be chosen.
+                  if (who === 'contact' && !contact.providerId) {
+                    setError(contact.name.trim() ? 'Pick them from Contacts, or choose Someone else.' : 'Choose the reviewer from Contacts, then create the link.');
+                    return;
+                  }
+                  if (who === 'circle' && !person) {
+                    setError('Choose the reviewer from the care circle, then create the link.');
+                    return;
+                  }
+                  setError('');
+                  inviteMutation.mutate();
+                }}
+              >
                 Create link
               </Button>
             </div>

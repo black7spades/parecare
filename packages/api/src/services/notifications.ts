@@ -1,4 +1,6 @@
 import { db } from '../config/database';
+import { contactLine, supplyContext, type NextAction } from './alertContacts';
+import type { ContactSummary } from './professionals';
 import { dateInZone, hmInZone, startOfDayInZone } from '../lib/timezone';
 import { coveredTimes, doseAnchor } from '../lib/doseSlots';
 import { DOSE_AUDIT_ENTITY, doseOutcomeWord, isGivenStatus } from '../lib/doseOutcome';
@@ -48,6 +50,13 @@ export interface NotificationItem {
   read: boolean;
   /** The record it is about, when the link opens that one record. */
   record_id?: string | null;
+  record_kind?: string | null;
+  /** Who to call about it: the supplier or main pharmacy for a supply alert. */
+  contact?: ContactSummary | null;
+  /** The next thing to do: order online, call or email, or open the record. */
+  next_action?: NextAction | null;
+  /** Supply alerts: about how many days are left. */
+  days_left?: number | null;
 }
 
 /**
@@ -369,6 +378,8 @@ export async function gatherNotifications(
           urgent: out && critical,
           created_at: new Date(m.updated_at ?? Date.now()).toISOString(),
           read: read.has(key),
+          record_id: m.id,
+          record_kind: 'medications',
         });
       }
     }
@@ -402,6 +413,20 @@ export async function gatherNotifications(
           read: read.has(key),
         });
       }
+    }
+  }
+
+  // Supply alerts name who to call and what to do: order online, call or
+  // email the supplier, else their main pharmacy.
+  const supplyIds = items.filter((i) => (i.kind === 'supply_low' || i.kind === 'supply_out') && i.record_id).map((i) => i.record_id!);
+  if (supplyIds.length) {
+    const ctx = await supplyContext(supplyIds);
+    for (const i of items) {
+      const c = i.record_id ? ctx.get(i.record_id) : undefined;
+      if (!c || (i.kind !== 'supply_low' && i.kind !== 'supply_out')) continue;
+      i.contact = c.contact;
+      i.next_action = c.next_action;
+      i.days_left = c.days_left;
     }
   }
 
@@ -444,7 +469,9 @@ export function notificationPath(item: NotificationItem): string {
   if (item.kind === 'outcome_due') return `/app/${item.profile_id}/appointments?outcome=${item.record_id ?? ''}`;
   if (item.kind === 'dose_overdue' || item.kind === 'dose_not_given') return `/app/${item.profile_id}/mar`;
   const page = ENTITY_PAGES[item.entity_type ?? ''] ?? '';
-  return `/app/${item.profile_id}${page ? `/${page}` : ''}`;
+  // Opens the record itself when the alert is about one.
+  const record = page && item.record_id && item.record_kind ? `?record=${item.record_id}` : '';
+  return `/app/${item.profile_id}${page ? `/${page}` : ''}${record}`;
 }
 
 const VERBS: Record<string, string> = { created: 'added', updated: 'updated', deleted: 'removed' };
@@ -487,10 +514,12 @@ export function notificationText(item: NotificationItem): string {
     return `${item.actor_name ?? 'Someone'} recorded ${item.profile_name}'s ${item.medication_name} as ${item.summary ?? 'not given'}.`;
   }
   if (item.kind === 'supply_out') {
-    return `${item.profile_name}'s prescription for ${item.medication_name} is out of stock.`;
+    return `${item.profile_name}'s ${item.medication_name} has run out.${contactLine(item.contact ?? null)}`;
   }
   if (item.kind === 'supply_low') {
-    return `${item.profile_name}'s prescription for ${item.medication_name} is low.`;
+    const days = item.days_left;
+    const left = days == null ? '' : days === 0 ? ', less than a day left' : `, about ${days} ${days === 1 ? 'day' : 'days'} left`;
+    return `${item.profile_name}'s ${item.medication_name} is running low${left}.${contactLine(item.contact ?? null)}`;
   }
   if (item.kind === 'care_plan_ready') {
     return `${item.profile_name}'s care plan is ready to review.`;

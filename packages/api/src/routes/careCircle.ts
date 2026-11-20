@@ -32,7 +32,7 @@ careCircleRouter.get('/', requireAuth, async (req, res) => {
     .leftJoin('accounts', 'care_circle_members.account_id', 'accounts.id')
     .where({ care_profile_id: req.params['id'] })
     .orderBy('care_circle_members.created_at', 'asc')
-    .select('care_circle_members.*', 'accounts.email as account_email');
+    .select('care_circle_members.*', 'accounts.email as account_email', 'accounts.phone as account_phone');
 
   // Owners and admins also see each pending invite's link and expiry so an
   // invitation never depends on email delivery working.
@@ -49,8 +49,11 @@ careCircleRouter.get('/', requireAuth, async (req, res) => {
   res.json({
     members: members.map((m) => {
       const inv = m.invitation_id ? invitationById.get(m.invitation_id) : undefined;
+      const accountPhone = (m as { account_phone?: string | null }).account_phone;
       return {
         ...m,
+        // Someone with a login keeps their phone on their account, once.
+        phone: accountPhone?.trim() || m.phone || null,
         // active: logs in. invited: invite sent, not yet accepted. added: in
         // the circle by name only, with no login.
         status: m.invite_accepted ? 'active' : isAddedPerson(m) ? 'added' : 'invited',
@@ -260,6 +263,20 @@ careCircleRouter.patch('/me/relationship', requireAuth, async (req, res) => {
     return;
   }
   res.json({ relationship: parsed.data.relationship });
+});
+
+// Your own phone, kept on your account so it is the same in every circle
+// you are in and wherever you are picked. Allowed for anyone with access,
+// viewers included, and for the account holder.
+careCircleRouter.patch('/me', requireAuth, async (req, res) => {
+  const parsed = z.object({ phone: z.string().trim().max(50).nullable() }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'A phone number is at most 50 characters.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const phone = parsed.data.phone?.trim() || null;
+  await db('accounts').where({ id: req.account!.id }).update({ phone, updated_at: db.fn.now() });
+  res.json({ phone });
 });
 
 careCircleRouter.get('/:memberId', requireAuth, async (req, res) => {

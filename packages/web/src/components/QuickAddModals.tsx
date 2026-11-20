@@ -1,19 +1,14 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { Button } from './ui/Button';
 import { CrossIcon } from './ui/icons';
 import { Input } from './ui/Input';
 import { Modal } from './ui/Modal';
 import { CatalogueCombo } from './CatalogueCombo';
-import {
-  CONDITION_CATEGORIES,
-  type CarePlan,
-  type EmergencyContact,
-  type MedicalCondition,
-  type Provider,
-} from '../lib/care';
+import { CONDITION_CATEGORIES, type MedicalCondition, type Provider } from '../lib/care';
+import { EmergencyContactAdd } from './EmergencyContactsEditor';
 
 /**
  * Small dialogs that record a fact right where it is shown missing: the
@@ -22,40 +17,78 @@ import {
  * user is never sent away mid-task to type something in.
  */
 
+/**
+ * Cancel and Save. Save always answers: with a box still empty it says which
+ * one in a sentence beside the button, rather than greying out.
+ */
 function Footer({
   onClose,
   onSave,
   saving,
-  disabled,
+  missing,
 }: {
   onClose: () => void;
   onSave: () => void;
   saving: boolean;
-  disabled: boolean;
+  /** What is still needed, as a sentence, or null when ready. */
+  missing: string | null;
 }) {
+  const [said, setSaid] = useState('');
   return (
-    <div className="flex justify-end gap-2">
-      <Button type="button" variant="ghost" onClick={onClose}>
-        Cancel
-      </Button>
-      <Button type="button" loading={saving} disabled={disabled} onClick={onSave}>
-        Save
-      </Button>
+    <div className="space-y-2">
+      {said ? <p className="text-sm text-red-600 text-right" role="alert">{said}</p> : null}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          loading={saving}
+          onClick={() => {
+            if (missing) {
+              setSaid(missing);
+              return;
+            }
+            setSaid('');
+            onSave();
+          }}
+        >
+          Save
+        </Button>
+      </div>
     </div>
   );
 }
 
 /** Add a GP to the profile's providers. */
-export function GpModal({
+export function GpModal(props: { profileId: string; open: boolean; onClose: () => void; onSaved?: () => void }) {
+  return <MainContactModal {...props} providerType="gp" title="Add their GP" namePlaceholder="e.g. Dr Priya Nair" placePlaceholder="e.g. Northside Family Practice" />;
+}
+
+/** Add their pharmacy, where repeats are ordered from. */
+export function PharmacyModal(props: { profileId: string; open: boolean; onClose: () => void; onSaved?: () => void }) {
+  return <MainContactModal {...props} providerType="pharmacy" title="Add a pharmacy" namePlaceholder="e.g. Terry White Chemmart Box Hill" />;
+}
+
+/** Add a main contact of one kind (a GP, a pharmacy) to the profile's contacts. */
+function MainContactModal({
   profileId,
   open,
   onClose,
   onSaved,
+  providerType,
+  title,
+  namePlaceholder,
+  placePlaceholder,
 }: {
   profileId: string;
   open: boolean;
   onClose: () => void;
   onSaved?: () => void;
+  providerType: 'gp' | 'pharmacy';
+  title: string;
+  namePlaceholder: string;
+  placePlaceholder?: string;
 }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
@@ -66,13 +99,14 @@ export function GpModal({
   const mutation = useMutation({
     mutationFn: () =>
       api.post<{ provider: Provider }>(`/care-profiles/${profileId}/providers`, {
-        provider_type: 'gp',
+        provider_type: providerType,
         name: name.trim(),
-        organisation: organisation.trim() || null,
+        ...(providerType === 'gp' ? { organisation: organisation.trim() || null } : { kind: 'organisation' }),
         phone: phone.trim() || null,
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['providers', profileId] });
+      void queryClient.invalidateQueries({ queryKey: ['medications', profileId] });
       void queryClient.invalidateQueries({ queryKey: ['health-alerts'] });
       setName('');
       setOrganisation('');
@@ -80,101 +114,52 @@ export function GpModal({
       onSaved?.();
       onClose();
     },
-    onError: (err) => setError(err instanceof Error ? err.message : 'Could not save the GP.'),
+    onError: (err) => setError(err instanceof Error ? err.message : 'That was not saved. Try again.'),
   });
 
   return (
-    <Modal open={open} onClose={onClose} title="Add their GP">
+    <Modal open={open} onClose={onClose} title={title}>
       <div className="space-y-4">
-        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Dr Priya Nair" />
-        <Input
-          label="Practice"
-          value={organisation}
-          onChange={(e) => setOrganisation(e.target.value)}
-          placeholder="e.g. Northside Family Practice"
-        />
+        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder={namePlaceholder} />
+        {providerType === 'gp' ? (
+          <Input label="Practice" value={organisation} onChange={(e) => setOrganisation(e.target.value)} placeholder={placePlaceholder} />
+        ) : null}
         <Input label="Phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        <Footer onClose={onClose} onSave={() => mutation.mutate()} saving={mutation.isPending} disabled={!name.trim()} />
+        <Footer onClose={onClose} onSave={() => mutation.mutate()} saving={mutation.isPending} missing={name.trim() ? null : 'Write their name, then save.'} />
       </div>
     </Modal>
   );
 }
 
-/** Add one emergency contact to the care-needs record. */
+/**
+ * Choose someone to call in an emergency, right where it is shown missing:
+ * You, someone in the care circle, a contact, or someone not in PareCare.
+ */
 export function EmergencyContactModal({
   profileId,
   open,
   onClose,
   onSaved,
+  ownerRelationship,
 }: {
   profileId: string;
   open: boolean;
   onClose: () => void;
   onSaved?: () => void;
+  ownerRelationship?: string | null;
 }) {
-  const queryClient = useQueryClient();
-  const [name, setName] = useState('');
-  const [relationship, setRelationship] = useState('');
-  const [phone, setPhone] = useState('');
-  const [error, setError] = useState('');
-
-  const { data } = useQuery({
-    queryKey: ['care-plan', profileId],
-    queryFn: () => api.get<{ plan: CarePlan | null }>(`/care-profiles/${profileId}/plan`),
-    enabled: open,
-  });
-
-  const mutation = useMutation({
-    mutationFn: () => {
-      // The care-needs record saves as a whole, so the new contact rides
-      // along with everything already recorded.
-      const plan = data?.plan;
-      const contact: EmergencyContact = {
-        name: name.trim(),
-        ...(relationship.trim() ? { relationship: relationship.trim() } : {}),
-        phone: phone.trim(),
-      };
-      const body: CarePlan = {
-        dietary_requirements: plan?.dietary_requirements ?? [],
-        mobility_aids: plan?.mobility_aids ?? [],
-        communication_needs: plan?.communication_needs ?? [],
-        advance_care_directive: plan?.advance_care_directive ?? false,
-        advance_care_directive_location: plan?.advance_care_directive_location ?? null,
-        emergency_contacts: [...(plan?.emergency_contacts ?? []), contact],
-      };
-      return api.put(`/care-profiles/${profileId}/plan`, body);
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['care-plan', profileId] });
-      setName('');
-      setRelationship('');
-      setPhone('');
-      onSaved?.();
-      onClose();
-    },
-    onError: (err) => setError(err instanceof Error ? err.message : 'Could not save the contact.'),
-  });
-
   return (
-    <Modal open={open} onClose={onClose} title="Add emergency contact">
-      <div className="space-y-4">
-        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} />
-        <Input
-          label="Relationship"
-          value={relationship}
-          onChange={(e) => setRelationship(e.target.value)}
-          placeholder="e.g. Daughter"
-        />
-        <Input label="Phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        <Footer
-          onClose={onClose}
-          onSave={() => mutation.mutate()}
-          saving={mutation.isPending}
-          disabled={!name.trim() || !phone.trim()}
-        />
-      </div>
+    <Modal open={open} onClose={onClose} title="Choose who to call">
+      <EmergencyContactAdd
+        profileId={profileId}
+        ownerRelationship={ownerRelationship}
+        onCancel={onClose}
+        onAdded={() => {
+          onSaved?.();
+          onClose();
+        }}
+      />
     </Modal>
   );
 }
@@ -266,7 +251,7 @@ export function ConditionModal({
           Symptoms, diagnosis codes and treatments can be added on the record afterwards.
         </p>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        <Footer onClose={onClose} onSave={() => mutation.mutate()} saving={mutation.isPending} disabled={!name.trim()} />
+        <Footer onClose={onClose} onSave={() => mutation.mutate()} saving={mutation.isPending} missing={name.trim() ? null : 'Write the name, then save.'} />
       </div>
     </Modal>
   );
@@ -385,7 +370,7 @@ export function MedicationModal({
           afterwards.
         </p>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        <Footer onClose={onClose} onSave={() => mutation.mutate()} saving={mutation.isPending} disabled={!name.trim()} />
+        <Footer onClose={onClose} onSave={() => mutation.mutate()} saving={mutation.isPending} missing={name.trim() ? null : 'Write the name, then save.'} />
       </div>
     </Modal>
   );

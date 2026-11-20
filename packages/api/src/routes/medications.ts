@@ -9,6 +9,7 @@ import { exportRecords, importRecords, type PortDescriptor, type PortFormat } fr
 import { resolveCatalogueId } from './medicationCatalogue';
 import { getMarRetentionMonths } from '../config/settings';
 import { drawDownOnHand, perDoseDrawdown } from '../services/medicationSupply';
+import { contactSummaries, linkSupplierToContact, mainContact, resolveContactInput, supplierContacts } from '../services/professionals';
 
 export const medicationsRouter = Router({ mergeParams: true });
 
@@ -19,7 +20,45 @@ const medSelect = () =>
     .join('medication_catalogue as c', 'm.medication_catalogue_id', 'c.id')
     .leftJoin('medical_conditions as mc', 'm.medical_condition_id', 'mc.id')
     .leftJoin('suppliers as sup', 'm.supplier_id', 'sup.id')
-    .select('m.*', 'c.name as name', 'c.form as form', 'mc.name as condition_name', 'sup.address_suburb as supplier_suburb');
+    .leftJoin('providers as pres', 'm.prescriber_provider_id', 'pres.id')
+    .leftJoin('appointments as src', 'm.source_appointment_id', 'src.id')
+    .select(
+      'm.*', 'c.name as name', 'c.form as form', 'mc.name as condition_name', 'sup.address_suburb as supplier_suburb',
+      'pres.name as prescriber_name', 'src.title as source_appointment_title', 'src.starts_at as source_appointment_starts_at'
+    );
+
+type MedOut = Record<string, unknown> & { id: string; prescriber_provider_id: string | null; supplier_id: string | null };
+
+/**
+ * Who to call about each medicine, in the shape every screen shows: who
+ * prescribes it, where it is reordered from, and the visit it started at.
+ */
+async function withContacts<T extends Record<string, unknown>>(meds: T[], profileId: string): Promise<Array<T & Record<string, unknown>>> {
+  const rows = meds as unknown as MedOut[];
+  const [prescribers, suppliers] = await Promise.all([
+    contactSummaries(db, rows.map((m) => m.prescriber_provider_id), profileId),
+    supplierContacts(db, rows.map((m) => m.supplier_id), profileId),
+  ]);
+  return meds.map((m) => {
+    const r = m as unknown as MedOut;
+    return {
+      ...m,
+      prescriber: (r.prescriber_provider_id && prescribers.get(r.prescriber_provider_id)) || null,
+      supplier_contact: (r.supplier_id && suppliers.get(r.supplier_id)) || null,
+      source_appointment: r['source_appointment_id']
+        ? { id: r['source_appointment_id'], title: r['source_appointment_title'], starts_at: r['source_appointment_starts_at'] }
+        : null,
+    };
+  });
+}
+
+/** One medicine as every screen reads it. */
+async function medOut(id: string, profileId: string) {
+  const row = await medWithName(id);
+  if (!row) return row;
+  const [out] = await withContacts([serializeMed(row)], profileId);
+  return out;
+}
 
 const medWithName = (id: string) => medSelect().where('m.id', id).first();
 
@@ -57,6 +96,13 @@ const medSchema = z.object({
   supplier_id: z.string().uuid().optional().nullable(),
   supplier: z.string().max(255).optional().nullable(),
   supplier_order_url: z.string().url().max(2000).optional().nullable().or(z.literal('')),
+  // Who writes the script: a contact picked by id, or a new name filed in
+  // Contacts with what they do. And the visit it started at.
+  prescriber_provider_id: z.string().uuid().optional().nullable(),
+  prescriber_name: z.string().trim().max(255).optional().nullable(),
+  prescriber_type: z.string().trim().max(100).optional().nullable(),
+  prescriber_phone: z.string().trim().max(50).optional().nullable(),
+  source_appointment_id: z.string().uuid().optional().nullable(),
   // Dangerous to miss (stopping suddenly is harmful): overdue and
   // out-of-stock alerts for this medication are urgent.
   critical: z.boolean().optional(),
@@ -120,6 +166,7 @@ export async function resolveSupplierId(
   const [created] = await db('suppliers')
     .insert({ account_id: accountId, name: trimmed, order_url: normaliseOrderUrl(orderUrl) })
     .returning('id');
+  await linkSupplierToContact(db, (created as { id: string }).id);
   return (created as { id: string }).id;
 }
 
@@ -140,6 +187,7 @@ interface MedRow {
   repeats_due: string | null;
   supplier: string | null;
   supplier_order_url: string | null;
+  prescriber_name?: string | null;
   active: boolean;
 }
 
@@ -159,6 +207,7 @@ interface MedInsert {
   repeats_due: string | null;
   supplier: string | null;
   supplier_order_url: string | null;
+  prescriber_name: string | null;
   active: boolean;
 }
 
@@ -233,6 +282,7 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
     { key: 'repeats_due', header: 'Repeats due', aliases: ['repeat', 'repeat due'], toCell: (r) => r.repeats_due ?? '' },
     { key: 'supplier', header: 'Supplier', aliases: ['pharmacy', 'supplied by'], toCell: (r) => r.supplier ?? '' },
     { key: 'supplier_order_url', header: 'Order link', aliases: ['order url', 'reorder link', 'order'], toCell: (r) => r.supplier_order_url ?? '' },
+    { key: 'prescriber_name', header: 'Prescribed by', aliases: ['prescriber', 'prescribed by', 'doctor'], toCell: (r) => r.prescriber_name ?? '' },
     { key: 'active', header: 'Active', aliases: ['status'], toCell: (r) => (r.active ? 'true' : 'false') },
   ],
   coerce: (raw, rowNumber) => {
@@ -277,6 +327,7 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
           const u = blank(raw['supplier_order_url']);
           return u && /^https?:\/\//i.test(u) ? u : null;
         })(),
+        prescriber_name: blank(raw['prescriber_name']),
         active: parseActive(raw['active']),
       },
     };
@@ -286,10 +337,14 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
 const readFormat = (v: unknown): PortFormat => (String(v).toLowerCase() === 'json' ? 'json' : 'csv');
 
 medicationsRouter.get('/', requireAuth, async (req, res) => {
+  const profileId = req.params['id'] as string;
   const meds = await medSelect()
-    .where('m.care_profile_id', req.params['id'])
+    .where('m.care_profile_id', profileId)
     .orderBy([{ column: 'm.active', order: 'desc' }, { column: 'c.name', order: 'asc' }]);
-  res.json({ medications: meds.map(serializeMed) });
+  // Their main pharmacy and GP stand in where a medicine names no supplier
+  // or prescriber, so there is always someone to call.
+  const [main_pharmacy, main_gp] = await Promise.all([mainContact(db, profileId, 'pharmacy'), mainContact(db, profileId, 'gp')]);
+  res.json({ medications: await withContacts(meds.map(serializeMed), profileId), main_pharmacy, main_gp });
 });
 
 // Export the medication list as CSV or JSON.
@@ -339,7 +394,10 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner('import medic
     // Link each imported supplier name to the account's shared supplier list,
     // creating one where the name is new, so imports track the same model.
     const supplierId = await resolveSupplierId(r.supplier, r.supplier_order_url, req.account!.id);
+    // Who prescribes it, found in Contacts or filed there.
+    const prescriber = r.prescriber_name ? await resolveContactInput(db, req.params['id'] as string, { name: r.prescriber_name }, 'gp') : null;
     toInsert.push({
+      prescriber_provider_id: prescriber && !('error' in prescriber) ? prescriber.id : null,
       care_profile_id: req.params['id'],
       medication_catalogue_id: catalogueId,
       units_per_dose: r.units_per_dose,
@@ -374,6 +432,9 @@ async function conditionBelongsToProfile(conditionId: string | null | undefined,
   const row = await db('medical_conditions').where({ id: conditionId, care_profile_id: profileId }).first();
   return !!row;
 }
+
+/** A write that names something that cannot be used, said plainly. */
+class MedInputError extends Error {}
 
 // Resolve the condition tie from either an id or a free-typed name, and
 // compose the dose columns, shared by create and edit.
@@ -414,6 +475,25 @@ async function medFieldsFrom(data: z.infer<typeof medSchema> | Partial<z.infer<t
   if ('critical' in data) fields['critical'] = data.critical ?? false;
   if ('active' in data) fields['active'] = data.active ?? true;
 
+  // Who prescribes it: picked, or named and filed in Contacts.
+  if ('prescriber_provider_id' in data || 'prescriber_name' in data) {
+    const who = await resolveContactInput(
+      db,
+      profileId,
+      { id: data.prescriber_provider_id, name: data.prescriber_name, type: data.prescriber_type, phone: data.prescriber_phone },
+      'gp'
+    );
+    if ('error' in who) throw new MedInputError(who.error);
+    fields['prescriber_provider_id'] = who.id;
+  }
+  if ('source_appointment_id' in data) {
+    if (data.source_appointment_id) {
+      const appt = await db('appointments').where({ id: data.source_appointment_id, care_profile_id: profileId }).first('id');
+      if (!appt) throw new MedInputError('That appointment is not one of this person\'s.');
+    }
+    fields['source_appointment_id'] = data.source_appointment_id ?? null;
+  }
+
   // Dose amount and measure are the source of truth; dose is composed.
   if ('dose_amount' in data || 'dose_unit' in data) {
     fields['dose_amount'] = data.dose_amount ?? null;
@@ -446,7 +526,16 @@ medicationsRouter.post('/', requireAuth, requireProfileOwner('add a medication')
     return;
   }
   const catalogueId = await resolveCatalogueId(parsed.data.name, parsed.data.form ?? null, req.account!.id);
-  const fields = await medFieldsFrom(parsed.data, req.params['id']!, req.account!.id);
+  let fields: Record<string, unknown>;
+  try {
+    fields = await medFieldsFrom(parsed.data, req.params['id']!, req.account!.id);
+  } catch (err) {
+    if (err instanceof MedInputError) {
+      res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
+      return;
+    }
+    throw err;
+  }
   const [med] = await db('medications')
     .insert({
       care_profile_id: req.params['id'],
@@ -466,7 +555,7 @@ medicationsRouter.post('/', requireAuth, requireProfileOwner('add a medication')
       schedule_times: parsed.data.schedule_times ? db.raw('?::jsonb', [JSON.stringify(parsed.data.schedule_times)]) : null,
     })
     .returning('id');
-  res.status(201).json({ medication: serializeMed(await medWithName((med as { id: string }).id)) });
+  res.status(201).json({ medication: await medOut((med as { id: string }).id, req.params['id']!) });
 });
 
 medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner("change a medication's dose, times or details"), async (req, res) => {
@@ -479,7 +568,17 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner("change a me
     res.status(400).json({ error: 'Condition not found', code: 'VALIDATION_ERROR' });
     return;
   }
-  const update: Record<string, unknown> = { ...(await medFieldsFrom(parsed.data, req.params['id']!, req.account!.id)), updated_at: db.fn.now() };
+  let fields: Record<string, unknown>;
+  try {
+    fields = await medFieldsFrom(parsed.data, req.params['id']!, req.account!.id);
+  } catch (err) {
+    if (err instanceof MedInputError) {
+      res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
+      return;
+    }
+    throw err;
+  }
+  const update: Record<string, unknown> = { ...fields, updated_at: db.fn.now() };
   if (parsed.data.schedule_times !== undefined) {
     update['schedule_times'] = parsed.data.schedule_times ? db.raw('?::jsonb', [JSON.stringify(parsed.data.schedule_times)]) : null;
   }
@@ -515,7 +614,7 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner("change a me
   ) {
     await db('attention_dismissals').where({ item_key: `out_of_stock:${req.params['medId']}` }).delete();
   }
-  res.json({ medication: serializeMed(await medWithName((med as { id: string }).id)) });
+  res.json({ medication: await medOut((med as { id: string }).id, req.params['id']!) });
 });
 
 // Bulk actions on the list. Delete is limited to the profile owner and
@@ -547,7 +646,16 @@ medicationsRouter.post('/bulk', requireAuth, requireProfileOwner('change several
   if (parsed.data.action === 'update') {
     // Resolve the same way a single edit does (supplier link, composed dose,
     // condition tie), but only for the fields supplied; then apply to all.
-    const fields = await medFieldsFrom(parsed.data.fields ?? {}, req.params['id']!, req.account!.id);
+    let fields: Record<string, unknown>;
+    try {
+      fields = await medFieldsFrom(parsed.data.fields ?? {}, req.params['id']!, req.account!.id);
+    } catch (err) {
+      if (err instanceof MedInputError) {
+        res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
+        return;
+      }
+      throw err;
+    }
     if (Object.keys(fields).length === 0) {
       res.status(400).json({ error: 'Choose at least one field to change.', code: 'VALIDATION_ERROR' });
       return;
@@ -622,7 +730,7 @@ medicationsRouter.post('/:medId/reorder', requireAuth, requireProfileOwner('mark
       });
     }
   }
-  res.json({ medication: serializeMed(await medWithName((med as { id: string }).id)) });
+  res.json({ medication: await medOut((med as { id: string }).id, req.params['id']!) });
 });
 
 // Chart view: the active regimen plus every administration touching the

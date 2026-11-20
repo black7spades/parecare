@@ -1,4 +1,5 @@
 import { db } from '../config/database';
+import { emergencyContactLines } from './emergencyContacts';
 import { dateInZone, formatInZone } from '../lib/timezone';
 import { repeatChoice, repeatLabel } from '../lib/repeat';
 import { withCategory } from './documentCategories';
@@ -236,23 +237,21 @@ export async function buildProfileContext(
     }
   }
 
-  if (plan) {
-    const contacts = Array.isArray(plan.emergency_contacts) ? plan.emergency_contacts : [];
+  const contacts = await emergencyContactLines(profileId);
+  if (plan || contacts.length) {
     sections.push(
       [
         `## Care plan`,
-        Array.isArray(plan.dietary_requirements) && plan.dietary_requirements.length
+        Array.isArray(plan?.dietary_requirements) && plan.dietary_requirements.length
           ? `Dietary requirements: ${plan.dietary_requirements.join('; ')}`
           : null,
-        Array.isArray(plan.mobility_aids) && plan.mobility_aids.length ? `Mobility aids: ${plan.mobility_aids.join('; ')}` : null,
-        Array.isArray(plan.communication_needs) && plan.communication_needs.length
+        Array.isArray(plan?.mobility_aids) && plan.mobility_aids.length ? `Mobility aids: ${plan.mobility_aids.join('; ')}` : null,
+        Array.isArray(plan?.communication_needs) && plan.communication_needs.length
           ? `Communication needs: ${plan.communication_needs.join('; ')}`
           : null,
-        `Advance care directive: ${plan.advance_care_directive ? `yes${plan.advance_care_directive_location ? `, kept at ${plan.advance_care_directive_location}` : ''}` : 'no'}`,
+        `Advance care directive: ${plan?.advance_care_directive ? `yes${plan.advance_care_directive_location ? `, kept at ${plan.advance_care_directive_location}` : ''}` : 'no'}`,
         contacts.length
-          ? `Emergency contacts: ${contacts
-              .map((c: { name?: string; relationship?: string; phone?: string }) => line([c.name, c.relationship, c.phone]))
-              .join(' | ')}`
+          ? `Emergency contacts: ${contacts.map((c) => line([c.name, c.relationship, c.phone])).join(' | ')}`
           : null,
       ]
         .filter(Boolean)

@@ -20,6 +20,36 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.48.0',
+    date: '2026-11-20',
+    summary: 'A contact on every record: who prescribes, who treats, who supplies, who to call in an emergency, and alerts that name the number.',
+    groups: [
+      { heading: 'Added', items: [
+        'Who prescribes each medicine. A medicine says who prescribes it and the visit it started at. The medications list has Prescribed by and Repeats due columns, and a medicine shows its prescriber with a phone to tap and Book a visit for scripts.',
+        'Reorder in one tap. A medicine running low offers Order online, Call or Email for its pharmacy, with the repeat request already written, then Mark as ordered. With no pharmacy on file it says so and offers Add a pharmacy.',
+        'Alerts say who to call. A low or empty medicine names the pharmacy and its number, and an overdue task names who it is with. Each alert opens the record itself and offers the next step: call, email, order online or book.',
+        'Who treats it, who provides it, who supplies it. A condition can name who treats it, a treatment who provides it, and equipment its supplier, each with a phone to tap. Book an appointment for this on a condition books with whoever treats it.',
+        'More ways to reach a contact. Contacts have an after-hours phone, a fax and opening hours, a row per day with Same hours Monday to Friday. A contact based at a clinic uses the clinic\'s when theirs are empty.',
+        'Main GP and past contacts. The first GP and first pharmacy are the main ones, with Make main to change it. No longer seeing them moves a contact to past contacts from a date you choose, and Seeing them again brings them back.',
+        'Emergency contacts picked, not typed. Choose who to call from you, the care circle or Contacts, and their phone comes from their own record, so a changed number changes everywhere. Arrows set who to call first. With nobody chosen, the person who looks after them is worked out from the profile, with Change.',
+        'Your phone. Add your phone once, in Settings or from your own row in the care circle, and it shows wherever you are picked.',
+        'New kinds of contact. Plan manager, Local Area Coordinator, Behaviour support practitioner, Care coordinator, Pharmacist, Teacher and Teacher aide, plus Respite service and Plan management provider for organisations. Someone saved under a school is filed as a teacher.',
+        'Support worker and Nurse. Two new roles in the care circle and in invitations.',
+        'A care plan reviewer from Contacts or the circle. Invite someone already on file to review the care plan, and their email comes from their own record. The plan shows who supports each condition with their phone, read live.',
+      ] },
+      { heading: 'Changed', items: [
+        'Home cards say whose phone it is. A daughter, the care home, the GP or the person\'s own phone, with the name above the number. The GP has a row of their own.',
+        'Phone numbers look tappable. Phone numbers, emails and links on contacts are underlined in a deeper green, so they read as links to tap.',
+        'The care circle reads the right way round. A row now says "Dorothy is their mother".',
+      ] },
+      { heading: 'Fixed', items: [
+        'How did it go? only shows once an appointment has happened.',
+        'An appointment no longer lists who it is with twice. Their name under Who with opens them in Contacts.',
+        'Save on the medication, condition, treatment, equipment and contact forms now says what is missing, instead of doing nothing.',
+      ] },
+    ],
+  },
+  {
     version: '0.47.0',
     date: '2026-11-20',
     summary: 'Book anything from anywhere: Book it on tasks, who a task is with and their number, documents to bring, and repeats from every day to every year.',

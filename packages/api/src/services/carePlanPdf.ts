@@ -103,6 +103,7 @@ export function renderPlanPdf(input: {
       doc.moveDown(0.25);
       for (const entry of entries) {
         const parts = Object.entries(entry.fields)
+          .filter(([k]) => !k.endsWith('_refs'))
           .filter(([, v]) => v !== null && v !== undefined && v !== '')
           .map(([f, v]) => `${fieldLabel(f)}: ${fieldText(v)}`);
         doc.fontSize(10).text(`• ${parts.join('.  ')}`, { indent: 12 });

@@ -269,6 +269,8 @@ export const CIRCLE_ROLES = [
   { value: 'family', label: 'Family' },
   { value: 'friend', label: 'Friend' },
   { value: 'carer', label: 'Carer' },
+  { value: 'support_worker', label: 'Support worker' },
+  { value: 'nurse', label: 'Nurse' },
   { value: 'organisation', label: 'Organisation' },
   { value: 'legal', label: 'Legal representative' },
   { value: 'other', label: 'Other' },
@@ -505,6 +507,13 @@ export interface Provider {
   poa_type: string | null;
   poa_activated: boolean;
   linked?: boolean;
+  after_hours_phone?: string | null;
+  fax?: string | null;
+  opening_hours?: OpeningHours | null;
+  /** For this person: their main contact of this kind (their GP, their pharmacy). */
+  is_main?: boolean;
+  /** For this person: no longer seeing them since this date. */
+  ended_on?: string | null;
 }
 
 /** Someone filed as working at a practice. */
@@ -541,7 +550,10 @@ export interface ContactSummary {
 }
 
 /** A contact record as someone to call. */
-export function summaryFromProvider(p: Pick<Provider, 'id' | 'name' | 'provider_type' | 'organisation' | 'phone' | 'email' | 'booking_link' | 'directions_link' | 'address' | 'practice_id' | 'inherited_fields'>): ContactSummary {
+export function summaryFromProvider(
+  p: Pick<Provider, 'id' | 'name' | 'provider_type' | 'organisation' | 'phone' | 'email' | 'booking_link' | 'directions_link' | 'address' | 'practice_id' | 'inherited_fields'> &
+    Partial<Pick<Provider, 'after_hours_phone' | 'fax' | 'opening_hours' | 'is_main' | 'ended_on'>>
+): ContactSummary {
   return {
     source: 'contact',
     id: p.id,
@@ -549,19 +561,25 @@ export function summaryFromProvider(p: Pick<Provider, 'id' | 'name' | 'provider_
     role_label: p.provider_type && p.provider_type !== 'other' ? providerTypeLabel(p.provider_type) : null,
     organisation: p.organisation ? { id: p.practice_id ?? null, name: p.organisation } : null,
     phone: p.phone,
-    after_hours_phone: null,
-    fax: null,
+    after_hours_phone: p.after_hours_phone ?? null,
+    fax: p.fax ?? null,
     email: p.email,
     booking_link: p.booking_link,
     order_link: null,
     directions_link: p.directions_link,
     address: p.address,
-    opening_hours: null,
+    opening_hours: p.opening_hours ?? null,
     inherited: p.inherited_fields ?? [],
-    is_main: false,
-    ended_on: null,
+    is_main: p.is_main ?? false,
+    ended_on: p.ended_on ?? null,
   };
 }
+
+/** "Main GP", "Main pharmacy": the type in words, GP kept in capitals. */
+export const mainTypeWords = (type: string): string => {
+  const label = providerTypeLabel(type);
+  return label === 'GP' ? 'GP' : label.toLowerCase();
+};
 
 /** Someone who can be picked for a job: the account holder first, then the circle. */
 export interface PickablePerson {
@@ -966,6 +984,9 @@ export interface MedicalCondition {
   catalogue_icd10_code?: string | null;
   catalogue_snomed_code?: string | null;
   medications: { id?: string; name: string; active: boolean }[];
+  /** Who treats it. */
+  treating_provider_id?: string | null;
+  treating?: ContactSummary | null;
   treatments?: ConditionTreatment[];
   codes?: ConditionCode[];
   functions?: ConditionFunction[];
@@ -1159,11 +1180,18 @@ export const CODE_SYSTEMS = [
 
 export const codeSystemLabel = (v: string) => CODE_SYSTEMS.find((x) => x.value === v)?.label ?? v;
 
-export interface EmergencyContact {
-  name: string;
-  relationship?: string;
-  phone: string;
-}
+/**
+ * Who to call in an emergency: someone in the circle, the account holder or
+ * a contact, read live from their own record; or someone not in PareCare.
+ */
+export type EmergencyContact = ContactSummary & {
+  /** The row; null for the worked-out default. */
+  row_id: string | null;
+  relationship: string | null;
+  sort_order: number;
+  /** Worked out from the profile, not chosen. */
+  inferred: boolean;
+};
 
 /** A first-class medication record (distinct from the care-plan summary). */
 export interface MedicationRecord {
@@ -1210,6 +1238,15 @@ export interface MedicationRecord {
   /** Dangerous to miss: overdue and out-of-stock alerts are urgent. */
   critical: boolean;
   active: boolean;
+  /** Who writes the script. */
+  prescriber_provider_id?: string | null;
+  prescriber_name?: string | null;
+  prescriber?: ContactSummary | null;
+  /** Where it is reordered from, as someone to call. */
+  supplier_contact?: ContactSummary | null;
+  /** The visit it started at. */
+  source_appointment_id?: string | null;
+  source_appointment?: { id: string; title: string; starts_at: string | null } | null;
 }
 
 /** A pharmacy or shop a medication is reordered from, shared per account.
@@ -1255,6 +1292,9 @@ export interface Asset {
   purchase_date: string | null;
   /** Where it was bought from. */
   supplier: string | null;
+  /** The supplier on file, and who to call there. */
+  supplier_id?: string | null;
+  supplier_contact?: ContactSummary | null;
   /** When the warranty runs out (YYYY-MM-DD). */
   warranty_expiry: string | null;
   /** new | good | fair | poor | retired */
@@ -1513,6 +1553,9 @@ export interface Treatment {
   active: boolean;
   metrics: TreatmentMetric[];
   last_observed_at?: string | null;
+  /** Who provides it. */
+  practitioner_provider_id?: string | null;
+  practitioner?: ContactSummary | null;
 }
 
 /** One recorded reading within an observation. */
@@ -1637,7 +1680,8 @@ export interface CarePlan {
   communication_needs: string[];
   advance_care_directive: boolean;
   advance_care_directive_location: string | null;
-  emergency_contacts: EmergencyContact[];
+  /** Read only: who to call, as lines. They are kept on their own list (/emergency-contacts). */
+  emergency_contacts?: Array<{ name: string; relationship: string | null; phone: string | null }>;
 }
 
 // --- The versioned care plan document ------------------------------------
@@ -1802,3 +1846,35 @@ export interface PlanPendingInfo {
   awaiting_signoff: PlanVersionMeta | null;
   baseline_gaps: PlanBaselineGaps;
 }
+
+/**
+ * What someone is to the person, from what the person is to them: Dorothy
+ * is Linda's mother, so Linda is her daughter. Gender picks the word when it
+ * is known; otherwise only an answer that needs no gender is given.
+ */
+export function inverseRelationship(personIsTheir: string | null | undefined, gender?: string | null): string | null {
+  const rel = String(personIsTheir ?? '').trim().toLowerCase();
+  const g = String(gender ?? '').trim().toLowerCase();
+  const female = /^(f|female|woman|girl)$/.test(g);
+  const male = /^(m|male|man|boy)$/.test(g);
+  const pick = (f: string, m: string) => (female ? f : male ? m : null);
+  if (['mother', 'mum', 'mom', 'father', 'dad', 'parent'].includes(rel)) return pick('Daughter', 'Son');
+  if (['son', 'daughter', 'child'].includes(rel)) return pick('Mother', 'Father');
+  if (['grandma', 'grandmother', 'grandpa', 'grandfather', 'nan', 'nana'].includes(rel)) return pick('Granddaughter', 'Grandson');
+  if (['grandson', 'granddaughter'].includes(rel)) return pick('Grandmother', 'Grandfather');
+  if (['sister', 'brother'].includes(rel)) return pick('Sister', 'Brother');
+  if (['aunt', 'uncle'].includes(rel)) return pick('Niece', 'Nephew');
+  if (['niece', 'nephew'].includes(rel)) return pick('Aunt', 'Uncle');
+  if (['mother-in-law', 'father-in-law'].includes(rel)) return pick('Daughter-in-law', 'Son-in-law');
+  if (['partner', 'wife', 'husband', 'spouse'].includes(rel)) return 'Partner';
+  if (rel === 'friend') return 'Friend';
+  if (rel === 'neighbour' || rel === 'neighbor') return 'Neighbour';
+  if (rel === 'cousin') return 'Cousin';
+  return null;
+}
+
+/** Words for what an emergency contact is to the person, offered as suggestions. */
+export const EMERGENCY_RELATIONSHIPS = [
+  'Daughter', 'Son', 'Partner', 'Mother', 'Father', 'Sister', 'Brother', 'Granddaughter', 'Grandson',
+  'Niece', 'Nephew', 'Friend', 'Neighbour', 'Carer', 'Support worker', 'Guardian',
+] as const;

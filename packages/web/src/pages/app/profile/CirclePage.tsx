@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useAuthStore } from '../../../stores/auth';
+import { PhoneLink } from '../../../components/cards/profile/links';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
@@ -56,6 +58,9 @@ export function CirclePage() {
   // first, for one person or several.
   const [removing, setRemoving] = useState<CircleMember[] | null>(null);
   const [bulkEditQueue, setBulkEditQueue] = useState<CircleMember[]>([]);
+  // Your own phone, kept on your account, added from your own row.
+  const myId = useAuthStore((st) => st.account?.id ?? null);
+  const [addingPhone, setAddingPhone] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['circle', profile.id],
@@ -224,12 +229,16 @@ export function CirclePage() {
                       <h3 className="text-sm font-semibold text-ink">{m.display_name}</h3>
                       <PoaBadge type={m.poa_type} activated={m.poa_activated} />
                     </div>
-                    <p className="text-xs text-muted capitalize">
-                      {m.role}
-                      {m.relationship ? ` · their ${m.relationship}` : ''}
+                    <p className="text-xs text-muted">
+                      {circleRoleLabel(m.role)}
                       {m.permission === 'viewer' && !isAdded(m) ? ' · view only' : ''}
                       {m.can_edit_profile ? ' · can edit profile' : ''}
                     </p>
+                    {m.relationship ? (
+                      <p className="text-xs text-muted">
+                        {careName} is their {m.relationship.toLowerCase()}
+                      </p>
+                    ) : null}
                   </div>
                   <span
                     className={`badge text-xs ${m.invite_accepted ? 'bg-primary-50 text-primary' : 'bg-surface-2 text-muted'}`}
@@ -239,7 +248,15 @@ export function CirclePage() {
                 </div>
                 {m.invited_email ? <p className="text-xs text-muted mt-1">{m.invited_email}</p> : null}
                 {isAdded(m) && m.email ? <p className="text-xs text-muted mt-1">{m.email}</p> : null}
-                {m.phone ? <p className="text-xs text-muted mt-1">{m.phone}</p> : null}
+                {m.phone ? (
+                  <p className="text-sm mt-1">
+                    <PhoneLink phone={m.phone} />
+                  </p>
+                ) : m.account_id && m.account_id === myId ? (
+                  <div className="mt-1">
+                    <Button size="xs" variant="ghost" onClick={() => setAddingPhone(true)}>Add your phone</Button>
+                  </div>
+                ) : null}
                 {m.poa_type ? <p className="text-xs text-amber-700 mt-1">{poaLabel(m.poa_type)}</p> : null}
                 {m.role_description ? <p className="text-sm text-ink mt-2">{m.role_description}</p> : null}
                 {!m.invite_accepted && !isAdded(m) && canManageEditors ? (
@@ -384,6 +401,18 @@ export function CirclePage() {
         </div>
       </Modal>
 
+      {addingPhone ? (
+        <YourPhoneModal
+          profileId={profile.id}
+          onClose={() => setAddingPhone(false)}
+          onSaved={() => {
+            setAddingPhone(false);
+            invalidate();
+            void queryClient.invalidateQueries({ queryKey: ['circle-people', profile.id] });
+          }}
+        />
+      ) : null}
+
       {panel.current ? (() => {
         const m = panel.current;
         return (
@@ -398,7 +427,7 @@ export function CirclePage() {
             canEdit={canManageEditors}
             fields={[
               { label: 'Role', value: circleRoleLabel(m.role) },
-              { label: `${careName} is their`, value: m.relationship },
+              { label: `${careName} is their`, value: m.relationship ? m.relationship.toLowerCase() : null },
               {
                 label: 'Access level',
                 value: isAdded(m)
@@ -407,7 +436,7 @@ export function CirclePage() {
               },
               { label: 'Can edit the profile', value: isAdded(m) ? null : m.can_edit_profile ? 'Yes' : 'No' },
               { label: 'Status', value: circleStatusLabel(m) },
-              { label: 'Phone', value: m.phone ? <a href={`tel:${m.phone}`} className="text-primary hover:underline">{m.phone}</a> : null },
+              { label: 'Phone', value: m.phone ? <PhoneLink phone={m.phone} /> : null },
               {
                 label: 'Email',
                 value: (m.email ?? m.invited_email ?? m.account_email)
@@ -1149,6 +1178,49 @@ function InviteAddedModal({
           <Button type="submit" loading={send.isPending} disabled={!email.trim()}>Send invite</Button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/** "Your phone": kept on your account, so it is the same in every circle and wherever you are picked. */
+function YourPhoneModal({ profileId, onClose, onSaved }: { profileId: string; onClose: () => void; onSaved: () => void }) {
+  const [phone, setPhone] = useState('');
+  const [error, setError] = useState('');
+  const save = useMutation({
+    mutationFn: () => api.patch(`/care-profiles/${profileId}/circle/me`, { phone: phone.trim() }),
+    onSuccess: onSaved,
+    onError: (err) => setError(err instanceof Error ? err.message : 'Your phone was not saved. Try again.'),
+  });
+  return (
+    <Modal open onClose={onClose} title="Your phone">
+      <div className="space-y-4">
+        <Input
+          id="your-phone"
+          label="Your phone"
+          type="tel"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          hint="Shown wherever you are picked, for example as an emergency contact."
+        />
+        {error ? <p className="text-sm text-red-600" role="alert">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button
+            loading={save.isPending}
+            onClick={() => {
+              if (!phone.trim()) {
+                setError('Write your phone number, then save.');
+                document.getElementById('your-phone')?.focus();
+                return;
+              }
+              setError('');
+              save.mutate();
+            }}
+          >
+            Save
+          </Button>
+        </div>
+      </div>
     </Modal>
   );
 }

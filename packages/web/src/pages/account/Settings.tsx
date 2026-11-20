@@ -27,6 +27,7 @@ interface Me {
   date_of_birth: string | null;
   gender: string | null;
   pronouns: string | null;
+  phone: string | null;
   mfa_enabled: boolean;
   oauth_provider: string | null;
 }
@@ -64,6 +65,7 @@ function YourDetails() {
   const [dob, setDob] = useState('');
   const [gender, setGender] = useState('');
   const [pronouns, setPronouns] = useState('');
+  const [phone, setPhone] = useState('');
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
   const [editorOpen, setEditorOpen] = useState(false);
@@ -77,6 +79,7 @@ function YourDetails() {
     setDob(me.date_of_birth ? me.date_of_birth.slice(0, 10) : '');
     setGender(me.gender ?? '');
     setPronouns(me.pronouns ?? '');
+    setPhone(me.phone ?? '');
   }, [me]);
 
   const refreshMe = () => void queryClient.invalidateQueries({ queryKey: ['me'] });
@@ -90,6 +93,7 @@ function YourDetails() {
         date_of_birth: dob || null,
         gender: gender.trim() || null,
         pronouns: pronouns.trim() || null,
+        phone: phone.trim() || null,
       }),
     onSuccess: () => {
       setError('');
@@ -222,6 +226,14 @@ function YourDetails() {
               <option value="they/them" />
             </datalist>
           </div>
+          <Input
+            id="your-phone"
+            label="Your phone"
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            hint="Shown wherever you are picked, for example as an emergency contact."
+          />
         </div>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex items-center gap-3">

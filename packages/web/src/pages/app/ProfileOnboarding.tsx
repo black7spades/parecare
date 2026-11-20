@@ -5,7 +5,8 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { CatalogueCombo } from '../../components/CatalogueCombo';
 import { ResidenceFields, emptyResidence, persistResidence, type ResidenceValue } from '../../components/ResidenceFields';
-import { NEUROTYPE_LABELS, RELATIONSHIPS, type CareProfile } from '../../lib/care';
+import { EMERGENCY_RELATIONSHIPS, NEUROTYPE_LABELS, RELATIONSHIPS, inverseRelationship, type CareProfile } from '../../lib/care';
+import { useAuthStore } from '../../stores/auth';
 import type { JourneyTemplateSummary } from '../../lib/journeys';
 
 /**
@@ -67,9 +68,16 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
   const [gpName, setGpName] = useState('');
   const [gpPractice, setGpPractice] = useState('');
   const [gpPhone, setGpPhone] = useState('');
+  // Who to call: the account holder when the person is not themselves
+  // ("Is it you, Linda?"), else someone named here, who joins the circle.
+  const account = useAuthStore((st) => st.account);
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.get<{ id: string; phone: string | null; gender: string | null }>('/auth/me') });
+  const personIsSelf = ['myself', 'self'].includes(String(profile.owner_relationship ?? '').trim().toLowerCase());
+  const [emIsMe, setEmIsMe] = useState(!isPet && !personIsSelf);
   const [emName, setEmName] = useState('');
   const [emRel, setEmRel] = useState('');
   const [emPhone, setEmPhone] = useState('');
+  const myRelationship = inverseRelationship(profile.owner_relationship, me?.gender) ?? '';
 
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -143,16 +151,23 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
           : Promise.resolve(),
       ]);
 
-      // 3. Emergency contact rides on the care-needs record.
-      if (emName.trim() && emPhone.trim()) {
-        const planRes = await api.get<{ plan: { emergency_contacts?: unknown } | null }>(`/care-profiles/${profile.id}/plan`);
-        const existing = Array.isArray(planRes.plan?.emergency_contacts) ? planRes.plan!.emergency_contacts : [];
-        await api.put(`/care-profiles/${profile.id}/plan`, {
-          dietary_requirements: [],
-          mobility_aids: [],
-          communication_needs: [],
-          advance_care_directive: false,
-          emergency_contacts: [...existing, { name: emName.trim(), relationship: emRel.trim() || undefined, phone: emPhone.trim() }],
+      // 3. Who to call, by reference: the account holder, or someone named
+      // here, who joins the circle with their phone so it is kept once.
+      if (emIsMe && me?.id) {
+        await api.post(`/care-profiles/${profile.id}/emergency-contacts`, {
+          ref: { account_id: me.id },
+          relationship: (emRel || myRelationship).trim() || null,
+          phone: emPhone.trim() || null,
+        });
+      } else if (!emIsMe && emName.trim()) {
+        const added = await api.post<{ member: { id: string } }>(`/care-profiles/${profile.id}/circle/people`, {
+          display_name: emName.trim(),
+          role: /daughter|son|mother|father|sister|brother|partner|grand|niece|nephew|aunt|uncle|cousin/i.test(emRel) ? 'family' : 'other',
+          phone: emPhone.trim() || null,
+        });
+        await api.post(`/care-profiles/${profile.id}/emergency-contacts`, {
+          ref: { circle_member_id: added.member.id },
+          relationship: emRel.trim() || null,
         });
       }
 
@@ -164,6 +179,16 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
   }
 
   const next = () => {
+    // Finish always answers: someone named needs a phone to be any use.
+    if (step === 'emergency') {
+      const needsPhone = (emIsMe ? !me?.phone : !!emName.trim()) && !emPhone.trim();
+      if (needsPhone) {
+        setError(emIsMe ? 'Add your phone, so you can be called, then finish.' : `Add ${emName.trim()}'s phone, then finish.`);
+        document.getElementById('onboarding-em-phone')?.focus();
+        return;
+      }
+    }
+    setError('');
     if (isLast) void saveAll();
     else setStepIndex((i) => i + 1);
   };
@@ -283,14 +308,52 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
         {step === 'emergency' ? (
           <div>
             <p className="text-sm text-muted mb-2">Who to call first in an emergency.</p>
-            <div className="grid gap-2 sm:grid-cols-3">
-              <Input aria-label="Contact name" placeholder="Name" value={emName} onChange={(e) => setEmName(e.target.value)} />
-              <select aria-label="Relationship" className={inputClass} value={emRel} onChange={(e) => setEmRel(e.target.value)}>
-                <option value="">Relationship</option>
-                {RELATIONSHIPS.filter((r) => r !== 'Myself').map((r) => <option key={r} value={r}>{r}</option>)}
-              </select>
-              <Input aria-label="Contact phone" type="tel" placeholder="Phone" value={emPhone} onChange={(e) => setEmPhone(e.target.value)} />
-            </div>
+            {!isPet && account ? (
+              <fieldset className="mb-3 space-y-1 text-sm text-ink">
+                <legend className="sr-only">Who to call</legend>
+                <label className="flex items-center gap-2">
+                  <input type="radio" name="em-who" checked={emIsMe} onChange={() => setEmIsMe(true)} />
+                  Is it you, {account.display_name.split(' ')[0]}?
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="radio" name="em-who" checked={!emIsMe} onChange={() => setEmIsMe(false)} />
+                  Someone else
+                </label>
+              </fieldset>
+            ) : null}
+            {emIsMe ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Input
+                  aria-label="Relationship"
+                  placeholder="Relationship, e.g. Daughter"
+                  value={emRel || myRelationship}
+                  onChange={(e) => setEmRel(e.target.value)}
+                  list="onboarding-em-rel"
+                />
+                {me?.phone ? (
+                  <p className="text-sm text-muted self-center">Your phone {me.phone} is on your account.</p>
+                ) : (
+                  <Input
+                    id="onboarding-em-phone"
+                    aria-label="Your phone"
+                    type="tel"
+                    placeholder="Your phone"
+                    value={emPhone}
+                    onChange={(e) => setEmPhone(e.target.value)}
+                    hint="Shown wherever you are picked, for example as an emergency contact."
+                  />
+                )}
+              </div>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-3">
+                <Input aria-label="Contact name" placeholder="Name" value={emName} onChange={(e) => setEmName(e.target.value)} />
+                <Input aria-label="Relationship" placeholder="Relationship, e.g. Son" value={emRel} onChange={(e) => setEmRel(e.target.value)} list="onboarding-em-rel" />
+                <Input id="onboarding-em-phone" aria-label="Contact phone" type="tel" placeholder="Phone" value={emPhone} onChange={(e) => setEmPhone(e.target.value)} />
+              </div>
+            )}
+            <datalist id="onboarding-em-rel">
+              {EMERGENCY_RELATIONSHIPS.map((r) => <option key={r} value={r} />)}
+            </datalist>
           </div>
         ) : null}
 

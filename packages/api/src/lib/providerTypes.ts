@@ -37,6 +37,7 @@ export const ORGANISATION_TYPES = [
   'Government department', 'Government agency', 'Community organisation', 'Charity',
   'Law firm', 'Insurer', 'School', 'Disability service', 'Aged care service',
   'Aged care home', 'Nursing home', 'Care home', 'Retirement village', 'Group home', 'Hospice',
+  'Plan management provider', 'Respite service',
 ];
 
 const ORG_TYPE_SET = new Set(ORGANISATION_TYPES.map((t) => t.toLowerCase()));
@@ -73,8 +74,25 @@ export function kindFor(type: string | null | undefined, name: string | null | u
  */
 export function fitTypeToKind(type: string, kind: ProviderKind, name: string): string {
   if (kind === 'organisation' && (type === 'other' || PERSON_BUILT_INS.has(type))) return placeTypeFromName(name);
-  if (kind === 'person' && isOrganisationType(type)) return /^dr\.?\s/i.test(name.trim()) ? 'Doctor' : 'other';
+  if (kind === 'person' && isOrganisationType(type)) return personTypeForPlace(type, name);
   return type;
+}
+
+/**
+ * What someone does, from the kind of place they were filed under: a person
+ * saved as a School is a Teacher, as a Pharmacy a Pharmacist, as a Law firm
+ * a Lawyer; at a hospital or clinic, a Doctor when titled Dr.
+ */
+export function personTypeForPlace(placeType: string, name: string): string {
+  const t = placeType.trim().toLowerCase();
+  const titledDr = /^dr\.?\s/i.test(name.trim());
+  if (t === 'school') return 'Teacher';
+  if (t === 'pharmacy') return 'Pharmacist';
+  if (t === 'law firm') return 'legal';
+  if (['hospital', 'clinic', 'practice', 'medical centre', 'health centre', 'health hub'].includes(t)) return titledDr ? 'Doctor' : 'other';
+  if (['plan management provider'].includes(t)) return 'Plan manager';
+  if (['respite service', 'disability service', 'aged care service'].includes(t)) return titledDr ? 'Doctor' : 'Support worker';
+  return titledDr ? 'Doctor' : 'other';
 }
 
 /** The type a place is filed under when its name does not say what it is. */
@@ -113,7 +131,9 @@ export function placeTypeFromName(name: string): string {
 export const SEEDED_PROVIDER_TYPES = [
   'Accountant',
   'Audiologist',
+  'Behaviour support practitioner',
   'Cardiologist',
+  'Care coordinator',
   'Case manager',
   'Chiropractor',
   'Counsellor',
@@ -127,6 +147,7 @@ export const SEEDED_PROVIDER_TYPES = [
   'Geriatrician',
   'Gynaecologist',
   'Haematologist',
+  'Local Area Coordinator',
   'Nephrologist',
   'Neurologist',
   'Neurosurgeon',
@@ -139,7 +160,9 @@ export const SEEDED_PROVIDER_TYPES = [
   'Orthopaedic surgeon',
   'Osteopath',
   'Paediatrician',
+  'Pharmacist',
   'Physiotherapist',
+  'Plan manager',
   'Podiatrist',
   'Psychiatrist',
   'Respiratory physician',
@@ -149,6 +172,8 @@ export const SEEDED_PROVIDER_TYPES = [
   'Support coordinator',
   'Support worker',
   'Surgeon',
+  'Teacher',
+  'Teacher aide',
   'Urologist',
 ];
 

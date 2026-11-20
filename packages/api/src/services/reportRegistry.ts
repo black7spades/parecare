@@ -1,4 +1,5 @@
 import { Knex } from 'knex';
+import { emergencyContactLines } from './emergencyContacts';
 import { summarizeSpend, toNum, type SpendCategory } from './healthSpend';
 import { BUILT_IN_PROVIDER_TYPES } from '../lib/providerTypes';
 import { repeatChoice, repeatLabel } from '../lib/repeat';
@@ -872,8 +873,10 @@ registerSection({
       .join('care_profiles', 'care_profiles.id', 'care_plans.care_profile_id')
       .whereIn('care_plans.care_profile_id', profileIds)
       .select('care_plans.*', 'care_profiles.full_name as _profile_name');
+    const contactsByProfile = new Map<string, Array<{ name: string; relationship: string | null; phone: string | null }>>();
+    for (const r of rows) contactsByProfile.set(r.care_profile_id, await emergencyContactLines(r.care_profile_id));
     return rows.map((r) => {
-      const contacts = Array.isArray(r.emergency_contacts) ? r.emergency_contacts : [];
+      const contacts = contactsByProfile.get(r.care_profile_id) ?? [];
       return {
         _profile_id: r.care_profile_id,
         _profile_name: r._profile_name,
@@ -882,7 +885,7 @@ registerSection({
         communication_needs: Array.isArray(r.communication_needs) ? r.communication_needs.join(', ') : '',
         advance_care_directive: r.advance_care_directive,
         advance_care_directive_location: r.advance_care_directive_location,
-        emergency_contacts: contacts.map((c: Record<string, string>) => [c.name, c.relationship, c.phone].filter(Boolean).join(' - ')).join('; '),
+        emergency_contacts: contacts.map((c) => [c.name, c.relationship, c.phone].filter(Boolean).join(' - ')).join('; '),
       };
     });
   },

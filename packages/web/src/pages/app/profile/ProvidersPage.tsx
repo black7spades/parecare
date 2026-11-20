@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { OpeningHoursField, badDays, hoursFrom, weekFrom, type WeekHours } from '../../../components/OpeningHoursField';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { addressFrom, addressPayload, emptyAddress, type AddressValue } from '../../../components/AddressFields';
@@ -41,7 +42,9 @@ import { useProfile } from './ProfileLayout';
 import { Link, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { ContactStrip } from '../../../components/ContactStrip';
-import { summaryFromProvider, type Task } from '../../../lib/care';
+import { mainTypeWords, summaryFromProvider, type Task } from '../../../lib/care';
+import { CONTACT_LINK } from '../../../components/ContactStrip';
+import { formatDateOnly } from '../../../lib/datetime';
 import { bookingHref } from '../../../lib/booking';
 import { whenText, type Appointment } from './AppointmentsPage';
 
@@ -113,6 +116,17 @@ export function ProvidersPage() {
       options: providerTypeFilterOptions(providers, kind),
       match: (row, value) => row.provider_type === value,
     },
+    {
+      // Current by default; anyone no longer seen is under Past.
+      key: 'status',
+      label: 'Status',
+      anyLabel: 'Current and past',
+      options: [
+        { value: 'current', label: 'Current' },
+        { value: 'past', label: 'Past' },
+      ],
+      match: (row, value) => (value === 'past' ? !!row.ended_on : !row.ended_on),
+    },
   ];
 
   const dv = useDataView<Provider>({
@@ -121,6 +135,29 @@ export function ProvidersPage() {
     searchText: (p) => [p.name, p.organisation, p.phone, p.email, p.address, providerTypeLabel(p.provider_type)].filter(Boolean).join(' '),
     sorts: SORTS,
     filters,
+  });
+  // Opens on Current, once.
+  const [statusSet, setStatusSet] = useState(false);
+  useEffect(() => {
+    if (!statusSet) {
+      dv.setFilter('status', 'current');
+      setStatusSet(true);
+    }
+  }, [statusSet, dv]);
+  // How many of each type are current, so "Main GP" only shows where it helps.
+  const sameTypeCount = (p: Provider) => everything.filter((x) => !x.ended_on && x.provider_type.toLowerCase() === p.provider_type.toLowerCase()).length;
+  const showMain = (p: Provider) => !!p.is_main && (sameTypeCount(p) > 1 || ['gp', 'pharmacy'].includes(p.provider_type.toLowerCase()));
+  const [endingFor, setEndingFor] = useState<Provider | null>(null);
+  const [actionError, setActionError] = useState('');
+  const standing = useMutation({
+    mutationFn: ({ p, change }: { p: Provider; change: { is_main?: boolean; ended_on?: string | null } }) =>
+      api.patch(`/care-profiles/${profile.id}/providers/${p.id}/link`, change),
+    onSuccess: () => {
+      setActionError('');
+      setEndingFor(null);
+      invalidate();
+    },
+    onError: (err) => setActionError(err instanceof Error ? err.message : 'That change was not saved. Try again.'),
   });
 
   // Takes them off this person only; they stay in the directory for others.
@@ -261,20 +298,22 @@ export function ProvidersPage() {
                     </div>
                     <div className="flex flex-col items-end gap-1">
                       <span className="badge bg-surface-2 text-muted text-xs">{providerTypeLabel(p.provider_type)}</span>
+                      {showMain(p) ? <span className="badge bg-primary-50 text-primary-600 dark:bg-primary-100 dark:text-primary text-xs">Main {mainTypeWords(p.provider_type)}</span> : null}
+                      {p.ended_on ? <span className="badge bg-surface-2 text-muted text-xs">No longer seeing them since {formatDateOnly(p.ended_on, 'd MMM yyyy')}</span> : null}
                       {p.poa_type ? <PoaBadge type={p.poa_type} activated={p.poa_activated} /> : null}
                     </div>
                   </div>
                   <div className="mt-2 space-y-1 text-sm">
                     {p.phone ? (
                       <p>
-                        <a href={`tel:${p.phone}`} className="text-primary hover:underline">
+                        <a href={`tel:${p.phone.replace(/[^\d+]/g, '')}`} className={CONTACT_LINK} aria-label={`Call ${p.name} on ${p.phone}`}>
                           {p.phone}
                         </a>
                       </p>
                     ) : null}
                     {p.email ? (
-                      <p>
-                        <a href={`mailto:${p.email}`} className="text-primary hover:underline">
+                      <p className="break-all">
+                        <a href={`mailto:${p.email}`} className={CONTACT_LINK} aria-label={`Email ${p.name} at ${p.email}`}>
                           {p.email}
                         </a>
                       </p>
@@ -342,6 +381,16 @@ export function ProvidersPage() {
         }}
       />
 
+      {endingFor ? (
+        <EndedModal
+          provider={endingFor}
+          saving={standing.isPending}
+          error={actionError}
+          onClose={() => { setEndingFor(null); setActionError(''); }}
+          onSave={(date) => standing.mutate({ p: endingFor, change: { ended_on: date } })}
+        />
+      ) : null}
+
       <ProviderPicker
         kind={kind}
         profileId={profile.id}
@@ -399,7 +448,16 @@ export function ProvidersPage() {
               setEditing(p);
               setEditorOpen(true);
             }}
-            extra={[{ label: 'New appointment with them', onRun: () => navigate(bookingHref(profile.id, { provider: p.id })) }]}
+            extra={[
+              { label: 'New appointment with them', onRun: () => navigate(bookingHref(profile.id, { provider: p.id })) },
+              ...(canEdit && !p.ended_on && !p.is_main
+                ? [{ label: `Make main ${mainTypeWords(p.provider_type)}`, onRun: () => standing.mutate({ p, change: { is_main: true } }), pending: standing.isPending }]
+                : []),
+              ...(canEdit && !p.ended_on ? [{ label: 'No longer seeing them', onRun: () => setEndingFor(p) }] : []),
+              ...(canEdit && p.ended_on
+                ? [{ label: 'Seeing them again', onRun: () => standing.mutate({ p, change: { ended_on: null } }), pending: standing.isPending }]
+                : []),
+            ]}
             deleteLabel="Remove"
             onDelete={() => {
               removeProviders([p]);
@@ -407,6 +465,8 @@ export function ProvidersPage() {
             }}
             onClose={panel.close}
           >
+            {actionError ? <p className="text-sm text-red-600" role="alert">{actionError}</p> : null}
+            {showMain(p) ? <p className="text-sm text-ink">Their main {mainTypeWords(p.provider_type)}.</p> : null}
             <section>
               <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">How to reach them</h3>
               <ContactStrip contact={summaryFromProvider(p)} profileId={profile.id} book={false} />
@@ -445,6 +505,52 @@ export function ProvidersPage() {
         );
       })() : null}
     </div>
+  );
+}
+
+/** "No longer seeing them": since when, today unless changed. */
+function EndedModal({
+  provider,
+  saving,
+  error,
+  onClose,
+  onSave,
+}: {
+  provider: Provider;
+  saving: boolean;
+  error: string;
+  onClose: () => void;
+  onSave: (date: string) => void;
+}) {
+  const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [missing, setMissing] = useState('');
+  return (
+    <Modal open onClose={onClose} title="No longer seeing them">
+      <div className="space-y-4">
+        <p className="text-sm text-muted">
+          {provider.name} moves to past contacts. Nothing about them is lost, and they come back with Seeing them again.
+        </p>
+        <Input id="ended-on" label="Since when?" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        {missing ? <p className="text-sm text-red-600" role="alert">{missing}</p> : null}
+        {error ? <p className="text-sm text-red-600" role="alert">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button
+            loading={saving}
+            onClick={() => {
+              if (!date) {
+                setMissing('Choose the date you stopped seeing them, then save.');
+                return;
+              }
+              setMissing('');
+              onSave(date);
+            }}
+          >
+            Save
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -548,6 +654,9 @@ function ProviderEditor({
   const [otherNames, setOtherNames] = useState<string[]>([]);
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [afterHours, setAfterHours] = useState('');
+  const [fax, setFax] = useState('');
+  const [week, setWeek] = useState<WeekHours>(weekFrom(null));
   const [address, setAddress] = useState<AddressValue>(emptyAddress);
   const [bookingLink, setBookingLink] = useState('');
   const [directionsLink, setDirectionsLink] = useState('');
@@ -563,6 +672,10 @@ function ProviderEditor({
     setSharesAddress(provider ? !!provider.uses_practice_address || !provider.organisation : true);
     setPhone(ownValue(provider, 'phone'));
     setEmail(ownValue(provider, 'email'));
+    setAfterHours(ownValue(provider, 'after_hours_phone'));
+    setFax(ownValue(provider, 'fax'));
+    // Hours taken from where they are based start empty, so they keep following it.
+    setWeek(weekFrom(provider && !(provider.inherited_fields ?? []).includes('opening_hours') ? provider.opening_hours : null));
     setAddress(provider ? addressFrom(provider) : emptyAddress);
     setBookingLink(ownValue(provider, 'booking_link'));
     setDirectionsLink(ownValue(provider, 'directions_link'));
@@ -579,6 +692,9 @@ function ProviderEditor({
         name: name.trim(),
         phone: phone.trim() || null,
         email: email.trim() || null,
+        after_hours_phone: afterHours.trim() || null,
+        fax: fax.trim() || null,
+        opening_hours: hoursFrom(week),
         ...addressPayload(address),
         ...practicePayload(worksAt, sharesAddress),
         also_known_as: otherNames,
@@ -602,7 +718,18 @@ function ProviderEditor({
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
-          if (name.trim()) mutation.mutate();
+          // Save always answers: say what is missing.
+          if (!name.trim()) {
+            setError('Write their name first, then save.');
+            return;
+          }
+          const bad = badDays(week);
+          if (bad.length) {
+            setError(`Check the opening hours on ${bad.join(', ')}: the closing time comes before the opening time.`);
+            return;
+          }
+          setError('');
+          mutation.mutate();
         }}
       >
         <ProviderTypeField key={`type-${provider?.id ?? 'new'}`} id="provider-type" value={type} onChange={setType} kind={kind} />
@@ -619,6 +746,11 @@ function ProviderEditor({
           <Input label="Phone" placeholder={sharedPlaceholder(worksAt, 'phone')} value={phone} onChange={(e) => setPhone(e.target.value)} />
           <Input label="Email" type="email" placeholder={sharedPlaceholder(worksAt, 'email')} value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="After-hours phone" placeholder={sharedPlaceholder(worksAt, 'after_hours_phone')} value={afterHours} onChange={(e) => setAfterHours(e.target.value)} />
+          <Input label="Fax" placeholder={sharedPlaceholder(worksAt, 'fax')} value={fax} onChange={(e) => setFax(e.target.value)} />
+        </div>
+        <OpeningHoursField value={week} onChange={setWeek} inheritedFrom={worksAt.practiceName.trim() || null} />
         <PracticeAddress
           worksAt={worksAt}
           sharesAddress={sharesAddress}
@@ -679,7 +811,7 @@ function ProviderEditor({
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" loading={mutation.isPending} disabled={!name.trim()}>
+          <Button type="submit" loading={mutation.isPending}>
             Save
           </Button>
         </div>

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { contactSummaries, contactSummary, resolveContactInput } from '../services/professionals';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
@@ -253,10 +254,12 @@ conditionsRouter.get('/', requireAuth, async (req, res) => {
     docsByCondition.set(key, arr);
   }
 
+  const treating = await contactSummaries(db, conditions.map((c) => c.treating_provider_id as string | null), req.params['id'] as string);
   res.json({
     conditions: conditions.map((c) =>
       serializeCondition({
         ...c,
+        treating: (c.treating_provider_id && treating.get(c.treating_provider_id)) || null,
         medications: medsByCondition.get(c.id) ?? [],
         treatments: treatmentsByCondition.get(c.id) ?? [],
         codes: codesByCondition.get(c.id) ?? [],
@@ -299,7 +302,35 @@ const conditionSchema = z.object({
   diagnosis_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   diagnosing_provider: z.string().max(255).optional().nullable(),
   diagnosis_document_id: z.union([z.string().uuid(), z.null()]).optional(),
+  // Who treats it: a contact picked by id, or a new name filed in Contacts.
+  treating_provider_id: z.string().uuid().optional().nullable(),
+  treating_name: z.string().trim().max(255).optional().nullable(),
+  treating_type: z.string().trim().max(100).optional().nullable(),
+  treating_phone: z.string().trim().max(50).optional().nullable(),
 });
+
+type ConditionInput = Partial<z.infer<typeof conditionSchema>>;
+
+/**
+ * Split who treats it off a condition write and resolve it: the columns to
+ * store, or a plain error. Nothing when the write does not mention them.
+ */
+async function treatingColumns(
+  data: ConditionInput,
+  profileId: string
+): Promise<{ rest: ConditionInput; columns: Record<string, unknown> } | { error: string }> {
+  const { treating_provider_id, treating_name, treating_type, treating_phone, ...rest } = data;
+  if (treating_provider_id === undefined && treating_name === undefined) return { rest, columns: {} };
+  const who = await resolveContactInput(db, profileId, { id: treating_provider_id, name: treating_name, type: treating_type, phone: treating_phone }, 'specialist');
+  if ('error' in who) return who;
+  return { rest, columns: { treating_provider_id: who.id } };
+}
+
+/** One condition with who treats it, as every screen reads it. */
+async function conditionOut(c: Record<string, unknown>, profileId: string) {
+  const treating = await contactSummary(db, c['treating_provider_id'] as string | null, profileId);
+  return serializeCondition({ ...c, treating });
+}
 
 /**
  * Fill in what can be worked out from the dates when the user has not said
@@ -346,10 +377,15 @@ conditionsRouter.post('/', requireAuth, async (req, res) => {
   }
   // Every recorded condition joins the shared catalogue, so a name typed
   // once is suggested to everyone from then on.
+  const who = await treatingColumns(parsed.data, req.params['id'] as string);
+  if ('error' in who) {
+    res.status(400).json({ error: who.error, code: 'VALIDATION_ERROR' });
+    return;
+  }
   const catalogueId = await resolveConditionCatalogueId(parsed.data.name, req.account!.id);
-  const data = classifyCondition(parsed.data);
+  const data = classifyCondition(who.rest);
   const [condition] = await db('medical_conditions')
-    .insert({ care_profile_id: req.params['id'], ...data, condition_catalogue_id: catalogueId })
+    .insert({ care_profile_id: req.params['id'], ...data, ...who.columns, condition_catalogue_id: catalogueId })
     .returning('*');
   // The catalogue's reference codes come along automatically, so a picked
   // condition starts with its standard ICD-10 and SNOMED CT codes.
@@ -359,7 +395,7 @@ conditionsRouter.post('/', requireAuth, async (req, res) => {
   if (catalogueEntry?.snomed_code) seedCodes.push({ condition_id: condition.id, system: 'snomed', code: catalogueEntry.snomed_code });
   if (seedCodes.length > 0) await db('condition_codes').insert(seedCodes).onConflict(['condition_id', 'system', 'code']).ignore();
   const codes = await db('condition_codes').where({ condition_id: condition.id });
-  res.status(201).json({ condition: serializeCondition({ ...condition, codes, functions: [] }) });
+  res.status(201).json({ condition: await conditionOut({ ...condition, codes, functions: [] }, req.params['id'] as string) });
 });
 
 conditionsRouter.patch('/:conditionId', requireAuth, async (req, res) => {
@@ -369,14 +405,20 @@ conditionsRouter.patch('/:conditionId', requireAuth, async (req, res) => {
     return;
   }
   // A rename re-links the catalogue entry so suggestions follow the new name.
+  const who = await treatingColumns(parsed.data, req.params['id'] as string);
+  if ('error' in who) {
+    res.status(400).json({ error: who.error, code: 'VALIDATION_ERROR' });
+    return;
+  }
   const catalogueId = parsed.data.name
     ? await resolveConditionCatalogueId(parsed.data.name, req.account!.id)
     : undefined;
-  const data = classifyCondition(parsed.data);
+  const data = classifyCondition(who.rest);
   const [condition] = await db('medical_conditions')
     .where({ id: req.params['conditionId'], care_profile_id: req.params['id'] })
     .update({
       ...data,
+      ...who.columns,
       ...(catalogueId ? { condition_catalogue_id: catalogueId } : {}),
       updated_at: db.fn.now(),
     })
@@ -385,7 +427,7 @@ conditionsRouter.patch('/:conditionId', requireAuth, async (req, res) => {
     res.status(404).json({ error: 'Condition not found', code: 'NOT_FOUND' });
     return;
   }
-  res.json({ condition: serializeCondition(condition) });
+  res.json({ condition: await conditionOut(condition, req.params['id'] as string) });
 });
 
 conditionsRouter.delete('/:conditionId', requireAuth, async (req, res) => {

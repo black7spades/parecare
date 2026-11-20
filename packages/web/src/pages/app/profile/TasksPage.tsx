@@ -724,6 +724,7 @@ export function TasksPage() {
                   contact={t.provider}
                   profileId={profile.id}
                   book={booking ? false : { fromTask: t.id }}
+                  recordHref={t.provider.source === 'contact' && t.provider.id ? `/app/${profile.id}/providers?record=${t.provider.id}` : undefined}
                   onAddPhone={canEdit ? () => setEditing({ task: t, focus: 'who' }) : undefined}
                 />
               ) : (

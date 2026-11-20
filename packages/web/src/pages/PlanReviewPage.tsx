@@ -149,7 +149,8 @@ export function PlanReviewPage() {
 
       {(version.report ? (showRecord ? sections : []) : sections).map((s) => {
         const entries = version.content.sections[s] ?? [];
-        const fieldNames = [...new Set(entries.flatMap((e: PlanEntry) => Object.keys(e.fields)))];
+        // References behind "supported by" are for the app, not for reading.
+        const fieldNames = [...new Set(entries.flatMap((e: PlanEntry) => Object.keys(e.fields)))].filter((f) => !f.endsWith('_refs'));
         return (
           <div key={s} className="card">
             <div className="flex items-baseline justify-between gap-2 mb-2">

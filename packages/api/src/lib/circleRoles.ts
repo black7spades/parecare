@@ -5,11 +5,12 @@
  * the list's own form and always compared without case.
  */
 
-export const CIRCLE_ROLE_VALUES = ['family', 'friend', 'carer', 'organisation', 'legal', 'other'] as const;
+export const CIRCLE_ROLE_VALUES = ['family', 'friend', 'carer', 'support_worker', 'nurse', 'organisation', 'legal', 'other'] as const;
 
 /** Words people use for a listed role, matched without case. */
 const ROLE_ALIASES: Record<string, string> = {
   'legal representative': 'legal',
+  'support worker': 'support_worker',
 };
 
 /** The listed form of a role when it is one of ours, else the text tidied. */
