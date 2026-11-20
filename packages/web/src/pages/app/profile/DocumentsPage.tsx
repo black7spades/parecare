@@ -14,7 +14,7 @@ import { CIRCLE_ROLES, EXPIRING_CATEGORY_KEYS, circleRoleLabel, type CareDocumen
 import { categoryNameOf, documentCategoriesKey, useDocumentCategories } from '../../../lib/documentCategories';
 import { SortableTh } from '../../../components/data/SortableTh';
 import { ContactPicker, changedContactFieldsAs, contactFieldsAs, emptyContact, pickedFrom, type PickedContact } from '../../../components/ContactPicker';
-import { ContactStrip } from '../../../components/ContactStrip';
+import { CONTACT_LINK, ContactStrip } from '../../../components/ContactStrip';
 import { formatDateOnly } from '../../../lib/datetime';
 import { DocumentCategoryField } from '../../../components/DocumentCategoryField';
 import { EditCategoriesModal } from '../../../components/EditCategoriesModal';
@@ -87,7 +87,7 @@ function AttachedList({ doc, limit }: { doc: CareDocument; limit?: number }) {
   return (
     <span className="flex flex-col gap-0.5">
       {shown.map((a) => (
-        <Link key={`${a.kind}-${a.id}`} to={a.path} className={`text-primary hover:underline ${limit ? 'block truncate max-w-[11rem]' : 'break-words'}`} title={`Open the ${a.kind_label.toLowerCase()}: ${a.label}`}>
+        <Link key={`${a.kind}-${a.id}`} to={a.path} className={`${CONTACT_LINK} ${limit ? 'block truncate max-w-[11rem]' : 'break-words'}`} title={`Open the ${a.kind_label.toLowerCase()}: ${a.label}`}>
           {a.label}
         </Link>
       ))}
@@ -493,7 +493,7 @@ export function DocumentsPage() {
                   {(doc.attached_to ?? []).map((a) => (
                     <li key={`${a.kind}-${a.id}`}>
                       <span className="text-muted">{a.kind_label}: </span>
-                      <Link to={a.path} className="font-medium text-primary underline">{a.label}</Link>
+                      <Link to={a.path} className={CONTACT_LINK} aria-label={`Open the ${a.kind_label.toLowerCase()} ${a.label}`}>{a.label}</Link>
                     </li>
                   ))}
                 </ul>

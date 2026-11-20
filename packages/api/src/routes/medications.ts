@@ -10,7 +10,7 @@ import { resolveCatalogueId } from './medicationCatalogue';
 import { getMarRetentionMonths } from '../config/settings';
 import { drawDownOnHand, perDoseDrawdown } from '../services/medicationSupply';
 import { contactSummaries, linkSupplierToContact, mainContact, resolveContactInput, supplierContacts } from '../services/professionals';
-import { STOP_REASONS, changesFor, recordMedicationChange, restartMedication, stopMedication } from '../services/medicationChanges';
+import { STOP_REASONS, changesFor, recordMedicationChange, restartMedication, stopMedication, type ChangeSource } from '../services/medicationChanges';
 import { COURSE_RUNNING_SQL } from '../lib/course';
 
 export const medicationsRouter = Router({ mergeParams: true });
@@ -682,7 +682,14 @@ medicationsRouter.patch('/:medId', requireAuth, requireProfileOwner("change a me
       },
     })
   );
-  if (typeof activeChange === 'boolean') await setActive(db, req.params['id']!, req.account!.id, [med.id], activeChange);
+  if (typeof activeChange === 'boolean') {
+    // Stopped or started from a letter or a visit: the stop or start cites it.
+    await setActive(db, req.params['id']!, req.account!.id, [med.id], activeChange, {
+      reason: parsed.data.change_reason,
+      source_appointment_id: parsed.data.change_source_appointment_id,
+      source_document_id: parsed.data.change_source_document_id,
+    });
+  }
   // Restocking clears any "out of stock" acknowledgement, so the urgent alert
   // recurs if this medication runs out again later.
   if (
@@ -716,7 +723,10 @@ medicationsRouter.post('/bulk', requireAuth, requireProfileOwner('change several
   }
   const scope = db('medications').where({ care_profile_id: req.params['id'] }).whereIn('id', parsed.data.ids);
   if (parsed.data.action === 'delete') {
+    const gone = (await scope.clone().pluck('id')) as string[];
     const deleted = await scope.del();
+    // Letters no longer list a medicine that is gone.
+    if (gone.length) await db('document_links').where({ entity_type: 'medications' }).whereIn('entity_id', gone).delete();
     res.json({ deleted });
     return;
   }
@@ -753,16 +763,16 @@ medicationsRouter.post('/bulk', requireAuth, requireProfileOwner('change several
  * Stop or start medicines again, each kept in its history. Ones already in
  * the asked-for state are left alone.
  */
-async function setActive(conn: typeof db, profileId: string, actorId: string, ids: string[], active: boolean): Promise<number> {
+async function setActive(conn: typeof db, profileId: string, actorId: string, ids: string[], active: boolean, source?: ChangeSource): Promise<number> {
   const rows = (await conn('medications').where({ care_profile_id: profileId }).whereIn('id', ids).select('id', 'active')) as Array<{ id: string; active: boolean }>;
   let n = 0;
   await conn.transaction(async (trx) => {
     for (const r of rows) {
       if (!active && r.active) {
-        await stopMedication(trx, { medicationId: r.id, profileId, actorId });
+        await stopMedication(trx, { medicationId: r.id, profileId, actorId, source });
         n += 1;
       } else if (active && !r.active) {
-        await restartMedication(trx, { medicationId: r.id, profileId, actorId });
+        await restartMedication(trx, { medicationId: r.id, profileId, actorId, source });
         n += 1;
       }
     }
@@ -822,6 +832,8 @@ medicationsRouter.post('/:medId/restart', requireAuth, requireProfileOwner('star
 
 medicationsRouter.delete('/:medId', requireAuth, requireProfileOwner('delete a medication'), async (req, res) => {
   const affected = await db('medications').where({ id: req.params['medId'], care_profile_id: req.params['id'] }).del();
+  // Letters no longer list a medicine that is gone.
+  if (affected) await db('document_links').where({ entity_type: 'medications', entity_id: String(req.params['medId']) }).delete();
   if (!affected) {
     res.status(404).json({ error: 'Medication not found', code: 'NOT_FOUND' });
     return;

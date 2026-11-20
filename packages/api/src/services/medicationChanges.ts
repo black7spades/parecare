@@ -132,7 +132,40 @@ export async function recordMedicationChange(
       changed_by_account_id: opts.actorId,
     })
     .returning('id');
-  return { change_id: (row as { id: string }).id };
+  const changeId = (row as { id: string }).id;
+  // The letter a change came from lists the medicine under Attached to.
+  if (doc && (await linkLetter(conn, doc, med.id))) {
+    await conn('medication_changes').where({ id: changeId }).update({ linked_document: true });
+  }
+  return { change_id: changeId };
+}
+
+/** Attach a letter to the medicine its change came from; true when this made the link. */
+async function linkLetter(conn: Conn, documentId: string, medicationId: string): Promise<boolean> {
+  const made = await conn('document_links')
+    .insert({ document_id: documentId, entity_type: 'medications', entity_id: medicationId })
+    .onConflict(['document_id', 'entity_type', 'entity_id'])
+    .ignore()
+    .returning('document_id');
+  return made.length > 0;
+}
+
+/**
+ * A change taken back out of the history no longer ties its letter to the
+ * medicine, when that change made the link and no other change on the
+ * medicine still cites the letter. A link someone made themselves stays.
+ */
+async function unlinkLetterIfUnused(conn: Conn, change: { source_document_id: string | null; linked_document: boolean }, medicationId: string): Promise<void> {
+  const documentId = change.source_document_id;
+  if (!documentId) return;
+  const still = (await conn('medication_changes').where({ medication_id: medicationId, source_document_id: documentId }).first('id')) as { id: string } | undefined;
+  if (still) {
+    // Another change cites it: that one now owns the link it relies on.
+    if (change.linked_document) await conn('medication_changes').where({ id: still.id }).update({ linked_document: true });
+    return;
+  }
+  if (!change.linked_document) return;
+  await conn('document_links').where({ document_id: documentId, entity_type: 'medications', entity_id: medicationId }).delete();
 }
 
 /** Stop a medicine: off the active list, with the last day, why, and the history row. */
@@ -159,7 +192,7 @@ export async function stopMedication(
  */
 export async function restartMedication(
   conn: Conn,
-  opts: { medicationId: string; profileId: string; actorId: string | null; undoChangeId?: string | null }
+  opts: { medicationId: string; profileId: string; actorId: string | null; undoChangeId?: string | null; source?: ChangeSource }
 ): Promise<boolean> {
   const med = await conn('medications').where({ id: opts.medicationId, care_profile_id: opts.profileId }).first('id');
   if (!med) return false;
@@ -171,14 +204,17 @@ export async function restartMedication(
     const last = (await conn('medication_changes')
       .where({ medication_id: opts.medicationId })
       .orderBy('created_at', 'desc')
-      .first('id', 'change_kind')) as { id: string; change_kind: string } | undefined;
+      .first('id', 'change_kind', 'source_document_id', 'linked_document')) as
+      | { id: string; change_kind: string; source_document_id: string | null; linked_document: boolean }
+      | undefined;
     if (last && last.id === opts.undoChangeId && last.change_kind === 'stopped') {
       await conn('medication_changes').where({ id: last.id }).delete();
+      await unlinkLetterIfUnused(conn, last, opts.medicationId);
       await conn('medications').where({ id: opts.medicationId }).update(restore);
       return true;
     }
   }
-  await recordMedicationChange(conn, { medicationId: opts.medicationId, profileId: opts.profileId, actorId: opts.actorId, kind: 'restarted', patch: restore });
+  await recordMedicationChange(conn, { medicationId: opts.medicationId, profileId: opts.profileId, actorId: opts.actorId, kind: 'restarted', patch: restore, source: opts.source });
   return true;
 }
 

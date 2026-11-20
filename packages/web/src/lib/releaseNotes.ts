@@ -20,6 +20,17 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.49.1',
+    date: '2026-11-20',
+    summary: 'Documents link both ways: Attached to opens each record, and a letter lists the medicines it changed.',
+    groups: [
+      { heading: 'Fixed', items: [
+        'Attached to looks like links. On a document, each record under Attached to now shows as an underlined link in the same green as phone numbers and emails, so it is clear that tapping one opens that record.',
+        'A letter lists the medicines it changed. When a medicine change, stop or start says it came from a letter, the letter now lists that medicine under Attached to. Changes already recorded are linked too.',
+      ] },
+    ],
+  },
+  {
     version: '0.49.0',
     date: '2026-11-20',
     summary: 'Documents follow the work: dates on every letter, referrals that warn before they run out, and a history for every medicine.',
