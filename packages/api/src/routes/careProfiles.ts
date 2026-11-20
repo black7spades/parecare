@@ -4,10 +4,11 @@ import path from 'path';
 import { buildSituation } from '../services/situation';
 import { z } from 'zod';
 import { db } from '../config/database';
+import { applyDeathChange } from '../services/death';
 import { getStorageConfig } from '../config/settings';
 import { requireAuth } from '../middleware/auth';
 import { requireAccountRight } from '../middleware/accountRights';
-import { requireCountBelow } from '../middleware/subscriptionGate';
+import { getCareAccess, requireCountBelow } from '../middleware/subscriptionGate';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
 import { resolveAddress, linkAddressToProfile } from '../services/addresses';
 import {
@@ -790,7 +791,20 @@ careProfilesRouter.patch('/:id', requireAuth, async (req, res) => {
         .where({ care_profile_id: profile.id, provider_id: providerId })
         .first();
       if (!link) {
-        res.status(400).json({ error: 'That provider is not linked to this profile', code: 'PROVIDER_NOT_LINKED' });
+        // One of this account's own contacts, such as the care home every
+        // resident lives in, is simply linked: never block a save over it.
+        const own = await db('providers').where({ id: providerId, account_id: profile.account_id }).first('id');
+        if (own) {
+          await db('care_profile_providers')
+            .insert({ care_profile_id: profile.id, provider_id: providerId })
+            .onConflict(['care_profile_id', 'provider_id'])
+            .ignore();
+          continue;
+        }
+        res.status(400).json({
+          error: "That contact is not in this person's contacts. Add them to Contacts first, then choose them here.",
+          code: 'PROVIDER_NOT_LINKED',
+        });
         return;
       }
     }
@@ -858,7 +872,11 @@ careProfilesRouter.patch('/:id', requireAuth, async (req, res) => {
     console.warn('Address book capture failed:', (err as Error).message);
   }
 
-  res.json({ profile: updated });
+  // Recording a death stops what was still running for them; clearing it
+  // puts it all back. The screen shows the sentence this returns.
+  const death_change = 'died_on' in parsed.data ? await applyDeathChange(updated.id, profile.died_on, updated.died_on) : null;
+
+  res.json({ profile: updated, death_change });
 });
 
 // Archive: reversible. The owner can archive their own profiles; platform
@@ -871,6 +889,21 @@ careProfilesRouter.delete('/:id', requireAuth, async (req, res) => {
   const affected = await query.update({ archived: true, updated_at: db.fn.now() });
 
   if (!affected) {
+    // Say why, plainly, when the profile is someone else's that this account
+    // can see. Anyone else just hears it was not found.
+    const access = await getCareAccess(req.account!, String(req.params['id']));
+    const existing = access && await db('care_profiles as cp')
+      .join('accounts as a', 'cp.account_id', 'a.id')
+      .where('cp.id', req.params['id'])
+      .first('cp.full_name', 'cp.preferred_name', 'a.display_name');
+    if (existing) {
+      const name = existing.preferred_name ?? existing.full_name;
+      res.status(403).json({
+        error: `Only ${existing.display_name ?? 'the person who set it up'}, who set up ${name}'s profile, or an admin can archive it. Nothing has changed.`,
+        code: 'OWNER_ONLY',
+      });
+      return;
+    }
     res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
     return;
   }

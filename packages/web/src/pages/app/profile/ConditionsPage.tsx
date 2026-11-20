@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
+import { formatDateOnly } from '../../../lib/datetime';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { EditableSubheader } from '../../../components/ui/EditableSubheader';
@@ -33,7 +34,7 @@ import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/use
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 
 
-const fmtDate = (d: string | null | undefined) => (d ? format(new Date(d), 'd MMM yyyy') : '');
+const fmtDate = (d: string | null | undefined) => formatDateOnly(d, 'd MMM yyyy');
 const todayIso = () => format(new Date(), 'yyyy-MM-dd');
 
 /** Over and done with: marked resolved, or its resolution date has passed. */

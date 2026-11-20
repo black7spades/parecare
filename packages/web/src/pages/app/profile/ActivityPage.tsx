@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
-import { entityLabel, type ActivityEntry } from '../../../lib/care';
+import { DOSE_ENTITY, doseActivityWords, entityLabel, type ActivityEntry } from '../../../lib/care';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar } from '../../../components/data/DataToolbar';
 import { EditableSubheader } from '../../../components/ui/EditableSubheader';
@@ -179,13 +179,21 @@ export function ActivityPage() {
             >
               <span className={`badge text-xs capitalize shrink-0 ${ACTION_STYLES[e.action]}`}>{e.action}</span>
               <div className="flex-1">
-                <p className="text-sm text-ink">
-                  <span className="font-medium">{e.actor_name ?? 'A former member'}</span> {e.action} a{' '}
-                  {entityLabel(e.entity_type)}
-                  {e.source === 'pare' ? <span className="text-muted"> via Pare</span> : null}
-                  {e.source === 'assistant' ? <span className="text-muted"> via an assistant</span> : null}
-                  {e.summary ? <span className="text-muted">: "{e.summary}"</span> : null}
-                </p>
+                {e.entity_type === DOSE_ENTITY ? (
+                  <p className="text-sm text-ink">
+                    <span className="font-medium">{e.actor_name ?? 'A former member'}</span> {doseActivityWords(e.action, e.summary)}
+                    {e.source === 'pare' ? <span className="text-muted"> via Pare</span> : null}
+                    {e.source === 'assistant' ? <span className="text-muted"> via an assistant</span> : null}
+                  </p>
+                ) : (
+                  <p className="text-sm text-ink">
+                    <span className="font-medium">{e.actor_name ?? 'A former member'}</span> {e.action} a{' '}
+                    {entityLabel(e.entity_type)}
+                    {e.source === 'pare' ? <span className="text-muted"> via Pare</span> : null}
+                    {e.source === 'assistant' ? <span className="text-muted"> via an assistant</span> : null}
+                    {e.summary ? <span className="text-muted">: "{e.summary}"</span> : null}
+                  </p>
+                )}
                 <p className="text-xs text-muted">{format(new Date(e.created_at), 'EEE d MMM yyyy, HH:mm')}</p>
               </div>
             </li>

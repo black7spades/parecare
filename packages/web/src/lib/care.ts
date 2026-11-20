@@ -1,3 +1,4 @@
+import { parseDateOnly } from './datetime';
 export const CARE_PHASES = [
   { value: 'early_concern', label: 'Early concern' },
   { value: 'home_with_support', label: 'Home with support' },
@@ -178,7 +179,8 @@ export const roomAreaTypeLabel = (v: string | null | undefined) =>
 /** Whole years lived, from the date of birth to today. */
 export function ageFrom(dateOfBirth: string | null | undefined): number | null {
   if (!dateOfBirth) return null;
-  const born = new Date(dateOfBirth);
+  // A plain day, read as that day here, not as midnight UTC.
+  const born = parseDateOnly(dateOfBirth) ?? new Date(dateOfBirth);
   if (Number.isNaN(born.getTime())) return null;
   const now = new Date();
   let age = now.getFullYear() - born.getFullYear();
@@ -273,7 +275,7 @@ export const CIRCLE_ROLES = [
 ] as const;
 
 export const circleRoleLabel = (role: string) =>
-  CIRCLE_ROLES.find((r) => r.value === role)?.label ?? role.charAt(0).toUpperCase() + role.slice(1);
+  CIRCLE_ROLES.find((r) => r.value === role.trim().toLowerCase())?.label ?? role.charAt(0).toUpperCase() + role.slice(1);
 
 export type CircleStatus = 'active' | 'invited' | 'added';
 
@@ -337,12 +339,37 @@ const ENTITY_LABELS: Record<string, string> = {
   conditions: 'condition',
   medications: 'medication',
   'health-statuses': 'health status',
+  doses: 'dose',
   appointments: 'appointment',
   calendar: 'calendar entry',
   records: 'note',
 };
 
 export const entityLabel = (type: string) => ENTITY_LABELS[type] ?? type;
+
+/** What recording or clearing a date of death stopped or put back. */
+export interface DeathChange {
+  kind: 'stopped' | 'restored';
+  tasks: number;
+  appointments: number;
+  /** One plain sentence for the screen. */
+  message: string;
+}
+
+/** The activity kind for a recorded dose. Its summary is "Metoprolol as refused". */
+export const DOSE_ENTITY = 'doses';
+
+/**
+ * The words after a person's name for a dose activity line, so it reads
+ * "Jess recorded Metoprolol as refused" rather than "Medication added".
+ * With a profile name, it says whose dose it was.
+ */
+export function doseActivityWords(action: string | null, summary: string | null, profileName?: string): string {
+  const what = summary ?? 'a dose';
+  if (action === 'deleted') return `removed a dose record${profileName ? ` for ${profileName}` : ''}: ${what}`;
+  if (action === 'updated') return `corrected a dose record${profileName ? ` for ${profileName}` : ''}: ${what}`;
+  return `recorded ${profileName ? `${profileName}'s ` : ''}${what}`;
+}
 
 export interface CareDocument {
   id: string;
@@ -498,6 +525,8 @@ export interface Task {
   completed: boolean;
   completed_at: string | null;
   completed_by_name: string | null;
+  /** Set when recording a death closed this task; clearing the date reopens it. */
+  stopped_by_death_at?: string | null;
   desired_outcome: string | null;
   sentiment: number | null;
   completion_reason: string | null;

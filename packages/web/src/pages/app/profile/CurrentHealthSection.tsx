@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { ConditionModal } from '../../../components/QuickAddModals';
@@ -13,6 +12,7 @@ import {
 } from '../../../lib/care';
 import { SymptomsSection } from './ConditionSymptoms';
 import { ConditionTracking } from './ConditionTracking';
+import { formatDateOnly } from '../../../lib/datetime';
 
 /** The passing-health kinds offered when recording from this card. */
 const CURRENT_HEALTH_CATEGORIES = CONDITION_CATEGORIES.filter((c) =>
@@ -133,7 +133,7 @@ export function CurrentHealthSection({
             {c.category ? <span className="text-xs text-muted">{conditionCategoryLabel(c.category)}</span> : null}
             <span className="text-xs text-muted">{conditionStatusLabel(c.status)}</span>
             {c.started_on ? (
-              <span className="text-xs text-muted">since {format(new Date(c.started_on), 'd MMM yyyy')}</span>
+              <span className="text-xs text-muted">since {formatDateOnly(c.started_on, 'd MMM yyyy')}</span>
             ) : null}
             {c.is_contagious ? (
               <span className="text-xs text-red-600 dark:text-red-400 font-medium">Contagious</span>

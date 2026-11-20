@@ -105,13 +105,19 @@ export function OverviewPage() {
 
   const [confirmText, setConfirmText] = useState('');
   const [deleteError, setDeleteError] = useState('');
+  const [archiveError, setArchiveError] = useState('');
+  // Only the person who set up the profile, or a platform admin, may archive
+  // or delete it, so nobody else is offered a button that cannot work.
+  const canArchive = isOwner || access === 'admin';
 
   const archiveMutation = useMutation({
     mutationFn: () => api.delete(`/care-profiles/${profile.id}`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['care-profiles'] });
+      void queryClient.invalidateQueries({ queryKey: ['care-profiles-summary'] });
       navigate('/app');
     },
+    onError: (err) => setArchiveError(err instanceof Error ? err.message : `${careName}'s profile could not be archived. Try again.`),
   });
 
   const deleteMutation = useMutation({
@@ -217,20 +223,30 @@ export function OverviewPage() {
         onMove={moveCard}
       />
 
-      <div className="pt-4 border-t border-border">
-        <Button variant="ghost" size="sm" onClick={() => setArchiveOpen(true)}>
-          Archive or delete this profile
-        </Button>
-      </div>
+      {canArchive ? (
+        <div className="pt-4 border-t border-border">
+          <Button variant="ghost" size="sm" onClick={() => setArchiveOpen(true)}>
+            Archive or delete this profile
+          </Button>
+        </div>
+      ) : null}
 
       <Modal open={archiveOpen} onClose={closeArchive} title="Archive or delete profile">
         <p className="text-sm text-muted mb-4">
           Archiving hides {careName}'s profile and its records from your
           dashboard. Nothing is deleted, and you can bring it back later.
         </p>
+        {archiveError ? <p className="mb-3 text-sm text-red-600">{archiveError}</p> : null}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={closeArchive}>Cancel</Button>
-          <Button variant="secondary" loading={archiveMutation.isPending} onClick={() => archiveMutation.mutate()}>
+          <Button
+            variant="secondary"
+            loading={archiveMutation.isPending}
+            onClick={() => {
+              setArchiveError('');
+              archiveMutation.mutate();
+            }}
+          >
             Archive
           </Button>
         </div>
@@ -254,8 +270,11 @@ export function OverviewPage() {
               <Button
                 variant="danger"
                 loading={deleteMutation.isPending}
-                disabled={!nameMatches}
                 onClick={() => {
+                  if (!nameMatches) {
+                    setDeleteError(`Type ${profile.full_name} exactly as shown to confirm.`);
+                    return;
+                  }
                   setDeleteError('');
                   deleteMutation.mutate();
                 }}

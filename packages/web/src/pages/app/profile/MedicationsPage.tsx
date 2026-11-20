@@ -29,6 +29,7 @@ import { SELF_RELATIONSHIP,
   totalOnHand,
   type MedicationRecord,
 } from '../../../lib/care';
+import { formatDateOnly } from '../../../lib/datetime';
 
 // Domain sort/filter helpers for the reusable data view.
 const earliestTime = (m: MedicationRecord): number => {
@@ -66,6 +67,9 @@ export function MedicationsPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<MedicationRecord | null>(null);
   const [confirmBulkLog, setConfirmBulkLog] = useState(false);
+  // What went wrong with the last quick action, said plainly rather than nothing.
+  const [actionError, setActionError] = useState('');
+  const failed = (fallback: string) => (err: unknown) => setActionError(err instanceof Error ? err.message : fallback);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   // Recording an ad-hoc dose from the list. This is the entry point for
   // as-needed medications, which have no scheduled slots to tap in the record.
@@ -139,22 +143,26 @@ export function MedicationsPage() {
   // Record a dose now for every selected medication in one shot.
   const bulkLog = useMutation({
     mutationFn: () => api.post<{ recorded: number }>(`/care-profiles/${profile.id}/medications/administrations/batch`, {
-      entries: dv.selectedRows.map((m) => ({ medication_id: m.id, administered_at: new Date().toISOString(), status: 'given' })),
+      // Each is the prescribed dose by the prescribed route, so both checks are confirmed.
+      entries: dv.selectedRows.map((m) => ({ medication_id: m.id, administered_at: new Date().toISOString(), status: 'given', right_dose: true, right_route: true })),
     }),
-    onSuccess: () => { setConfirmBulkLog(false); dv.clearSelection(); invalidate(); },
+    onSuccess: () => { setActionError(''); setConfirmBulkLog(false); dv.clearSelection(); invalidate(); },
+    onError: (err) => { setConfirmBulkLog(false); failed('The doses were not recorded. Try again.')(err); },
   });
 
   // Mark a low medication as ordered: the reorder workflow's middle state.
   const markOrdered = useMutation({
     mutationFn: (id: string) => api.post(`/care-profiles/${profile.id}/medications/${id}/reorder`, { action: 'ordered' }),
-    onSuccess: () => invalidate(),
+    onSuccess: () => { setActionError(''); invalidate(); },
+    onError: failed('The medication was not marked as ordered. Try again.'),
   });
 
   const bulkSetActive = useMutation({
     mutationFn: (action: 'activate' | 'deactivate') => api.post(`/care-profiles/${profile.id}/medications/bulk`, {
       action, ids: dv.selectedRows.map((m) => m.id),
     }),
-    onSuccess: () => { dv.clearSelection(); invalidate(); },
+    onSuccess: () => { setActionError(''); dv.clearSelection(); invalidate(); },
+    onError: failed('The medications were not changed. Try again.'),
   });
 
   const bulkActions: ToolbarBulkAction[] = [
@@ -303,6 +311,13 @@ export function MedicationsPage() {
           </div>
         ) : null}
       </div>
+
+      {actionError ? (
+        <div className="mb-3 flex items-start justify-between gap-3 rounded-md border-l-4 border-red-400 bg-red-50 dark:bg-red-900/10 px-4 py-2 text-sm text-red-700 dark:text-red-300">
+          <span>{actionError}</span>
+          <Button size="xs" variant="ghost" onClick={() => setActionError('')}>Dismiss</Button>
+        </div>
+      ) : null}
 
       {listOpen ? (
         <>
@@ -460,7 +475,7 @@ export function MedicationsPage() {
               { label: 'Days left', value: days != null ? `About ${Math.floor(days)}` : null },
               { label: 'Supplier branch', value: m.supplier_suburb },
               { label: 'On order since', value: m.reorder_ordered_at ? format(new Date(m.reorder_ordered_at), 'd MMM yyyy') : null },
-              { label: 'Next repeat due', value: m.repeats_due ? format(new Date(m.repeats_due), 'd MMM yyyy') : null },
+              { label: 'Next repeat due', value: m.repeats_due ? formatDateOnly(m.repeats_due, 'd MMM yyyy') : null },
               { label: 'Dangerous to miss', value: m.critical ? 'Yes' : null },
               { label: 'Status', value: m.active ? 'Active' : 'Inactive' },
             ]}

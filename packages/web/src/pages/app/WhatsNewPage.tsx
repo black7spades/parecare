@@ -4,6 +4,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { api } from '../../api/client';
 import { Button } from '../../components/ui/Button';
 import { browserTimeZone } from '../../lib/datetime';
+import { DOSE_ENTITY, doseActivityWords } from '../../lib/care';
 
 /**
  * What's new: everything happening across the care circles this person can
@@ -18,7 +19,7 @@ import { browserTimeZone } from '../../lib/datetime';
 
 interface NotificationItem {
   key: string;
-  kind: 'activity' | 'supply_low' | 'supply_out' | 'dose_overdue' | 'care_plan_ready' | 'outcome_due';
+  kind: 'activity' | 'supply_low' | 'supply_out' | 'dose_overdue' | 'dose_not_given' | 'care_plan_ready' | 'outcome_due';
   record_id?: string | null;
   profile_id: string;
   profile_name: string;
@@ -61,14 +62,18 @@ function itemText(item: NotificationItem): string {
   if (item.kind === 'dose_overdue') {
     const n = item.missed_count ?? 1;
     return n === 1
-      ? `${item.profile_name}'s dose of ${item.medication_name} is due and not yet recorded.`
-      : `${item.profile_name} has ${n} doses of ${item.medication_name} due and not yet recorded today.`;
+      ? `${item.profile_name}'s dose of ${item.medication_name} is due and has not been given.`
+      : `${item.profile_name} has ${n} doses of ${item.medication_name} due today that have not been given.`;
+  }
+  if (item.kind === 'dose_not_given') {
+    return `${item.actor_name ?? 'Someone'} recorded ${item.profile_name}'s ${item.medication_name} as ${item.summary ?? 'not given'}.`;
   }
   if (item.kind === 'supply_out') return `${item.profile_name}'s prescription for ${item.medication_name} is out of stock.`;
   if (item.kind === 'supply_low') return `${item.profile_name}'s prescription for ${item.medication_name} is low.`;
   if (item.kind === 'care_plan_ready') return `${item.profile_name}'s care plan is ready to review.`;
   const who = item.actor_name ?? 'Someone';
   if (item.entity_type === 'messages' && item.action === 'created') return `${who} posted in ${item.profile_name}'s messages.`;
+  if (item.entity_type === DOSE_ENTITY) return `${who} ${doseActivityWords(item.action, item.summary, item.profile_name)}.`;
   const target = ENTITY_TARGETS[item.entity_type ?? ''];
   const noun = target?.noun ?? 'a record';
   const verb = VERBS[item.action ?? ''] ?? 'changed';
@@ -76,7 +81,7 @@ function itemText(item: NotificationItem): string {
 }
 
 function itemPath(item: NotificationItem): string {
-  if (item.kind === 'dose_overdue') return `/app/${item.profile_id}/mar`;
+  if (item.kind === 'dose_overdue' || item.kind === 'dose_not_given' || item.entity_type === DOSE_ENTITY) return `/app/${item.profile_id}/mar`;
   // How an appointment went is recorded on the appointment itself.
   if (item.kind === 'outcome_due') return `/app/${item.profile_id}/appointments?outcome=${item.record_id ?? ''}`;
   const page = ENTITY_TARGETS[item.entity_type ?? '']?.page ?? '';
@@ -162,7 +167,7 @@ function FeedList({
       <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">{title}</h2>
       <ul className="card divide-y divide-border p-0 overflow-hidden">
         {items.map((item) => {
-          const medical = item.kind === 'supply_low' || item.kind === 'supply_out' || item.kind === 'dose_overdue';
+          const medical = item.kind === 'supply_low' || item.kind === 'supply_out' || item.kind === 'dose_overdue' || item.kind === 'dose_not_given';
           return (
             <li key={item.key}>
               <button

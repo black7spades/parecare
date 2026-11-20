@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth';
 import { requireAccountRight } from '../middleware/accountRights';
 import { requireCountBelow } from '../middleware/subscriptionGate';
 import { requireProfileOwner } from '../middleware/permissions';
+import { canonicalRole } from '../lib/circleRoles';
 import { createInvitation, resendInvitation, revokeInvitation, inviteUrl, effectiveStatus, InviteError } from '../services/invitations';
 import { env } from '../config/env';
 import type { CareCircleMember, Invitation } from '../types';
@@ -115,7 +116,7 @@ careCircleRouter.post(
   '/',
   requireAuth,
   requireAccountRight('can_invite_members'),
-  requireProfileOwner,
+  requireProfileOwner('invite someone to the care circle'),
   requireCountBelow('care_circle_members', async (req) => {
     const result = await db('care_circle_members')
       .where({ care_profile_id: req.params['id'] })
@@ -164,7 +165,7 @@ careCircleRouter.post(
  * Add someone to the circle by name, with no invite and no login: a
  * neighbour, a friend, a support worker. Phone and email are optional.
  */
-careCircleRouter.post('/people', requireAuth, requireProfileOwner, async (req, res) => {
+careCircleRouter.post('/people', requireAuth, requireProfileOwner('add someone to the care circle'), async (req, res) => {
   const parsed = circlePersonSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Give them a name to add them. Check the email looks right if you gave one.', code: 'VALIDATION_ERROR' });
@@ -182,7 +183,7 @@ careCircleRouter.post(
   '/:memberId/invite',
   requireAuth,
   requireAccountRight('can_invite_members'),
-  requireProfileOwner,
+  requireProfileOwner('send someone in the care circle an invitation'),
   async (req, res) => {
     const parsed = z
       .object({ email: z.string().trim().email(), permission: z.enum(['viewer', 'contributor']).default('contributor') })
@@ -267,7 +268,7 @@ careCircleRouter.get('/:memberId', requireAuth, async (req, res) => {
 });
 
 // New link, fresh expiry, email re-sent. For pending invites only.
-careCircleRouter.post('/:memberId/resend-invite', requireAuth, requireAccountRight('can_invite_members'), requireProfileOwner, async (req, res) => {
+careCircleRouter.post('/:memberId/resend-invite', requireAuth, requireAccountRight('can_invite_members'), requireProfileOwner('send an invitation again'), async (req, res) => {
   const member = await db<CareCircleMember>('care_circle_members')
     .where({ id: req.params['memberId'], care_profile_id: req.params['id'] })
     .first();
@@ -287,7 +288,7 @@ careCircleRouter.post('/:memberId/resend-invite', requireAuth, requireAccountRig
   }
 });
 
-careCircleRouter.patch('/:memberId', requireAuth, requireProfileOwner, async (req, res) => {
+careCircleRouter.patch('/:memberId', requireAuth, requireProfileOwner("change someone's role or access in the care circle"), async (req, res) => {
   const updateSchema = z.object({
     role: z.string().min(1).optional(),
     role_description: z.string().optional().nullable(),
@@ -317,6 +318,8 @@ careCircleRouter.patch('/:memberId', requireAuth, requireProfileOwner, async (re
   }
   const { display_name, phone, email, ...rest } = parsed.data;
   const fields: Record<string, unknown> = { ...rest };
+  // "Carer" and "carer" are one role: store the listed form.
+  if (rest.role !== undefined) fields['role'] = canonicalRole(rest.role) || existing.role;
   if (isAddedPerson(existing)) {
     if (display_name !== undefined) fields['display_name'] = display_name;
     if (phone !== undefined) fields['phone'] = phone?.trim() || null;
@@ -336,7 +339,7 @@ careCircleRouter.patch('/:memberId', requireAuth, requireProfileOwner, async (re
   res.json({ member: updated });
 });
 
-careCircleRouter.delete('/:memberId', requireAuth, requireProfileOwner, async (req, res) => {
+careCircleRouter.delete('/:memberId', requireAuth, requireProfileOwner('remove someone from the care circle'), async (req, res) => {
   const member = await db<CareCircleMember>('care_circle_members')
     .where({ id: req.params['memberId'], care_profile_id: req.params['id'] })
     .first();

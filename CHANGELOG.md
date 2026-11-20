@@ -6,6 +6,64 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.46.3] - 2026-11-20
+
+### Fixed
+
+- **A refused dose is not a given dose.** A dose recorded as refused, held
+  or omitted no longer quiets the overdue alert, and the family is told
+  straight away, for example "Jess recorded Dorothy's Metoprolol as
+  refused." The activity list says the same, rather than "Medication added".
+- **One tap records the dose as prescribed.** A dose recorded with one tap,
+  with Log all due doses or with Record all doses now counts as the right
+  dose by the right route. Before, every one was flagged as wrong.
+- **Directories show everything that is yours.** People, Professionals,
+  Organisations, Suppliers, Assets and Addresses now list every person
+  and record set up on the account, not only those shared with it. An empty
+  People directory explains what it is for and offers Add a person.
+- **Care homes are in Organisations.** A care home, nursing home or hospice
+  is now filed with Organisations rather than Professionals, including
+  those already saved.
+- **Residents' profiles save again.** Saving Edit profile for a resident of
+  a care home no longer stops with a message about the home not being
+  linked. The home is linked to them on the spot.
+- **Sharing a document with carers reaches every carer.** A role is now
+  picked from the list when editing someone in the care circle, and roles
+  match whatever their capitals, so "Carer" and "carer" are the same role.
+  Roles already saved have been tidied to match.
+- **Recording a death stops what was still running.** Saving a date of death
+  now stops task reminders, dose and supply alerts and the calendar feed,
+  closes open tasks and cancels future appointments, which stay on the
+  record as history. The screen says what stopped. Undo, or clearing the
+  date, puts everything back as it was.
+- **A hospital stay keeps the home address.** Choosing a hospital or care
+  facility as where someone lives no longer wipes their home address, and
+  reaching them through the facility no longer erases a personal contact
+  such as a daughter.
+- **Letters land on the right visit.** When Pare files a letter about a
+  visit, such as a discharge summary, it only attaches it to an appointment
+  whose name matches. Otherwise it files the visit on its own, with every
+  next step, rather than on whatever appointment happened last.
+- **The care plan review date stays put.** The yearly review date is set
+  once and no longer moves a year out every time the plan is rebuilt. A
+  reminder task comes two weeks before, and Change date on the care plan
+  moves both.
+- **Archive is only offered where it works.** Archive shows only on profiles
+  set up on this account. When some of the profiles chosen belong to someone
+  else, the screen says which were left and why.
+- **Birthdays no longer slip back a day.** Saving Edit profile without
+  changes no longer moves a date of birth to the day before. Dates of birth,
+  dates of death, repeat dates and other whole-day dates now show and save
+  as the same day everywhere, including exports.
+- **Blocked changes say who can make them.** Someone who cannot change a
+  medication, a treatment, care costs or the care circle is now told exactly
+  what they cannot do and who can, by name, instead of a message about the
+  care circle.
+- **Replies stay with their own question.** Replies to a question can only
+  be read and written from the profile the question belongs to.
+- **A task keeps the contact it was made with.** A task made with a contact
+  now keeps that contact, checked as one of the person's own contacts.
+
 ## [0.46.2] - 2026-11-20
 
 ### Fixed

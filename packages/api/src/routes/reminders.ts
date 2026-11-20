@@ -15,7 +15,19 @@ const reminderSchema = z.object({
   rrule: z.string().optional().nullable(),
   assigned_to: z.string().uuid().optional().nullable(),
   desired_outcome: z.string().max(2000).optional().nullable(),
+  // Who the task is with: a contact already linked to this person.
+  provider_id: z.string().uuid().optional().nullable(),
 });
+
+/**
+ * A contact named on a task must be one linked to this person, so a task can
+ * never point at someone else's contact. Returns a plain sentence when not.
+ */
+async function contactProblem(profileId: string, providerId: string | null | undefined): Promise<string | null> {
+  if (!providerId) return null;
+  const link = await db('care_profile_providers').where({ care_profile_id: profileId, provider_id: providerId }).first();
+  return link ? null : 'That contact is not in this person\'s contacts. Add them to Contacts first, then pick them here.';
+}
 
 // The full task record. status filters to open, done or all (default open,
 // so existing callers are unchanged); completed tasks carry when they were
@@ -28,6 +40,7 @@ remindersRouter.get('/', requireAuth, async (req, res) => {
     // A next step knows its kind and the appointment it came out of.
     .leftJoin('next_step_types as nst', 'r.next_step_type_id', 'nst.id')
     .leftJoin('appointments as ap', 'r.appointment_id', 'ap.id')
+    .leftJoin('providers as pv', 'r.provider_id', 'pv.id')
     // An appointment waiting on this to-do for its date: doing the to-do
     // means adding that date.
     .leftJoin('appointments as tb', function () {
@@ -37,7 +50,8 @@ remindersRouter.get('/', requireAuth, async (req, res) => {
     .select(
       'r.*', 'a.display_name as completed_by_name', 'cl.display_name as claimed_by_name',
       'nst.name as next_step_type_name', 'ap.title as appointment_title', 'ap.starts_at as appointment_starts_at',
-      'tb.id as to_book_appointment_id', 'tb.title as to_book_title'
+      'tb.id as to_book_appointment_id', 'tb.title as to_book_title',
+      'pv.name as provider_name'
     );
   if (status === 'open') query.where('r.completed', false);
   else if (status === 'done') query.where('r.completed', true);
@@ -71,6 +85,11 @@ remindersRouter.post('/', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
     return;
   }
+  const problem = await contactProblem(String(req.params['id']), parsed.data.provider_id);
+  if (problem) {
+    res.status(400).json({ error: problem, code: 'PROVIDER_NOT_LINKED' });
+    return;
+  }
 
   const [reminder] = await db<Reminder>('reminders')
     .insert({ care_profile_id: req.params['id'], ...parsed.data })
@@ -98,6 +117,11 @@ remindersRouter.post('/fan-out', requireAuth, async (req, res) => {
   }
   const sourceId = req.params['id'] as string;
   const { also_profile_ids, ...fields } = parsed.data;
+  const problem = await contactProblem(sourceId, fields.provider_id);
+  if (problem) {
+    res.status(400).json({ error: problem, code: 'PROVIDER_NOT_LINKED' });
+    return;
+  }
 
   // Source first: access already verified by the profile-access middleware.
   const [sourceReminder] = await db<Reminder>('reminders')
@@ -118,7 +142,9 @@ remindersRouter.post('/fan-out', requireAuth, async (req, res) => {
       skipped.push({ profile_id: pid, reason: 'view_only' });
       continue;
     }
-    await db('reminders').insert({ care_profile_id: pid, ...fields, assigned_to: null });
+    // The contact carries across only when it is linked to that person too.
+    const contactThere = fields.provider_id && !(await contactProblem(pid, fields.provider_id)) ? fields.provider_id : null;
+    await db('reminders').insert({ care_profile_id: pid, ...fields, assigned_to: null, provider_id: contactThere });
     // The source write is audited by middleware; log each extra profile here.
     await db('audit_log')
       .insert({
@@ -147,7 +173,16 @@ remindersRouter.patch('/:reminderId', requireAuth, async (req, res) => {
     return;
   }
 
+  const problem = await contactProblem(String(req.params['id']), parsed.data.provider_id);
+  if (problem) {
+    res.status(400).json({ error: problem, code: 'PROVIDER_NOT_LINKED' });
+    return;
+  }
+
   const update: Record<string, unknown> = { ...parsed.data };
+  // A person reopening or ticking off a task makes it theirs again: clearing
+  // a date of death later leaves it as they set it.
+  if (parsed.data.completed !== undefined) update['stopped_by_death_at'] = null;
   if (parsed.data.completed === true) {
     update['completed_at'] = db.fn.now();
     update['completed_by_account_id'] = req.account!.id;

@@ -682,8 +682,12 @@ function DocumentDetailsFields({
   children?: ReactNode;
 }) {
   // Standard roles plus any custom roles already in use in this circle.
-  const knownRoles = [...new Set([...CIRCLE_ROLES.map((r) => r.value), ...members.map((m) => m.role)])];
-  const addableRoles = knownRoles.filter((r) => !roles.includes(r));
+  // Roles match without case, so "Carer" and "carer" are offered once.
+  const knownRoles: string[] = [];
+  for (const r of [...CIRCLE_ROLES.map((x) => x.value as string), ...members.map((m) => m.role)]) {
+    if (r && !knownRoles.some((k) => k.toLowerCase() === r.trim().toLowerCase())) knownRoles.push(r.trim());
+  }
+  const addableRoles = knownRoles.filter((r) => !roles.some((x) => x.toLowerCase() === r.toLowerCase()));
   const everyoneNames = members.map(memberName);
 
   return (

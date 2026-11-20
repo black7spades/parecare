@@ -1,3 +1,4 @@
+import { useAuthStore } from '../../stores/auth';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
@@ -11,7 +12,7 @@ import { EditableSubheader } from '../../components/ui/EditableSubheader';
 import { RecordPanel } from '../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../components/record/useRecordPanel';
 import { ageFrom, phaseLabel, CARE_PHASES, type ProfileKind } from '../../lib/care';
-import { format } from 'date-fns';
+import { formatDateOnly } from '../../lib/datetime';
 
 interface CircleMember {
   display_name: string;
@@ -93,6 +94,7 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
   });
   const profiles = data?.profiles ?? [];
   const canEdit = data?.can_edit ?? false;
+  const canCreate = useAuthStore((s) => s.account?.can_create_care_profiles !== false);
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['directory-profiles', kind] });
 
   const dv = useDataView<DirectoryProfile>({
@@ -140,7 +142,8 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
               ? ['Marie Rose', 'Marie', '1948-03-14', 'she/her', 'English', 'home_with_support', 'Mother', 'Chris Rattray', '07 5555 5555', 'chris@example.com']
               : ['Bread Loaf', 'Cat', 'Domestic Shorthair', 'true', '', '2019-06-01', 'Cat', 'Chris Rattray', '07 5555 5555', '']}
           />
-          {canEdit ? (
+          {/* Offered to everyone allowed to set up a profile. */}
+          {profiles.length > 0 && canCreate ? (
             <Link to={`/app/profiles/new?kind=${kind}`}>
               <Button>{isPeople ? 'Add person' : 'Add pet'}</Button>
             </Link>
@@ -176,8 +179,20 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
       {isLoading ? (
         <p className="text-sm text-muted">Loading…</p>
       ) : profiles.length === 0 ? (
-        <div className="card text-center py-10">
-          <p className="text-sm text-muted">No {label.toLowerCase()} in the directory yet.</p>
+        <div className="card text-center py-10 space-y-3">
+          <p className="text-sm font-semibold text-ink">{isPeople ? 'No one here yet' : 'No pets here yet'}</p>
+          <p className="text-sm text-muted max-w-md mx-auto">
+            {isPeople
+              ? 'Everyone you look after shows here, with who to contact and who is in their care circle. Add the first person to get started.'
+              : 'Every pet you look after shows here, with their owner and who to contact. Add the first pet to get started.'}
+          </p>
+          {canCreate ? (
+            <Link to={`/app/profiles/new?kind=${kind}`} className="inline-block">
+              <Button>{isPeople ? 'Add a person' : 'Add a pet'}</Button>
+            </Link>
+          ) : (
+            <p className="text-xs text-muted">The person who manages this account adds people here.</p>
+          )}
         </div>
       ) : dv.view.length === 0 ? (
         <div className="card text-center py-10">
@@ -248,7 +263,7 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
                       </td>
                       <td className="px-3 py-2 text-muted">
                         {p.date_of_birth
-                          ? format(new Date(p.date_of_birth), 'd MMM yyyy')
+                          ? formatDateOnly(p.date_of_birth, 'd MMM yyyy')
                           : '-'}
                       </td>
                       <td className="px-3 py-2">
@@ -334,7 +349,7 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
           fields={[
             { label: 'Preferred name', value: current.preferred_name },
             { label: 'Relationship', value: current.owner_relationship },
-            { label: 'Date of birth', value: current.date_of_birth ? format(new Date(current.date_of_birth), 'd MMM yyyy') : null },
+            { label: 'Date of birth', value: current.date_of_birth ? formatDateOnly(current.date_of_birth, 'd MMM yyyy') : null },
             { label: 'Age', value: ageFrom(current.date_of_birth) != null ? String(ageFrom(current.date_of_birth)) : null },
             ...(isPeople
               ? [{ label: 'Phase', value: phaseLabel(current.current_phase) }]

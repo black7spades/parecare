@@ -40,6 +40,8 @@ async function tick(): Promise<void> {
   const due = await db<Reminder>('reminders')
     .join('care_profiles', 'reminders.care_profile_id', 'care_profiles.id')
     .where('reminders.completed', false)
+    // No reminder emails about someone who has died.
+    .whereNull('care_profiles.died_on')
     .where('reminders.next_due_at', '<=', now)
     .where((qb) => {
       qb.whereNull('reminders.last_notified_at').orWhereRaw('reminders.last_notified_at < reminders.next_due_at');

@@ -5,6 +5,7 @@ import { db } from '../config/database';
 import { uploadFile, deleteFile } from './storage';
 import { composeReport, reportToHtml } from './carePlanReport';
 import { isSelfManaged } from './aiTone';
+import { standardReviewDue } from './carePlanReview';
 
 /**
  * Event-driven incremental care-plan updater.
@@ -782,9 +783,9 @@ async function synthesizeNarrative(profileId: string): Promise<Record<NarrativeS
   }
 
   // The standard review anchor is never left to the model: at least every
-  // 12 months from this version.
-  const due = new Date();
-  due.setMonth(due.getMonth() + 12);
+  // 12 months. It is set once, on the first plan, and kept through every
+  // rebuild unless a person moves it; a reminder task comes ahead of it.
+  const dueBy = await standardReviewDue(profileId);
 
   const dedup = (entries: PlanEntry[]): PlanEntry[] => {
     const seen = new Set<string>();
@@ -821,7 +822,7 @@ async function synthesizeNarrative(profileId: string): Promise<Record<NarrativeS
         key: 'review:standard',
         fields: {
           review_type: 'Standard',
-          due_by: due.toISOString().slice(0, 10),
+          due_by: dueBy,
           reason: 'Reviewed with the participant at least once every 12 months',
         },
       },
@@ -1436,6 +1437,8 @@ export async function deleteCarePlan(profileId: string): Promise<number> {
     await trx('care_plan_versions').where({ care_profile_id: profileId }).delete();
     await trx('care_plan_access').where({ care_profile_id: profileId }).delete();
     if (docIds.length) await trx('documents').whereIn('id', docIds).delete();
+    // A fresh plan starts a fresh yearly review; its reminder task moves with it.
+    await trx('care_profiles').where({ id: profileId }).update({ care_plan_review_due_on: null });
   });
   for (const d of docs) {
     await deleteFile(d.file_url).catch(() => {});

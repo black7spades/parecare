@@ -6,7 +6,8 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import {  } from '../../../components/ui/icons';
-import {  } from '../../../components/ui/Input';
+import { Input } from '../../../components/ui/Input';
+import { formatDateOnly } from '../../../lib/datetime';
 import { Modal } from '../../../components/ui/Modal';
 import {  } from '../../../components/AllergyModal';
 import { PagePurpose } from '../../../components/PagePurpose';
@@ -305,6 +306,8 @@ export function PlanPage() {
             />
           ) : null}
 
+          <ReviewDateCard profileId={profile.id} />
+
           <ChangelogCard changes={changelogData?.changes ?? []} />
 
           <VersionsCard
@@ -489,6 +492,75 @@ function CurrentVersionCard({
       <p className="text-xs text-muted mt-2">
         The full content opens under View, and each section links to the page where its facts are managed.
       </p>
+    </div>
+  );
+}
+
+/**
+ * When the next full review of the plan is due. Set once when the plan is
+ * first built and kept through every rebuild; a reminder task comes two
+ * weeks before. Anyone who can edit the plan may move it.
+ */
+function ReviewDateCard({ profileId }: { profileId: string }) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState('');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const { data } = useQuery({
+    queryKey: ['plan-review-date', profileId],
+    queryFn: () => api.get<{ due_on: string | null; can_change: boolean }>(`/care-profiles/${profileId}/plan/review-date`),
+  });
+  const save = useMutation({
+    mutationFn: (dueOn: string) => api.put<{ due_on: string }>(`/care-profiles/${profileId}/plan/review-date`, { due_on: dueOn }),
+    onSuccess: () => {
+      setEditing(false);
+      setError('');
+      setNote('Saved. The reminder task has moved too, and the next plan update shows the new date.');
+      void queryClient.invalidateQueries({ queryKey: ['plan-review-date', profileId] });
+      void queryClient.invalidateQueries({ queryKey: ['tasks', profileId] });
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'The review date did not save. Try again.'),
+  });
+  if (!data?.due_on) return null;
+
+  return (
+    <div className="card">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-ink">Next full review</h3>
+          <p className="text-sm text-ink">Due by {formatDateOnly(data.due_on, 'd MMMM yyyy')}</p>
+          <p className="text-xs text-muted">A reminder task comes two weeks before.</p>
+        </div>
+        {data.can_change && !editing ? (
+          <Button size="sm" variant="ghost" onClick={() => { setValue(data.due_on ?? ''); setNote(''); setEditing(true); }}>
+            Change date
+          </Button>
+        ) : null}
+      </div>
+      {editing ? (
+        <form
+          className="mt-3 flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!value) {
+              setError('Choose the day the review is due.');
+              return;
+            }
+            save.mutate(value);
+          }}
+        >
+          <Input label="Review due by" type="date" value={value} onChange={(e) => setValue(e.target.value)} />
+          <Button type="button" variant="ghost" size="sm" onClick={() => { setEditing(false); setError(''); }}>
+            Cancel
+          </Button>
+          <Button type="submit" size="sm" variant="secondary" loading={save.isPending}>
+            Save
+          </Button>
+        </form>
+      ) : null}
+      {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
+      {note ? <p className="mt-2 text-xs text-muted">{note}</p> : null}
     </div>
   );
 }

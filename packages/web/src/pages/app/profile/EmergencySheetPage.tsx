@@ -12,6 +12,7 @@ import { SetPoaForm } from '../../../components/SetPoaForm';
 import { ConditionModal, EmergencyContactModal, GpModal, MedicationModal } from '../../../components/QuickAddModals';
 import { useProfile } from './ProfileLayout';
 import { poaLabel, providerTypeLabel, residenceTypeLabel, roomAreaTypeLabel, type Allergy, type CarePlan, type CircleMember, type MedicalCondition, type MedicationRecord, type Provider } from '../../../lib/care';
+import { formatDateOnly } from '../../../lib/datetime';
 
 type SheetModal = 'allergy' | 'contact' | 'poa' | 'condition' | 'medication' | 'gp' | null;
 
@@ -100,7 +101,7 @@ export function EmergencySheetPage() {
           <p className="text-sm text-muted">
             {[
               profile.preferred_name ? `Known as ${profile.preferred_name}` : null,
-              profile.date_of_birth ? `DOB ${format(new Date(profile.date_of_birth), 'd MMM yyyy')}` : null,
+              profile.date_of_birth ? `DOB ${formatDateOnly(profile.date_of_birth, 'd MMM yyyy')}` : null,
               profile.primary_language ? `Language: ${profile.primary_language}` : null,
             ]
               .filter(Boolean)
