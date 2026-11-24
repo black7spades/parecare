@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { CareDocument, CircleMember } from '../lib/care';
@@ -30,6 +30,10 @@ export function DocumentAttach({
   idPrefix?: string;
 }) {
   const queryClient = useQueryClient();
+  // The list as it is now, not as it was when an upload started: an upload
+  // takes a moment, and the new document must join whatever is ticked by then.
+  const latest = useRef(value);
+  latest.current = value;
   const [picking, setPicking] = useState(false);
   const [uploading, setUploading] = useState(false);
   const { data } = useQuery({
@@ -42,7 +46,7 @@ export function DocumentAttach({
     enabled: uploading,
   });
   const docs = data?.documents ?? [];
-  const chosen = value.map((id) => docs.find((d) => d.id === id)).filter((d): d is CareDocument => !!d);
+  const chosen = [...new Set(value)].map((id) => docs.find((d) => d.id === id)).filter((d): d is CareDocument => !!d);
   const available = docs.filter((d) => !value.includes(d.id));
 
   return (
@@ -86,7 +90,7 @@ export function DocumentAttach({
                 type="checkbox"
                 className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
                 checked={false}
-                onChange={() => onChange([...value, d.id])}
+                onChange={() => { if (!value.includes(d.id)) onChange([...value, d.id]); }}
               />
               <span className="text-ink break-words">{d.label}</span>
               {d.category_name ? <span className="text-xs text-muted">{d.category_name}</span> : null}
@@ -107,7 +111,11 @@ export function DocumentAttach({
             setUploading(false);
             setPicking(false);
             void queryClient.invalidateQueries({ queryKey: ['documents', profileId] });
-            onChange([...value, doc.id]);
+            // Ticked to go with the record straight away, once.
+            queryClient.setQueryData<{ documents: CareDocument[] }>(['documents', profileId], (old) =>
+              old && !old.documents.some((d) => d.id === doc.id) ? { ...old, documents: [doc, ...old.documents] } : old
+            );
+            if (!latest.current.includes(doc.id)) onChange([...latest.current, doc.id]);
           }}
         />
       ) : null}

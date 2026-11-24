@@ -16,6 +16,7 @@ import { coverMedDay, type ChartAdmin } from '../lib/marCoverage';
 import type { ContactSummary, MedicationRecord } from '../lib/care';
 import { ContactStrip, CONTACT_LINK } from './ContactStrip';
 import { usePareOn } from '../lib/aiStatus';
+import { offerDoseUndo } from '../lib/doseUndo';
 
 export interface AttentionItem {
   profile_id: string;
@@ -206,15 +207,18 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
           }
         }
       }
-      if (entries.length) {
-        await api.post(`/care-profiles/${profileId}/medications/administrations/batch`, { entries });
-      }
-      return entries.length;
+      if (!entries.length) return { count: 0, ids: [] as string[] };
+      const res = await api.post<{ ids?: string[] }>(`/care-profiles/${profileId}/medications/administrations/batch`, { entries });
+      return { count: entries.length, ids: res?.ids ?? [] };
     },
-    onSuccess: (_n, profileId) => {
-      void queryClient.invalidateQueries({ queryKey: ['pare-attention'] });
-      void queryClient.invalidateQueries({ queryKey: ['med-chart', profileId] });
-      void queryClient.invalidateQueries({ queryKey: ['calendar-upcoming', profileId] });
+    onSuccess: (done, profileId) => {
+      const refresh = () => {
+        void queryClient.invalidateQueries({ queryKey: ['pare-attention'] });
+        void queryClient.invalidateQueries({ queryKey: ['med-chart', profileId] });
+        void queryClient.invalidateQueries({ queryKey: ['calendar-upcoming', profileId] });
+      };
+      refresh();
+      offerDoseUndo({ profileId, ids: done.ids, message: `${done.count} ${done.count === 1 ? 'dose' : 'doses'} recorded as given.`, onChanged: refresh });
     },
   });
 

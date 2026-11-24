@@ -1,13 +1,14 @@
 import type { Knex } from 'knex';
 import { z } from 'zod';
 import { db } from '../config/database';
-import { env } from '../config/env';
 import { newLinkToken } from '../lib/tokens';
 import { enrichAppointments } from './booking';
 import { composeEmergencySheet, sheetDocumentIds, type EmergencySheet } from './emergencySheet';
 import { appointmentEvent, appointmentPlace, calendarText, type IcsAppointment } from './ics';
 import { personSummary, type ContactSummary } from './professionals';
 import { timeText, weekdayText } from '../lib/dayText';
+import type { Request } from 'express';
+import { publicBase } from '../lib/publicUrl';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -40,7 +41,8 @@ export interface ShareLinkRow {
 
 const THIRTY_DAYS = 30 * 24 * 3600 * 1000;
 
-export const shareUrl = (token: string): string => `${env.APP_URL}/shared/${token}`;
+/** Where a link opens. Give it the request, so the link uses the address people reach PareCare on. */
+export const shareUrl = (token: string, req?: Pick<Request, 'get' | 'protocol'>): string => `${publicBase(req)}/shared/${token}`;
 
 export async function createShareLink(
   conn: Conn,
@@ -83,10 +85,10 @@ export async function activeEmergencyLink(profileId: string, conn: Conn = db): P
 }
 
 /** A link as the screen shows it: where it goes and how often it has been opened. */
-export const linkOut = (l: ShareLinkRow) => ({
+export const linkOut = (l: ShareLinkRow, req?: Pick<Request, 'get' | 'protocol'>) => ({
   id: l.id,
   kind: l.kind,
-  url: shareUrl(l.token),
+  url: shareUrl(l.token, req),
   entity_id: l.entity_id,
   recipient_email: l.recipient_email,
   expires_at: l.expires_at,
@@ -178,12 +180,12 @@ export async function ownerZone(profileId: string, conn: Conn = db): Promise<str
 }
 
 /** One appointment as a calendar file. */
-export async function appointmentIcs(profileId: string, appointmentId: string, conn: Conn = db): Promise<{ filename: string; body: string } | null> {
+export async function appointmentIcs(profileId: string, appointmentId: string, conn: Conn = db, base?: string): Promise<{ filename: string; body: string } | null> {
   const found = await appointmentForSending(profileId, appointmentId, conn);
   if (!found || !found.shared.starts_at || found.shared.status === 'cancelled') return null;
   const zone = await ownerZone(profileId, conn);
   const safe = found.shared.title.replace(/[^\w -]+/g, '').trim().replace(/\s+/g, '-').toLowerCase() || 'appointment';
-  return { filename: `${safe}.ics`, body: calendarText(found.shared.title, appointmentEvent(found.ics, zone)) };
+  return { filename: `${safe}.ics`, body: calendarText(found.shared.title, appointmentEvent(found.ics, zone, base)) };
 }
 
 /** Who something is sent to: a contact, a circle person, the account holder, or an email typed in. */

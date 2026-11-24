@@ -129,6 +129,10 @@ export function StepAction({
           {format(new Date(appt.starts_at), appt.all_day ? 'EEE d MMM yyyy' : "EEE d MMM yyyy, h:mmaaa")}
         </Link>
       </span>
+    ) : appt.status === 'cancelled' ? (
+      <span className="text-xs text-muted">
+        <Link to={`/app/${profileId}/appointments?record=${appt.id}`} className={CONTACT_LINK}>Cancelled</Link>
+      </span>
     ) : (
       <span className="text-xs text-muted">
         Saved as not booked yet.{' '}

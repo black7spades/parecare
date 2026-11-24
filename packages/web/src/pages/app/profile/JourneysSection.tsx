@@ -16,7 +16,9 @@ import type { ChecklistItem, ChecklistNote, CircleMember } from '../../../lib/ca
 import { UploadDocumentModal } from './DocumentsPage';
 import { useProfile } from './ProfileLayout';
 import {
+  ageInYears,
   matchingLifeStages,
+  suggestedForWords,
   type CareJourney,
   type CareJourneyPhase,
   type JourneyTemplateFull,
@@ -728,8 +730,16 @@ function EnrolModal({
     const haystack = `${t.name} ${t.description ?? ''}`.toLowerCase();
     return words.some((w) => haystack.includes(w));
   });
-  const suggested = filtered.filter((t) => t.life_stage_ids.some((id) => matchedIds.has(id)));
-  const rest = filtered.filter((t) => !t.life_stage_ids.some((id) => matchedIds.has(id)));
+  // Suggested by age: the everyday journeys first. Journeys for the end of a
+  // life fit any age, so they wait in the rest of the library, never at the
+  // top for someone who is simply getting older.
+  const KIND_ORDER: Record<string, number> = { life_stage: 0, event: 1, condition: 2 };
+  const age = dateOfBirth ? ageInYears(dateOfBirth) : null;
+  const ageing = (t: JourneyTemplateSummary) => t.slug === 'more-help-at-home' || t.slug === 'life-in-residential-care';
+  const fits = (t: JourneyTemplateSummary) =>
+    t.kind !== 'end_of_life' && (!ageing(t) || (age !== null && age >= 65)) && t.life_stage_ids.some((id) => matchedIds.has(id));
+  const suggested = filtered.filter(fits).sort((a, b) => (KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9));
+  const rest = filtered.filter((t) => !fits(t));
 
   const enrolMutation = useMutation({
     mutationFn: (template_id: string) => api.post(`/care-profiles/${profileId}/journeys`, { template_id }),
@@ -776,7 +786,7 @@ function EnrolModal({
             {matched.length > 0 && suggested.length > 0 ? (
               <>
                 <p className="text-xs font-medium text-muted uppercase tracking-wide">
-                  Suggested for {matched.map((s) => s.name.toLowerCase()).join(', ')}
+                  Suggested for {suggestedForWords({ date_of_birth: dateOfBirth, due_date: dueDate }, careName) ?? careName ?? 'them'}
                 </p>
                 {suggested.map(templateRow)}
               </>

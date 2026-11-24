@@ -6,19 +6,35 @@
 
 const SHEET_KEY_PREFIX = 'parecare.emergency-sheet.';
 
-/** The scripts and styles this page started with, so it can start again offline. */
+/**
+ * The scripts and styles this page started with, so it can start again
+ * offline: every file the browser fetched for it, whatever started the fetch,
+ * plus every script and style named in the page. The offline helper follows
+ * each script's own imports from there, so new file names never need listing.
+ */
 function pageAssets(): string[] {
+  const urls = new Set<string>();
   try {
-    return (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
-      .filter((e) => ['script', 'link', 'css'].includes(e.initiatorType))
-      .map((e) => e.name)
-      .filter((u) => {
-        const url = new URL(u, window.location.origin);
-        return url.origin === window.location.origin && !url.pathname.startsWith('/api/');
-      });
+    for (const e of performance.getEntriesByType('resource') as PerformanceResourceTiming[]) urls.add(e.name);
   } catch {
-    return [];
+    /* no timing list in this browser */
   }
+  try {
+    document.querySelectorAll<HTMLScriptElement>('script[src]').forEach((s) => urls.add(s.src));
+    document.querySelectorAll<HTMLLinkElement>('link[href]').forEach((l) => urls.add(l.href));
+  } catch {
+    /* nothing named */
+  }
+  // This file's own script, which holds the page.
+  urls.add(import.meta.url);
+  return [...urls].filter((u) => {
+    try {
+      const url = new URL(u, window.location.origin);
+      return url.origin === window.location.origin && !url.pathname.startsWith('/api/');
+    } catch {
+      return false;
+    }
+  });
 }
 
 function post(message: unknown): boolean {
@@ -38,8 +54,8 @@ function post(message: unknown): boolean {
 }
 
 /** Keep this page and its data for opening with no signal. */
-export function keepOffline(json: Array<{ url: string; body: unknown }>): void {
-  post({ type: 'keep-offline', assets: pageAssets(), json: json.map((j) => ({ url: `/api/v1${j.url}`, body: j.body })) });
+export function keepOffline(json: Array<{ url: string; body: unknown }>, pageFiles: string[] = []): void {
+  post({ type: 'keep-offline', assets: [...pageAssets(), ...pageFiles], json: json.map((j) => ({ url: `/api/v1${j.url}`, body: j.body })) });
 }
 
 /** Forget kept data: some links, or everything. */

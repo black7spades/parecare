@@ -93,28 +93,91 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+/**
+ * Every file the app needs to start, found rather than listed, so it keeps
+ * working whatever the build names its files: the scripts and styles the
+ * start page names, the ones the page says it used, and every script those
+ * scripts load in turn. Scripts loaded only on demand, such as admin pages,
+ * are left out.
+ */
+const ASSET = /\.(?:m?js|jsx|tsx?|css|woff2?|ttf|otf|svg|png|webmanifest)$/i;
+const SCRIPT = /\.(?:m?js|jsx|tsx?)$/i;
+const sameOriginAsset = (u, base) => {
+  try {
+    const url = new URL(u, base);
+    if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return null;
+    return ASSET.test(url.pathname) ? url.pathname + url.search : null;
+  } catch {
+    return null;
+  }
+};
+const refsInPage = (html, base) => {
+  const out = [];
+  const tag = /<(?:script|link)\b[^>]*>/gi;
+  let m;
+  while ((m = tag.exec(html))) {
+    const attr = /\b(?:src|href)\s*=\s*["']([^"']+)["']/i.exec(m[0]);
+    const path = attr ? sameOriginAsset(attr[1], base) : null;
+    if (path) out.push(path);
+  }
+  return out;
+};
+// Static imports only: `import x from "./a.js"`, `import "./a.js"`, `export * from "./a.js"`.
+// A dynamic import("./a.js") has a bracket and is not matched.
+const importsInScript = (code, base) => {
+  const out = [];
+  const re = /\b(?:from|import)\s*["']([^"']+)["']/g;
+  let m;
+  while ((m = re.exec(code))) {
+    const path = sameOriginAsset(m[1], base);
+    if (path) out.push(path);
+  }
+  return out;
+};
+
+async function keepAssets(cache, start) {
+  const seen = new Set();
+  const queue = [...start];
+  while (queue.length && seen.size < 300) {
+    const path = queue.shift();
+    if (seen.has(path)) continue;
+    seen.add(path);
+    try {
+      const r = await fetch(path, { credentials: 'same-origin' });
+      if (!r.ok) continue;
+      if (SCRIPT.test(new URL(path, self.location.origin).pathname)) {
+        const code = await r.clone().text();
+        for (const next of importsInScript(code, new URL(path, self.location.origin))) if (!seen.has(next)) queue.push(next);
+      }
+      await cache.put(path, r);
+    } catch {
+      /* best effort: what is already kept stays */
+    }
+  }
+}
+
 self.addEventListener('message', (event) => {
   const data = event.data || {};
   if (data.type === 'keep-offline') {
     event.waitUntil(
       caches.open(OFFLINE_CACHE).then(async (cache) => {
         // The page itself: the app's start page, used for any kept page.
+        const start = [];
         try {
           const shell = await fetch('/', { credentials: 'same-origin' });
-          if (shell.ok) await cache.put('/__shell', shell);
+          if (shell.ok) {
+            const html = await shell.clone().text();
+            start.push(...refsInPage(html, self.location.origin));
+            await cache.put('/__shell', shell);
+          }
         } catch {
           /* already kept, or no connection */
         }
         for (const u of Array.isArray(data.assets) ? data.assets : []) {
-          const key = keyFor(u);
-          if (!key) continue;
-          try {
-            const r = await fetch(key, { credentials: 'same-origin' });
-            if (r.ok) await cache.put(key, r);
-          } catch {
-            /* best effort */
-          }
+          const path = sameOriginAsset(u, self.location.origin);
+          if (path) start.push(path);
         }
+        await keepAssets(cache, start);
         // The data the page shows, as the page already has it, marked with when it was saved.
         for (const item of Array.isArray(data.json) ? data.json : []) {
           const key = keyFor(item.url);

@@ -44,6 +44,7 @@ import { bookingHref } from '../../../lib/booking';
 import { useNavigate } from 'react-router-dom';
 import type { ContactSummary } from '../../../lib/care';
 import { askIfHome } from '../../../stores/homeDose';
+import { offerDoseUndo } from '../../../lib/doseUndo';
 
 const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
 
@@ -228,11 +229,18 @@ export function MedicationsPage() {
 
   // Record a dose now for every selected medication in one shot.
   const bulkLog = useMutation({
-    mutationFn: () => api.post<{ recorded: number }>(`/care-profiles/${profile.id}/medications/administrations/batch`, {
+    mutationFn: () => api.post<{ recorded: number; ids?: string[] }>(`/care-profiles/${profile.id}/medications/administrations/batch`, {
       // Each is the prescribed dose by the prescribed route, so both checks are confirmed.
       entries: dv.selectedRows.map((m) => ({ medication_id: m.id, administered_at: new Date().toISOString(), status: 'given', right_dose: true, right_route: true })),
     }),
-    onSuccess: (res) => { askIfHome(profile.id, res); setActionError(''); setConfirmBulkLog(false); dv.clearSelection(); invalidate(); },
+    onSuccess: (res) => {
+      askIfHome(profile.id, res);
+      setActionError('');
+      setConfirmBulkLog(false);
+      dv.clearSelection();
+      invalidate();
+      offerDoseUndo({ profileId: profile.id, ids: res?.ids, message: `${res?.recorded ?? 0} ${res?.recorded === 1 ? 'dose' : 'doses'} recorded as given.`, onChanged: invalidate });
+    },
     onError: (err) => { setConfirmBulkLog(false); failed('The doses were not recorded. Try again.')(err); },
   });
 
@@ -438,6 +446,7 @@ export function MedicationsPage() {
               resource="medications"
               canImport={canManageMeds}
               onImported={invalidate}
+              importNote="A medicine already on the list, with the same name and dose, is matched rather than added again: anything the file changes is updated and kept in its history, and the rest is left as it is."
               templateHeaders={['Name', 'Units per dose', 'Dose amount', 'Dose measure', 'Type', 'Route', 'With food', 'As needed', 'Times', 'How often', 'Instructions', 'Critical', 'Condition', 'As needed for', 'Hours between doses', 'Most in 24 hours', 'A full pack provides', 'Units left', 'Packs on hand', 'Repeats due', 'Supplier', 'Order link', 'Prescribed by', 'Prescriber phone', 'Repeats left', 'Last day of the course', 'Active', 'Last day taken', 'Why it stopped']}
               templateSample={['Metformin', '1', '500', 'mg', 'Tablet', 'By mouth', 'Yes', 'No', '08:00; 20:00', 'Twice a day', 'Take with a full glass of water', 'No', 'Type 2 diabetes', '', '', '', '60', '42', '2', '2026-12-01', 'City Pharmacy', 'https://citypharmacy.example/reorder', 'Dr Rachel Cohen', '03 9560 4422', '5', '', 'Yes', '', '']}
             />

@@ -31,3 +31,7 @@
 ## Block 12 re-walk (2026-11-25, 0.55.0)
 
 Step 3 FAIL. A request form uploaded from Attach a document inside the new test form is filed in Documents but not ticked, so the test says Nothing to bring.
+
+## Wave 10 re-walk (2026-11-25, 0.55.1)
+
+Step 3 PASS. A request form uploaded from Attach a document inside the new test form is ticked to bring at once and saved with the test.

@@ -1,5 +1,6 @@
 import path from 'path';
 import { Router } from 'express';
+import { publicBase } from '../lib/publicUrl';
 import { z } from 'zod';
 import { db } from '../config/database';
 import { getStorageConfig } from '../config/settings';
@@ -28,7 +29,7 @@ emergencySheetRouter.get('/', requireAuth, async (req, res) => {
     return;
   }
   const link = await activeEmergencyLink(sheet.profile.id);
-  res.json({ sheet, link: link ? linkOut(link) : null });
+  res.json({ sheet, link: link ? linkOut(link, req) : null });
 });
 
 /**
@@ -42,7 +43,7 @@ shareLinksRouter.get('/', requireAuth, async (req, res) => {
   const q = db('share_links').where({ care_profile_id: String(req.params['id']) }).orderBy('created_at', 'desc').limit(200);
   if (req.query['kind']) q.where({ kind: String(req.query['kind']) });
   const links = (await q) as ShareLinkRow[];
-  res.json({ links: links.map(linkOut) });
+  res.json({ links: links.map((l) => linkOut(l, req)) });
 });
 
 shareLinksRouter.post('/', requireAuth, async (req, res) => {
@@ -57,17 +58,17 @@ shareLinksRouter.post('/', requireAuth, async (req, res) => {
   const profileId = String(req.params['id']);
   const existing = await activeEmergencyLink(profileId);
   if (existing) {
-    res.json({ link: linkOut(existing) });
+    res.json({ link: linkOut(existing, req) });
     return;
   }
   try {
     const link = await createShareLink(db, { profileId, kind: 'emergency_sheet', createdBy: req.account!.id });
-    res.status(201).json({ link: linkOut(link) });
+    res.status(201).json({ link: linkOut(link, req) });
   } catch (err) {
     // Two taps at once: one link is made, and both get it.
     const made = await activeEmergencyLink(profileId);
     if (!made) throw err;
-    res.json({ link: linkOut(made) });
+    res.json({ link: linkOut(made, req) });
   }
 });
 
@@ -85,7 +86,7 @@ shareLinksRouter.delete('/:linkId', requireAuth, async (req, res) => {
     res.status(404).json({ error: 'That link is already turned off.', code: 'NOT_FOUND' });
     return;
   }
-  res.json({ link: linkOut(row as ShareLinkRow) });
+  res.json({ link: linkOut(row as ShareLinkRow, req) });
 });
 
 /** Undo a turn off: the same link works again. */
@@ -102,7 +103,7 @@ shareLinksRouter.post('/:linkId/restore', requireAuth, async (req, res) => {
   }
   // One emergency sheet link at a time: a newer one stays the one in use.
   if (!row.revoked_at) {
-    res.json({ link: linkOut(row) });
+    res.json({ link: linkOut(row, req) });
     return;
   }
   if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) {
@@ -114,7 +115,7 @@ shareLinksRouter.post('/:linkId/restore', requireAuth, async (req, res) => {
     return;
   }
   const [restored] = await db('share_links').where({ id: row.id }).update({ revoked_at: null }).returning('*');
-  res.json({ link: linkOut(restored as ShareLinkRow) });
+  res.json({ link: linkOut(restored as ShareLinkRow, req) });
 });
 
 /**
@@ -151,7 +152,7 @@ sharedRouter.get('/:token/calendar.ics', async (req, res) => {
     res.status(opened.status).send(turnedOff(opened.shared_by));
     return;
   }
-  const file = opened.page.kind === 'appointment' ? await appointmentIcs(opened.link.care_profile_id, opened.page.appointment.id) : null;
+  const file = opened.page.kind === 'appointment' ? await appointmentIcs(opened.link.care_profile_id, opened.page.appointment.id, undefined, publicBase(req)) : null;
   if (!file) {
     res.status(404).send('This link has no appointment with a date to add.');
     return;

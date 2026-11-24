@@ -368,7 +368,7 @@ export function OutcomeModal({
                       </Link>
                     ) : null}
                   </div>
-                  {s.led_to && !s.led_to.starts_at && canEdit && !s.completed ? (
+                  {s.led_to && !s.led_to.starts_at && s.led_to.status !== 'cancelled' && canEdit && !s.completed ? (
                     <Button size="xs" variant="ghost" className="whitespace-nowrap" onClick={() => onAddDate(s.led_to!.id)}>
                       Not booked yet, book it
                     </Button>
@@ -377,12 +377,14 @@ export function OutcomeModal({
                     {s.led_to
                       ? s.led_to.starts_at
                         ? `Booked for ${format(new Date(s.led_to.starts_at), 'd MMM')}`
-                        : null
+                        : s.led_to.status === 'cancelled'
+                          ? 'Cancelled'
+                          : null
                       : s.completed
                         ? `Done${s.completed_at ? ` ${format(new Date(s.completed_at), 'd MMM')}` : ''}`
                         : `Due ${format(new Date(s.next_due_at), 'd MMM')}`}
                   </span>
-                  {canEdit && !s.completed && s.led_to && !s.led_to.starts_at ? (
+                  {canEdit && !s.completed && s.led_to && !s.led_to.starts_at && s.led_to.status !== 'cancelled' ? (
                     <span className="flex gap-1">
                       <Button size="xs" variant="secondary" onClick={() => onAddDate(s.led_to!.id)}>Book it</Button>
                     </span>

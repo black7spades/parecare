@@ -5,8 +5,28 @@ import { Modal } from './ui/Modal';
 
 interface ImportSummary {
   imported: number;
+  /** Already on the list and changed by the file, where the list matches them. */
+  updated?: number;
+  updated_names?: string[];
+  /** Already on the list and the same as the file, so left as they are. */
+  unchanged?: number;
   skipped: number;
   errors: { row: number; message: string }[];
+}
+
+/** A list of names as people say it: "A, B and C". */
+const nameList = (names: string[]) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
+
+/** What the import did, in a sentence or two. */
+function summaryLines(s: ImportSummary, resource: string): string[] {
+  const one = resource.replace(/s$/, '');
+  const count = (n: number) => `${n} ${n === 1 ? one : resource}`;
+  const lines: string[] = [];
+  if (s.imported > 0 || (!s.updated && !s.unchanged)) lines.push(`Added ${count(s.imported)}.`);
+  if (s.updated) lines.push(`Updated ${count(s.updated)} already on the list${s.updated_names?.length ? `: ${nameList(s.updated_names)}` : ''}.`);
+  if (s.unchanged) lines.push(`${count(s.unchanged)} ${s.unchanged === 1 ? 'was' : 'were'} already on the list with nothing new, so ${s.unchanged === 1 ? 'it was' : 'they were'} left as ${s.unchanged === 1 ? 'it was' : 'they were'}.`);
+  if (s.skipped > 0) lines.push(`${s.skipped} ${s.skipped === 1 ? 'row' : 'rows'} could not be read, listed below.`);
+  return lines;
 }
 
 interface ImportExportProps {
@@ -22,6 +42,8 @@ interface ImportExportProps {
   templateHeaders: string[];
   /** Optional example row shown in the template. */
   templateSample?: string[];
+  /** What happens to rows already on the list, said under Import. */
+  importNote?: string;
 }
 
 function download(filename: string, body: BlobPart, type: string) {
@@ -42,7 +64,7 @@ function csvCell(v: string): string {
  * `GET {basePath}/export?format=` and `POST {basePath}/import`. Handles CSV
  * and JSON, a blank template download, and an import result summary.
  */
-export function ImportExport({ basePath, resource, canImport, onImported, templateHeaders, templateSample }: ImportExportProps) {
+export function ImportExport({ basePath, resource, canImport, onImported, templateHeaders, templateSample, importNote }: ImportExportProps) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<'csv' | 'json' | null>(null);
   const [importing, setImporting] = useState(false);
@@ -115,7 +137,7 @@ export function ImportExport({ basePath, resource, canImport, onImported, templa
               <h3 className="text-sm font-semibold text-ink mb-1">Import</h3>
               <p className="text-xs text-muted mb-2">
                 Upload a CSV or JSON file. Column headers are matched flexibly, so exports from a pharmacy or
-                spreadsheet usually import as-is. New rows are added; nothing is overwritten.
+                spreadsheet usually import as-is. {importNote ?? 'New rows are added; nothing is overwritten.'}
               </p>
               <input
                 ref={fileInput}
@@ -134,10 +156,9 @@ export function ImportExport({ basePath, resource, canImport, onImported, templa
 
           {summary ? (
             <div className="rounded-md border border-border bg-surface p-3 text-sm">
-              <p className="text-ink font-medium">
-                Imported {summary.imported} {resource}
-                {summary.skipped > 0 ? `, skipped ${summary.skipped}` : ''}.
-              </p>
+              {summaryLines(summary, resource).map((line) => (
+                <p key={line} className="text-ink font-medium">{line}</p>
+              ))}
               {summary.errors.length > 0 ? (
                 <ul className="mt-2 list-disc pl-5 text-xs text-amber-700 space-y-0.5 max-h-40 overflow-y-auto">
                   {summary.errors.slice(0, 20).map((e, i) => <li key={i}>{e.message}</li>)}

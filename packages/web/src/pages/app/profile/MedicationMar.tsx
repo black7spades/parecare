@@ -5,6 +5,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, addMonths, addWeeks, eachDayOfInterval, endOfDay, endOfMonth, endOfWeek, isSameDay, startOfDay, startOfMonth, startOfWeek, subMonths } from 'date-fns';
 import { format } from '../../../lib/dateFormat';
+import { formatDateOnly } from '../../../lib/datetime';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { PencilIcon, CrossIcon } from '../../../components/ui/icons';
@@ -19,6 +20,7 @@ import { RecordPanel } from '../../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { askIfHome } from '../../../stores/homeDose';
+import { offerDoseUndo } from '../../../lib/doseUndo';
 import type { OpenStay } from '../../../lib/lifeEvents';
 
 const SELECT = 'rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -169,6 +171,7 @@ function MarChart({ profileId, personName, callName, canAdminister, empty }: { p
     administrations: ChartAdmin[];
     paused_by_stay?: OpenStay | null;
     stays?: Array<{ id: string; admitted_on: string; discharged_on: string | null }>;
+    died_on?: string | null;
   };
   const { data } = useQuery({
     queryKey: chartKey,
@@ -182,11 +185,16 @@ function MarChart({ profileId, personName, callName, canAdminister, empty }: { p
   const stays = data?.stays ?? [];
   // A day in hospital, open stay or past: the day they went in, up to the
   // day before they came home.
+  // From the day someone died, nothing is due either.
+  const diedOn = data?.died_on ? String(data.died_on).slice(0, 10) : null;
+  const afterDeath = (d: Date) => !!diedOn && format(d, 'yyyy-MM-dd') > diedOn;
+  const deathDay = (d: Date) => !!diedOn && format(d, 'yyyy-MM-dd') === diedOn;
   const inHospitalOn = (d: Date) => {
     const day = format(d, 'yyyy-MM-dd');
-    return stays.some((s) => day >= s.admitted_on && (!s.discharged_on || day < s.discharged_on));
+    return afterDeath(d) || deathDay(d) || stays.some((s) => day >= s.admitted_on && (!s.discharged_on || day < s.discharged_on));
   };
-  const pausedDay = inHospitalOn(anchor);
+  // The day itself still shows what was given, so it can be checked or filled in.
+  const pausedDay = inHospitalOn(anchor) && !deathDay(anchor);
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['med-chart', profileId] });
@@ -216,7 +224,19 @@ function MarChart({ profileId, personName, callName, canAdminister, empty }: { p
       return { prev };
     },
     onError: (_e, _v, ctx) => { if (ctx?.prev !== undefined) queryClient.setQueryData(chartKey, ctx.prev); },
-    onSuccess: (res) => askIfHome(profileId, res),
+    onSuccess: (res, entries) => {
+      askIfHome(profileId, res);
+      // One tap records it, so one tap takes it back.
+      const one = entries.length === 1 ? meds.find((m) => m.id === entries[0]!.medication_id) : null;
+      offerDoseUndo({
+        profileId,
+        ids: (res as { ids?: string[] } | undefined)?.ids,
+        message: one
+          ? `${one.name} at ${format(new Date(entries[0]!.scheduled_for ?? entries[0]!.administered_at), 'HH:mm')} recorded as given.`
+          : `${entries.length} doses recorded as given.`,
+        onChanged: invalidate,
+      });
+    },
     onSettled: () => invalidate(),
   });
 
@@ -325,19 +345,28 @@ function MarChart({ profileId, personName, callName, canAdminister, empty }: { p
       ) : period === 'day' && pausedDay ? (
         <div className="card text-center py-6 space-y-1">
           <p className="text-sm text-ink">
-            {stay && format(anchor, 'yyyy-MM-dd') >= stay.admitted_on
+            {afterDeath(anchor)
+              ? `${callName ?? 'They'} died on ${formatDateOnly(diedOn!, 'd MMMM yyyy')}, so nothing is due.`
+              : stay && format(anchor, 'yyyy-MM-dd') >= stay.admitted_on
               ? `Nothing is due here while ${callName ?? 'you are'}${callName ? ' is' : ''} in ${stay.hospital_name ?? 'hospital'}. The hospital gives the medicines.`
               : `${callName ? `${callName} was` : 'You were'} in hospital this day, so nothing was due here. The hospital gave the medicines.`}
           </p>
-          {stay ? <p className="text-xs text-muted">Doses start being due again once the discharge is recorded.</p> : null}
+          {stay && !afterDeath(anchor) ? <p className="text-xs text-muted">Doses start being due again once the discharge is recorded.</p> : null}
         </div>
       ) : period === 'day' ? (
-        <DayGrid meds={meds} admins={admins} day={anchor} now={now} canAdminister={canAdminister}
+        <>
+        {deathDay(anchor) ? (
+          <p className="text-sm text-ink rounded-md border border-border bg-surface px-3 py-2">
+            {`${callName ?? 'They'} died on ${formatDateOnly(diedOn!, 'd MMMM yyyy')}. Doses given that day are kept here; nothing more is due.`}
+          </p>
+        ) : null}
+        <DayGrid meds={meds} admins={admins} day={anchor} now={now} canAdminister={canAdminister} nothingDue={deathDay(anchor)}
           onQuick={quick} onLogAllDue={logAllDue}
           onLogDetail={(med, slotISO) => {
             const fallback = isSameDay(anchor, now) ? now : new Date(`${format(anchor, 'yyyy-MM-dd')}T12:00:00`);
             setRecording({ med, slotISO: slotISO ?? undefined, whenLocal: format(slotISO ? new Date(slotISO) : fallback, "yyyy-MM-dd'T'HH:mm") });
           }} />
+        </>
       ) : (
         <MonthGrid meds={meds} days={days} admins={admins} now={now} onPickDay={(d) => { setPeriod('day'); setAnchor(d); }} />
       )}
@@ -362,15 +391,20 @@ function MarChart({ profileId, personName, callName, canAdminister, empty }: { p
 // to log it "given" instantly) plus any doses recorded that day as coloured
 // chips, and a "log" button for an ad-hoc or exception dose. Always renders,
 // even for medications with no scheduled times.
-function DayGrid({ meds, admins, day, now, canAdminister, onQuick, onLogAllDue, onLogDetail }: {
+function DayGrid({ meds, admins, day, now, canAdminister, onQuick, onLogAllDue, onLogDetail, nothingDue = false }: {
   meds: MedicationRecord[]; admins: ChartAdmin[]; day: Date; now: Date; canAdminister: boolean;
+  /** The day someone died: doses given show, nothing is still due. */
+  nothingDue?: boolean;
   onQuick: (medId: string, scheduledFor: string) => void;
   onLogAllDue: () => void;
   onLogDetail: (med: MedicationRecord, slotISO: string | null) => void;
 }) {
   const dayStr = format(day, 'yyyy-MM-dd');
   const chipBase = 'inline-flex items-center gap-1 h-7 rounded px-2 text-xs font-medium';
-  const covers = meds.map((m) => ({ m, cover: coverMedDay(m, dayStr, admins, now) }));
+  const covers = meds.map((m) => {
+    const cover = coverMedDay(m, dayStr, admins, now);
+    return { m, cover: nothingDue ? { ...cover, slots: cover.slots.filter((sv) => sv.covered) } : cover };
+  });
   // Something is due only when a passed slot has no dose covering it, so once
   // every scheduled dose is given (however it was recorded) the button goes.
   const anyDue = covers.some(({ cover }) => cover.slots.some((sv) => sv.past && !sv.covered));

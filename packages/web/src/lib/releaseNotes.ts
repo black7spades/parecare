@@ -20,6 +20,27 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.55.1',
+    date: '2026-11-25',
+    summary: 'Fixes from walking every scenario: the emergency sheet opens offline, a dose change asks why and who said so, imports never double medicines, and alerts that need acting on stay at the top.',
+    groups: [
+      { heading: 'Fixed', items: [
+        'The emergency sheet opens with no internet. Save on this phone now keeps everything the sheet needs to start, so it opens with no connection instead of a blank page.',
+        'Changing a dose asks why and who said so. Changing a dose or its times through Edit now asks why it changed and who said so, the same as Record a change, and keeps both in the medicine\'s history.',
+        'A document uploaded for a visit goes with it. A document uploaded through Attach a document while adding an appointment or a test is ticked as one to bring straight away.',
+        'Importing the same medicines twice adds nothing twice. A medicine already on the list, with the same name and dose, is matched instead of added again. Anything the file changes is updated and kept in its history, the rest is left alone, and the import says what it added, updated and left as it was.',
+        'No doses to give in hospital or after a death. The Medications today tile on the overview, the calendar and the medication record agree: nothing is due while someone is in hospital, or from the day they died.',
+        'Dose and supply alerts stay at the top of the bell. A dose not given or a medicine running low stays at the top of the bell until it is dealt with, however much else happens.',
+        'Decide by shows in the move into care table. The date to decide how the room is paid for now shows in the table and on the move, even once a choice is made.',
+        'A cancelled appointment with no date says it is cancelled. It no longer offers Book it, and the to-do to book it closes.',
+        'Journey suggestions fit the person\'s age. The journey lists say who they are suggested for, such as someone aged 36, and journeys for the end of a life no longer lead the list.',
+        'Undo after one tap. Recording a dose with one tap on the medication record, Log all due doses or Record a dose for several medicines now offers Undo straight away.',
+        'The add to home screen note no longer covers anything. It sits at the top of the page instead of over the dose buttons.',
+        'Shared links work when no web address is set. A link to the emergency sheet, a report, an appointment or the calendar feed uses the address PareCare was opened on, port and all.',
+      ] },
+    ],
+  },
+  {
     version: '0.55.0',
     date: '2026-11-25',
     summary: 'PareCare now works in any country: the services, ID numbers, funding schemes, yearly checks, words and date formats follow the country, and every service can be changed, added and checked once a year.',

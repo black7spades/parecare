@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { publicBase } from '../lib/publicUrl';
 import type { Knex } from 'knex';
 import { z } from 'zod';
 import { db } from '../config/database';
@@ -16,6 +17,7 @@ import {
   addBookingTodo,
   appointmentInputSchema,
   bookAppointment,
+  closeBookingTodos,
   enrichAppointments,
   moveLater,
   removePreparationTasks,
@@ -462,7 +464,7 @@ appointmentsRouter.patch('/:appointmentId', requireAuth, async (req, res) => {
  * the place, who it is with and their phone, what to bring and two alarms.
  */
 appointmentsRouter.get('/:appointmentId/calendar.ics', requireAuth, async (req, res) => {
-  const file = await appointmentIcs(String(req.params['id']), String(req.params['appointmentId']));
+  const file = await appointmentIcs(String(req.params['id']), String(req.params['appointmentId']), undefined, publicBase(req));
   if (!file) {
     res.status(404).json({ error: 'This appointment has no date yet, so there is nothing to add to a calendar.', code: 'NOT_FOUND' });
     return;
@@ -515,8 +517,8 @@ appointmentsRouter.post('/:appointmentId/send', requireAuth, async (req, res) =>
     db('care_profiles').where({ id: profileId }).first('full_name', 'preferred_name') as Promise<{ full_name: string; preferred_name: string | null } | undefined>,
   ]);
   const name = profile?.preferred_name || profile?.full_name || 'Someone';
-  const ics = await appointmentIcs(profileId, appointmentId);
-  const url = shareUrl(link.token);
+  const ics = await appointmentIcs(profileId, appointmentId, undefined, publicBase(req));
+  const url = shareUrl(link.token, req);
   let sent = false;
   try {
     sent = await sendShareEmail(
@@ -531,12 +533,12 @@ appointmentsRouter.post('/:appointmentId/send', requireAuth, async (req, res) =>
     res.status(502).json({
       error: `The email to ${recipient.name} did not go. Copy the link and send it another way, or try again in a minute.`,
       code: 'EMAIL_FAILED',
-      link: linkOut(link),
+      link: linkOut(link, req),
       recipient: { name: recipient.name, email: recipient.email },
     });
     return;
   }
-  res.status(201).json({ sent, link: linkOut(link), recipient: { name: recipient.name, email: recipient.email } });
+  res.status(201).json({ sent, link: linkOut(link, req), recipient: { name: recipient.name, email: recipient.email } });
 });
 
 /** Stop a repeating appointment here. Later ones nobody has added to are removed. */
@@ -627,6 +629,10 @@ appointmentsRouter.post('/bulk', requireAuth, async (req, res) => {
     return;
   }
   const ids = (await db('appointments').where({ care_profile_id: req.params['id'] }).whereIn('id', parsed.data.ids).pluck('id')) as string[];
+  // Only the ones being cancelled now close their booking to-do.
+  const newlyCancelled = parsed.data.action === 'cancel'
+    ? ((await db('appointments').whereIn('id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']).whereNot('status', 'cancelled').pluck('id')) as string[])
+    : [];
   // Attended, cancelled or gone: no night-before reminder.
   await removePreparationTasks(db, ids);
   const scope = db('appointments').whereIn('id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']);
@@ -640,6 +646,7 @@ appointmentsRouter.post('/bulk', requireAuth, async (req, res) => {
     status: parsed.data.action === 'complete' ? 'completed' : 'cancelled',
     updated_at: db.fn.now(),
   });
+  if (newlyCancelled.length) await closeBookingTodos(db, String(req.params['id']), newlyCancelled);
   await refreshReferrals(db, String(req.params['id']));
   res.json({ updated });
 });

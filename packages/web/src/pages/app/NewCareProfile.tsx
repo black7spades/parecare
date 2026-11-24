@@ -5,7 +5,7 @@ import { api } from '../../api/client';
 import { Input, Textarea } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { PET_SPECIES, petRelationshipFor, type CareProfile, type ProfileKind } from '../../lib/care';
-import { ageInYears, matchingLifeStages, type JourneyTemplateSummary, type LifeStage } from '../../lib/journeys';
+import { ageInYears, matchingLifeStages, suggestedForWords, type JourneyTemplateSummary, type LifeStage } from '../../lib/journeys';
 import { RelationshipSelect } from '../../components/RelationshipSelect';
 import { ProfileOnboarding } from './ProfileOnboarding';
 import { useAuthStore } from '../../stores/auth';
@@ -464,7 +464,7 @@ function JourneyPicker({
       <p className="block text-sm font-medium text-ink mb-1">Care journeys to start with</p>
       <p className="text-xs text-muted mb-2">
         {matched.length > 0 && suggested.length > 0
-          ? `A few that fit ${matched.map((s) => s.name.toLowerCase()).join(' and ')}. `
+          ? `A few that fit ${suggestedForWords({ date_of_birth: dateOfBirth || null, due_date: dueDate || null }) ?? 'them'}. `
           : 'Enter a date of birth or a due date to see the few that fit. '}
         Optional, and journeys can be added or changed at any time.
       </p>
@@ -531,8 +531,8 @@ function PetJourneyPicker({ selected, onChange }: { selected: string[]; onChange
     <div>
       <p className="block text-sm font-medium text-ink mb-1">Care journeys to start with</p>
       <p className="text-xs text-muted mb-2">
-        Optional. A journey gives your pet phases to move through and a checklist for each one. You can add or change
-        them at any time.
+        Optional. A journey gives your pet phases to move through and a checklist for each one. Add or change them at
+        any time.
       </p>
       <div className="max-h-44 overflow-y-auto rounded-md border border-border divide-y divide-border">
         {templates.map((t) => (
