@@ -67,7 +67,7 @@ export function EmergencySheetPage() {
     keepOffline([
       { url: `/care-profiles/${profile.id}/emergency-sheet`, body: { sheet: sheetData.sheet, link: null } },
       { url: `/care-profiles/${profile.id}`, body: queryClient.getQueryData(['care-profile', profile.id]) },
-    ]);
+    ], [import.meta.url]);
   };
   useEffect(() => {
     if (data?.sheet && !data.offline_saved_at && readKept(profile.id)) keepNow(data);

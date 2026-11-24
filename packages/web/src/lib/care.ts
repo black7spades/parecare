@@ -836,7 +836,7 @@ export interface ConditionAppointment {
     type_name: string;
     completed: boolean;
     next_due_at: string;
-    led_to: { id: string; title: string; starts_at: string | null } | null;
+    led_to: { id: string; title: string; starts_at: string | null; status?: string } | null;
   }>;
 }
 

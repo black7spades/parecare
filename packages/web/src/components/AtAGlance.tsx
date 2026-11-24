@@ -88,7 +88,7 @@ export function AtAGlance({ profileId }: { profileId: string }) {
     : calendar.isError
       ? trouble
       : todaysDoses.length === 0
-        ? 'None scheduled'
+        ? 'Nothing to give today'
         : toGive === 0
           ? 'All given'
           : `${toGive} ${toGive === 1 ? 'dose' : 'doses'} to give`;

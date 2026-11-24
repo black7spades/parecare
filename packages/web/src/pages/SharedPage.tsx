@@ -79,7 +79,7 @@ export function SharedPage() {
     // An emergency sheet stays on the phone that opened it, for no signal.
     if (data && !data.offline_saved_at && data.kind === 'emergency_sheet') {
       keep(token, data);
-      keepOffline([{ url: `/shared/${token}`, body: data }]);
+      keepOffline([{ url: `/shared/${token}`, body: data }], [import.meta.url]);
     }
   }, [data, token]);
   useEffect(() => {

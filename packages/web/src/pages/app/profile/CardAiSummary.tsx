@@ -100,11 +100,12 @@ export function CardAiSummary({
   // the app is open instead.
   useEffect(() => {
     const asked = `${profileId}:${cardKey}`;
-    if (!autoGenerate || !canEdit || isLoading || summary || alreadyAsked.has(asked) || generateMutation.isPending) return;
+    // With Pare off there is no one to ask, so nothing is sent.
+    if (!pareOn || !autoGenerate || !canEdit || isLoading || summary || alreadyAsked.has(asked) || generateMutation.isPending) return;
     alreadyAsked.add(asked);
     silentAttempt.current = true;
     generateMutation.mutate();
-  }, [autoGenerate, canEdit, isLoading, summary, generateMutation, profileId, cardKey]);
+  }, [pareOn, autoGenerate, canEdit, isLoading, summary, generateMutation, profileId, cardKey]);
 
   if (isLoading) return null;
   if (!summary && !canEdit) return null;

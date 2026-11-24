@@ -1,5 +1,5 @@
 import { useRoundNotice, type TaskRound } from '../../../lib/taskRounds';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from '../../../lib/dateFormat';
@@ -125,6 +125,9 @@ const statusLabel = (v: string) => APPOINTMENT_STATUSES.find((s) => s.value === 
 
 const openSteps = (a: Appointment) => (a.next_steps ?? []).filter((s) => !s.completed).length;
 const byText = (x: string | null | undefined, y: string | null | undefined) => (x ?? '').localeCompare(y ?? '');
+
+/** No date yet and still wanted: one to book. A cancelled one with no date is just cancelled. */
+export const waitingToBook = (a: Pick<Appointment, 'starts_at' | 'status'>) => !a.starts_at && a.status !== 'cancelled';
 
 const whenValue = (a: Appointment) => (a.starts_at ? new Date(a.starts_at).getTime() : Number.MAX_SAFE_INTEGER);
 
@@ -516,6 +519,8 @@ export function AppointmentsPage() {
                   <td className="px-3 py-2 text-ink whitespace-nowrap">
                     {a.starts_at ? (
                       whenText(a)
+                    ) : !waitingToBook(a) ? (
+                      <span className="text-muted">No date</span>
                     ) : canEdit ? (
                       <Button size="xs" variant="secondary" onClick={() => setEditing(a)}>Book it</Button>
                     ) : (
@@ -534,7 +539,7 @@ export function AppointmentsPage() {
                   </td>
                   <td className="px-3 py-2 text-muted hidden 2xl:table-cell">{a.location ?? ''}</td>
                   <td className="px-3 py-2 text-ink">
-                    {!a.starts_at && canEdit ? (
+                    {waitingToBook(a) && canEdit ? (
                       <Button size="xs" variant="ghost" className="whitespace-nowrap" aria-label={`Book ${a.title}`} onClick={() => setEditing(a)}>
                         Not booked yet, book it
                       </Button>
@@ -578,10 +583,10 @@ export function AppointmentsPage() {
 
       {current ? (
         <RecordPanel
-          key={current.id}
+          key={`panel-${current.id}`}
           kindLabel="Appointment"
           title={current.title}
-          subtitle={current.starts_at ? whenText(current, 'EEEE d MMMM yyyy') : 'Not booked yet'}
+          subtitle={current.starts_at ? whenText(current, 'EEEE d MMMM yyyy') : waitingToBook(current) ? 'Not booked yet' : 'Cancelled'}
           kind="appointments"
           recordId={current.id}
           profileId={profile.id}
@@ -591,9 +596,11 @@ export function AppointmentsPage() {
               label: 'When',
               value: current.starts_at
                 ? whenText(current)
-                : canEdit
-                  ? <Button size="xs" variant="ghost" onClick={() => setEditing(current)}>Not booked yet, book it</Button>
-                  : 'Not booked yet',
+                : !waitingToBook(current)
+                  ? 'No date'
+                  : canEdit
+                    ? <Button size="xs" variant="ghost" onClick={() => setEditing(current)}>Not booked yet, book it</Button>
+                    : 'Not booked yet',
             },
             { label: 'Ends', value: current.ends_at ? format(new Date(current.ends_at), 'HH:mm') : null },
             { label: 'Kind', value: typeLabel(current.appointment_type) },
@@ -614,7 +621,7 @@ export function AppointmentsPage() {
             { label: 'How to get ready', value: current.preparation ? <LinkedText text={current.preparation} canEdit={false} /> : null },
             {
               label: 'Status',
-              value: !current.starts_at && canEdit
+              value: waitingToBook(current) && canEdit
                 ? <Button size="xs" variant="ghost" onClick={() => setEditing(current)}>Not booked yet, book it</Button>
                 : statusLabel(current.status),
             },
@@ -662,7 +669,7 @@ export function AppointmentsPage() {
           ]}
           onEdit={() => setEditing(current)}
           done={
-            !current.starts_at
+            waitingToBook(current)
               ? { label: 'Book it', onRun: () => setEditing(current) }
               : current.status === 'scheduled' && hasStarted(current)
                 ? { label: 'Mark attended', onRun: () => markAttended.mutate(current), pending: markAttended.isPending }
@@ -933,7 +940,7 @@ export function AppointmentsPage() {
 
       {(adding && (!newBooking.fromTask || fromTask)) || editing ? (
         <AppointmentEditor
-          key={editing?.id ?? `new-${newBooking.fromTask}`}
+          key={editing ? `edit-${editing.id}` : `new-${newBooking.fromTask}`}
           profileId={profile.id}
           appointment={editing}
           initialProviderId={editing ? '' : newBooking.providerId || fromTask?.provider_id || ''}
@@ -1277,7 +1284,14 @@ export function AppointmentFields({
   waitsOnTask?: boolean;
 }) {
   const health = useHealthConfig();
-  const set = (patch: Partial<AppointmentDraft>) => onChange({ ...value, ...patch });
+  // Always on top of the latest form, so a change that lands late, such as
+  // a document finishing its upload, never undoes one made meanwhile.
+  const latest = useRef(value);
+  latest.current = value;
+  const set = (patch: Partial<AppointmentDraft>) => {
+    latest.current = { ...latest.current, ...patch };
+    onChange(latest.current);
+  };
   const [sameAsLast, setSameAsLast] = useState(false);
 
   const { data: providersData } = useQuery({
@@ -1647,7 +1661,7 @@ export function AppointmentEditor({
   const errors = tried ? appointmentDraftErrors(draft, requireDate) : {};
   // Opened to add the date: start there.
   useEffect(() => {
-    if (appointment && !appointment.starts_at) {
+    if (appointment && waitingToBook(appointment)) {
       window.setTimeout(() => document.getElementById('appt-date')?.focus(), 50);
     }
   }, [appointment]);
@@ -1682,7 +1696,7 @@ export function AppointmentEditor({
   });
 
   return (
-    <Modal open onClose={onClose} title={isNew ? 'Add appointment' : appointment.starts_at ? `Edit ${appointment.title}` : `Book ${appointment.title}`} wide>
+    <Modal open onClose={onClose} title={isNew ? 'Add appointment' : !waitingToBook(appointment) ? `Edit ${appointment.title}` : `Book ${appointment.title}`} wide>
       <div className="space-y-4">
         <AppointmentFields profileId={profileId} value={draft} onChange={setDraft} errors={errors} dateOptional={!requireDate} waitsOnTask={isNew && !!fromReminderId} />
         {error ? <p className="text-sm text-red-600">{error}</p> : null}

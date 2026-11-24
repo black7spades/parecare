@@ -135,6 +135,22 @@ export async function addBookingTodo(
   return result.reminder.id;
 }
 
+/**
+ * Appointments cancelled with no date: the to-do to book each one is done
+ * with, so it closes rather than asking for a booking nobody wants.
+ */
+export async function closeBookingTodos(conn: Conn, profileId: string, appointmentIds: string[]): Promise<void> {
+  if (appointmentIds.length === 0) return;
+  const tasks = (await conn('appointments as a')
+    .join('reminders as r', 'r.id', 'a.from_reminder_id')
+    .where({ 'a.care_profile_id': profileId, 'a.status': 'cancelled', 'r.completed': false })
+    .whereIn('a.id', appointmentIds)
+    .whereNull('a.starts_at')
+    .pluck('r.id')) as string[];
+  // Closed for good, even on a to-do that repeats: there is nothing to book.
+  if (tasks.length) await conn('reminders').whereIn('id', tasks).update({ completed: true, completed_at: conn.fn.now() });
+}
+
 const PLACE_KEYS = ['location', 'address_line1', 'address_line2', 'address_suburb', 'address_state', 'address_postcode', 'address_country', 'directions_link'] as const;
 const EXTRA_KEYS = ['attendees', 'bring_document_ids', 'repeat', 'repeat_until', 'tz', 'provider_phone', 'cost_estimate', 'cost_actual', 'from_journey_item_id'] as const;
 
@@ -487,6 +503,8 @@ export async function updateAppointment(
   if (cols['all_day']) cols['ends_at'] = null;
   await conn('appointments').where({ id: before.id }).update({ ...cols, updated_at: conn.fn.now() });
   if (nowBooked && before.from_reminder_id) await finishTask(conn, { profileId, taskId: before.from_reminder_id, actorId });
+  // Cancelled before it ever had a date: there is nothing left to book.
+  if (input.status === 'cancelled' && before.status !== 'cancelled' && !before.starts_at && !input.starts_at) await closeBookingTodos(conn, profileId, [before.id]);
   const fromItem = await itemFor(conn, profileId, input.from_journey_item_id);
   if (fromItem) await conn('checklist_items').where({ id: fromItem.id }).update({ appointment_id: before.id });
   // A journey step waiting on this booking is done once it has a date.

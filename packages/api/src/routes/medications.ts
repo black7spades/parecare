@@ -267,6 +267,8 @@ interface MedInsert {
   min_hours_between_doses: number | null;
   max_doses_per_day: number | null;
   active: boolean;
+  /** The cells the file filled in: only these change a medicine already on the list. */
+  filled: string[];
 }
 
 /** A date cell as YYYY-MM-DD, or nothing. */
@@ -436,6 +438,7 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
         stopped_on: dayCell(raw['stopped_on']),
         stop_reason: stopReasonFrom(blank(raw['stop_reason'])),
         active: parseActive(raw['active']),
+        filled: Object.keys(raw).filter((k) => (raw[k] ?? '').trim() !== ''),
       },
     };
   },
@@ -502,8 +505,44 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner('import medic
     return;
   }
 
+  // The same file imported twice adds nothing twice. A medicine already on
+  // the list, by name and dose, is matched: what the file changes is
+  // updated, kept in its history, and the rest is left as it is.
+  const profileId = req.params['id'] as string;
+  const existing = (await medSelect().where('m.care_profile_id', profileId).orderBy([{ column: 'm.active', order: 'desc' }, { column: 'm.created_at', order: 'asc' }])) as Array<Record<string, unknown> & { id: string; name: string }>;
+  const nameKey = (n: unknown) => String(n ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const amountKey = (v: unknown) => {
+    const t = String(v ?? '').trim().toLowerCase();
+    return t !== '' && Number.isFinite(Number(t)) ? String(Number(t)) : t;
+  };
+  const doseKey = (amount: unknown, unit: unknown) => `${amountKey(amount)}|${String(unit ?? '').trim().toLowerCase()}`;
+  const claimed = new Set<string>();
+  const rowsByName = new Map<string, number>();
+  for (const r of records) rowsByName.set(nameKey(r.name), (rowsByName.get(nameKey(r.name)) ?? 0) + 1);
+  const matchFor = (r: MedInsert) => {
+    const sameName = existing.filter((m) => !claimed.has(m.id) && nameKey(m.name) === nameKey(r.name));
+    const sameDose = sameName.filter((m) => doseKey(m['dose_amount'], m['dose_unit']) === doseKey(r.dose_amount, r.dose_unit));
+    // A stopped row matches a stopped medicine, an active row an active one.
+    const sameState = sameDose.find((m) => !!m['active'] === r.active);
+    if (sameState ?? sameDose[0]) return sameState ?? sameDose[0]!;
+    // One of that name on the list and one in the file: the dose itself changed.
+    const onList = existing.filter((m) => nameKey(m.name) === nameKey(r.name)).length;
+    if (sameName.length === 1 && onList === 1 && rowsByName.get(nameKey(r.name)) === 1) return sameName[0]!;
+    return null;
+  };
+
   const toInsert: Record<string, unknown>[] = [];
+  const updatedNames: string[] = [];
+  const unchangedNames: string[] = [];
   for (const r of records) {
+    const match = matchFor(r);
+    if (match) {
+      claimed.add(match.id);
+      const changed = await updateFromImport(match, r, profileId, req.account!.id);
+      (changed ? updatedNames : unchangedNames).push(match.name);
+      continue;
+    }
+
     const catalogueId = await resolveCatalogueId(r.name, r.form, req.account!.id);
     // Link each imported supplier name to the account's shared supplier list,
     // creating one where the name is new, so imports track the same model.
@@ -547,10 +586,100 @@ medicationsRouter.post('/import', requireAuth, requireProfileOwner('import medic
         : null,
     });
   }
-  const inserted = await db('medications').insert(toInsert).returning('id');
+  const inserted = toInsert.length ? await db('medications').insert(toInsert).returning('id') : [];
 
-  res.status(201).json({ imported: inserted.length, skipped: errors.length, errors });
+  res.status(201).json({
+    imported: inserted.length,
+    updated: updatedNames.length,
+    unchanged: unchangedNames.length,
+    updated_names: updatedNames,
+    skipped: errors.length,
+    errors,
+  });
 });
+
+/**
+ * A medicine already on the list, updated from an imported row: only the
+ * cells the file filled in, and only where they differ. A new dose or new
+ * times go in its history; a stop or a start is a stop or a start. True when
+ * anything changed.
+ */
+async function updateFromImport(med: Record<string, unknown> & { id: string; name: string }, r: MedInsert, profileId: string, accountId: string): Promise<boolean> {
+  const filled = new Set(r.filled);
+  const patch: Record<string, unknown> = {};
+  const text = (v: unknown) => (v === null || v === undefined ? '' : String(v).trim());
+  const num = (v: unknown) => (v === null || v === undefined || v === '' ? null : Number(v));
+  const day = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : dayCell(v));
+  const setText = (col: string, value: string | null) => { if (text(med[col]) !== text(value)) patch[col] = value; };
+  const setNum = (col: string, value: number | null) => { if (num(med[col]) !== value) patch[col] = value; };
+  const setBool = (col: string, value: boolean) => { if (!!med[col] !== value) patch[col] = value; };
+  const setDay = (col: string, value: string | null) => { if (day(med[col]) !== value) patch[col] = value; };
+
+  if (filled.has('units_per_dose')) setNum('units_per_dose', r.units_per_dose);
+  if (filled.has('dose_amount') || filled.has('dose_unit')) {
+    // Only what the file gave: an amount with no measure keeps the measure on file, and the other way round.
+    const amount = (v: unknown) => (text(v) !== '' && Number.isFinite(Number(text(v))) ? String(Number(text(v))) : text(v).toLowerCase());
+    const nextAmount = r.dose_amount ?? (med['dose_amount'] as string | null);
+    const nextUnit = r.dose_unit ?? (med['dose_unit'] as string | null);
+    if (amount(med['dose_amount']) !== amount(nextAmount) || text(med['dose_unit']).toLowerCase() !== text(nextUnit).toLowerCase()) {
+      patch['dose_amount'] = nextAmount;
+      patch['dose_unit'] = nextUnit;
+      patch['dose'] = composeDose(nextAmount, nextUnit);
+    }
+  }
+  if (filled.has('form') && text(med['form']).toLowerCase() !== text(r.form).toLowerCase()) {
+    patch['medication_catalogue_id'] = await resolveCatalogueId(med.name, r.form, accountId);
+  }
+  if (filled.has('route')) setText('route', r.route);
+  if (filled.has('with_food')) setBool('with_food', r.with_food);
+  if (filled.has('as_needed')) setBool('as_needed', r.as_needed);
+  if (filled.has('frequency')) setText('frequency', r.frequency);
+  if (filled.has('instructions')) setText('instructions', r.instructions);
+  if (filled.has('as_needed_for')) setText('as_needed_for', r.as_needed_for);
+  if (filled.has('min_hours_between_doses')) setNum('min_hours_between_doses', r.min_hours_between_doses);
+  if (filled.has('max_doses_per_day')) setNum('max_doses_per_day', r.max_doses_per_day);
+  if (filled.has('critical')) setBool('critical', r.critical);
+  if (filled.has('supply')) setNum('supply', r.supply);
+  // What is on hand counts down with every dose given, so an older file never winds it back.
+  if (filled.has('repeats_due')) setDay('repeats_due', r.repeats_due);
+  if (filled.has('repeats_left')) setNum('repeats_left', r.repeats_left);
+  if (filled.has('course_ends_on')) setDay('course_ends_on', r.course_ends_on);
+  // Times written as words, such as twice a day, give no times to use: the ones on file stay.
+  if (filled.has('schedule_times') && r.schedule_times.length > 0) {
+    const before = (Array.isArray(med['schedule_times']) ? (med['schedule_times'] as string[]) : []).slice().sort().join(',');
+    if (before !== r.schedule_times.slice().sort().join(',')) {
+      patch['schedule_times'] = r.schedule_times.length ? db.raw('?::jsonb', [JSON.stringify(r.schedule_times)]) : null;
+    }
+  }
+  if (filled.has('supplier') && text(med['supplier']).toLowerCase() !== text(r.supplier).toLowerCase()) {
+    patch['supplier_id'] = await resolveSupplierId(r.supplier, r.supplier_order_url, accountId);
+    patch['supplier'] = r.supplier;
+  }
+  if (filled.has('supplier_order_url')) setText('supplier_order_url', r.supplier_order_url);
+  if (filled.has('prescriber_name') && text(med['prescriber_name']).toLowerCase() !== text(r.prescriber_name).toLowerCase()) {
+    const who = await resolveContactInput(db, profileId, { name: r.prescriber_name, phone: r.prescriber_phone }, 'gp');
+    if (!('error' in who)) patch['prescriber_provider_id'] = who.id;
+  }
+  if (filled.has('condition_name') && text(med['condition_name']).toLowerCase() !== text(r.condition_name).toLowerCase()) {
+    patch['medical_condition_id'] = await resolveConditionId(r.condition_name, profileId);
+  }
+  const stops = filled.has('active') && !r.active && !!med['active'];
+  const starts = filled.has('active') && r.active && !med['active'];
+  if (Object.keys(patch).length === 0 && !stops && !starts) return false;
+
+  const source = { reason: 'Changed by an imported file.' };
+  await db.transaction(async (trx) => {
+    if (Object.keys(patch).length) {
+      await recordMedicationChange(trx, { medicationId: med.id, profileId, actorId: accountId, patch: { ...patch, updated_at: trx.fn.now() }, source });
+    }
+    if (stops) {
+      await stopMedication(trx, { medicationId: med.id, profileId, actorId: accountId, stopped_on: r.stopped_on, stop_reason: r.stop_reason as StopReason | null, source });
+    } else if (starts) {
+      await restartMedication(trx, { medicationId: med.id, profileId, actorId: accountId, source });
+    }
+  });
+  return true;
+}
 
 // A medication can only be tied to one of this person's own conditions.
 async function conditionBelongsToProfile(conditionId: string | null | undefined, profileId: string): Promise<boolean> {
@@ -1113,6 +1242,8 @@ medicationsRouter.get('/chart', requireAuth, async (req, res) => {
       .where('admitted_on', '<=', to.toISOString().slice(0, 10))
       .where((w) => w.whereNull('discharged_on').orWhere('discharged_on', '>=', new Date(from.getTime() - 86400000).toISOString().slice(0, 10)))
       .select('id', 'admitted_on', 'discharged_on'),
+    // From the day they died, nothing is due.
+    died_on: ((await db('care_profiles').where({ id: String(req.params['id']) }).first('died_on')) as { died_on: string | null } | undefined)?.died_on ?? null,
   });
 });
 
@@ -1290,7 +1421,8 @@ medicationsRouter.post('/administrations/batch', requireAuth, async (req, res) =
     throw err;
   }
   res.locals['auditEntries'] = result.doses.map((r) => doseAudit('created', r.id, result.meds.get(r.medication_id)!.name, r.status));
-  res.status(201).json({ recorded: result.doses.length, in_hospital: await homeDoseQuestion(db, req.params['id']!) });
+  // The new records' ids, so a tap can be undone straight away.
+  res.status(201).json({ recorded: result.doses.length, ids: result.doses.map((d) => d.id), in_hospital: await homeDoseQuestion(db, req.params['id']!) });
 });
 
 // Delete a recorded dose (e.g. logged twice by mistake). Any non-viewer

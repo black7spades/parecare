@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db } from '../config/database';
 import { env } from '../config/env';
+import { publicBase } from '../lib/publicUrl';
 import { requireAuth } from '../middleware/auth';
 import type { CareProfile, Reminder } from '../types';
 import { dateInZone, isValidTimeZone, parseZonedTime } from '../lib/timezone';
@@ -124,10 +125,13 @@ async function expandMedicationEvents(
   to: Date,
   timeZone: string | null = null
 ): Promise<CalendarEvent[]> {
-  // Medicine times end on the day someone died.
+  // Medicine times end on the day someone died: from that day nothing is
+  // still to give, as on the medication record. A dose given that day stays.
   const person = await db('care_profiles').where({ id: profileId }).first('died_on');
+  let diedOn: string | null = null;
   if (person?.died_on) {
-    const day = String(person.died_on).slice(0, 10);
+    const day = person.died_on instanceof Date ? person.died_on.toISOString().slice(0, 10) : String(person.died_on).slice(0, 10);
+    diedOn = day;
     const zoneForDay = isValidTimeZone(timeZone) ? timeZone : 'UTC';
     const lastDay = parseZonedTime(`${day}T23:59:59`, zoneForDay) ?? new Date(`${day}T23:59:59Z`);
     if (lastDay < to) to = lastDay;
@@ -173,8 +177,26 @@ async function expandMedicationEvents(
     d = next.toISOString().slice(0, 10);
   }
 
+  // In hospital the hospital gives the medicines: from the day they went in
+  // up to the day before they came home, nothing is due here, as on the
+  // medication record.
+  const stays = (await db('hospital_stays')
+    .where({ care_profile_id: profileId })
+    .where('admitted_on', '<=', days[days.length - 1] ?? dateInZone(to, zone))
+    .where((qb) => qb.whereNull('discharged_on').orWhere('discharged_on', '>', days[0] ?? dateInZone(from, zone)))
+    .select('admitted_on', 'discharged_on')) as Array<{ admitted_on: unknown; discharged_on: unknown }>;
+  const dayOf = (v: unknown) => (v instanceof Date ? dateInZone(v, 'UTC') : v ? String(v).slice(0, 10) : null);
+  const paused = (day: string) =>
+    (diedOn !== null && day >= diedOn) ||
+    stays.some((s) => {
+      const inOn = dayOf(s.admitted_on);
+      const outOn = dayOf(s.discharged_on);
+      return !!inOn && day >= inOn && (!outOn || day < outOn);
+    });
+
   const events: CalendarEvent[] = [];
   for (const day of days) {
+    const nothingDue = paused(day);
     for (const med of withTimes) {
       // After the last day of a course, its doses are not due.
       if (med.course_ends_on && day > String(med.course_ends_on).slice(0, 10)) continue;
@@ -183,6 +205,7 @@ async function expandMedicationEvents(
       for (const t of times) {
         const when = slotAt(day, t);
         if (when < from || when > to || events.length >= 1000) continue;
+        if (nothingDue && !covered.has(t)) continue;
         events.push({
           id: `med-${med.id}-${day}-${t}`,
           title: `💊 ${med.name}${med.dose ? ` ${med.dose}` : ''}`,
@@ -276,7 +299,7 @@ calendarRouter.get('/feed', requireAuth, async (req, res) => {
     res.status(404).json({ error: 'Care profile not found', code: 'NOT_FOUND' });
     return;
   }
-  const url = `${env.APP_URL}/api/v1/calendar/${profile.ics_token}.ics`;
+  const url = `${publicBase(req)}/api/v1/calendar/${profile.ics_token}.ics`;
   res.json({ url, webcal: url.replace(/^https?:\/\//, 'webcal://') });
 });
 
@@ -331,7 +354,7 @@ icsRouter.get('/:token.ics', async (req, res) => {
       // A finished task stays on the calendar, marked done, never cancelled.
       `SUMMARY:${icsEscape(r.completed ? `Done: ${r.title}` : r.title)}`,
       // Task notes stay in PareCare: only the way back in goes out.
-      `DESCRIPTION:${icsEscape(`Open in PareCare: ${openInApp(profile.id, 'tasks', r.id)}`)}`,
+      `DESCRIPTION:${icsEscape(`Open in PareCare: ${openInApp(profile.id, 'tasks', r.id, publicBase(req))}`)}`,
       'STATUS:CONFIRMED'
     );
     // The stored rule is the truth, so every 2 weeks or every year repeats right.
@@ -377,7 +400,8 @@ icsRouter.get('/:token.ics', async (req, res) => {
           provider: a.provider ?? null,
           bring: (a.bring_documents ?? []).map((d) => d.label),
         },
-        ownerZone
+        ownerZone,
+        publicBase(req)
       )
     );
   }

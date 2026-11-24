@@ -21,6 +21,7 @@ import { profilesInHospital } from './hospitalStays';
 
 const HORIZON_DAYS = 30;
 const MAX_ITEMS = 50;
+const MAX_PINNED = 40;
 
 export type NotificationKind =
   | 'activity'
@@ -448,17 +449,27 @@ export async function gatherNotifications(
     }
   }
 
-  // Priority items lead: an unread urgent alert outranks everything, then
-  // urgency, then recency.
-  return items
-    .filter((i) => wanted(i.kind, prefs))
-    .sort(
-      (a, b) =>
-        Number(b.urgent && !b.read) - Number(a.urgent && !a.read) ||
-        Number(b.urgent) - Number(a.urgent) ||
-        (a.created_at < b.created_at ? 1 : -1)
-    )
-    .slice(0, MAX_ITEMS);
+  // Something still to deal with, a dose not given or a medicine running
+  // out, leads the feed and is never pushed out by newer news: it stays
+  // until it is dealt with, however much else happens. Among those, and
+  // among the rest, an unread urgent alert outranks everything, then
+  // urgency, then unread, then recency. The cap only trims the news.
+  const byPriority = (a: NotificationItem, b: NotificationItem) =>
+    Number(b.urgent && !b.read) - Number(a.urgent && !a.read) ||
+    Number(b.urgent) - Number(a.urgent) ||
+    Number(!b.read) - Number(!a.read) ||
+    (a.created_at < b.created_at ? 1 : -1);
+  const kept = items.filter((i) => wanted(i.kind, prefs));
+  // Room is always left for some news; unread alerts are kept before read ones.
+  const pinned = kept.filter(stillToDeal).sort(byPriority).slice(0, MAX_PINNED);
+  const news = kept.filter((i) => !stillToDeal(i)).sort(byPriority);
+  return [...pinned, ...news.slice(0, Math.max(0, MAX_ITEMS - pinned.length))];
+}
+
+/** Alerts about something still to do, which clear themselves once it is done. */
+const STILL_TO_DEAL: NotificationKind[] = ['dose_overdue', 'dose_not_given', 'supply_out', 'supply_low'];
+function stillToDeal(item: NotificationItem): boolean {
+  return STILL_TO_DEAL.includes(item.kind);
 }
 
 /** Where each kind of record lives, for deep links in outbound messages. */

@@ -35,3 +35,7 @@
 ## Block 12 re-walk (2026-11-25, 0.55.0)
 
 Step 6 FAIL. The owner Edit changes the dose and logs it, but has no why box or who said so. That box is only on Record a change, offered to helpers.
+
+## Wave 10 re-walk (2026-11-25, 0.55.1)
+
+Step 6 PASS. Edit asks why it changed and who said so when the dose or times move, and both show in the history.

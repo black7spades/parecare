@@ -311,19 +311,19 @@ reportsRouter.post('/send', requireAuth, requireAccountRight('can_export_data'),
         '',
         'It opens without logging in, for the next 30 days.',
       ],
-      { text: 'Open the report', url: shareUrl(link.token) }
+      { text: 'Open the report', url: shareUrl(link.token, req) }
     );
   } catch (err) {
     console.error('Report email failed:', err);
     res.status(502).json({
       error: `The email to ${recipient.name} did not go. Copy the link and send it another way, or try again in a minute.`,
       code: 'EMAIL_FAILED',
-      link: linkOut(link),
+      link: linkOut(link, req),
       recipient: { name: recipient.name, email: recipient.email },
     });
     return;
   }
-  res.status(201).json({ sent, link: linkOut(link), recipient: { name: recipient.name, email: recipient.email }, documents: docs });
+  res.status(201).json({ sent, link: linkOut(link, req), recipient: { name: recipient.name, email: recipient.email }, documents: docs });
 });
 
 // ── Presets ─────────────────────────────────────────────────────────────

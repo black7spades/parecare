@@ -253,7 +253,7 @@ export function WhereTheyLivePage() {
                       <td className="px-3 py-2 font-medium text-ink">{m.facility?.name ?? 'Care home'}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{formatDateOnly(m.entry_on)}</td>
                       <td className="px-3 py-2">{m.payment_label ?? <span className="text-muted">Not decided yet</span>}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">{m.payment_choice ? '' : formatDateOnly(m.payment_choice_due_on)}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{formatDateOnly(m.payment_choice_due_on)}</td>
                       {canEdit ? (
                         <td className="px-3 py-2 text-right whitespace-nowrap space-x-1">
                           <Button size="xs" variant="ghost" aria-label={`Edit the move into ${m.facility?.name ?? 'care'}`} title="Edit" onClick={() => setMoveForm({ move: m })}><PencilIcon /></Button>
@@ -345,7 +345,7 @@ export function WhereTheyLivePage() {
               { label: 'How the room is paid for', value: m.payment_label ?? 'Not decided yet' },
               {
                 label: 'Decide by',
-                value: !m.payment_choice && m.payment_choice_due_on ? (
+                value: m.payment_choice_due_on ? (
                   <span>
                     {formatDateOnly(m.payment_choice_due_on)}
                     {m.payment_due_worked_out ? <span className="block text-xs text-muted">Worked out as 28 days after moving in.</span> : null}

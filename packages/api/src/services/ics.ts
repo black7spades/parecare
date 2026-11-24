@@ -61,8 +61,8 @@ export function calendarText(name: string, bodyLines: string[]): string {
 }
 
 /** The link back to a record in the app. */
-export const openInApp = (profileId: string, page: string, recordId: string): string =>
-  `${env.APP_URL}/app/${profileId}/${page}?record=${recordId}`;
+export const openInApp = (profileId: string, page: string, recordId: string, base: string = env.APP_URL): string =>
+  `${base}/app/${profileId}/${page}?record=${recordId}`;
 
 const nextDay = (day: string): string => {
   const d = new Date(`${day}T12:00:00Z`);
@@ -110,11 +110,11 @@ export function appointmentDetailLines(a: IcsAppointment): string[] {
   return out;
 }
 
-export function appointmentEvent(a: IcsAppointment, zone: string | null): string[] {
+export function appointmentEvent(a: IcsAppointment, zone: string | null, base?: string): string[] {
   const start = new Date(a.starts_at);
   const end = a.ends_at ? new Date(a.ends_at) : new Date(start.getTime() + 30 * 60 * 1000);
   const place = appointmentPlace(a);
-  const description = [...appointmentDetailLines(a), `Open in PareCare: ${openInApp(a.care_profile_id, 'appointments', a.id)}`].join('\n');
+  const description = [...appointmentDetailLines(a), `Open in PareCare: ${openInApp(a.care_profile_id, 'appointments', a.id, base)}`].join('\n');
   return [
     'BEGIN:VEVENT',
     `UID:appt-${a.id}@parecare`,

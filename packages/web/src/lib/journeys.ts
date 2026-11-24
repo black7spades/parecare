@@ -147,6 +147,21 @@ export function matchingLifeStages(
   );
 }
 
+/**
+ * Who the suggested journeys are for, in plain words from their age:
+ * "someone aged 36", "a baby under one", "a baby on the way". Null with no
+ * date to go on.
+ */
+export function suggestedForWords(profile: { date_of_birth: string | null; due_date?: string | null }, name?: string | null): string | null {
+  const who = name?.trim() ? `${name.trim()}, ` : '';
+  if (profile.date_of_birth) {
+    const age = ageInYears(profile.date_of_birth);
+    if (age < 1) return `${who}a baby under one`;
+    return who ? `${who}aged ${age}` : `someone aged ${age}`;
+  }
+  return profile.due_date ? `${who}a baby on the way` : null;
+}
+
 export const JOURNEY_KINDS = [
   { value: 'life_stage', label: 'Life stage' },
   { value: 'condition', label: 'Condition' },

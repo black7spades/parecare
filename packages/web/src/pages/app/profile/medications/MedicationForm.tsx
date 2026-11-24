@@ -12,7 +12,7 @@ import { TimeField } from './TimeField';
 import { SupplierModal } from './SupplierModal';
 import type { CareDocument, MedicationRecord, Supplier } from '../../../../lib/care';
 import type { Appointment } from '../AppointmentsPage';
-import { ContactPicker, contactProblem, changedContactFieldsAs, contactFieldsAs, pickedFrom, type PickedContact } from '../../../../components/ContactPicker';
+import { ContactPicker, contactProblem, changedContactFieldsAs, contactFieldsAs, emptyContact, pickedFrom, type PickedContact } from '../../../../components/ContactPicker';
 import { format } from '../../../../lib/dateFormat';
 
 /**
@@ -69,14 +69,19 @@ export function MedicationForm({
   const initialTimes = med?.schedule_times ?? [];
   const [perDay, setPerDay] = useState(med?.as_needed ? 0 : initialTimes.length || 1);
   const [slots, setSlots] = useState<string[]>(initialTimes.length ? initialTimes : ['08:00']);
+  // A medicine saved with no times shows 08:00 to start from; that is not a
+  // change until someone touches the times.
+  const [timesTouched, setTimesTouched] = useState(false);
   const [packSize, setPackSize] = useState(med?.supply != null ? String(med.supply) : '');
   const [remaining, setRemaining] = useState(med?.supply_remaining != null ? String(med.supply_remaining) : '');
   const [packs, setPacks] = useState(med?.packs_on_hand != null ? String(med.packs_on_hand) : '');
   const [repeatsDue, setRepeatsDue] = useState(med?.repeats_due ?? '');
   const [repeatsLeft, setRepeatsLeft] = useState(med?.repeats_left != null ? String(med.repeats_left) : '');
   const [courseEnds, setCourseEnds] = useState(med?.course_ends_on ?? '');
-  // Why the dose or times changed and where from, asked only when they did.
+  // Why the dose or times changed, who said so and where from, asked only
+  // when they did: the same questions as Record a change.
   const [changeReason, setChangeReason] = useState('');
+  const [saidBy, setSaidBy] = useState<PickedContact>(emptyContact);
   const [changeSource, setChangeSource] = useState('');
   const [changeDocId, setChangeDocId] = useState('');
   // The supplier is chosen from the account's shared suppliers; picking one
@@ -118,7 +123,7 @@ export function MedicationForm({
     !!med &&
     ((doseAmount.trim() || '') !== (med.dose_amount ?? '') ||
       (doseUnit.trim() || '') !== (med.dose_unit ?? '') ||
-      !sameTimes(timesNow, med.as_needed ? [] : med.schedule_times ?? []));
+      (timesTouched && !sameTimes(timesNow, med.as_needed ? [] : med.schedule_times ?? [])));
 
   const typeMeta = MED_TYPES.find((t) => t.value.toLowerCase() === type.toLowerCase());
 
@@ -158,6 +163,7 @@ export function MedicationForm({
 
   // Keep the number of time slots in step with the times-a-day number.
   const setPerDayCount = (n: number) => {
+    setTimesTouched(true);
     const count = Math.max(0, Math.min(12, Math.floor(n)));
     setPerDay(count);
     setSlots((prev) => {
@@ -169,7 +175,10 @@ export function MedicationForm({
     });
   };
 
-  const setSlot = (i: number, v: string) => setSlots((prev) => prev.map((s, j) => (j === i ? v : s)));
+  const setSlot = (i: number, v: string) => {
+    setTimesTouched(true);
+    setSlots((prev) => prev.map((s, j) => (j === i ? v : s)));
+  };
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -190,7 +199,8 @@ export function MedicationForm({
         min_hours_between_doses: !asNeeded || gapHours.trim() === '' ? null : Number(gapHours),
         max_doses_per_day: !asNeeded || mostPerDay.trim() === '' ? null : Number(mostPerDay),
         critical,
-        schedule_times: asNeeded ? [] : slots.slice(0, perDay),
+        // Untouched times stay as they were, even none: 08:00 is only a starting point.
+        schedule_times: asNeeded ? [] : med && !timesTouched ? med.schedule_times ?? [] : slots.slice(0, perDay),
         supply: packSize.trim() === '' ? null : Number(packSize),
         supply_remaining: remaining.trim() === '' ? null : Number(remaining),
         packs_on_hand: packs.trim() === '' ? null : Number(packs),
@@ -202,6 +212,12 @@ export function MedicationForm({
               change_reason: changeReason.trim() || null,
               change_source_appointment_id: changeSource.startsWith('appt:') ? changeSource.slice(5) : null,
               change_source_document_id: changeSource === 'letter' && changeDocId ? changeDocId : null,
+              // Who said so: a contact picked, or a new name filed in Contacts.
+              ...(saidBy.providerId
+                ? { change_source_provider_id: saidBy.providerId, ...(saidBy.phone.trim() ? { change_source_provider_phone: saidBy.phone.trim() } : {}) }
+                : saidBy.name.trim() && saidBy.isNew
+                  ? { change_source_provider_name: saidBy.name.trim(), change_source_provider_type: saidBy.providerType.trim() || null, change_source_provider_phone: saidBy.phone.trim() || null }
+                  : {}),
             }
           : {}),
         // The chosen supplier is authoritative: the server derives the name
@@ -245,6 +261,17 @@ export function MedicationForm({
           if (unpicked) {
             setError(unpicked);
             document.getElementById('med-prescriber')?.focus();
+            return;
+          }
+          // A new dose or new times say who said so and why, as Record a change does.
+          if (changed && saidBy.name.trim() && !saidBy.providerId && !saidBy.isNew) {
+            setError(`Pick who said so from the list, or choose Add ${saidBy.name.trim()} as a new contact.`);
+            document.getElementById('med-change-said-by')?.focus();
+            return;
+          }
+          if (changed && !changeReason.trim()) {
+            setError('Say why it changed, e.g. Dr Zhang lowered it at the GP round.');
+            document.getElementById('med-change-reason')?.focus();
             return;
           }
           setError('');
@@ -438,6 +465,37 @@ export function MedicationForm({
           </label>
         </section>
 
+        {changed ? (
+          <section className="rounded-md border border-border bg-surface-2 p-3 space-y-3">
+            <p className="text-sm text-ink">The {(doseAmount.trim() || '') !== (med?.dose_amount ?? '') || (doseUnit.trim() || '') !== (med?.dose_unit ?? '') ? 'dose' : 'times'} changed. This is kept in its history.</p>
+            <Textarea id="med-change-reason" label="Why did it change?" value={changeReason} onChange={(e) => setChangeReason(e.target.value)} rows={2} placeholder="e.g. Dr Zhang lowered it at the GP round" />
+            <ContactPicker id="med-change-said-by" label="Who said so?" profileId={profileId} value={saidBy} onChange={setSaidBy} defaultType="gp" hint="The doctor or pharmacist who asked for it, if there was one." confirmNew />
+            <div>
+              <label htmlFor="med-change-source" className="block text-sm font-medium text-ink mb-1">Where did the change come from?</label>
+              <select id="med-change-source" className={`${SELECT} w-full`} value={changeSource} onChange={(e) => setChangeSource(e.target.value)}>
+                <option value="">Choose one</option>
+                {pastVisits.slice(0, 10).map((a) => (
+                  <option key={a.id} value={`appt:${a.id}`}>
+                    {a.title}, {format(new Date(a.starts_at!), 'd MMM yyyy')}
+                  </option>
+                ))}
+                <option value="letter">A letter on file</option>
+                <option value="unsure">Not sure</option>
+              </select>
+            </div>
+            {changeSource === 'letter' ? (
+              <div>
+                <label htmlFor="med-change-letter" className="block text-sm font-medium text-ink mb-1">Which letter</label>
+                <select id="med-change-letter" className={`${SELECT} w-full`} value={changeDocId} onChange={(e) => setChangeDocId(e.target.value)}>
+                  <option value="">Choose a document</option>
+                  {letters.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
+                </select>
+                {letters.length === 0 ? <p className="mt-1 text-xs text-muted">No documents on file yet. Upload the letter in Documents, then pick it here.</p> : null}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
         <section>
           <h3 className="text-sm font-semibold text-ink mb-2">Supply</h3>
           <p className="text-sm text-ink leading-8">
@@ -501,43 +559,7 @@ export function MedicationForm({
           </p>
         </section>
 
-        {changed ? (
-          <section className="rounded-md border border-border bg-surface-2 p-3 space-y-3">
-            <p className="text-sm text-ink">The {(doseAmount.trim() || '') !== (med?.dose_amount ?? '') || (doseUnit.trim() || '') !== (med?.dose_unit ?? '') ? 'dose' : 'times'} changed. This is kept in its history.</p>
-            <Input
-              id="med-change-reason"
-              label="Why did it change?"
-              placeholder="e.g. Blood pressure low after a fall"
-              value={changeReason}
-              onChange={(e) => setChangeReason(e.target.value)}
-            />
-            <div>
-              <label htmlFor="med-change-source" className="block text-sm font-medium text-ink mb-1">Where did the change come from?</label>
-              <select id="med-change-source" className={`${SELECT} w-full`} value={changeSource} onChange={(e) => setChangeSource(e.target.value)}>
-                <option value="">Choose one</option>
-                {pastVisits.slice(0, 10).map((a) => (
-                  <option key={a.id} value={`appt:${a.id}`}>
-                    {a.title}, {format(new Date(a.starts_at!), 'd MMM yyyy')}
-                  </option>
-                ))}
-                <option value="letter">A letter on file</option>
-                <option value="unsure">Not sure</option>
-              </select>
-            </div>
-            {changeSource === 'letter' ? (
-              <div>
-                <label htmlFor="med-change-letter" className="block text-sm font-medium text-ink mb-1">Which letter</label>
-                <select id="med-change-letter" className={`${SELECT} w-full`} value={changeDocId} onChange={(e) => setChangeDocId(e.target.value)}>
-                  <option value="">Choose a document</option>
-                  {letters.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
-                </select>
-                {letters.length === 0 ? <p className="mt-1 text-xs text-muted">No documents on file yet. Upload the letter in Documents, then pick it here.</p> : null}
-              </div>
-            ) : null}
-          </section>
-        ) : null}
-
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        {error ? <p className="text-sm text-red-600" role="alert">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={mutation.isPending}>Save</Button>
