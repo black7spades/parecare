@@ -6,6 +6,9 @@ import { Button } from '../../components/ui/Button';
 import { EditableSubheader } from '../../components/ui/EditableSubheader';
 import { DataToolbar } from '../../components/data/DataToolbar';
 import { useDataView, type DataSort, type DataFilter } from '../../components/data/useDataView';
+import { ReportSectionTable, type ReportResult } from '../../components/ReportTables';
+import { SendReportCard } from '../../components/SendReport';
+import { usePareOn } from '../../lib/aiStatus';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -49,19 +52,6 @@ interface ProfileOption {
   photo_color: string | null;
 }
 
-interface ReportSectionResult {
-  key: string;
-  label: string;
-  rows: Record<string, unknown>[];
-  fields: ReportField[];
-}
-
-interface ReportResult {
-  generatedAt: string;
-  profileCount: number;
-  sections: ReportSectionResult[];
-  aiNarrative?: string;
-}
 
 interface PresetConfig {
   sections: SectionConfig[];
@@ -225,7 +215,11 @@ export function ReportGeneratorPage() {
   const [datePreset, setDatePreset] = useState<DatePreset>('30d');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
-  const [includeAi, setIncludeAi] = useState(false);
+  const pareOn = usePareOn();
+  const [includeAiChoice, setIncludeAi] = useState(false);
+  // With no Pare attached the report is the tables alone.
+  const includeAi = pareOn && includeAiChoice;
+  const [generateNote, setGenerateNote] = useState('');
   const [aiPrompt, setAiPrompt] = useState('');
   const [result, setResult] = useState<ReportResult | null>(null);
   const [activePresetId, setActivePresetId] = useState<string | null>(null);
@@ -419,6 +413,10 @@ export function ReportGeneratorPage() {
   };
 
   const canGenerate = selectedSections.size > 0 && selectedProfileIds.length > 0;
+  const missingForReport = `The report needs ${[
+    selectedProfileIds.length === 0 ? 'who it is about, ticked in the people list' : null,
+    selectedSections.size === 0 ? 'at least one section' : null,
+  ].filter(Boolean).join(' and ')}.`;
 
   // ── Viewing a saved report ────────────────────────────────────────────
   if (step === 'saved-view' && viewingSavedReport) {
@@ -491,6 +489,15 @@ export function ReportGeneratorPage() {
             </div>
           </div>
         ) : null}
+
+        <SendReportCard
+          profileIds={selectedProfileIds}
+          profileName={allProfiles.find((p) => p.id === selectedProfileIds[0])?.full_name ?? null}
+          reportName={presets.find((p) => p.id === activePresetId)?.name ?? 'Report'}
+          sections={Array.from(selectedSections.values())}
+          dateRange={dateRangeFromPreset(datePreset, customFrom, customTo)}
+          narrative={result.aiNarrative ?? null}
+        />
 
         {result.aiNarrative ? (
           <div className="card">
@@ -842,7 +849,8 @@ export function ReportGeneratorPage() {
         ) : null}
       </div>
 
-      {/* AI narrative */}
+      {/* AI narrative, only when Pare is attached */}
+      {pareOn ? (
       <div className="card">
           <div className="flex items-center gap-3">
             <button
@@ -873,21 +881,34 @@ export function ReportGeneratorPage() {
             </div>
           ) : null}
         </div>
+      ) : null}
 
       {/* Generate button */}
       <div className="flex items-center gap-3">
         <Button
-          onClick={() => generateMutation.mutate()}
+          onClick={() => {
+            if (!canGenerate) {
+              setGenerateNote(missingForReport);
+              return;
+            }
+            setGenerateNote('');
+            generateMutation.mutate();
+          }}
           loading={generateMutation.isPending}
-          disabled={!canGenerate}
         >
           Generate report
         </Button>
         <Button
           variant="secondary"
-          onClick={() => exportCsvMutation.mutate()}
+          onClick={() => {
+            if (!canGenerate) {
+              setGenerateNote(missingForReport);
+              return;
+            }
+            setGenerateNote('');
+            exportCsvMutation.mutate();
+          }}
           loading={exportCsvMutation.isPending}
-          disabled={!canGenerate}
         >
           Export as CSV
         </Button>
@@ -896,10 +917,8 @@ export function ReportGeneratorPage() {
             {(generateMutation.error as Error).message}
           </p>
         ) : null}
-        {!canGenerate ? (
-          <p className="text-sm text-muted">
-            Select at least one profile and one data section
-          </p>
+        {generateNote ? (
+          <p className="text-sm text-red-600" role="alert">{generateNote}</p>
         ) : null}
       </div>
     </div>
@@ -907,43 +926,6 @@ export function ReportGeneratorPage() {
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────
-
-function ReportSectionTable({ section }: { section: ReportSectionResult }) {
-  return (
-    <div className="card">
-      <h3 className="text-sm font-semibold text-ink mb-1">{section.label}</h3>
-      <p className="text-xs text-muted mb-3">{section.rows.length} {section.rows.length === 1 ? 'record' : 'records'}</p>
-      {section.rows.length === 0 ? (
-        <p className="text-sm text-muted">No data for this section.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-muted border-b border-border">
-                <th className="px-3 py-2 font-medium">Profile</th>
-                {section.fields.map((f) => (
-                  <th key={f.key} className="px-3 py-2 font-medium">{f.label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {section.rows.map((row, i) => (
-                <tr key={i} className="border-b border-border last:border-0">
-                  <td className="px-3 py-2 font-medium">{String(row['_profile_name'] ?? '')}</td>
-                  {section.fields.map((f) => (
-                    <td key={f.key} className="px-3 py-2">
-                      <CellValue value={row[f.key]} type={f.type} />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function FilterControl({
   filter,
@@ -1013,24 +995,4 @@ function FilterControl({
   }
 
   return null;
-}
-
-function CellValue({ value, type }: { value: unknown; type: string }) {
-  if (value === null || value === undefined || value === '') {
-    return <span className="text-muted">-</span>;
-  }
-  if (type === 'boolean') {
-    return <span>{value ? 'Yes' : 'No'}</span>;
-  }
-  if (type === 'date') {
-    const d = new Date(String(value));
-    if (!Number.isNaN(d.getTime())) {
-      return <span className="tabular-nums">{d.toLocaleDateString()}</span>;
-    }
-  }
-  if (type === 'enum') {
-    const label = PHASE_LABELS[String(value)] ?? String(value).replace(/_/g, ' ');
-    return <span className="capitalize">{label}</span>;
-  }
-  return <span>{String(value)}</span>;
 }

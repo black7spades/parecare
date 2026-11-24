@@ -24,6 +24,11 @@ export const OPTION_CATEGORIES = [
   // Kinds of organisation: Health hub, Government department, and whatever
   // else people type when filing an organisation.
   'organisation_type',
+  // What keeps eating and drinking safe: Sit upright to eat and drink,
+  // Thickened fluids, and whatever else people type.
+  'swallowing_need',
+  // Australian health funds, for the ID numbers form.
+  'health_fund',
 ] as const;
 
 export type OptionCategory = (typeof OPTION_CATEGORIES)[number];

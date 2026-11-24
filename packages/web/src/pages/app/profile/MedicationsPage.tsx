@@ -425,8 +425,8 @@ export function MedicationsPage() {
               resource="medications"
               canImport={canManageMeds}
               onImported={invalidate}
-              templateHeaders={['Name', 'Units per dose', 'Dose', 'Type', 'Route', 'With food', 'As needed', 'Times', 'Instructions', 'Supply in units', 'Packs on hand', 'Supplier', 'Order link', 'Repeats left', 'Last day of the course', 'Active']}
-              templateSample={['Metformin', '1', '500 mg', 'Tablet', 'By mouth', 'true', 'false', '08:00; 20:00', 'Take with a full glass of water', '60', '2', 'City Pharmacy', 'https://citypharmacy.example/reorder', '5', '', 'true']}
+              templateHeaders={['Name', 'Units per dose', 'Dose amount', 'Dose measure', 'Type', 'Route', 'With food', 'As needed', 'Times', 'How often', 'Instructions', 'Critical', 'Condition', 'As needed for', 'Hours between doses', 'Most in 24 hours', 'A full pack provides', 'Units left', 'Packs on hand', 'Repeats due', 'Supplier', 'Order link', 'Prescribed by', 'Prescriber phone', 'Repeats left', 'Last day of the course', 'Active', 'Last day taken', 'Why it stopped']}
+              templateSample={['Metformin', '1', '500', 'mg', 'Tablet', 'By mouth', 'Yes', 'No', '08:00; 20:00', 'Twice a day', 'Take with a full glass of water', 'No', 'Type 2 diabetes', '', '', '', '60', '42', '2', '2026-12-01', 'City Pharmacy', 'https://citypharmacy.example/reorder', 'Dr Rachel Cohen', '03 9560 4422', '5', '', 'Yes', '', '']}
             />
             {canManageMeds ? <Button onClick={() => setAddOpen(true)}>Add medication</Button> : null}
           </div>

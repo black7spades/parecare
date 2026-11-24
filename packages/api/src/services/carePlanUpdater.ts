@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'crypto';
+import { createHash } from 'crypto';
 import { emergencyContactLines } from './emergencyContacts';
 import { z } from 'zod';
 import { accountIdForProfile, categoryIdByKey } from './documentCategories';
@@ -1484,4 +1484,4 @@ export async function baselineGaps(profileId: string): Promise<BaselineGaps> {
   };
 }
 
-export const newReviewToken = (): string => randomBytes(32).toString('hex');
+export { newLinkToken as newReviewToken } from '../lib/tokens';

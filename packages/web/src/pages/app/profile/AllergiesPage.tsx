@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { EditableSubheader } from '../../../components/ui/EditableSubheader';
@@ -12,12 +12,14 @@ import { SortableTh } from '../../../components/data/SortableTh';
 import { RecordPanel } from '../../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
-import type { Allergy } from '../../../lib/care';
+import { SEVERITY_RANK, severityLabel, type Allergy, type NoKnownAllergies } from '../../../lib/care';
+import { formatDateOnly } from '../../../lib/datetime';
 import { useProfile } from './ProfileLayout';
 
 const SORTS: DataSort<Allergy>[] = [
   { key: 'substance', label: 'Substance', compare: (a, b) => a.substance.localeCompare(b.substance) },
   { key: 'reaction', label: 'Reaction', compare: (a, b) => (a.reaction ?? '').localeCompare(b.reaction ?? '') },
+  { key: 'severity', label: 'How bad', compare: (a, b) => (SEVERITY_RANK[a.severity ?? ''] ?? 0) - (SEVERITY_RANK[b.severity ?? ''] ?? 0) },
 ];
 
 /**
@@ -32,9 +34,21 @@ export function AllergiesPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['allergies', profile.id],
-    queryFn: () => api.get<{ allergies: Allergy[] }>(`/care-profiles/${profile.id}/allergies`),
+    queryFn: () => api.get<{ allergies: Allergy[]; no_known: NoKnownAllergies | null }>(`/care-profiles/${profile.id}/allergies`),
   });
   const allergies = data?.allergies ?? [];
+  const noKnown = data?.no_known ?? null;
+  const [noneError, setNoneError] = useState('');
+  // Checked: no known allergies. Adding one clears it.
+  const confirmNone = useMutation({
+    mutationFn: () => api.post(`/care-profiles/${profile.id}/allergies/none`, {}),
+    onSuccess: () => {
+      setNoneError('');
+      void queryClient.invalidateQueries({ queryKey: ['allergies', profile.id] });
+      void queryClient.invalidateQueries({ queryKey: ['emergency-sheet', profile.id] });
+    },
+    onError: (err) => setNoneError(err instanceof Error ? err.message : 'That could not be saved. Try again in a moment.'),
+  });
 
   // Deleting is held back a few seconds with Undo, never a "sure?" box.
   const deferDelete = useUndoStore((s) => s.deferDelete);
@@ -101,11 +115,27 @@ export function AllergiesPage() {
         <p className="text-sm text-muted">Loading...</p>
       ) : dv.view.length === 0 ? (
         <div className="card text-center py-10">
-          <p className="text-sm text-muted">
-            {allergies.length === 0
-              ? `No allergies recorded for ${careName} yet.`
-              : 'No allergies match your search.'}
-          </p>
+          {allergies.length === 0 && noKnown ? (
+            <p className="text-sm text-ink">
+              No known allergies, checked{noKnown.by_name ? ` by ${noKnown.by_name}` : ''} on {formatDateOnly(noKnown.on, 'd MMM yyyy')}. Adding an allergy clears this.
+            </p>
+          ) : allergies.length === 0 ? (
+            <div className="space-y-3">
+              <p className="text-sm text-ink">
+                Record anything {careName} must not be given, so it shows on the emergency sheet and the medicine round.
+              </p>
+              {canEdit ? (
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button size="sm" variant="secondary" loading={confirmNone.isPending} onClick={() => confirmNone.mutate()}>
+                    No known allergies
+                  </Button>
+                </div>
+              ) : null}
+              {noneError ? <p className="text-sm text-red-600" role="alert">{noneError}</p> : null}
+            </div>
+          ) : (
+            <p className="text-sm text-muted">No allergies match your search.</p>
+          )}
         </div>
       ) : (
         <div className="card p-0 overflow-x-auto border-l-4 border-l-red-500">
@@ -113,6 +143,7 @@ export function AllergiesPage() {
             <thead>
               <tr className="text-left text-xs text-muted border-b border-border">
                 <SortableTh label="Allergic to" sortKey="substance" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label="How bad" sortKey="severity" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Reaction" sortKey="reaction" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 {canEdit ? <th className="px-3 py-2 text-right">Actions</th> : null}
               </tr>
@@ -121,6 +152,7 @@ export function AllergiesPage() {
               {dv.view.map((a) => (
                 <tr key={a.id} {...panel.rowProps(a.id)} className={`border-b border-border last:border-0 ${RECORD_ROW_CLASS}`}>
                   <td className="px-3 py-2 font-medium text-red-700 dark:text-red-300">{a.substance}</td>
+                  <td className={`px-3 py-2 ${a.severity === 'life_threatening' || a.severity === 'severe' ? 'font-semibold text-red-700 dark:text-red-300' : 'text-ink'}`}>{severityLabel(a.severity) ?? ''}</td>
                   <td className="px-3 py-2 text-ink">{a.reaction ?? ''}</td>
                   {canEdit ? (
                     <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -155,6 +187,7 @@ export function AllergiesPage() {
           canEdit={canEdit}
           fields={[
             { label: 'Allergic to', value: panel.current.substance },
+            { label: 'How bad', value: severityLabel(panel.current.severity) },
             { label: 'Reaction', value: panel.current.reaction },
           ]}
           onEdit={() => setEditing(panel.current)}

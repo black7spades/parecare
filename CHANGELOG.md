@@ -6,6 +6,33 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.51.0] - 2026-11-21
+
+### Added
+
+- **ID numbers.** Edit profile has an ID numbers tab with a box for each number: Medicare with the position on the card and the valid to month, the Individual Healthcare Identifier, DVA with the card colour, NDIS, the health fund and member number, and My Aged Care. Each number is checked. One that does not look right says what it should look like, and the rest still save.
+- **How bad an allergy is.** Each allergy says how bad the reaction is: mild, moderate, severe or life threatening. An allergy that causes anaphylaxis is marked life threatening without being asked.
+- **No known allergies is a checked answer.** With no allergies on file, No known allergies records who checked and when. Adding an allergy clears it.
+- **Eating and drinking safely.** Care needs has a list for what keeps eating and drinking safe, such as sitting upright or thickened fluids, beside diet and mobility.
+- **A fuller emergency sheet.** The sheet now runs in the order a paramedic needs it: who this is, where they are, ID numbers, allergies with how bad, conditions they have now, medicines, eating, drinking and moving, the advance care directive with its document, power of attorney holders with their phone and document, who to call, and every professional and organisation. Every phone on it can be tapped to call. The same sheet prints in bulk from the Homeboard.
+- **Share the emergency sheet by link.** Share a link gives a link that opens the sheet with no login, for a paramedic, a hospital or family. It shows how many times it has been opened and keeps working until it is turned off, with Undo straight after.
+- **Save on this phone.** The emergency sheet keeps a copy on the phone, so it opens with no internet.
+- **Send a report.** A report for one person can be sent to a contact, someone in the care circle or any email, with documents such as a referral sent with it. It opens with no login for 30 days. Documents shared only with some people in the circle are never sent.
+- **A fuller health summary.** The health summary now includes their GP and contacts, appointments coming up and from the last year, open questions, and who to call in an emergency, each detail in its own column.
+- **Send an appointment.** Send to someone sends one appointment, such as to whoever is driving: the time, the place, the contact's phone, what to bring and how to get ready, with the calendar entry attached. Notes stay private. Add to my calendar puts it in your own calendar.
+
+### Changed
+
+- **A calendar feed that helps you get there.** Appointments in the calendar feed show the place, who it is with and their phone, what to bring, how to get ready, a link back into PareCare, and reminders a day before and two hours before. Finished tasks stay on the calendar marked Done.
+- **Files that read plainly.** Downloads write dates as dates and phases as the screen names them, such as Residential ongoing. The medicines file now keeps how often, whether it is critical, the condition it is for and the prescriber's phone, and reads every column back in, so nothing is lost on the way round.
+- **Reports without Pare.** With no Pare attached, the report builder makes the tables on its own and the AI summary choice is not offered. Generate report and Send always say what is missing instead of greying out.
+
+### Fixed
+
+- **Task notes stay private.** The calendar feed no longer sends out task notes or appointment notes.
+- **Who to call in a report.** Emergency contacts in a report have a column each for name, relationship, phone and email.
+- **Save on an allergy always answers.** With nothing typed, Save says what to write instead of sitting greyed out.
+
 ## [0.50.1] - 2026-11-20
 
 ### Fixed

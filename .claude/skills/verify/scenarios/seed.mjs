@@ -113,6 +113,8 @@ await appt(meT, me.id, { title: 'GP review', appointment_type: 'consultation', p
 await appt(meT, me.id, { title: 'Blood test', appointment_type: 'test', starts_at: at(3, 8) });
 await task(meT, me.id, { title: 'Book neurologist', body: 'Referral from Dr Raman. Phone Dr Chen on 03 9345 6677.', reminder_type: 'once', next_due_at: at(2) });
 await task(meT, me.id, { title: 'Get repeat script for Propranolol', reminder_type: 'once', next_due_at: at(4) });
+// Wave 5: questions to take to the neurologist, for the health summary.
+await question(meT, me.id, { title: 'Should I keep a migraine diary before the visit?' });
 await upload(meT, me.id, 'Neurology referral letter', 'Referral', 'Referral to Dr Anna Chen, Neurologist, Royal Melbourne Hospital. 12 months.');
 
 // 2. Parent of a child with complex needs ---------------------------------
@@ -146,7 +148,7 @@ const dauT = await register('daughter@bench.test', 'Linda', 'Kowalski');
 await call('PATCH', '/auth/me', dauT, { phone: '0412 555 777', gender: 'Female' });
 const mum = await profile(dauT, { kind: 'person', first_name: 'Dorothy', last_name: 'Kowalski', date_of_birth: '1943-02-19', owner_relationship: 'mother', current_phase: 'increased_dependency', contact_kind: 'self', primary_language: 'English', address_line1: '7 Banksia Court', address_suburb: 'Box Hill', address_state: 'VIC', address_postcode: '3128', residence_type: 'private_residence' });
 ids.mum = mum.id;
-const mumGp = await provider(dauT, mum.id, { provider_type: 'GP', name: 'Dr James Okafor', phone: '03 9890 3300', email: 'info@boxhillfamily.example', practice_name: 'Box Hill Family Practice', booking_link: 'https://boxhillfamily.example/book' });
+const mumGp = await provider(dauT, mum.id, { provider_type: 'GP', name: 'Dr James Okafor', phone: '03 9890 3300', email: 'info@boxhillfamily.example', practice_name: 'Box Hill Family Practice', booking_link: 'https://boxhillfamily.example/book', address_line1: '12 Station Street', address_suburb: 'Box Hill', address_state: 'VIC', address_postcode: '3128' });
 const pharm = await provider(dauT, mum.id, { provider_type: 'Pharmacy', name: 'Terry White Chemmart Box Hill', phone: '03 9890 1234', email: 'orders@chemmartbh.example' });
 const cardio = await provider(dauT, mum.id, { provider_type: 'Cardiologist', name: 'Dr Michael Tran', phone: '03 9854 7700', practice_name: 'Eastern Heart Clinic' });
 const geri = await provider(dauT, mum.id, { provider_type: 'Geriatrician', name: 'Dr Susan Whitfield', phone: '03 9094 2200', practice_name: 'Box Hill Hospital Aged Care' });
@@ -175,6 +177,15 @@ await upload(dauT, mum.id, 'Discharge summary Box Hill Hospital', 'Letter', 'Dis
 await question(dauT, mum.id, { title: 'Is the memory change getting worse?', body: 'Ask Dr Okafor and the neurologist.' });
 await question(dauT, mum.id, { title: 'Can Warfarin be swapped for something that needs fewer blood tests?' });
 await logEntry(dauT, mum.id, { entry_type: 'observation', title: 'Mum seemed confused today', body: 'Asked about Dad twice. Ate lunch well.' });
+// Wave 5: how Dorothy eats and moves, her directive, her son who holds power
+// of attorney with his document, and a task already done, for the emergency
+// sheet and the calendar feed.
+await call('PUT', `/care-profiles/${mum.id}/plan`, dauT, { dietary_requirements: ['Diabetic diet'], mobility_aids: ['Walking stick'], communication_needs: [], advance_care_directive: true, advance_care_directive_location: 'Kitchen drawer, blue folder' });
+await upload(dauT, mum.id, 'Advance care directive', 'Advance care directive', 'Advance care directive for Dorothy Kowalski. Wishes to stay at home.');
+await call('POST', `/care-profiles/${mum.id}/circle/people`, dauT, { display_name: 'Peter Kowalski', role: 'family', relationship: 'Son', phone: '0413 555 902', email: 'peter.k@example.com', poa_type: 'enduring', poa_activated: false });
+await upload(dauT, mum.id, 'Enduring power of attorney', 'Power of attorney', 'Enduring power of attorney appointing Peter Kowalski.');
+const mumDone = await task(dauT, mum.id, { title: 'Pick up the blood test form', body: 'Ring the clinic on 03 9890 3300 first.', reminder_type: 'once', next_due_at: at(-2) });
+if (mumDone) await call('PATCH', `/care-profiles/${mum.id}/reminders/${mumDone.id}`, dauT, { completed: true });
 
 // 4. Aged care home manager, professional tier, ordinary user -------------
 console.log('Home manager and 20 residents');

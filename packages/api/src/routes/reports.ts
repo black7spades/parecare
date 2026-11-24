@@ -3,7 +3,10 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { getCareAccess } from '../middleware/subscriptionGate';
 import { requireAccountRight } from '../middleware/accountRights';
+import { z } from 'zod';
 import { getRegistry, generateReport, toCsv, SYSTEM_PRESETS, type ReportPreset } from '../services/reportEngine';
+import { sendShareEmail } from '../services/email';
+import { SendProblem, createShareLink, linkOut, resolveRecipient, sendToSchema, shareUrl } from '../services/shareLinks';
 
 export const reportsRouter = Router();
 
@@ -29,6 +32,16 @@ function parseDateRange(query: Record<string, unknown>): { from: Date; to: Date 
   const to = query['to'] ? new Date(String(query['to'])) : new Date();
   const from = query['from'] ? new Date(String(query['from'])) : new Date(to.getTime() - 30 * 24 * 3600 * 1000);
   return { from, to };
+}
+
+/** Who is reading each person's report, for documents shared only with some roles. */
+async function docAccessFor(account: NonNullable<import('express').Request['account']>, profileIds: string[]) {
+  const map = new Map<string, { owner: boolean; role: string | null }>();
+  for (const id of profileIds) {
+    const access = await getCareAccess(account, id);
+    if (access) map.set(id, { owner: access.level === 'owner', role: access.member?.role ?? null });
+  }
+  return map;
 }
 
 async function accessibleProfileIds(accountId: string, role: string, requestedIds: string[]): Promise<string[]> {
@@ -156,6 +169,7 @@ reportsRouter.post('/generate', requireAuth, async (req, res) => {
     dateRange: dateRange ?? null,
     includeAiNarrative: !!includeAiNarrative,
     aiPrompt: aiPrompt ?? undefined,
+    docAccess: await docAccessFor(account, profileIds),
   });
 
   res.json(result);
@@ -181,12 +195,126 @@ reportsRouter.post('/export/csv', requireAuth, requireAccountRight('can_export_d
     sections,
     dateRange: dateRange ?? null,
     includeAiNarrative: false,
+    docAccess: await docAccessFor(account, profileIds),
   });
 
   const csv = toCsv(result.sections);
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename="parecare-report-${new Date().toISOString().slice(0, 10)}.csv"`);
   res.send(csv);
+});
+
+// ── Send a report ──────────────────────────────────────────────────────
+
+const sendSchema = z.object({
+  profile_id: z.string().uuid(),
+  report: z.object({
+    name: z.string().trim().min(1).max(200),
+    sections: z.array(z.object({ key: z.string(), fields: z.array(z.string()).default([]), filters: z.record(z.unknown()).default({}) })).min(1).max(40),
+    dateRange: z.object({ from: z.string(), to: z.string() }).nullable().optional(),
+    // The summary the sender already read, when Pare wrote one.
+    narrative: z.string().max(40000).optional().nullable(),
+  }),
+  to: sendToSchema,
+  document_ids: z.array(z.string().uuid()).max(20).default([]),
+});
+
+/**
+ * Send one person's report to someone, such as a specialist's rooms: an
+ * email with a link that opens it with no login for 30 days, and the chosen
+ * documents with it. Documents shared only with some roles never go. With no
+ * email set up here, the link comes back to send another way.
+ */
+reportsRouter.post('/send', requireAuth, requireAccountRight('can_export_data'), async (req, res) => {
+  const parsed = sendSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Choose who to send it to.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const account = req.account!;
+  const { profile_id: profileId, report, to, document_ids } = parsed.data;
+  const access = await getCareAccess(account, profileId);
+  if (!access || access.level === 'viewer') {
+    res.status(403).json({ error: 'Only someone who can change this person\'s records can send their report. Ask the person who manages the profile.', code: 'FORBIDDEN' });
+    return;
+  }
+  let recipient;
+  try {
+    recipient = await resolveRecipient(profileId, to);
+  } catch (err) {
+    if (err instanceof SendProblem) {
+      res.status(400).json({ error: err.message, code: 'NO_EMAIL' });
+      return;
+    }
+    throw err;
+  }
+  // Someone outside the circle reads it, so only what the whole circle may see goes.
+  const result = await generateReport({ profileIds: [profileId], sections: report.sections, dateRange: report.dateRange ?? null, includeAiNarrative: false });
+  // Pare's summary was written from the sender's view. When a documents
+  // section could hold documents shared only with some roles, it stays home.
+  const hasHeld = report.sections.some((sec) => sec.key === 'documents')
+    ? !!(await db('documents').where({ care_profile_id: profileId }).whereRaw('coalesce(array_length(visible_to_roles, 1), 0) > 0').first('id'))
+    : false;
+  if (report.narrative?.trim() && !hasHeld) result.aiNarrative = report.narrative.trim();
+  const docs = document_ids.length
+    ? ((await db('documents')
+        .whereIn('id', document_ids)
+        .where({ care_profile_id: profileId })
+        .whereRaw('coalesce(array_length(visible_to_roles, 1), 0) = 0')
+        .select('id', 'label')) as Array<{ id: string; label: string }>)
+    : [];
+  const profile = (await db('care_profiles').where({ id: profileId }).first('full_name', 'preferred_name')) as { full_name: string; preferred_name: string | null } | undefined;
+  const totalRows = result.sections.reduce((sum, sec) => sum + sec.rows.length, 0);
+  const [saved] = await db('saved_reports')
+    .insert({
+      account_id: account.id,
+      name: `${report.name}, sent to ${recipient.name}`,
+      config: JSON.stringify({ sections: report.sections, dateRange: report.dateRange ?? null, profileIds: [profileId] }),
+      result: JSON.stringify(result),
+      profile_count: 1,
+      section_count: result.sections.length,
+      total_rows: totalRows,
+      has_ai_narrative: !!result.aiNarrative,
+      generated_at: result.generatedAt,
+    })
+    .returning('id');
+  const link = await createShareLink(db, {
+    profileId,
+    kind: 'report',
+    entityId: (saved as { id: string }).id,
+    providerId: recipient.provider_id,
+    circleMemberId: recipient.circle_member_id,
+    recipientEmail: recipient.email,
+    documentIds: docs.map((d) => d.id),
+    createdBy: account.id,
+  });
+  const name = profile?.preferred_name || profile?.full_name || 'Someone';
+  const from = account.display_name || account.email;
+  let sent = false;
+  try {
+    sent = await sendShareEmail(
+      recipient.email,
+      `${name}: ${report.name}`,
+      [
+        // Someone sending their own report sends "their" report, not "Sam Nguyen's".
+        `${from} sent you ${from === profile?.full_name || from === profile?.preferred_name ? 'their' : `${name}'s`} ${report.name.toLowerCase()} through PareCare.`,
+        ...(docs.length ? ['', `With it: ${docs.map((d) => d.label).join(', ')}.`] : []),
+        '',
+        'It opens without logging in, for the next 30 days.',
+      ],
+      { text: 'Open the report', url: shareUrl(link.token) }
+    );
+  } catch (err) {
+    console.error('Report email failed:', err);
+    res.status(502).json({
+      error: `The email to ${recipient.name} did not go. Copy the link and send it another way, or try again in a minute.`,
+      code: 'EMAIL_FAILED',
+      link: linkOut(link),
+      recipient: { name: recipient.name, email: recipient.email },
+    });
+    return;
+  }
+  res.status(201).json({ sent, link: linkOut(link), recipient: { name: recipient.name, email: recipient.email }, documents: docs });
 });
 
 // ── Presets ─────────────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ import { AvatarEditor } from '../../../components/ui/AvatarEditor';
 import { Avatar } from '../../../components/ui/Avatar';
 import { ContactDetails, contactPayload, emptyContact, type ContactValue } from '../../../components/ContactDetails';
 import { ResidenceFields, residenceFrom, residencePayload, persistResidence, residenceNeedsPersist, emptyResidence, type ResidenceValue } from '../../../components/ResidenceFields';
+import { IdentifiersForm } from '../../../components/IdentifiersForm';
 import { PET_SPECIES, type CareProfile, type DeathChange, type Provider } from '../../../lib/care';
 
 /** Edit the person or pet in care, and their photo. Shown only to those with edit access. */
@@ -15,12 +16,19 @@ export function EditProfileModal({
   profile,
   open,
   onClose,
+  initialTab = 'details',
 }: {
   profile: CareProfile;
   open: boolean;
   onClose: () => void;
+  /** Open straight at the ID numbers, such as from the emergency sheet. */
+  initialTab?: 'details' | 'ids';
 }) {
   const isPet = profile.kind === 'pet';
+  const [tab, setTab] = useState<'details' | 'ids'>(initialTab);
+  useEffect(() => {
+    if (open) setTab(initialTab);
+  }, [open, initialTab]);
   const queryClient = useQueryClient();
   const [title, setTitle] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -233,6 +241,11 @@ export function EditProfileModal({
             <Button onClick={onClose}>Done</Button>
           </div>
         </div>
+      ) : !isPet && tab === 'ids' ? (
+        <div className="space-y-4">
+          <ProfileTabs tab={tab} onTab={setTab} />
+          <IdentifiersForm profileId={profile.id} canEdit />
+        </div>
       ) : (
       <form
         className="space-y-4"
@@ -241,6 +254,7 @@ export function EditProfileModal({
           saveMutation.mutate();
         }}
       >
+        {!isPet ? <ProfileTabs tab={tab} onTab={setTab} /> : null}
         <div className="flex items-center gap-4">
           <Avatar
             accountId={profile.id}
@@ -393,3 +407,25 @@ export function EditProfileModal({
   );
 }
 
+/** Details or ID numbers: a segmented switch, each its own form and Save. */
+function ProfileTabs({ tab, onTab }: { tab: 'details' | 'ids'; onTab: (t: 'details' | 'ids') => void }) {
+  const item = (t: 'details' | 'ids', label: string) => (
+    <Button
+      type="button"
+      size="sm"
+      variant="ghost"
+      role="tab"
+      aria-selected={tab === t}
+      className={tab === t ? 'bg-card text-ink font-medium shadow-sm' : 'text-muted hover:text-ink'}
+      onClick={() => onTab(t)}
+    >
+      {label}
+    </Button>
+  );
+  return (
+    <div role="tablist" aria-label="What to edit" className="inline-flex rounded-md bg-surface-2 p-0.5 gap-0.5">
+      {item('details', 'Details')}
+      {item('ids', 'ID numbers')}
+    </div>
+  );
+}

@@ -279,6 +279,12 @@ healthSpendRouter.get('/export', async (req, res) => {
   if (range.to) query = query.where('e.spent_on', '<=', range.to);
   const rows = await query.orderBy('e.spent_on', 'asc');
 
+  // Codes go out as the screen names them, so the file reads plainly.
+  const CATEGORY_WORDS: Record<string, string> = { medication: 'Medication', appointment: 'Appointment', other: 'Other' };
+  const FUNDING_WORDS: Record<string, string> = {
+    self: 'Self funded', ndis: 'NDIS', private_health: 'Private health', medicare: 'Medicare', government: 'Government', other: 'Other',
+  };
+  const CLAIM_WORDS: Record<string, string> = { none: 'Not claimable', unclaimed: 'Unclaimed', submitted: 'Submitted', reimbursed: 'Reimbursed' };
   const headers = [
     'Date', 'Person', 'Description', 'Category', 'Funding source', 'Account code',
     'Total', 'Tax', 'Ex tax', 'Claimable', 'Reimbursed', 'Outstanding', 'Claim status',
@@ -293,11 +299,11 @@ healthSpendRouter.get('/export', async (req, res) => {
     const status = String(e['claim_status'] ?? 'none');
     const outstanding = status === 'unclaimed' || status === 'submitted' ? Math.max(0, claimable - reimbursed) : 0;
     lines.push([
-      csvCell(e['spent_on']),
+      csvCell(String(e['spent_on'] ?? '').slice(0, 10)),
       csvCell(personName),
       csvCell(e['item_name'] ?? e['description'] ?? ''),
-      csvCell(e['category']),
-      csvCell(e['funding_source'] ?? ''),
+      csvCell(CATEGORY_WORDS[String(e['category'])] ?? e['category']),
+      csvCell(FUNDING_WORDS[String(e['funding_source'] ?? '')] ?? e['funding_source'] ?? ''),
       csvCell(e['account_code'] ?? ''),
       csvCell(total.toFixed(2)),
       csvCell(tax.toFixed(2)),
@@ -305,7 +311,7 @@ healthSpendRouter.get('/export', async (req, res) => {
       csvCell(claimable ? claimable.toFixed(2) : ''),
       csvCell(reimbursed ? reimbursed.toFixed(2) : ''),
       csvCell(outstanding ? outstanding.toFixed(2) : ''),
-      csvCell(status),
+      csvCell(CLAIM_WORDS[status] ?? status),
     ].join(','));
   }
 

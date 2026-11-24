@@ -25,6 +25,7 @@ import { useHealthConfig } from '../../../lib/appConfig';
 import { noticeFiled, refreshContacts, useNoticeStore } from '../../../stores/notice';
 import { AddressFields, addressFrom, addressPayload, emptyAddress, hasAddress, type AddressValue } from '../../../components/AddressFields';
 import { ContactStrip } from '../../../components/ContactStrip';
+import { SendAppointmentModal, downloadAppointmentIcs } from '../../../components/SendAppointmentModal';
 import { ContactPicker } from '../../../components/ContactPicker';
 import { LinkedText } from '../../../components/LinkedText';
 import { DocumentAttach } from '../../../components/DocumentAttach';
@@ -200,6 +201,9 @@ export function AppointmentsPage() {
   // Forwarding to a new appointment: book it, then the notes go to it.
   const [forwardingNew, setForwardingNew] = useState<{ sourceId: string; items: ReturnType<typeof pickedItems> } | null>(null);
   const [forwardError, setForwardError] = useState('');
+  // Sending one appointment to someone, such as whoever is driving.
+  const [sendingFor, setSendingFor] = useState<Appointment | null>(null);
+  const [calendarError, setCalendarError] = useState('');
   // One in a series was moved: offer to move the later ones too.
   const [seriesMove, setSeriesMove] = useState<{ id: string; from: string; later: number; to: string } | null>(null);
 
@@ -646,6 +650,22 @@ export function AppointmentsPage() {
             // Only once it has happened.
             ...(hasStarted(current) && current.status !== 'cancelled' ? [{ label: 'How did it go?', onRun: () => setOutcomeFor(current.id) }] : []),
             { label: 'Forward notes', onRun: () => setForwarding({ sourceId: current.id, noteId: null }) },
+            // Only once it has a date: a driver needs a time and a place.
+            ...(current.starts_at && current.status !== 'cancelled'
+              ? [
+                  { label: 'Send to someone', onRun: () => setSendingFor(current) },
+                  {
+                    label: 'Add to my calendar',
+                    always: true,
+                    onRun: () => {
+                      setCalendarError('');
+                      downloadAppointmentIcs(profile.id, current.id, current.title).catch((err: unknown) =>
+                        setCalendarError(err instanceof Error ? err.message : 'The calendar entry could not be made just now. Try again in a moment.')
+                      );
+                    },
+                  },
+                ]
+              : []),
             ...(current.series ? [{ label: 'Stop repeating', onRun: () => stopRepeating.mutate(current), pending: stopRepeating.isPending }] : []),
           ]}
           onForwardNote={(noteId) => setForwarding({ sourceId: current.id, noteId })}
@@ -655,6 +675,7 @@ export function AppointmentsPage() {
           }}
           onClose={panel.close}
         >
+          {calendarError ? <p className="text-sm text-red-600" role="alert">{calendarError}</p> : null}
           <section>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Who with</h3>
             {current.provider ? (
@@ -794,6 +815,15 @@ export function AppointmentsPage() {
         />
       ) : null}
 
+      {sendingFor ? (
+        <SendAppointmentModal
+          profileId={profile.id}
+          appointmentId={sendingFor.id}
+          title={sendingFor.title}
+          driver={(sendingFor.attendees ?? []).find((a) => a.is_driver) ?? null}
+          onClose={() => setSendingFor(null)}
+        />
+      ) : null}
       {forwarding && appointments.some((a) => a.id === forwarding.sourceId) ? (
         <ForwardNotesModal
           key={`${forwarding.sourceId}-${forwarding.noteId ?? 'all'}`}

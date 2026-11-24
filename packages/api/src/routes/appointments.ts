@@ -26,6 +26,20 @@ import {
 } from '../services/booking';
 import { createTask, findSameBookingTask, joinTask } from '../services/tasks';
 import { refreshReferrals } from '../services/documentDates';
+import { sendShareEmail } from '../services/email';
+import {
+  SendProblem,
+  appointmentEmailLines,
+  appointmentForSending,
+  appointmentIcs,
+  createShareLink,
+  linkOut,
+  ownerZone,
+  resolveRecipient,
+  sendToSchema,
+  shareUrl,
+  whenText,
+} from '../services/shareLinks';
 
 /**
  * Appointments are a first-class record: who is being seen, what for,
@@ -425,6 +439,88 @@ appointmentsRouter.patch('/:appointmentId', requireAuth, async (req, res) => {
     }
     throw err;
   }
+});
+
+/**
+ * Add one appointment to someone's own calendar: a single calendar file with
+ * the place, who it is with and their phone, what to bring and two alarms.
+ */
+appointmentsRouter.get('/:appointmentId/calendar.ics', requireAuth, async (req, res) => {
+  const file = await appointmentIcs(String(req.params['id']), String(req.params['appointmentId']));
+  if (!file) {
+    res.status(404).json({ error: 'This appointment has no date yet, so there is nothing to add to a calendar.', code: 'NOT_FOUND' });
+    return;
+  }
+  res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+  res.send(file.body);
+});
+
+/**
+ * Send one appointment to someone, such as whoever is driving: the time, the
+ * place, the contact's phone, what to bring and how to get ready, with the
+ * calendar entry attached and a link that opens with no login. Notes stay
+ * private. With no email set up here, the link comes back to send another way.
+ */
+appointmentsRouter.post('/:appointmentId/send', requireAuth, async (req, res) => {
+  const parsed = z.object({ to: sendToSchema }).safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Choose who to send it to.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const profileId = String(req.params['id']);
+  const appointmentId = String(req.params['appointmentId']);
+  const found = await appointmentForSending(profileId, appointmentId);
+  if (!found) {
+    res.status(404).json({ error: 'That appointment could not be found.', code: 'NOT_FOUND' });
+    return;
+  }
+  let recipient;
+  try {
+    recipient = await resolveRecipient(profileId, parsed.data.to);
+  } catch (err) {
+    if (err instanceof SendProblem) {
+      res.status(400).json({ error: err.message, code: 'NO_EMAIL' });
+      return;
+    }
+    throw err;
+  }
+  const link = await createShareLink(db, {
+    profileId,
+    kind: 'appointment',
+    entityId: appointmentId,
+    providerId: recipient.provider_id,
+    circleMemberId: recipient.circle_member_id,
+    recipientEmail: recipient.email,
+    createdBy: req.account!.id,
+  });
+  const [zone, profile] = await Promise.all([
+    ownerZone(profileId),
+    db('care_profiles').where({ id: profileId }).first('full_name', 'preferred_name') as Promise<{ full_name: string; preferred_name: string | null } | undefined>,
+  ]);
+  const name = profile?.preferred_name || profile?.full_name || 'Someone';
+  const ics = await appointmentIcs(profileId, appointmentId);
+  const url = shareUrl(link.token);
+  let sent = false;
+  try {
+    sent = await sendShareEmail(
+      recipient.email,
+      `${name}: ${found.shared.title}, ${whenText(found.shared.starts_at, found.shared.all_day, zone)}`,
+      appointmentEmailLines(name, found.shared, zone),
+      { text: 'Open the appointment', url },
+      ics ? [{ filename: ics.filename, content: ics.body, contentType: 'text/calendar; charset=utf-8; method=PUBLISH' }] : []
+    );
+  } catch (err) {
+    console.error('Appointment email failed:', err);
+    res.status(502).json({
+      error: `The email to ${recipient.name} did not go. Copy the link and send it another way, or try again in a minute.`,
+      code: 'EMAIL_FAILED',
+      link: linkOut(link),
+      recipient: { name: recipient.name, email: recipient.email },
+    });
+    return;
+  }
+  res.status(201).json({ sent, link: linkOut(link), recipient: { name: recipient.name, email: recipient.email } });
 });
 
 /** Stop a repeating appointment here. Later ones nobody has added to are removed. */

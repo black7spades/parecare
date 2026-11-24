@@ -272,7 +272,7 @@ documentsRouter.get('/:docId/file', requireAuth, async (req, res) => {
     return;
   }
 
-  const localPath = path.join(getStorageConfig().localPath, doc.file_url.slice('/uploads/'.length));
+  const localPath = path.resolve(getStorageConfig().localPath, doc.file_url.slice('/uploads/'.length));
   if (doc.mime_type) res.setHeader('Content-Type', doc.mime_type);
   const ext = path.extname(doc.file_url);
   res.setHeader('Content-Disposition', `attachment; filename="${doc.label.replace(/[^\w .-]/g, '_')}${ext}"`);

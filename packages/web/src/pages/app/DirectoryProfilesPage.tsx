@@ -160,7 +160,7 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
               ? ['Name', 'Preferred name', 'Date of birth', 'Pronouns', 'Language', 'Phase', 'Relationship', 'Room', 'GP name', 'GP phone', 'GP practice', 'Next of kin name', 'Next of kin relationship', 'Next of kin phone', 'Next of kin email']
               : ['Name', 'Species', 'Breed', 'Desexed', 'Microchip', 'Date of birth', 'Relationship', 'Contact name', 'Contact phone', 'Contact email']}
             templateSample={isPeople
-              ? ['Marie Rose', 'Marie', '1948-03-14', 'she/her', 'English', 'residential_ongoing', 'Resident', '112', 'Dr Rachel Cohen', '03 9560 4422', 'Glen Waverley Medical', 'Chris Rattray', 'Son', '0412 555 555', 'chris@example.com']
+              ? ['Marie Rose', 'Marie', '1948-03-14', 'she/her', 'English', 'Residential ongoing', 'Resident', '112', 'Dr Rachel Cohen', '03 9560 4422', 'Glen Waverley Medical', 'Chris Rattray', 'Son', '0412 555 555', 'chris@example.com']
               : ['Bread Loaf', 'Cat', 'Domestic Shorthair', 'true', '', '2019-06-01', 'Cat', 'Chris Rattray', '07 5555 5555', '']}
           />
           {/* Offered to everyone allowed to set up a profile. */}

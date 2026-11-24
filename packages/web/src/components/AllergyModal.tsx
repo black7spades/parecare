@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import { Button } from './ui/Button';
 import { Modal } from './ui/Modal';
 import { CatalogueCombo } from './CatalogueCombo';
-import type { Allergy } from '../lib/care';
+import { ALLERGY_SEVERITIES, type Allergy, type AllergySeverity } from '../lib/care';
 
 /**
  * The one way an allergy is recorded or corrected, wherever the need
@@ -31,11 +31,12 @@ export function AllergyModal({
   const queryClient = useQueryClient();
   const [substance, setSubstance] = useState(allergy?.substance ?? '');
   const [reaction, setReaction] = useState(allergy?.reaction ?? '');
+  const [severity, setSeverity] = useState<AllergySeverity | ''>(allergy?.severity ?? '');
   const [error, setError] = useState('');
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const body = { substance: substance.trim(), reaction: reaction.trim() || null };
+      const body = { substance: substance.trim(), reaction: reaction.trim() || null, severity: severity || null };
       if (isNew) {
         return api.post<{ allergy: Allergy }>(`/care-profiles/${profileId}/allergies`, body);
       }
@@ -43,6 +44,7 @@ export function AllergyModal({
     },
     onSuccess: (res) => {
       void queryClient.invalidateQueries({ queryKey: ['allergies', profileId] });
+      void queryClient.invalidateQueries({ queryKey: ['emergency-sheet', profileId] });
       onSaved?.(res.allergy);
       onClose();
     },
@@ -77,6 +79,22 @@ export function AllergyModal({
           />
           <p className="mt-1 text-xs text-muted">What happens if they are given it.</p>
         </div>
+        <div>
+          <label htmlFor={`allergy-severity-${allergy?.id ?? 'new'}`} className="block text-sm font-medium text-ink mb-1">
+            How bad is the reaction
+          </label>
+          <select
+            id={`allergy-severity-${allergy?.id ?? 'new'}`}
+            className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            value={severity}
+            onChange={(e) => setSeverity(e.target.value as AllergySeverity | '')}
+          >
+            <option value="">Not known</option>
+            {ALLERGY_SEVERITIES.map((s) => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
+        </div>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>
@@ -85,8 +103,15 @@ export function AllergyModal({
           <Button
             type="button"
             loading={saveMutation.isPending}
-            disabled={!substance.trim()}
-            onClick={() => saveMutation.mutate()}
+            onClick={() => {
+              // Save always answers: say what is missing.
+              if (!substance.trim()) {
+                setError('Say what they are allergic to, then save.');
+                return;
+              }
+              setError('');
+              saveMutation.mutate();
+            }}
           >
             Save
           </Button>
