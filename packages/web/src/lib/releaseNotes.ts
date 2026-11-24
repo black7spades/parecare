@@ -20,6 +20,30 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.55.0',
+    date: '2026-11-25',
+    summary: 'PareCare now works in any country: the services, ID numbers, funding schemes, yearly checks, words and date formats follow the country, and every service can be changed, added and checked once a year.',
+    groups: [
+      { heading: 'Added', items: [
+        'Works in any country. Whoever runs PareCare picks the country it is used in: Australia, New Zealand, the United Kingdom, Ireland, Canada or the United States. PareCare works out a first guess from the server and the browser, so it is one tap to confirm. An account set up somewhere else can pick its own country in its settings.',
+        'National services for each country. Journey steps that send someone to a national service, such as support for carers, an aged care assessment, a crisis line or quit smoking support, show that country\'s own service with its number and website. In the UK the carer step shows Carers UK; in Australia it shows Carer Gateway, as before.',
+        'Enter your own. Every service can be changed, and new ones added, by whoever runs PareCare for everyone, or by an account owner for their own account. Back to the original puts the built-in details back, with Undo. A change shows everywhere the service is used, straight away.',
+        'Add the number for this service. Where a country has no single national number for a step, the step says so and offers Add the number for this service, or Add a task, so nobody hits a dead end.',
+        'A yearly check. Each service shows when it was last checked. Once a year, whoever runs PareCare gets a task on their home page, and an email, to check the services are still right. With Pare on, Check current services suggests changes one at a time to use or dismiss. With Pare off, each service\'s website is linked in the list to check by hand.',
+        'ID numbers for each country. Edit profile, first setup and the emergency sheet ask for the numbers the person\'s country uses: Medicare, the IHI, DVA, NDIS and My Aged Care in Australia, the NHS number in the UK, the NHI number in New Zealand, the PPS number and medical card in Ireland, the provincial health card in Canada, and Medicare and Medicaid in the United States. Each is checked as it is saved.',
+        'The emergency number on the emergency sheet. The sheet now starts with who to call in an emergency where the person lives: 000 in Australia, 999 in the UK, 911 in North America.',
+      ] },
+      { heading: 'Changed', items: [
+        'Funding, yearly checks and referrals follow the country. Funding plans offer the country\'s own schemes and name the local coordinator its way, such as an NDIS plan with a Local Area Coordinator in Australia or a personal budget with a social worker in the UK. Suggested yearly checks offer the 75+ health assessment only in Australia, and the flu vaccine from October in the north. A referral\'s end date is worked out only where referrals run out by rule.',
+        'Words and formats follow the country. The advance care directive is called what the country calls it, such as an advance decision in the UK. Dates read month first in the United States and Canada, address boxes say County, Province or ZIP code where those are used, phone numbers in notes are found the way that country writes them, and health funds offered are that country\'s own. Currency and the financial year follow the country until someone changes them.',
+        'The home card\'s last update reads as a sentence, such as Linda started a journey, Ageing well and staying independent, 5 minutes ago.',
+      ] },
+      { heading: 'Fixed', items: [
+        'When first setup stops because something on an earlier step needs fixing, such as an ID number that does not look right, the main button now goes straight to that step instead of offering Try again.',
+      ] },
+    ],
+  },
+  {
     version: '0.54.0',
     date: '2026-11-25',
     summary: 'Questions go to the visit they are for, first setup asks for medicines, pharmacy, ID numbers, the directive and power of attorney, and everything works without Pare.',

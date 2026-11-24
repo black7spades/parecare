@@ -5,6 +5,8 @@ import { repeatChoice, repeatLabel } from '../lib/repeat';
 import { withCategory } from './documentCategories';
 import { roleMaySee } from '../lib/circleRoles';
 import type { CareAccess, CareProfile } from '../types';
+import { localiseCareWords } from '../lib/countries';
+import { systemCountry } from './country';
 
 /**
  * Builds the assistant's knowledge of one person. Everything the platform
@@ -255,7 +257,7 @@ export async function buildProfileContext(
         Array.isArray(plan?.communication_needs) && plan.communication_needs.length
           ? `Communication needs: ${plan.communication_needs.join('; ')}`
           : null,
-        `Advance care directive: ${plan?.advance_care_directive ? `yes${plan.advance_care_directive_location ? `, kept at ${plan.advance_care_directive_location}` : ''}` : 'no'}`,
+        `${localiseCareWords('Advance care directive', systemCountry())}: ${plan?.advance_care_directive ? `yes${plan.advance_care_directive_location ? `, kept at ${plan.advance_care_directive_location}` : ''}` : 'no'}`,
         contacts.length
           ? `Emergency contacts: ${contacts.map((c) => line([c.name, c.relationship, c.phone])).join(' | ')}`
           : null,

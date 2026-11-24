@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import { format } from '../../../lib/dateFormat';
 import { api } from '../../../api/client';
 import { ACTIVITY_VERBS, DOSE_ENTITY, activityWords, doseActivityWords, entityLabel, type ActivityEntry } from '../../../lib/care';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';

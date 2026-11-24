@@ -40,6 +40,8 @@ export interface JourneyTemplateTask {
   action_document_category?: string | null;
   action_page?: string | null;
   action_url?: string | null;
+  /** A kind of national service; its details come from the country. */
+  action_service?: string | null;
   due_in_days?: number | null;
   repeat?: string | null;
   repeat_rrule?: string | null;

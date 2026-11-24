@@ -105,7 +105,7 @@ async function generateNarrative(sections: ReportSectionResult[], customPrompt?:
 
   const systemPrompt = [
     'You are a care report analyst for PareCare, a care coordination platform.',
-    'You will be given structured data from a care report. Write a clear, professional narrative summary suitable for handover to medical staff, NDIS auditors, or care managers.',
+    'You will be given structured data from a care report. Write a clear, professional narrative summary suitable for handover to medical staff, funding reviewers, or care managers.',
     'Guidelines:',
     '- Use plain language. Avoid jargon unless defining it.',
     '- Highlight key findings, patterns, and concerns.',

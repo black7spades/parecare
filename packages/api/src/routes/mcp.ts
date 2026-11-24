@@ -104,7 +104,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   add_allergy: 'Record an allergy or intolerance for a person.',
   remove_allergy: 'Remove an allergy from a person\'s record.',
   confirm_no_allergies: 'Record that a person has no known allergies, checked today. Only when the user says so, and only while no allergy is on file.',
-  set_id_numbers: 'Record a person\'s ID numbers: Medicare with its position on the card and valid to month, Individual Healthcare Identifier, DVA, NDIS, health fund and My Aged Care. Each number is checked; one that does not look right is not saved.',
+  set_id_numbers: 'Record a person\'s ID numbers, the ones their country uses: in Australia Medicare with its position on the card and valid to month, the Individual Healthcare Identifier, DVA, NDIS and My Aged Care; elsewhere the NHS, NHI, PPS, health card, or Medicare and Medicaid numbers; and their health fund or insurer. Each number is checked; one that does not look right is not saved.',
   add_condition: 'Record a health condition or diagnosis for a person, and who treats it.',
   update_condition: 'Change a condition already on file: who treats it, how severe it is, its status or notes.',
   log_condition: 'Log how a condition is going today for a person.',
@@ -139,7 +139,7 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   record_hospital_stay: 'Record that a person went into hospital: which hospital, the day, the ward and why. Their medicine reminders pause while the stay is open.',
   record_discharge: 'Record that a person left hospital. Adds a task to see their GP within the days the letter gives, and a task to look over the care plan.',
   record_result: 'Record a test result for a person, one value per measure, linked to the test and shown at the next visit with whoever ordered it.',
-  set_funding_plan: 'Record or change a person\'s NDIS plan or aged care package: its dates, how it is managed, its contacts and budgets.',
+  set_funding_plan: 'Record or change a person\'s funding plan, such as disability funding or an aged care package, named as their country names it: its dates, how it is managed, its contacts and budgets.',
   record_move_into_care: 'Record a person moving into a care home: the dates, the payment choice and notice, keeping their previous home.',
 };
 

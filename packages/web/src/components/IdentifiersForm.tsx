@@ -4,30 +4,26 @@ import { api } from '../api/client';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { CatalogueCombo } from './CatalogueCombo';
-import { DVA_CARD_COLOURS, type IdentifierField, type Identifiers } from '../lib/care';
+import { type IdentifierField, type Identifiers } from '../lib/care';
+import { useProfileCountry } from '../lib/country';
 
-type Draft = Record<IdentifierField, string>;
-
-const EMPTY: Draft = {
-  medicare_number: '', medicare_irn: '', medicare_valid_to: '', ihi_number: '', dva_number: '', dva_card_colour: '',
-  ndis_number: '', health_fund_name: '', health_fund_member_number: '', my_aged_care_number: '',
-};
+type Draft = Partial<Record<IdentifierField, string>>;
 
 /** The month on the card, MM/YYYY, from the last day of that month. */
 const toCardMonth = (d: string | null) => (d && /^\d{4}-\d{2}/.test(d) ? `${d.slice(5, 7)}/${d.slice(0, 4)}` : '');
 
-const fromSaved = (ids: Identifiers): Draft => ({
-  medicare_number: ids.medicare_number ?? '',
-  medicare_irn: ids.medicare_irn ? String(ids.medicare_irn) : '',
-  medicare_valid_to: toCardMonth(ids.medicare_valid_to),
-  ihi_number: ids.ihi_number ?? '',
-  dva_number: ids.dva_number ?? '',
-  dva_card_colour: ids.dva_card_colour ?? '',
-  ndis_number: ids.ndis_number ?? '',
-  health_fund_name: ids.health_fund_name ?? '',
-  health_fund_member_number: ids.health_fund_member_number ?? '',
-  my_aged_care_number: ids.my_aged_care_number ?? '',
-});
+/** Every number on file as its box shows it; the boxes shown come from the person's country. */
+const fromSaved = (ids: Identifiers): Draft =>
+  Object.fromEntries(
+    (Object.keys(ids) as IdentifierField[]).map((k) => {
+      const v = ids[k];
+      if (k === 'medicare_valid_to') return [k, toCardMonth(v as string | null)];
+      return [k, v === null || v === undefined ? '' : String(v)];
+    })
+  ) as Draft;
+
+const differs = (a: Draft, b: Draft) =>
+  Object.fromEntries((Object.keys(a) as IdentifierField[]).filter((k) => (a[k] ?? '') !== (b[k] ?? '')).map((k) => [k, a[k] ?? '']));
 
 const SELECT = 'block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
@@ -60,7 +56,8 @@ export function IdentifiersForm({
     queryKey: ['identifiers', profileId],
     queryFn: () => api.get<{ identifiers: Identifiers }>(`/care-profiles/${profileId}/identifiers`),
   });
-  const [draft, setDraft] = useState<Draft>(EMPTY);
+  const { config } = useProfileCountry(profileId);
+  const [draft, setDraft] = useState<Draft>({});
   const [problems, setProblems] = useState<Partial<Record<IdentifierField, string>>>({});
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
@@ -81,8 +78,8 @@ export function IdentifiersForm({
 
   useEffect(() => {
     if (!onDraft || !ready) return;
-    const before = data?.identifiers ? fromSaved(data.identifiers) : EMPTY;
-    onDraft(Object.fromEntries((Object.keys(draft) as IdentifierField[]).filter((k) => draft[k] !== before[k]).map((k) => [k, draft[k]])));
+    const before = data?.identifiers ? fromSaved(data.identifiers) : {};
+    onDraft(differs(draft, before));
     // onDraft is the caller's setter; only the boxes matter here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft, ready]);
@@ -90,8 +87,8 @@ export function IdentifiersForm({
   const save = useMutation({
     // Only the boxes that changed go, so nothing on file is cleared by accident.
     mutationFn: () => {
-      const before = data?.identifiers ? fromSaved(data.identifiers) : EMPTY;
-      const changed = Object.fromEntries((Object.keys(draft) as IdentifierField[]).filter((k) => draft[k] !== before[k]).map((k) => [k, draft[k]]));
+      const before = data?.identifiers ? fromSaved(data.identifiers) : {};
+      const changed = differs(draft, before);
       return api.put<{ identifiers: Identifiers; problems: Partial<Record<IdentifierField, string>>; saved: IdentifierField[] }>(`/care-profiles/${profileId}/identifiers`, changed);
     },
     onSuccess: (res) => {
@@ -127,19 +124,61 @@ export function IdentifiersForm({
     );
   }
 
-  const box = (k: IdentifierField, label: string, extra: { hint?: string; placeholder?: string; inputMode?: 'numeric' | 'text' } = {}) => (
-    <Input
-      label={label}
-      value={draft[k]}
-      onChange={(e) => set(k)(e.target.value)}
-      error={problems[k]}
-      hint={extra.hint}
-      placeholder={extra.placeholder}
-      inputMode={extra.inputMode}
-      disabled={!canEdit}
-      autoComplete="off"
-    />
-  );
+  const field = (f: (typeof config.id_groups)[number]['fields'][number]) => {
+    const k = f.key as IdentifierField;
+    const id = `id-${k}-${profileId}`;
+    if (f.kind === 'select') {
+      return (
+        <div key={k}>
+          <label htmlFor={id} className="block text-sm font-medium text-ink mb-1">{f.label}</label>
+          <select id={id} className={SELECT} value={draft[k] ?? ''} disabled={!canEdit} onChange={(e) => set(k)(e.target.value)}>
+            <option value="">{k === 'dva_card_colour' ? 'No DVA card' : 'Not recorded'}</option>
+            {(f.options ?? []).map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          {problems[k] ? <p className="mt-1 text-xs text-red-600">{problems[k]}</p> : null}
+        </div>
+      );
+    }
+    if (k === 'health_fund_name') {
+      return (
+        <div key={k}>
+          <span className="block text-sm font-medium text-ink mb-1">{f.label}</span>
+          {canEdit ? (
+            <CatalogueCombo
+              endpoint="/option-catalogue?category=health_fund"
+              ariaLabel={f.label}
+              placeholder={config.words.health_fund_example ? `e.g. ${config.words.health_fund_example}` : undefined}
+              initial={draft[k] ?? ''}
+              keepValue
+              onPick={set(k)}
+              widthClass="w-full"
+            />
+          ) : (
+            <p className="text-sm text-ink">{draft[k] || 'Not recorded'}</p>
+          )}
+          {problems[k] ? <p className="mt-1 text-xs text-red-600">{problems[k]}</p> : null}
+        </div>
+      );
+    }
+    return (
+      <Input
+        key={k}
+        label={f.label}
+        value={draft[k] ?? ''}
+        onChange={(e) => set(k)(e.target.value)}
+        error={problems[k]}
+        hint={f.hint ?? undefined}
+        placeholder={f.placeholder ?? undefined}
+        inputMode={f.numeric || f.kind === 'position' ? 'numeric' : 'text'}
+        disabled={!canEdit}
+        autoComplete="off"
+      />
+    );
+  };
+
+  const cols = (n: number) => (n >= 3 ? 'sm:grid-cols-3' : n === 2 ? 'sm:grid-cols-2' : '');
 
   return (
     <form
@@ -149,65 +188,12 @@ export function IdentifiersForm({
         if (!onDraft) save.mutate();
       }}
     >
-      <fieldset className="space-y-3">
-        <legend className="text-sm font-semibold text-ink mb-1">Medicare</legend>
-        <div className="grid gap-3 sm:grid-cols-[1fr_8rem_8rem]">
-          {box('medicare_number', 'Medicare number', { placeholder: '2123 45670 1', inputMode: 'numeric' })}
-          {box('medicare_irn', 'Position on the card', { placeholder: '1', inputMode: 'numeric', hint: 'The number beside their name.' })}
-          {box('medicare_valid_to', 'Valid to', { placeholder: 'MM/YYYY' })}
-        </div>
-      </fieldset>
-      <fieldset className="space-y-3">
-        <legend className="text-sm font-semibold text-ink mb-1">My Health Record</legend>
-        {box('ihi_number', 'Individual Healthcare Identifier', { hint: '16 digits, starts with 8003. It is on My Health Record.', inputMode: 'numeric' })}
-      </fieldset>
-      <fieldset className="space-y-3">
-        <legend className="text-sm font-semibold text-ink mb-1">Veterans</legend>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {box('dva_number', 'DVA file number', { placeholder: 'NX123456' })}
-          <div>
-            <label htmlFor={`dva-colour-${profileId}`} className="block text-sm font-medium text-ink mb-1">DVA card colour</label>
-            <select id={`dva-colour-${profileId}`} className={SELECT} value={draft.dva_card_colour} disabled={!canEdit} onChange={(e) => set('dva_card_colour')(e.target.value)}>
-              <option value="">No DVA card</option>
-              {DVA_CARD_COLOURS.map((c) => (
-                <option key={c.value} value={c.value}>{c.label}</option>
-              ))}
-            </select>
-            {problems.dva_card_colour ? <p className="mt-1 text-xs text-red-600">{problems.dva_card_colour}</p> : null}
-          </div>
-        </div>
-      </fieldset>
-      <fieldset className="space-y-3">
-        <legend className="text-sm font-semibold text-ink mb-1">NDIS</legend>
-        {box('ndis_number', 'NDIS number', { hint: '9 digits, starts with 43.', inputMode: 'numeric' })}
-      </fieldset>
-      <fieldset className="space-y-3">
-        <legend className="text-sm font-semibold text-ink mb-1">Private health</legend>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <span className="block text-sm font-medium text-ink mb-1">Health fund</span>
-            {canEdit ? (
-              <CatalogueCombo
-                endpoint="/option-catalogue?category=health_fund"
-                ariaLabel="Health fund"
-                placeholder="e.g. Medibank"
-                initial={draft.health_fund_name}
-                keepValue
-                onPick={set('health_fund_name')}
-                widthClass="w-full"
-              />
-            ) : (
-              <p className="text-sm text-ink">{draft.health_fund_name || 'Not recorded'}</p>
-            )}
-            {problems.health_fund_name ? <p className="mt-1 text-xs text-red-600">{problems.health_fund_name}</p> : null}
-          </div>
-          {box('health_fund_member_number', 'Member number')}
-        </div>
-      </fieldset>
-      <fieldset className="space-y-3">
-        <legend className="text-sm font-semibold text-ink mb-1">Aged care</legend>
-        {box('my_aged_care_number', 'My Aged Care number', { hint: 'Starts with AC.', placeholder: 'AC12345678' })}
-      </fieldset>
+      {config.id_groups.map((g) => (
+        <fieldset key={g.legend} className="space-y-3">
+          <legend className="text-sm font-semibold text-ink mb-1">{g.legend}</legend>
+          <div className={`grid gap-3 ${cols(g.fields.length)}`}>{g.fields.map(field)}</div>
+        </fieldset>
+      ))}
       {error ? <p className="text-sm text-red-600" role="alert">{error}</p> : null}
       {canEdit && !onDraft ? (
         <div className="flex items-center justify-end gap-3">

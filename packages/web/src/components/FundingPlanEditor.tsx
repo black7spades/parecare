@@ -6,7 +6,8 @@ import { Input } from './ui/Input';
 import { Modal } from './ui/Modal';
 import { contactProblem, ContactPicker, emptyContact, pickedFrom, type PickedContact } from './ContactPicker';
 import { noticeFiled, refreshContacts } from '../stores/notice';
-import { MANAGEMENT, SCHEMES, addDays, type FundingPlan } from '../lib/lifeEvents';
+import { addDays, type FundingPlan } from '../lib/lifeEvents';
+import { schemeFor, useProfileCountry } from '../lib/country';
 
 const selectClass =
   'block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -25,9 +26,10 @@ const contactRef = (v: PickedContact, before: { id: string | null } | null | und
 };
 
 /**
- * Add a funding plan or change one: an NDIS plan, Support at Home, a Home
- * Care Package. Only what kind of plan it is is needed. Reports are due six
- * weeks before the review unless a day is given.
+ * Add a funding plan or change one, in the person's country's schemes: an
+ * NDIS plan, Support at Home or a Home Care Package in Australia, a personal
+ * budget in the UK. Only what kind of plan it is is needed. Reports are due
+ * six weeks before the review unless a day is given.
  */
 export function FundingPlanEditor({
   profileId,
@@ -42,6 +44,7 @@ export function FundingPlanEditor({
   fromJourneyItemId?: string | null;
 }) {
   const queryClient = useQueryClient();
+  const { config } = useProfileCountry(profileId);
   const [scheme, setScheme] = useState<string>(plan?.scheme ?? 'ndis');
   const [starts, setStarts] = useState(plan?.starts_on ?? '');
   const [ends, setEnds] = useState(plan?.ends_on ?? '');
@@ -58,7 +61,12 @@ export function FundingPlanEditor({
   const [missing, setMissing] = useState('');
   const [error, setError] = useState('');
   const reportsShown = reportsDue || (review ? addDays(review, -42) : '');
-  const isNdis = scheme === 'ndis';
+  const chosen = schemeFor(config, scheme);
+  // The local coordinator is asked for where the scheme has one: a Local Area Coordinator, a social worker.
+  const coordinatorLabel = chosen.area_coordinator;
+  const managed = chosen.management;
+  // A plan from a scheme this country does not list still shows its kind, so it can be kept as it is.
+  const schemes = config.funding.some((f) => f.key === scheme) ? config.funding : [...config.funding, { ...chosen, key: scheme as typeof chosen.key }];
 
   const setBudget = (key: number, patch: Partial<BudgetDraft>) => setBudgets((bs) => bs.map((b) => (b.key === key ? { ...b, ...patch } : b)));
 
@@ -121,7 +129,7 @@ export function FundingPlanEditor({
             [
               ['plan-manager', contactProblem(planManager, 'Plan manager')],
               ['plan-coordinator', contactProblem(coordinator, 'Support coordinator')],
-              ['plan-lac', contactProblem(lac, 'Local Area Coordinator')],
+              ['plan-lac', coordinatorLabel ? contactProblem(lac, coordinatorLabel) : null],
             ] as const
           ).find(([, p]) => p);
           if (unpicked) {
@@ -136,8 +144,8 @@ export function FundingPlanEditor({
         <div>
           <label htmlFor="plan-scheme" className="block text-sm font-medium text-ink mb-1">Scheme</label>
           <select id="plan-scheme" className={selectClass} value={scheme} onChange={(e) => setScheme(e.target.value)}>
-            {SCHEMES.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
+            {schemes.map((s) => (
+              <option key={s.key} value={s.key}>{s.label}</option>
             ))}
           </select>
         </div>
@@ -154,20 +162,22 @@ export function FundingPlanEditor({
             hint={!reportsDue && review ? 'Worked out as six weeks before the review.' : undefined}
           />
         </div>
-        <div>
-          <label htmlFor="plan-management" className="block text-sm font-medium text-ink mb-1">How it is managed</label>
-          <select id="plan-management" className={selectClass} value={management} onChange={(e) => setManagement(e.target.value)}>
-            <option value="">Not set</option>
-            {MANAGEMENT.map((m) => (
-              <option key={m.value} value={m.value}>{isNdis || m.value !== 'agency' ? m.label : 'Managed by the provider'}</option>
-            ))}
-          </select>
-        </div>
+        {managed ? (
+          <div>
+            <label htmlFor="plan-management" className="block text-sm font-medium text-ink mb-1">How it is managed</label>
+            <select id="plan-management" className={selectClass} value={management} onChange={(e) => setManagement(e.target.value)}>
+              <option value="">Not set</option>
+              {(['agency', 'plan', 'self'] as const).map((m) => (
+                <option key={m} value={m}>{managed[m]}</option>
+              ))}
+            </select>
+          </div>
+        ) : null}
         <div className="grid gap-3 sm:grid-cols-2">
           <ContactPicker id="plan-manager" label="Plan manager" profileId={profileId} value={planManager} onChange={setPlanManager} defaultType="Plan manager" placeholder="Search Contacts or type a name" />
           <ContactPicker id="plan-coordinator" label="Support coordinator" profileId={profileId} value={coordinator} onChange={setCoordinator} defaultType="Support coordinator" placeholder="Search Contacts or type a name" />
-          {isNdis ? (
-            <ContactPicker id="plan-lac" label="Local Area Coordinator" profileId={profileId} value={lac} onChange={setLac} defaultType="Local Area Coordinator" placeholder="Search Contacts or type a name" />
+          {coordinatorLabel ? (
+            <ContactPicker id="plan-lac" label={coordinatorLabel} profileId={profileId} value={lac} onChange={setLac} defaultType={coordinatorLabel} placeholder="Search Contacts or type a name" />
           ) : null}
         </div>
         <fieldset className="space-y-2">

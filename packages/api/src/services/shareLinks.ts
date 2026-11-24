@@ -7,6 +7,7 @@ import { enrichAppointments } from './booking';
 import { composeEmergencySheet, sheetDocumentIds, type EmergencySheet } from './emergencySheet';
 import { appointmentEvent, appointmentPlace, calendarText, type IcsAppointment } from './ics';
 import { personSummary, type ContactSummary } from './professionals';
+import { timeText, weekdayText } from '../lib/dayText';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -209,7 +210,7 @@ export async function resolveRecipient(
   conn: Conn = db
 ): Promise<{ name: string; email: string; provider_id: string | null; circle_member_id: string | null }> {
   const typed = 'email' in to && to.email ? to.email.trim() : null;
-  if (typed && !EMAIL_RE.test(typed)) throw new SendProblem('That email does not look right. It needs an @ and a full address, such as reception@clinic.com.au.');
+  if (typed && !EMAIL_RE.test(typed)) throw new SendProblem('That email does not look right. It needs an @ and a full address, such as reception@clinic.example.');
   if ('provider_id' in to) {
     const linked = await conn('care_profile_providers').where({ care_profile_id: profileId, provider_id: to.provider_id }).first('id');
     const p = linked ? ((await conn('providers').where({ id: to.provider_id }).first('id', 'name', 'email')) as { id: string; name: string; email: string | null } | undefined) : undefined;
@@ -245,7 +246,7 @@ export async function resolveRecipient(
     return { name: person.name, email: person.email, provider_id: null, circle_member_id: null };
   }
   const email = to.email.trim();
-  if (!EMAIL_RE.test(email)) throw new SendProblem('That email does not look right. It needs an @ and a full address, such as reception@clinic.com.au.');
+  if (!EMAIL_RE.test(email)) throw new SendProblem('That email does not look right. It needs an @ and a full address, such as reception@clinic.example.');
   return { name: to.name?.trim() || email, email, provider_id: null, circle_member_id: null };
 }
 
@@ -337,9 +338,9 @@ export function whenText(startsAt: string | null, allDay: boolean, zone: string 
   if (!startsAt) return 'Not booked yet';
   const d = new Date(startsAt);
   const timeZone = zone ?? 'UTC';
-  const day = new Intl.DateTimeFormat('en-AU', { timeZone, weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).format(d);
+  const day = weekdayText(d, timeZone);
   if (allDay) return `${day}, any time that day`;
-  const time = new Intl.DateTimeFormat('en-AU', { timeZone, hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+  const time = timeText(d, timeZone);
   return `${day}, ${time}`;
 }
 

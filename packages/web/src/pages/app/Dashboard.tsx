@@ -8,7 +8,8 @@ import { Input } from '../../components/ui/Input';
 import { BulkInviteModal } from './homeboard/BulkInviteModal';
 import { browserTimeZone } from '../../lib/datetime';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { formatDistanceToNow, format } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
+import { format } from '../../lib/dateFormat';
 import { api } from '../../api/client';
 import { useAuthStore } from '../../stores/auth';
 import { useAssistantStore } from '../../stores/assistant';
@@ -42,6 +43,7 @@ import { AttentionPanel } from '../../components/AttentionPanel';
 import { useAiStatus, usePareOn, AI_WARMING_MESSAGE } from '../../lib/aiStatus';
 import { PareOffNote } from '../../components/PareOffNote';
 import { BulkLinkProviderPicker, BulkLinkAddressPicker, BulkLinkOwnerPicker, BulkLinkCarerPicker } from './homeboard/BulkLinkPickers';
+import { SystemTasksCard } from '../../components/SystemTasksCard';
 
 interface SummaryJourney {
   id: string;
@@ -128,6 +130,22 @@ const poaLabel = (type: string | null) => POA_TYPES.find((t) => t.value === type
 
 /** The journey used when sorting by journey: first active, phase order breaks ties. */
 const firstJourney = (p: ProfileSummary): SummaryJourney | null => p.journeys[0] ?? null;
+
+/**
+ * The last change to a person's record as a sentence: who did what, to
+ * which record, and how long ago. "Linda started a journey, Ageing well,
+ * 5 minutes ago." Never the system's own words for it.
+ */
+function lastUpdateSentence(a: NonNullable<ProfileSummary['last_activity']>): string {
+  const who = a.actor_name ?? 'Someone';
+  const what =
+    a.entity_type === DOSE_ENTITY
+      ? doseActivityWords(a.action, a.summary)
+      : a.entity_type === 'journeys' && a.action === 'created'
+        ? `started a journey${a.summary ? `, ${a.summary},` : ''}`
+        : `${activityWords(a.action, a.entity_type)}${a.summary ? `, ${a.summary},` : ''}`;
+  return `${who} ${what} ${formatDistanceToNow(new Date(a.created_at), { addSuffix: true })}.`;
+}
 
 export function Dashboard() {
   const { account } = useAuthStore();
@@ -301,6 +319,8 @@ export function Dashboard() {
           <Button size="sm" onClick={() => navigate('/app/profiles/new')}>Add care profile</Button>
         ) : null}
       </div>
+
+      <SystemTasksCard />
 
       {profiles.length > 0 ? <PareOffNote /> : null}
 
@@ -913,11 +933,7 @@ function ProfileCard({
         {p.last_activity ? (
           <Row label="Last update">
             <span className="text-muted">
-              {p.last_activity.entity_type === DOSE_ENTITY
-                ? `${p.last_activity.actor_name ?? 'Someone'} ${doseActivityWords(p.last_activity.action, p.last_activity.summary)}`
-                : `${p.last_activity.actor_name ?? 'Someone'} ${activityWords(p.last_activity.action, p.last_activity.entity_type)}${p.last_activity.summary ? `: ${p.last_activity.summary}` : ''}`}
-              {' · '}
-              {formatDistanceToNow(new Date(p.last_activity.created_at), { addSuffix: true })}
+              {lastUpdateSentence(p.last_activity)}
             </span>
           </Row>
         ) : null}
@@ -1115,9 +1131,7 @@ function ProfileTable({
                   <td data-field="kin_relationship" className="px-3 py-2 text-muted">{p.next_of_kin?.relationship ?? ''}</td>
                   <td data-field="kin_phone" className="px-3 py-2 whitespace-nowrap">{p.next_of_kin?.phone ? tel(p.next_of_kin.phone, p.next_of_kin.name) : ''}</td>
                   <td data-field="updated" className="px-3 py-2 text-muted">
-                    {p.last_activity
-                      ? `${p.last_activity.summary || activityWords(p.last_activity.action, p.last_activity.entity_type)} · ${formatDistanceToNow(new Date(p.last_activity.created_at), { addSuffix: true })}`
-                      : ''}
+                    {p.last_activity ? lastUpdateSentence(p.last_activity) : ''}
                   </td>
                 </tr>
               );

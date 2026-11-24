@@ -11,6 +11,7 @@ import { whereNamed } from './providerPractices';
 import { formatInZone } from '../lib/timezone';
 import type { Knex } from 'knex';
 import type { Account } from '../types';
+import { dayText } from '../lib/dayText';
 
 /**
  * What Pare can record about life events, through the same services the
@@ -125,7 +126,7 @@ async function linkedByName(profileId: string, name: string | null | undefined):
 const filedLine = (filed: Array<{ name: string }>) => filed.map((f) => ` Added ${f.name} to Contacts.`).join('');
 
 const friendly = (d: string) =>
-  new Date(`${d}T12:00:00Z`).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  dayText(d);
 
 export async function executeLifeEvent(action: LifeEventAction, ctx: Ctx): Promise<string> {
   const { profileId, account, timeZone } = ctx;

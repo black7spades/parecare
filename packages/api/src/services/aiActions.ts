@@ -282,6 +282,16 @@ const setIdNumbersSchema = z.object({
   health_fund_name: idField,
   health_fund_member_number: idField,
   my_aged_care_number: idField,
+  // New Zealand, the UK, Ireland, Canada and the US.
+  nhs_number: idField,
+  nhi_number: idField,
+  pps_number: idField,
+  medical_card_number: idField,
+  health_card_province: idField,
+  health_card_number: idField,
+  health_card_version: idField,
+  medicare_mbi: idField,
+  medicaid_number: idField,
 });
 
 const removeAllergySchema = z.object({

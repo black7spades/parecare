@@ -287,7 +287,7 @@ function SecretEditor({
             {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
           </select>
         </label>
-        <Input label="Website" value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} hint="Where you sign in, e.g. https://netbank.com.au" />
+        <Input label="Website" value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} hint="Where you sign in, e.g. https://www.yourbank.example" />
         <Input label="Sign in as" value={username} onChange={(e) => setUsername(e.target.value)} hint="The username, member number or email used to sign in" />
         <div>
           <Input label="Password" type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} hint="Stored encrypted" />

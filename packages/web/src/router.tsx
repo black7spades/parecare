@@ -57,6 +57,7 @@ import { SystemLayout } from './pages/admin/SystemLayout';
  */
 const AdminUsers = lazy(() => import('./pages/admin/AdminUsers').then((m) => ({ default: m.AdminUsers })));
 const AdminJourneys = lazy(() => import('./pages/admin/AdminJourneys').then((m) => ({ default: m.AdminJourneys })));
+const AdminCountry = lazy(() => import('./pages/admin/AdminCountry').then((m) => ({ default: m.AdminCountry })));
 const AdminChats = lazy(() => import('./pages/admin/AdminChats').then((m) => ({ default: m.AdminChats })));
 const AdminSettings = lazy(() => import('./pages/admin/AdminSettings').then((m) => ({ default: m.AdminSettings })));
 const AdminDatabase = lazy(() => import('./pages/admin/AdminDatabase').then((m) => ({ default: m.AdminDatabase })));
@@ -227,6 +228,7 @@ export const router = createBrowserRouter([
           { index: true, element: <Navigate to="/system/users" replace /> },
           { path: 'users', element: <AdminUsers /> },
           { path: 'journeys', element: <AdminJourneys /> },
+          { path: 'country', element: <AdminCountry /> },
           { path: 'chats', element: <AdminChats /> },
           { path: 'reports', element: <ReportsPage /> },
           {

@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom';
 import { browserTimeZone } from '../lib/datetime';
 import { useQuery } from '@tanstack/react-query';
-import { format, isToday, isTomorrow, startOfDay, endOfDay, addDays } from 'date-fns';
+import { isToday, isTomorrow, startOfDay, endOfDay, addDays } from 'date-fns';
+import { format } from '../lib/dateFormat';
 import { api } from '../api/client';
 import type { CareDocument } from '../lib/care';
 

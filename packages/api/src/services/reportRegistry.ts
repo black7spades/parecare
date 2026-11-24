@@ -6,6 +6,7 @@ import { repeatChoice, repeatLabel } from '../lib/repeat';
 import { roleMaySee } from '../lib/circleRoles';
 import { contactSummaries } from './professionals';
 import { SEVERITY_LABELS, type AllergySeverity } from './allergies';
+import { timeText } from '../lib/dayText';
 
 const APPOINTMENT_STATUS_WORDS: Record<string, string> = {
   scheduled: 'Booked',
@@ -804,7 +805,7 @@ registerSection({
   meta: {
     key: 'health_spend_claims',
     label: 'Health spend claims',
-    description: 'Costs that are claimable back from a funding source (NDIS, private health, Medicare), what has been reimbursed and what is still outstanding',
+    description: 'Costs that are claimable back from a funding source, such as a funding plan, health insurance or the public health system, what has been reimbursed and what is still outstanding',
     category: 'medications',
     fields: [
       { key: 'spent_on', label: 'Date', type: 'date' },
@@ -1153,7 +1154,7 @@ registerSection({
           _profile_name: r._profile_name,
           title: r.title,
           starts_on: day,
-          time: r.all_day ? 'Any time that day' : new Intl.DateTimeFormat('en-AU', { timeZone: zone, hour: '2-digit', minute: '2-digit', hour12: false }).format(d),
+          time: r.all_day ? 'Any time that day' : timeText(d, zone ?? undefined),
           provider_name: c?.name ?? null,
           provider_type: c?.role_label ?? null,
           provider_phone: c?.phone ?? null,

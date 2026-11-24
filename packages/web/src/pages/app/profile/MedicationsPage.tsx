@@ -25,7 +25,7 @@ import { SortableTh } from '../../../components/data/SortableTh';
 import { RecordPanel, type RecordAction, type RecordLink } from '../../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
-import { format } from 'date-fns';
+import { format } from '../../../lib/dateFormat';
 import { SELF_RELATIONSHIP,
   daysOfSupply,
   isLowSupply,

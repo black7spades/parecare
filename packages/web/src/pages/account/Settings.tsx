@@ -7,6 +7,8 @@ import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { Avatar } from '../../components/ui/Avatar';
 import { AvatarEditor } from '../../components/ui/AvatarEditor';
+import { ServicesTable } from '../../components/ServicesTable';
+import type { CountryResponse } from '../../lib/country';
 
 /**
  * One place for everything about the person signed in: their own details and
@@ -48,6 +50,7 @@ export function AccountSettings() {
       <h1>Settings</h1>
       <YourDetails />
       <SignInAndSecurity />
+      <CountryAndServices />
     </div>
   );
 }
@@ -451,6 +454,64 @@ function MfaSettings() {
           Set up two-factor authentication
         </Button>
       )}
+    </div>
+  );
+}
+
+// ── 3. Country and services ──────────────────────────────────────────────
+
+/**
+ * Where this account's people live. Most accounts follow the country
+ * PareCare is set to; one set up somewhere else picks its own. The services
+ * below are the ones journeys and the emergency sheet point to, and any of
+ * them can be changed for this account.
+ */
+function CountryAndServices() {
+  const queryClient = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ['country'], queryFn: () => api.get<CountryResponse>('/country') });
+  const [note, setNote] = useState('');
+  const save = useMutation({
+    mutationFn: (country: string | null) => api.put<Pick<CountryResponse, 'config' | 'own_country' | 'services'>>('/country/account', { country }),
+    onSuccess: (res) => {
+      queryClient.setQueryData<CountryResponse>(['country'], (d) => (d ? { ...d, ...res } : d));
+      void queryClient.invalidateQueries({ queryKey: ['country'] });
+      setNote(`Saved. Your account now follows ${res.config.name}.`);
+    },
+    onError: (err) => setNote(err instanceof Error ? err.message : 'That did not save. Try again in a moment.'),
+  });
+  if (isLoading || !data) return null;
+  return (
+    <div className="card space-y-4">
+      <SectionHeading n={3} title="Country and services" />
+      <div>
+        <label htmlFor="account-country" className="block text-sm font-medium text-ink mb-1">Country</label>
+        <select
+          id="account-country"
+          className="block w-full max-w-xs rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          value={data.own_country ?? ''}
+          onChange={(e) => save.mutate(e.target.value || null)}
+        >
+          <option value="">Same as this PareCare: {data.system_country.name}</option>
+          {data.choices.map((c) => (
+            <option key={c.code} value={c.code}>{c.name}</option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-muted">Sets the ID numbers asked for, the funding schemes, the yearly checks, how dates are written and the services below.</p>
+        {note ? <p className="mt-1 text-sm text-muted" role="status">{note}</p> : null}
+      </div>
+      <div className="space-y-2">
+        <h3 className="text-sm font-semibold text-ink">Services in {data.config.name}</h3>
+        <p className="text-sm text-ink">Journey steps and the emergency sheet point to these. A change here is for your account only, and shows everywhere they are used.</p>
+        <ServicesTable
+          services={data.services}
+          basePath="/country/account"
+          everyone={false}
+          onChanged={(services) => {
+            queryClient.setQueryData<CountryResponse>(['country'], (d) => (d ? { ...d, services } : d));
+            void queryClient.invalidateQueries({ queryKey: ['country'] });
+          }}
+        />
+      </div>
     </div>
   );
 }

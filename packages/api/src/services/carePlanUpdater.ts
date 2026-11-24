@@ -7,6 +7,8 @@ import { uploadFile, deleteFile } from './storage';
 import { composeReport, reportToHtml } from './carePlanReport';
 import { isSelfManaged } from './aiTone';
 import { standardReviewDue } from './carePlanReview';
+import { localiseCareWords, preset } from '../lib/countries';
+import { profileCountry, systemCountry } from './country';
 
 /**
  * Event-driven incremental care-plan updater.
@@ -52,8 +54,9 @@ export interface DeltaOp {
  * Section order is presentation order. The synthesized clinical narrative
  * (goals and preferences first, then the strategies that pursue them, the
  * risks to watch, and when the plan must be reviewed) leads the document,
- * as care-plan frameworks such as the Australian Government's Support at
- * Home program expect; the factual record follows as the evidence base.
+ * as care-plan frameworks expect (in Australia the Support at Home program,
+ * the CQC standards in England); the factual record follows as the
+ * evidence base.
  */
 export const PLAN_SECTIONS = [
   'goals',
@@ -322,8 +325,8 @@ function diffOps(current: PlanContent, truth: Record<string, PlanEntry[]>, secti
 // ---------------------------------------------------------------------------
 // The synthesized clinical narrative
 //
-// Frameworks such as the Australian Government's Support at Home program
-// expect a care plan to lead with the participant's goals, preferences
+// Care plan frameworks (Support at Home in Australia, the CQC standards in
+// England and the like) expect a care plan to lead with the participant's goals, preferences
 // and choices, connect each condition to the services and strategies that
 // address it, assess risk proactively, and be reviewed at least every 12
 // months or when a significant event occurs. The plan editor below turns
@@ -558,7 +561,7 @@ type Narrative = z.infer<typeof narrativeSchema>;
  * The narrative every plan gets even with no AI configured: goals from
  * the recorded conditions and needs, strategies from the recorded
  * condition-to-treatment ties, risks from allergies and condition flags,
- * and the standard Support at Home review triggers.
+ * and the standard review triggers.
  */
 export function fallbackNarrative(src: NarrativeSources): Narrative {
   const first = src.display_name;
@@ -708,8 +711,8 @@ async function synthesizeNarrative(profileId: string): Promise<Record<NarrativeS
     if (isAiConfigured()) {
       const system =
         'You are the care plan editor for a care coordination platform. You synthesize the recorded ' +
-        'facts into the clinical narrative of a care plan meeting frameworks like the Australian ' +
-        "Government's Support at Home program. The plan is an INSTRUCTION MANUAL: it must tell a carer " +
+        `facts into the clinical narrative of a care plan meeting frameworks like ${preset(await profileCountry(db, profileId)).words.care_standards}. ` +
+        'The plan is an INSTRUCTION MANUAL: it must tell a carer ' +
         'not just what to do, but exactly HOW to do it, so someone who has never met the person could ' +
         'follow it. Requirements: ' +
         "1) GOALS: state the person's goals, preferences and choices up front, specific to them, " +
@@ -962,7 +965,7 @@ const entryName = (fields: PlanEntry['fields'] | undefined | null): string => {
 };
 
 function describeOp(op: DeltaOp, before?: PlanEntry['fields'] | null): string {
-  const section = SECTION_LABELS[op.section as PlanSection] ?? op.section;
+  const section = localiseCareWords(SECTION_LABELS[op.section as PlanSection] ?? op.section, systemCountry());
   const name = entryName(op.fields) || entryName(before) || op.key;
   if (op.op === 'add') return `Added to ${section}: ${name}`;
   if (op.op === 'remove') return `Removed from ${section}: ${name}`;
@@ -1013,7 +1016,7 @@ function renderHtml(
               .join('')}</tr>`
         )
         .join('');
-      return `<h2>${esc(SECTION_LABELS[s])}</h2><table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+      return `<h2>${esc(localiseCareWords(SECTION_LABELS[s], systemCountry()))}</h2><table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
     })
     .join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>Care plan for ${esc(profileName)}, version ${version}</title>

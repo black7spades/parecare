@@ -1,90 +1,26 @@
 import type { Knex } from 'knex';
 import { db } from '../config/database';
 import { resolveOptions } from '../routes/optionCatalogue';
+import { preset, type CountryCode, type IdFieldKey } from '../lib/countries';
+import { DVA_CARD_COLOURS, ID_FIELDS, ID_FIELD_KEYS, ihiProblem, medicareProblem } from './identifierFields';
+
+export { DVA_CARD_COLOURS, ihiProblem, medicareProblem };
 
 type Conn = Knex | Knex.Transaction;
 
 /**
- * A person's ID numbers, each its own field. Every number is checked against
- * the shape it should have. A number that fails is not saved and says what it
- * should look like; the rest of the numbers still save.
+ * A person's ID numbers, each its own field. Which ones they are asked for
+ * comes from their country: Medicare and the IHI in Australia, the NHS
+ * number in the UK, and so on (lib/countries.ts). Every number is checked
+ * against the shape it should have. A number that fails is not saved and
+ * says what it should look like; the rest of the numbers still save.
  */
-export interface Identifiers {
-  medicare_number: string | null;
-  medicare_irn: number | null;
-  /** The last day of the month printed on the card, YYYY-MM-DD. */
-  medicare_valid_to: string | null;
-  ihi_number: string | null;
-  dva_number: string | null;
-  dva_card_colour: 'gold' | 'white' | 'orange' | null;
-  ndis_number: string | null;
-  health_fund_name: string | null;
-  health_fund_member_number: string | null;
-  my_aged_care_number: string | null;
-}
+export type Identifiers = Record<Exclude<IdFieldKey, 'medicare_irn'>, string | null> & { medicare_irn: number | null };
 
-export const IDENTIFIER_FIELDS = [
-  'medicare_number', 'medicare_irn', 'medicare_valid_to', 'ihi_number', 'dva_number', 'dva_card_colour',
-  'ndis_number', 'health_fund_name', 'health_fund_member_number', 'my_aged_care_number',
-] as const;
-export type IdentifierField = (typeof IDENTIFIER_FIELDS)[number];
+export const IDENTIFIER_FIELDS = ID_FIELD_KEYS;
+export type IdentifierField = IdFieldKey;
 
-export const EMPTY_IDENTIFIERS: Identifiers = {
-  medicare_number: null, medicare_irn: null, medicare_valid_to: null, ihi_number: null, dva_number: null,
-  dva_card_colour: null, ndis_number: null, health_fund_name: null, health_fund_member_number: null, my_aged_care_number: null,
-};
-
-export const DVA_CARD_COLOURS = ['gold', 'white', 'orange'] as const;
-
-const digitsOnly = (v: string) => v.replace(/[\s-]/g, '');
-
-/** Medicare: 10 digits, the first 2 to 6, the 9th a check digit over the first 8. */
-export function medicareProblem(raw: string): string | null {
-  const n = digitsOnly(raw);
-  const shape = 'That Medicare number does not look right. It has 10 digits.';
-  if (!/^\d{10}$/.test(n)) return shape;
-  if (!/^[2-6]/.test(n)) return 'That Medicare number does not look right. It starts with a 2, 3, 4, 5 or 6.';
-  const weights = [1, 3, 7, 9, 1, 3, 7, 9];
-  const sum = weights.reduce((s, w, i) => s + w * Number(n[i]), 0);
-  if (sum % 10 !== Number(n[8])) return 'That Medicare number does not look right. Check each digit against the card.';
-  return null;
-}
-
-const luhnOk = (n: string): boolean => {
-  let sum = 0;
-  for (let i = 0; i < n.length; i++) {
-    let d = Number(n[n.length - 1 - i]);
-    if (i % 2 === 1) {
-      d *= 2;
-      if (d > 9) d -= 9;
-    }
-    sum += d;
-  }
-  return sum % 10 === 0;
-};
-
-/** IHI: 16 digits starting 800360, with a Luhn check. */
-export function ihiProblem(raw: string): string | null {
-  const n = digitsOnly(raw);
-  if (!/^\d{16}$/.test(n) || !n.startsWith('800360')) return 'That Individual Healthcare Identifier does not look right. It has 16 digits and starts with 8003.';
-  if (!luhnOk(n)) return 'That Individual Healthcare Identifier does not look right. Check each digit against My Health Record.';
-  return null;
-}
-
-export function ndisProblem(raw: string): string | null {
-  const n = digitsOnly(raw);
-  return /^43\d{7}$/.test(n) ? null : 'That NDIS number does not look right. It has 9 digits and starts with 43.';
-}
-
-export function myAgedCareProblem(raw: string): string | null {
-  const n = digitsOnly(raw).toUpperCase();
-  return /^AC\d{8,9}$/.test(n) ? null : 'That My Aged Care number does not look right. It starts with AC, then 8 or 9 digits.';
-}
-
-export function dvaProblem(raw: string): string | null {
-  const n = digitsOnly(raw).toUpperCase();
-  return /^[A-Z0-9]{1,9}$/.test(n) ? null : 'That DVA file number does not look right. It has up to 9 letters and digits, such as NX123456.';
-}
+export const EMPTY_IDENTIFIERS = Object.fromEntries(ID_FIELD_KEYS.map((k) => [k, null])) as unknown as Identifiers;
 
 /** "2027-08", "08/2027", "8/27" or a full date, as the last day of that month. */
 export function validToDate(raw: string): string | null {
@@ -112,64 +48,46 @@ export type IdentifierInput = Partial<Record<IdentifierField, string | number | 
  * sentence for each number that could not be used.
  */
 export function checkIdentifiers(input: IdentifierInput): { values: Partial<Identifiers>; problems: Partial<Record<IdentifierField, string>> } {
-  const values: Partial<Identifiers> = {};
+  const values: Record<string, unknown> = {};
   const problems: Partial<Record<IdentifierField, string>> = {};
-  const text = (k: IdentifierField): string | null | undefined => {
-    if (!(k in input)) return undefined;
-    const v = input[k];
-    if (v === null || v === undefined) return null;
-    const s = String(v).trim();
-    return s === '' ? null : s;
-  };
-  const take = (k: IdentifierField, problem: (s: string) => string | null, clean: (s: string) => string) => {
-    const s = text(k);
-    if (s === undefined) return;
-    if (s === null) {
-      (values as Record<string, unknown>)[k] = null;
-      return;
+  for (const k of ID_FIELD_KEYS) {
+    if (!(k in input)) continue;
+    const raw = input[k];
+    const s = raw === null || raw === undefined ? '' : String(raw).trim();
+    if (s === '') {
+      values[k] = null;
+      continue;
     }
-    const p = problem(s);
-    if (p) problems[k] = p;
-    else (values as Record<string, unknown>)[k] = clean(s);
-  };
-  take('medicare_number', medicareProblem, digitsOnly);
-  take('ihi_number', ihiProblem, digitsOnly);
-  take('ndis_number', ndisProblem, digitsOnly);
-  take('my_aged_care_number', myAgedCareProblem, (s) => digitsOnly(s).toUpperCase());
-  take('dva_number', dvaProblem, (s) => digitsOnly(s).toUpperCase());
-  const irn = text('medicare_irn');
-  if (irn !== undefined) {
-    if (irn === null) values.medicare_irn = null;
-    else if (/^[1-9]$/.test(irn)) values.medicare_irn = Number(irn);
-    else problems.medicare_irn = 'The position on the card is one number from 1 to 9, printed beside the name.';
-  }
-  const validTo = text('medicare_valid_to');
-  if (validTo !== undefined) {
-    if (validTo === null) values.medicare_valid_to = null;
-    else {
-      const d = validToDate(validTo);
-      if (d) values.medicare_valid_to = d;
-      else problems.medicare_valid_to = 'The valid to date is a month and year, such as 08/2027.';
+    const def = ID_FIELDS[k];
+    if (def.kind === 'position') {
+      if (/^[1-9]$/.test(s)) values[k] = Number(s);
+      else problems[k] = 'The position on the card is one number from 1 to 9, printed beside the name.';
+      continue;
     }
+    if (def.kind === 'month') {
+      const d = validToDate(s);
+      if (d) values[k] = d;
+      else problems[k] = 'The valid to date is a month and year, such as 08/2027.';
+      continue;
+    }
+    if (def.kind === 'select') {
+      const v = def.options!.find((o) => o.value.toLowerCase() === s.toLowerCase() || o.label.toLowerCase() === s.toLowerCase());
+      if (v) values[k] = v.value;
+      else problems[k] = `The ${def.label.toLowerCase()} is one of ${def.options!.map((o) => o.label).join(', ')}.`;
+      continue;
+    }
+    const p = def.problem?.(s) ?? null;
+    if (p) {
+      problems[k] = p;
+      continue;
+    }
+    if (s.length > def.max && !def.clean) {
+      problems[k] = `That ${def.label.toLowerCase()} is too long. It has at most ${def.max} letters and digits.`;
+      continue;
+    }
+    values[k] = def.clean ? def.clean(s) : s.replace(/\s+/g, ' ');
   }
-  const colour = text('dva_card_colour');
-  if (colour !== undefined) {
-    const c = colour?.toLowerCase() ?? null;
-    if (c === null) values.dva_card_colour = null;
-    else if ((DVA_CARD_COLOURS as readonly string[]).includes(c)) values.dva_card_colour = c as Identifiers['dva_card_colour'];
-    else problems.dva_card_colour = 'The DVA card is gold, white or orange.';
-  }
-  const fund = text('health_fund_name');
-  if (fund !== undefined) {
-    if (fund && fund.length > 120) problems.health_fund_name = 'That health fund name is too long.';
-    else values.health_fund_name = fund;
-  }
-  const member = text('health_fund_member_number');
-  if (member !== undefined) {
-    if (member && member.length > 30) problems.health_fund_member_number = 'That member number is too long. It has at most 30 letters and digits.';
-    else values.health_fund_member_number = member ? member.replace(/\s+/g, ' ') : null;
-  }
-  return { values, problems };
+  return { values: values as Partial<Identifiers>, problems };
 }
 
 const dateText = (v: unknown): string | null => (v ? String(v instanceof Date ? v.toISOString() : v).slice(0, 10) : null);
@@ -178,7 +96,7 @@ export async function identifiersFor(profileId: string, conn: Conn = db): Promis
   const row = (await conn('profile_identifiers').where({ care_profile_id: profileId }).first()) as Record<string, unknown> | undefined;
   if (!row) return { ...EMPTY_IDENTIFIERS, updated_at: null };
   const out = { ...EMPTY_IDENTIFIERS } as Record<string, unknown>;
-  for (const k of IDENTIFIER_FIELDS) out[k] = row[k] ?? null;
+  for (const k of ID_FIELD_KEYS) out[k] = row[k] ?? null;
   out['medicare_valid_to'] = dateText(row['medicare_valid_to']);
   out['medicare_irn'] = row['medicare_irn'] == null ? null : Number(row['medicare_irn']);
   return { ...(out as unknown as Identifiers), updated_at: row['updated_at'] ? new Date(row['updated_at'] as string).toISOString() : null };
@@ -208,16 +126,37 @@ export async function saveIdentifiers(
   return { identifiers, problems, saved };
 }
 
-/** Each number with its plain label, in the order the sheet shows them. */
-export const IDENTIFIER_LABELS: Record<IdentifierField, string> = {
-  medicare_number: 'Medicare number',
-  medicare_irn: 'Position on the card',
-  medicare_valid_to: 'Valid to',
-  ihi_number: 'Individual Healthcare Identifier',
-  dva_number: 'DVA file number',
-  dva_card_colour: 'DVA card colour',
-  ndis_number: 'NDIS number',
-  health_fund_name: 'Health fund',
-  health_fund_member_number: 'Member number',
-  my_aged_care_number: 'My Aged Care number',
-};
+/** Each number with its plain label. */
+export const IDENTIFIER_LABELS = Object.fromEntries(ID_FIELD_KEYS.map((k) => [k, ID_FIELDS[k].label])) as Record<IdentifierField, string>;
+
+/** A number's label as the person's country names it: "Health fund" in Australia, "Insurer" in Canada. */
+export function identifierLabel(country: CountryCode, key: IdentifierField): string {
+  for (const g of preset(country).id_groups) {
+    const f = g.fields.find((x) => x.key === key);
+    if (f) return f.label ?? ID_FIELDS[key].label;
+  }
+  return ID_FIELDS[key].label;
+}
+
+/** The ID numbers the person's country uses, in order, with how the emergency sheet writes each. */
+export function identifierLines(country: CountryCode, ids: Identifiers): Array<{ key: IdentifierField; label: string; value: string }> {
+  const out: Array<{ key: IdentifierField; label: string; value: string }> = [];
+  for (const g of preset(country).id_groups) {
+    for (const f of g.fields) {
+      const raw = ids[f.key];
+      if (raw === null || raw === undefined || raw === '') continue;
+      const def = ID_FIELDS[f.key];
+      let value = String(raw);
+      if (def.kind === 'month') value = `${value.slice(5, 7)}/${value.slice(0, 4)}`;
+      else if (def.kind === 'select') value = def.options?.find((o) => o.value === value)?.label ?? value;
+      else if (def.sheet) value = def.sheet(value);
+      out.push({ key: f.key, label: f.label ?? def.label, value });
+    }
+  }
+  return out;
+}
+
+/** The fields a country asks for, for Pare's instructions. */
+export function identifierKeysFor(country: CountryCode): IdentifierField[] {
+  return preset(country).id_groups.flatMap((g) => g.fields.map((f) => f.key));
+}

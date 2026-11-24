@@ -1,4 +1,4 @@
-import { format } from 'date-fns';
+import { format } from '../../../lib/dateFormat';
 import type { ConditionSymptom } from '../../../lib/care';
 
 /**

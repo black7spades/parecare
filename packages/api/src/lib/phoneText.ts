@@ -11,6 +11,7 @@
  *   "Healthdirect 1800 022 222"                     [1800 022 222]
  *   "Poisons 13 11 26"                              [13 11 26]
  *   "+61 3 9345 6677"                               [+61 3 9345 6677]
+ *   UK "Call 0808 808 7777", US "(800) 662-4357"    the same, with that country set
  *   "Seen 12/03/2026, 500 mg"                       none: a date and a dose
  *   "Ref 123456789012"                              none: too long
  */
@@ -20,7 +21,7 @@ export interface TextPart {
   text: string;
 }
 
-const CANDIDATE = /(?:\+61[\s-]*\(?0?\)?[\s-]*|\(0\d\)[\s-]*)?\d[\d\s\-()]{4,14}\d/g;
+const CANDIDATE = /(?:\+\d{1,3}[\s-]*)?(?:\(\d{1,4}\)[\s-]*)?\d[\d\s\-()]{3,14}\d/g;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const URL_RE = /\bhttps?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)]/gi;
 
@@ -30,17 +31,40 @@ export const phoneDigits = (s: string): string => {
   return (plus ? '+' : '') + s.replace(/\D/g, '');
 };
 
-/** Whether a run of digits is an Australian phone number. */
-export function isPhoneNumber(raw: string): boolean {
+/**
+ * The shapes of phone numbers in each country, once the country code is
+ * taken off: Australian landlines, mobiles, 1800 and 13 numbers; UK 01, 02,
+ * 03, 07 and 08 numbers; North American ten-digit numbers; and so on. A
+ * short national line such as 116 123 counts too. Dates, doses and long
+ * reference numbers never match.
+ */
+const PHONE_SHAPES: Record<string, { dial: string; shapes: RegExp[] }> = {
+  AU: { dial: '61', shapes: [/^0[2378]\d{8}$/, /^04\d{8}$/, /^1[38]00\d{6}$/, /^13\d{4}$/] },
+  NZ: { dial: '64', shapes: [/^0[3-79]\d{7}$/, /^02\d{7,9}$/, /^0800\d{6,7}$/, /^0508\d{6}$/] },
+  GB: { dial: '44', shapes: [/^0[123]\d{8,9}$/, /^07\d{9}$/, /^08\d{8,9}$/, /^116\d{3}$/] },
+  IE: { dial: '353', shapes: [/^0[1-9]\d{6,9}$/, /^1[58]\d{2}\d{6}$/, /^116\d{3}$/] },
+  CA: { dial: '1', shapes: [/^1?[2-9]\d{2}[2-9]\d{6}$/] },
+  US: { dial: '1', shapes: [/^1?[2-9]\d{2}[2-9]\d{6}$/] },
+};
+
+let phoneCountry = 'AU';
+/** Which country's numbers to look for; set from the country PareCare is in. */
+export function setPhoneCountry(code: string | null | undefined): void {
+  if (code && PHONE_SHAPES[code]) phoneCountry = code;
+}
+
+/** Whether a run of digits is a phone number where the person lives, or any number written with a + and its country code. */
+export function isPhoneNumber(raw: string, country: string = phoneCountry): boolean {
+  const rule = PHONE_SHAPES[country] ?? PHONE_SHAPES['AU']!;
   let d = phoneDigits(raw);
-  if (d.startsWith('+61')) d = '0' + d.slice(3).replace(/^0/, '');
-  if (d.startsWith('+')) return false;
-  if (d.length < 6 || d.length > 10) return false;
-  if (/^0[2378]\d{8}$/.test(d)) return true;
-  if (/^04\d{8}$/.test(d)) return true;
-  if (/^1[38]00\d{6}$/.test(d)) return true;
-  if (/^13\d{4}$/.test(d)) return true;
-  return false;
+  if (d.startsWith(`+${rule.dial}`)) {
+    const rest = d.slice(1 + rule.dial.length).replace(/^0/, '');
+    d = rule.dial === '1' ? rest : `0${rest}`;
+  }
+  // Another country's number, written in full with its code.
+  if (d.startsWith('+')) return d.length >= 9 && d.length <= 16;
+  if (d.length < 6 || d.length > 11) return false;
+  return rule.shapes.some((s) => s.test(d));
 }
 
 /** Every phone number in the text, as written. */

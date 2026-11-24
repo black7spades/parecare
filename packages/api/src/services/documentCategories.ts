@@ -1,5 +1,7 @@
 import type { Knex } from 'knex';
 import { db } from '../config/database';
+import { preset } from '../lib/countries';
+import { accountCountry } from './country';
 
 /**
  * Document categories: one list per account, shared by everyone the account
@@ -74,8 +76,10 @@ export async function ensureCategories(accountId: string, conn: Conn = db): Prom
     if (!adopted) fresh.push(c);
   }
   if (fresh.length === 0) return;
+  // The advance care directive is named as the account's country names it.
+  const directive = preset(await accountCountry(conn, accountId)).words.advance_directive;
   await conn('document_categories')
-    .insert(fresh.map((c) => ({ account_id: accountId, system_key: c.key, name: c.name })))
+    .insert(fresh.map((c) => ({ account_id: accountId, system_key: c.key, name: c.key === 'advance_care_directive' ? directive : c.name })))
     .onConflict()
     .ignore();
 }

@@ -5,6 +5,8 @@ import { mainContact } from './professionals';
 import { addDays } from './documentDates';
 import { todayFor } from './medicationChanges';
 import type { RepeatChoice } from '../lib/repeat';
+import { preset, type CountryCode } from '../lib/countries';
+import { profileCountry } from './country';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -30,12 +32,17 @@ export interface RecallRule {
   firstDue: (today: string) => string;
 }
 
-/** Flu shots are given from April: in season, within the week; otherwise next April. */
-const fluDue = (today: string): string => {
+/**
+ * Flu vaccines are given from the start of the season (April in the south,
+ * October in the north): in season, within the week; otherwise the next
+ * season's start.
+ */
+const fluDueFrom = (start: number) => (today: string): string => {
   const [y, m] = today.split('-').map(Number) as [number, number];
-  if (m >= 4 && m <= 6) return addDays(today, 7);
-  return `${m < 4 ? y : y + 1}-04-01`;
+  if (m >= start && m <= start + 2) return addDays(today, 7);
+  return `${m < start ? y : y + 1}-${String(start).padStart(2, '0')}-01`;
 };
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export const RECALL_RULES: RecallRule[] = [
   {
@@ -46,7 +53,29 @@ export const RECALL_RULES: RecallRule[] = [
     with_gp: true,
     covers: /\bflu\b|influenza/i,
     applies: (p) => (p.age != null && p.age >= 65) || p.chronic,
-    firstDue: fluDue,
+    firstDue: fluDueFrom(4),
+  },
+  // In the United States, Medicare's yearly check from 65.
+  {
+    key: 'annual_wellness_visit',
+    line: 'Medicare Annual Wellness Visit, every year from 65',
+    title: 'Book the Annual Wellness Visit',
+    repeat: 'yearly',
+    with_gp: true,
+    covers: /wellness visit|annual (check|physical)/i,
+    applies: (p) => p.age != null && p.age >= 65,
+    firstDue: (t) => addDays(t, 14),
+  },
+  // Outside Australia, a yearly review of a long-term condition with the GP.
+  {
+    key: 'condition_review',
+    line: 'Long-term condition review with the GP, every year',
+    title: 'Book a long-term condition review',
+    repeat: 'yearly',
+    with_gp: true,
+    covers: /condition review|annual review|management plan|chronic (disease|condition) (plan|review)/i,
+    applies: (p) => p.chronic,
+    firstDue: (t) => addDays(t, 14),
   },
   {
     key: 'health_check_75',
@@ -98,7 +127,35 @@ export const RECALL_RULES: RecallRule[] = [
     applies: (p) => p.age != null && p.age >= 75,
     firstDue: (t) => addDays(t, 30),
   },
+  // In Ireland a medical report is needed to renew a licence from 70.
+  {
+    key: 'licence_medical_70',
+    line: "Driver's licence medical report, when their licence is renewed from 70",
+    title: "Book the driver's licence medical report",
+    repeat: 'yearly',
+    with_gp: true,
+    covers: /licen[cs]e/i,
+    applies: (p) => p.age != null && p.age >= 70,
+    firstDue: (t) => addDays(t, 30),
+  },
 ];
+
+/**
+ * The checks offered where the person lives: the 75+ health assessment and
+ * the GP management plan are Australian; the flu season starts in April in
+ * the south and October in the north.
+ */
+export function rulesFor(country: CountryCode): RecallRule[] {
+  const p = preset(country);
+  return p.recalls
+    .map((k) => RECALL_RULES.find((r) => r.key === k))
+    .filter((r): r is RecallRule => !!r)
+    .map((r) =>
+      r.key === 'flu' && p.flu_season_month !== 4
+        ? { ...r, line: `Flu vaccine, every year from ${MONTHS[p.flu_season_month - 1]}`, title: 'Book flu vaccine', firstDue: fluDueFrom(p.flu_season_month) }
+        : r
+    );
+}
 
 export const recallKey = (profileId: string, rule: string) => `recall:${profileId}:${rule}`;
 
@@ -145,7 +202,7 @@ export async function recallsFor(conn: Conn, profileId: string, accountId: strin
   const dismissed = new Set(
     (await conn('attention_dismissals').where({ account_id: accountId }).where('item_key', 'like', `recall:${profileId}:%`).pluck('item_key')) as string[]
   );
-  return RECALL_RULES.filter((r) => r.applies(p))
+  return rulesFor(await profileCountry(conn, profileId)).filter((r) => r.applies(p))
     .filter((r) => !repeating.some((t) => r.covers.test(t)))
     .filter((r) => !dismissed.has(recallKey(profileId, r.key)))
     .map((r) => ({ rule: r.key, line: r.line, title: r.title, repeat: r.repeat, due_on: r.firstDue(p.today), key: recallKey(profileId, r.key) }));
@@ -159,7 +216,7 @@ export async function addRecall(
   conn: Conn,
   opts: { profileId: string; actorId: string; rule: string; timeZone?: string | null }
 ): Promise<{ id: string; title: string; repeat: RepeatChoice; joined: boolean } | null> {
-  const rule = RECALL_RULES.find((r) => r.key === opts.rule);
+  const rule = rulesFor(await profileCountry(conn, opts.profileId)).find((r) => r.key === opts.rule);
   if (!rule) return null;
   const p = await personFacts(conn, opts.profileId);
   if (!p) return null;

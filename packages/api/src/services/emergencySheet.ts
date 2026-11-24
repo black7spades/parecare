@@ -1,7 +1,9 @@
 import { db } from '../config/database';
 import { roleMaySee } from '../lib/circleRoles';
 import { emergencyContactsFor, type EmergencyContact } from './emergencyContacts';
-import { identifiersFor, type Identifiers } from './identifiers';
+import { identifierLines, identifiersFor, type Identifiers } from './identifiers';
+import { preset } from '../lib/countries';
+import { profileCountry, serviceForProfile } from './country';
 import { contactSummaries, mainContact, personSummary, type ContactSummary } from './professionals';
 
 /**
@@ -35,6 +37,12 @@ export interface EmergencySheet {
     address: string | null;
   };
   identifiers: Identifiers;
+  /** The ID numbers their country uses, labelled and written as on the card. */
+  id_lines: Array<{ key: string; label: string; value: string }>;
+  /** Who to ring in an emergency where they live: "Emergency 000". */
+  emergency_number: { name: string | null; phone: string | null; missing: boolean };
+  /** What their country calls a written record of treatment wishes. */
+  directive_term: string;
   allergies: Array<{ substance: string; reaction: string | null; severity: string | null }>;
   /** Checked: no known allergies, by whom and when. */
   no_known_allergies: { on: string; by_name: string | null } | null;
@@ -180,6 +188,9 @@ export async function composeEmergencySheet(profileId: string, viewer: SheetView
   const planRow = (plan ?? {}) as Record<string, unknown>;
   const allergyRows = allergies as Array<{ substance: string; reaction: string | null; severity: string | null }>;
   const noneOn = dateOnly(p['no_known_allergies_on']);
+  const country = await profileCountry(db, profileId);
+  const emergency = await serviceForProfile(db, profileId, 'emergency');
+  const ids = (({ updated_at: _u, ...rest }) => rest)(identifiers);
   return {
     profile: {
       id: profileId,
@@ -197,7 +208,10 @@ export async function composeEmergencySheet(profileId: string, viewer: SheetView
       room_area_type: (p['room_area_type'] as string | null) ?? null,
       address: address || null,
     },
-    identifiers: (({ updated_at: _u, ...rest }) => rest)(identifiers),
+    identifiers: ids,
+    id_lines: identifierLines(country, ids),
+    emergency_number: { name: emergency?.name ?? null, phone: emergency?.phone ?? null, missing: !emergency?.phone },
+    directive_term: preset(country).words.advance_directive,
     allergies: allergyRows.map((a) => ({ substance: a.substance, reaction: a.reaction ?? null, severity: a.severity ?? null })),
     no_known_allergies: allergyRows.length === 0 && noneOn ? { on: noneOn, by_name: (checkedBy as { display_name?: string } | null)?.display_name ?? null } : null,
     conditions: conditions as string[],

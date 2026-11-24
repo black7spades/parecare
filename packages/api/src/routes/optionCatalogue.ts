@@ -1,6 +1,27 @@
 import { Router } from 'express';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
+import { COUNTRY_CODES, preset, type CountryCode } from '../lib/countries';
+import { accountCountry } from '../services/country';
+
+/** Option values that belong to one country, so another country never sees them. */
+const COUNTRY_ONLY: Partial<Record<string, Partial<Record<CountryCode, string[]>>>> = {
+  provider_type: { AU: ['Local Area Coordinator', 'NDIS support coordinator'] },
+  health_fund: Object.fromEntries(COUNTRY_CODES.map((c) => [c, preset(c).health_funds])),
+};
+
+function countryOptionFilter(category: string, country: CountryCode): ((name: string) => boolean) | null {
+  const lists = COUNTRY_ONLY[category];
+  if (!lists) return null;
+  const mine = new Set((lists[country] ?? []).map((n) => n.toLowerCase()));
+  const others = new Set(
+    Object.entries(lists)
+      .filter(([c]) => c !== country)
+      .flatMap(([, names]) => names ?? [])
+      .map((n) => n.toLowerCase())
+  );
+  return (name: string) => mine.has(name.toLowerCase()) || !others.has(name.toLowerCase());
+}
 
 /**
  * Instance-wide shared lists of selectable values, categorised, backing
@@ -27,7 +48,8 @@ export const OPTION_CATEGORIES = [
   // What keeps eating and drinking safe: Sit upright to eat and drink,
   // Thickened fluids, and whatever else people type.
   'swallowing_need',
-  // Australian health funds, for the ID numbers form.
+  // Health funds and insurers, for the ID numbers form. Each country's own
+  // are offered there (lib/countries.ts).
   'health_fund',
 ] as const;
 
@@ -63,6 +85,18 @@ optionCatalogueRouter.get('/', requireAuth, async (req, res) => {
   const q = String(req.query['search'] ?? '').trim();
   let query = db('option_catalogue').where({ category }).select('id', 'name');
   if (q) query = query.whereILike('name', `%${q}%`);
-  const items = await query.orderBy('name', 'asc').limit(50);
+  let items = (await query.orderBy('name', 'asc').limit(category === 'health_fund' ? 500 : 50)) as Array<{ id: string; name: string }>;
+  // Lists that belong to one country show only that country's: Australian
+  // health funds in Australia, UK insurers in the UK. Anything someone typed
+  // themselves is always offered.
+  const country = await accountCountry(db, req.account!.id);
+  const keep = countryOptionFilter(category, country);
+  if (keep) items = items.filter((i) => keep(i.name)).slice(0, 50);
+  if (category === 'health_fund' && !q) {
+    // The country's own funds are offered even before anyone has typed one.
+    const have = new Set(items.map((i) => i.name.toLowerCase()));
+    for (const name of preset(country).health_funds) if (!have.has(name.toLowerCase())) items.push({ id: `preset:${name}`, name });
+    items.sort((a, b) => a.name.localeCompare(b.name));
+  }
   res.json({ items });
 });

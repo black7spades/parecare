@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { preset } from '../lib/countries';
+import { profileCountry } from '../services/country';
 import multer from 'multer';
 import path from 'path';
 import { z } from 'zod';
@@ -295,9 +297,8 @@ healthSpendRouter.get('/export', async (req, res) => {
 
   // Codes go out as the screen names them, so the file reads plainly.
   const CATEGORY_WORDS: Record<string, string> = { medication: 'Medication', appointment: 'Appointment', other: 'Other' };
-  const FUNDING_WORDS: Record<string, string> = {
-    self: 'Self funded', ndis: 'NDIS', private_health: 'Private health', medicare: 'Medicare', government: 'Government', other: 'Other',
-  };
+  // Who pays, as the person's country names it: Medicare in Australia, the NHS in the UK.
+  const FUNDING_WORDS: Record<string, string> = preset(await profileCountry(db, profileId)).cost_sources;
   const CLAIM_WORDS: Record<string, string> = { none: 'Not claimable', unclaimed: 'Unclaimed', submitted: 'Submitted', reimbursed: 'Reimbursed' };
   const headers = [
     'Date', 'Person', 'Description', 'Category', 'Funding source', 'Account code',

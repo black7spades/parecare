@@ -19,6 +19,7 @@ const SCAN_MESSAGE =
 const LONG_MESSAGE =
   'This is a long document. Pare read the first 6 parts. Upload the pages that matter most and Pare reads those too.';
 import { executeActions, actionSchema, type AssistantAction } from '../services/aiActions';
+import { profileCountry } from '../services/country';
 
 /**
  * Pull proposed actions out of the assistant's reply, tolerantly. Models vary:
@@ -231,7 +232,7 @@ async function readAndPropose(
     .orderBy('c.name')
     .select('c.name', 'm.dose', 'm.schedule_times')) as Array<{ name: string; dose: string | null; schedule_times: unknown }>;
   const medicines: CurrentMedicine[] = medRows.map((m) => ({ name: m.name, dose: m.dose, times: Array.isArray(m.schedule_times) ? (m.schedule_times as string[]) : [] }));
-  const system = buildIngestPrompt(personName, today, knownAddresses, categories, medicines);
+  const system = buildIngestPrompt(personName, today, knownAddresses, categories, medicines, await profileCountry(db, profileId));
 
   try {
     // Reading a whole document is a heavy, rare job worth the best model

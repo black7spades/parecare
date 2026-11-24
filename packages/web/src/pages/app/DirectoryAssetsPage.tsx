@@ -106,7 +106,7 @@ export function DirectoryAssetsPage() {
             canImport={canEdit}
             onImported={invalidate}
             templateHeaders={['Unit name', 'Category', 'Serial or unit number', 'Make or model', 'Price', 'Purchase date', 'Bought from', 'Warranty expiry', 'Condition', 'Location', 'Ownership', 'Return by', 'Service due', 'Notes']}
-            templateSample={['Electric hospital bed', 'Bed', 'SN-42815', 'Invacare Medley', '1450.00', '2025-03-11', 'Independence Australia', '2028-03-11', 'good', 'Main bedroom', 'Owned', '', '2026-09-01', 'Adjustable head and legs']}
+            templateSample={['Electric hospital bed', 'Bed', 'SN-42815', 'Invacare Medley', '1450.00', '2025-03-11', 'Mobility Supplies', '2028-03-11', 'good', 'Main bedroom', 'Owned', '', '2026-09-01', 'Adjustable head and legs']}
           />
           {canEdit ? (
             <Button onClick={() => { setEditing(null); setEditorOpen(true); }}>
@@ -543,7 +543,7 @@ export function DirectoryAssetEditor({
               label="From"
               value={supplier}
               onChange={(e) => setSupplier(e.target.value)}
-              placeholder="e.g. Independence Australia"
+              placeholder="e.g. Mobility Supplies"
               list="asset-supplier-options"
               hint="Who it was bought, borrowed or hired from. A new name is filed as a supplier."
             />

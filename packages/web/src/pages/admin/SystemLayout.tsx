@@ -27,6 +27,9 @@ export function SystemLayout() {
         <NavLink to="/system/journeys" className={tabClass}>
           Care journeys
         </NavLink>
+        <NavLink to="/system/country" className={tabClass}>
+          Country and services
+        </NavLink>
         <NavLink to="/system/chats" className={tabClass}>
           Pare chats
         </NavLink>

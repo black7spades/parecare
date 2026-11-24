@@ -27,6 +27,7 @@ import { SortableNavGroup, type NavItemDef } from './SortableNavGroup';
 import { navHeadingClass, navLinkClass } from './navStyles';
 import { VersionBadge } from './VersionBadge';
 import { RouteFallback } from './RouteFallback';
+import { CountryScope } from '../../lib/country';
 import { ActivityIcon, AssetIcon, BuildingIcon, CheckIcon, ChartIcon, MapPinIcon, PawIcon, StethoscopeIcon, StoreIcon, UsersIcon } from '../ui/icons';
 
 interface PinnedProfile {
@@ -702,7 +703,9 @@ export function Shell() {
         <main className="flex-1 min-w-0 overflow-auto bg-surface">
           <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
             <Suspense fallback={<RouteFallback />}>
-              <Outlet />
+              <CountryScope>
+                <Outlet />
+              </CountryScope>
             </Suspense>
           </div>
         </main>

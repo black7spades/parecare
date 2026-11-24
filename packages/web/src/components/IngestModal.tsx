@@ -44,7 +44,10 @@ const FIELD_LABEL: Record<string, string> = {
   repeats_left: 'Repeats left on the script', starts_at: 'When', provider_name: 'Who with', with_phone: 'Their phone', with_type: 'What they do',
   severity: 'How bad', medicare_number: 'Medicare number', medicare_irn: 'Position on the card', medicare_valid_to: 'Valid to',
   ihi_number: 'Individual Healthcare Identifier', dva_number: 'DVA file number', dva_card_colour: 'DVA card colour', ndis_number: 'NDIS number',
-  health_fund_name: 'Health fund', health_fund_member_number: 'Member number', my_aged_care_number: 'My Aged Care number',
+  health_fund_name: 'Health fund or insurer', health_fund_member_number: 'Member number', my_aged_care_number: 'My Aged Care number',
+  nhs_number: 'NHS number', nhi_number: 'NHI number', pps_number: 'PPS number', medical_card_number: 'Medical card number',
+  health_card_province: 'Province or territory', health_card_number: 'Health card number', health_card_version: 'Version code',
+  medicare_mbi: 'Medicare number', medicaid_number: 'Medicaid number',
 };
 /** Lists inside a proposal, each item shown as its own editable row. */
 const LIST_LABEL: Record<string, string> = { next_steps: 'Next steps' };

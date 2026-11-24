@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { Input } from './ui/Input';
 import { RELATIONSHIPS, type Provider } from '../lib/care';
+import { useCountry } from '../lib/country';
 
 /**
  * "Who should we contact about this person?" A conditional field set, so
@@ -107,6 +108,8 @@ export function ContactDetails({
   /** Providers linked to this profile, so one can stand in as the contact. */
   providers?: Provider[];
 }) {
+  // A number written the way this country writes them.
+  const phoneExample = useCountry().config.phone_example;
   const set = (patch: Partial<ContactValue>) => onChange({ ...value, ...patch });
 
   const { data } = useQuery({
@@ -128,7 +131,7 @@ export function ContactDetails({
 
   const PhoneRow = (
     <div className="grid gap-2 sm:grid-cols-[1fr_8rem]">
-      <Input label="Phone" value={value.phone} onChange={(e) => set({ phone: e.target.value })} placeholder="e.g. 0400 000 000" />
+      <Input label="Phone" value={value.phone} onChange={(e) => set({ phone: e.target.value })} placeholder={`e.g. ${phoneExample}`} />
       <div>
         <label htmlFor="contact-phone-type" className="block text-sm font-medium text-ink mb-1">
           Phone type

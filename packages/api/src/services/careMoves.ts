@@ -6,6 +6,7 @@ import { addDays } from './documentDates';
 import { addressColumns, ADDRESS_PART_KEYS, hasAnyPart, type AddressParts } from './addresses';
 import { changeCarePhase } from './journeys';
 import { todayFor } from './medicationChanges';
+import { dayText } from '../lib/dayText';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -59,7 +60,7 @@ export function paymentChoiceFrom(text: string | null | undefined): (typeof PAYM
 }
 
 const friendly = (d: string) =>
-  new Date(`${d}T12:00:00Z`).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  dayText(d);
 
 /** Save the home they are leaving as their previous home, once. */
 async function keepPreviousHome(conn: Conn, profileId: string): Promise<string | null> {

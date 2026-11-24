@@ -12,6 +12,10 @@ import { providerTypeLabel } from '../../lib/care';
 import { EditableSubheader } from '../../components/ui/EditableSubheader';
 import { useDataView, type DataSort, type DataFilter } from '../../components/data/useDataView';
 import { DataToolbar } from '../../components/data/DataToolbar';
+import { useCountry } from '../../lib/country';
+import { currentDirectiveTerm } from '../../lib/careTerms';
+import { Link } from 'react-router-dom';
+import { CONTACT_LINK } from '../../components/ContactStrip';
 import {
   JOURNEY_KINDS,
   journeyKindLabel,
@@ -431,7 +435,7 @@ function TemplateEditor({
 
   const { data: fullData } = useQuery({
     queryKey: ['journey-template', templateId],
-    queryFn: () => api.get<{ template: JourneyTemplateFull }>(`/journey-templates/${templateId}`),
+    queryFn: () => api.get<{ template: JourneyTemplateFull }>(`/journey-templates/${templateId}?edit=1`),
     enabled: !!templateId,
   });
   const loaded = fullData?.template;
@@ -457,7 +461,7 @@ function TemplateEditor({
 
   const { data: importData } = useQuery({
     queryKey: ['journey-template', importFrom],
-    queryFn: () => api.get<{ template: JourneyTemplateFull }>(`/journey-templates/${importFrom}`),
+    queryFn: () => api.get<{ template: JourneyTemplateFull }>(`/journey-templates/${importFrom}?edit=1`),
     enabled: !!importFrom,
   });
 
@@ -825,6 +829,7 @@ function stepActionFields(task: JourneyTemplateTask): Partial<JourneyTemplateTas
     action_document_category: task.action_document_category ?? null,
     action_page: task.action_page ?? null,
     action_url: task.action_url?.trim() ? task.action_url.trim() : null,
+    action_service: task.action_service ?? null,
     due_in_days: task.due_in_days ?? null,
     repeat: task.repeat ?? null,
     repeat_rrule: task.repeat ? null : task.repeat_rrule ?? null,
@@ -841,7 +846,7 @@ const STEP_CATEGORIES = [
   { value: 'results', label: 'Results' },
   { value: 'medical_record', label: 'Medical record' },
   { value: 'care_plan', label: 'Care plan' },
-  { value: 'advance_care_directive', label: 'Advance care directive' },
+  { value: 'advance_care_directive', label: currentDirectiveTerm() },
   { value: 'poa', label: 'Power of attorney' },
   { value: 'will', label: 'Will' },
   { value: 'identity', label: 'Identity' },
@@ -870,6 +875,11 @@ function StepActionEditor({
 }) {
   const action = task.action ?? 'none';
   const books = action === 'book' || action === 'call';
+  // The national services by kind; a step pointing to one takes its details from Country and services.
+  const { services: allServices, config: countryConfig } = useCountry();
+  const kinds = allServices.filter((sv) => !sv.added);
+  const phoneExample = countryConfig.phone_example;
+  const service = kinds.find((k) => k.kind === task.action_service) ?? null;
   return (
     <div className="grid gap-2 sm:grid-cols-3 rounded-md border border-border bg-surface p-2">
       <div>
@@ -888,19 +898,42 @@ function StepActionEditor({
           <Input id={`${idPrefix}-type`} placeholder="e.g. GP, Physiotherapist" value={task.action_provider_type ? providerTypeLabel(task.action_provider_type) : ''} disabled={readOnly} onChange={(e) => onChange({ action_provider_type: e.target.value })} />
         </div>
       ) : null}
-      {action === 'call' ? (
+      {action === 'call' || action === 'book' ? (
+        <div>
+          <label htmlFor={`${idPrefix}-service`} className="block text-xs text-muted mb-1">{action === 'call' ? 'Which service' : 'A service shown beside it'}</label>
+          <select
+            id={`${idPrefix}-service`}
+            className={SELECT_CLASS}
+            value={task.action_service ?? ''}
+            disabled={readOnly}
+            onChange={(e) => onChange({ action_service: e.target.value || null })}
+          >
+            <option value="">{action === 'call' ? 'A number typed here' : 'None'}</option>
+            {kinds.map((k) => (
+              <option key={k.kind} value={k.kind}>{k.label}</option>
+            ))}
+          </select>
+          {service ? (
+            <p className="mt-1 text-xs text-muted">
+              Its name, number and website come from <Link to="/system/country" className={CONTACT_LINK}>Country and services</Link>
+              {service.name ? `: ${service.name}${service.phone ? ` ${service.phone}` : ''}` : ', where there is no number yet'}.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {action === 'call' && !service ? (
         <>
           <div>
             <label htmlFor={`${idPrefix}-contact`} className="block text-xs text-muted mb-1">Contact name</label>
-            <Input id={`${idPrefix}-contact`} placeholder="e.g. Quitline" value={task.action_contact_name ?? ''} disabled={readOnly} onChange={(e) => onChange({ action_contact_name: e.target.value })} />
+            <Input id={`${idPrefix}-contact`} placeholder="e.g. Local hospice" value={task.action_contact_name ?? ''} disabled={readOnly} onChange={(e) => onChange({ action_contact_name: e.target.value })} />
           </div>
           <div>
             <label htmlFor={`${idPrefix}-phone`} className="block text-xs text-muted mb-1">Phone</label>
-            <Input id={`${idPrefix}-phone`} placeholder="e.g. 13 7848" value={task.action_phone ?? ''} disabled={readOnly} onChange={(e) => onChange({ action_phone: e.target.value })} />
+            <Input id={`${idPrefix}-phone`} placeholder={`e.g. ${phoneExample}`} value={task.action_phone ?? ''} disabled={readOnly} onChange={(e) => onChange({ action_phone: e.target.value })} />
           </div>
           <div>
             <label htmlFor={`${idPrefix}-url`} className="block text-xs text-muted mb-1">Website</label>
-            <Input id={`${idPrefix}-url`} placeholder="e.g. https://www.quit.org.au" value={task.action_url ?? ''} disabled={readOnly} onChange={(e) => onChange({ action_url: e.target.value })} />
+            <Input id={`${idPrefix}-url`} placeholder="e.g. https://www.example.org" value={task.action_url ?? ''} disabled={readOnly} onChange={(e) => onChange({ action_url: e.target.value })} />
           </div>
         </>
       ) : null}

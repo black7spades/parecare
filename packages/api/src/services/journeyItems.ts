@@ -6,6 +6,8 @@ import { REPEAT_CHOICE_VALUES, repeatChoice, repeatColumns, type RepeatChoice } 
 import { mainContact, type ContactSummary } from './professionals';
 import { recordLabel, type AttachedTo } from './recordLabels';
 import { createTask, markTaskDone, undoRound, updateTask, type TaskRound } from './tasks';
+import { profileCountry, servicesForProfile } from './country';
+import { localiseCareWords } from '../lib/countries';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -189,8 +191,8 @@ export async function setItemTask(
     actorId: opts.actorId,
     timeZone: opts.timeZone,
     input: {
-      title: item.title,
-      body: item.description,
+      title: item['is_custom'] ? item.title : localiseCareWords(item.title, await profileCountry(conn, opts.profileId)),
+      body: item['is_custom'] ? item.description : localiseCareWords(item.description, await profileCountry(conn, opts.profileId)) || item.description,
       ...due,
       ...assign,
       repeat,
@@ -259,15 +261,33 @@ export async function itemsOut(conn: Conn, profileId: string, items: Array<Recor
       contactByType.set(type, await mainContact(conn, profileId, type));
     }
   }
+  // National services by kind, where the person lives, looked up once.
+  const services = items.some((i) => i['action_service']) ? await servicesForProfile(conn, profileId) : null;
+  const country = await profileCountry(conn, profileId);
   const out: ItemOut[] = [];
   for (const i of items) {
     const t = taskByItem.get(i.id);
+    const kind = (i['action_service'] as string | null) ?? null;
+    const svc = kind ? services?.get(kind) ?? null : null;
+    // A built-in step speaks the country's words; a step someone wrote is theirs.
+    const words = i['is_custom'] ? {} : { title: localiseCareWords(i['title'] as string, country), description: localiseCareWords(i['description'] as string | null, country) || i['description'] };
+    const service = kind
+      ? {
+          action_contact_name: svc?.name ?? null,
+          action_phone: svc?.phone ?? null,
+          action_url: svc?.website ?? null,
+          action_service_label: svc?.label ?? null,
+          action_service_missing: !svc || svc.missing,
+        }
+      : {};
     const a = i['appointment_id'] ? apptById.get(i['appointment_id'] as string) : undefined;
     let linked: AttachedTo | null = null;
     if (i['linked_record_kind'] && i['linked_record_id']) linked = await recordLabel(conn, profileId, String(i['linked_record_kind']), String(i['linked_record_id']));
     const type = i['action_provider_type'] as string | null;
     out.push({
       ...i,
+      ...words,
+      ...service,
       repeat: repeatChoice({ rrule: i['repeat_rrule'] as string | null }),
       default_due_on: defaultDueOn(i['due_in_days'] as number | null, i['care_journey_phase_id'] ? phaseStart.get(i['care_journey_phase_id'] as string) : null),
       task: t

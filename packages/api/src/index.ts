@@ -57,6 +57,8 @@ import { startBackupScheduler, isRestoring } from './services/backup';
 import { startMarArchiveScheduler } from './services/marArchive';
 import { subscriptionsRouter } from './routes/subscriptions';
 import { adminRouter } from './routes/admin';
+import { adminCountryRouter, countryRouter, profileCountryRouter } from './routes/country';
+import { startCountryScheduler } from './services/country';
 import { adminDatabaseRouter } from './routes/adminDatabase';
 import { adminBackupsRouter, adminBackupsCallbackRouter } from './routes/adminBackups';
 import { errorHandler, notFound } from './middleware/errorHandler';
@@ -146,7 +148,10 @@ v1.use('/admin/database', adminDatabaseRouter);
 // router; it proves who it is from its own signed state instead.
 v1.use('/admin/backups', adminBackupsCallbackRouter);
 v1.use('/admin/backups', adminBackupsRouter);
+// The country and its services: before the admin router for the same reason.
+v1.use('/admin/country', adminCountryRouter);
 v1.use('/admin', adminRouter);
+v1.use('/country', countryRouter);
 v1.use('/subscriptions', subscriptionsRouter);
 // Shared, instance-wide medication catalogue (read for all; add for admins;
 // edit/delete for super admins).
@@ -205,6 +210,7 @@ v1.use('/care-profiles/:id/checklists', ...profileAccess, checklistsRouter);
 // ID numbers, the emergency sheet as one composed page, and the links it,
 // an appointment or a report are shared through with no login.
 v1.use('/care-profiles/:id/identifiers', ...profileAccess, identifiersRouter);
+v1.use('/care-profiles/:id/country', ...profileAccess, profileCountryRouter);
 v1.use('/care-profiles/:id/emergency-sheet', ...profileAccess, emergencySheetRouter);
 v1.use('/care-profiles/:id/share-links', ...profileAccess, shareLinksRouter);
 v1.use('/care-profiles/:id/journeys', ...profileAccess, journeysRouter);
@@ -289,6 +295,7 @@ async function start(): Promise<void> {
     await initWebPush();
     startReminderScheduler();
     startBackupScheduler();
+    startCountryScheduler();
     startMarArchiveScheduler();
     startNotificationScheduler();
     app.listen(env.PORT, () => {

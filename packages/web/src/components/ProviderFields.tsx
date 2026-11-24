@@ -231,7 +231,7 @@ export function WorksAtField({
         role="combobox"
         aria-expanded={open && options.length > 0}
         autoComplete="off"
-        placeholder="e.g. Health Hub Morayfield"
+        placeholder="e.g. City Health Hub"
         className="block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
         value={text}
         onChange={(e) => {

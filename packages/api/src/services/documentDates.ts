@@ -5,6 +5,9 @@ import { accountIdForProfile } from './documentCategories';
 import { nextStepTypeIdByKey } from './nextStepTypes';
 import { mainContact } from './professionals';
 import { createTask, ownerZone } from './tasks';
+import { preset, type CountryCode } from '../lib/countries';
+import { dayText } from '../lib/dayText';
+import { profileCountry } from './country';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -66,8 +69,7 @@ export function addDays(day: string, days: number): string {
   return t.toISOString().slice(0, 10);
 }
 
-const formatDay = (day: string): string =>
-  new Date(`${day}T12:00:00Z`).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+const formatDay = (day: string, country: CountryCode): string => dayText(day, country, 'long');
 
 async function loadDoc(conn: Conn, docId: string): Promise<DocDates | undefined> {
   return (await conn('documents as d')
@@ -81,8 +83,11 @@ const isGpType = (type: string | null | undefined): boolean => {
   return t === 'gp' || t === 'general practitioner' || t === 'doctor';
 };
 
-/** Who wrote a referral, and so how long it lasts: a GP, a practice or unknown is 12 months; another specialist 3. */
-async function writer(conn: Conn, providerId: string | null): Promise<{ id: string; name: string; isGp: boolean; months: number } | null> {
+/**
+ * Who wrote a referral, and so how long it lasts where the person lives. In
+ * Australia a GP, a practice or unknown is 12 months; another specialist 3.
+ */
+async function writer(conn: Conn, providerId: string | null, country: CountryCode = 'AU'): Promise<{ id: string; name: string; isGp: boolean; months: number } | null> {
   if (!providerId) return null;
   const p = (await conn('providers').where({ id: providerId }).first('id', 'name', 'provider_type')) as
     | { id: string; name: string; provider_type: string | null }
@@ -90,18 +95,23 @@ async function writer(conn: Conn, providerId: string | null): Promise<{ id: stri
   if (!p) return null;
   const type = String(p.provider_type ?? '').trim().toLowerCase();
   const gpLike = isGpType(type) || !type || type === 'other' || isOrganisationType(type);
-  return { id: p.id, name: p.name, isGp: isGpType(type), months: gpLike ? 12 : 3 };
+  const rule = preset(country).referral ?? { gp_months: 12, specialist_months: 3 };
+  return { id: p.id, name: p.name, isGp: isGpType(type), months: gpLike ? rule.gp_months : rule.specialist_months };
 }
 
 /** How long a referral lasts and where the count starts, in a sentence for the screen. */
 export async function validityNote(conn: Conn, doc: DocDates): Promise<string | null> {
   if (doc.category_key !== 'referral' || doc.no_expiry) return null;
+  const country = await profileCountry(conn, doc.care_profile_id);
+  // Where referrals do not run out by rule, only a date someone gives is kept.
+  if (!preset(country).referral) return null;
   if (!ymd(doc.issued_on) && !ymd(doc.valid_until)) return 'Add the date it was written, and the date it runs out is worked out for you.';
   if (!doc.valid_until_worked_out) return null;
-  const w = await writer(conn, doc.from_provider_id);
-  const rule = (w?.months ?? 12) === 12
-    ? 'a GP referral lasts 12 months from the first visit'
-    : 'a referral from a specialist lasts 3 months from the first visit';
+  const w = await writer(conn, doc.from_provider_id, country);
+  const r = preset(country).referral!;
+  const rule = (w?.months ?? r.gp_months) === r.gp_months
+    ? `a GP referral lasts ${r.gp_months} months from the first visit`
+    : `a referral from a specialist lasts ${r.specialist_months} months from the first visit`;
   if (doc.valid_from_appointment_id) return `Worked out: ${rule}.`;
   return `Worked out: ${rule}. The first visit is not booked yet, so it counts from the date written for now.`;
 }
@@ -116,10 +126,13 @@ export async function referralValidity(conn: Conn, docId: string, opts: { dateCh
   if (!doc) return;
   const before = ymd(doc.valid_until);
   const issued = ymd(doc.issued_on);
-  const ours = doc.category_key === 'referral' && !!issued && !doc.no_expiry && (!before || doc.valid_until_worked_out);
+  const country = await profileCountry(conn, doc.care_profile_id);
+  const rule = preset(country).referral;
+  // Worked out only where referrals run out by rule (Medicare in Australia).
+  const ours = !!rule && doc.category_key === 'referral' && !!issued && !doc.no_expiry && (!before || doc.valid_until_worked_out);
   if (ours) {
-    const w = await writer(conn, doc.from_provider_id);
-    const months = w?.months ?? 12;
+    const w = await writer(conn, doc.from_provider_id, country);
+    const months = w?.months ?? rule.gp_months;
     let fromDay = issued!;
     let fromAppt: string | null = null;
     if (doc.to_provider_id) {
@@ -188,12 +201,13 @@ export async function syncRenewalTask(conn: Conn, docId: string, opts: { dateCha
     return;
   }
   const zone = await ownerZone(conn, doc.care_profile_id);
-  const w = await writer(conn, doc.from_provider_id);
+  const country = await profileCountry(conn, doc.care_profile_id);
+  const w = await writer(conn, doc.from_provider_id, country);
   const gp = w?.isGp ? { id: w.id, name: w.name } : await mainContact(conn, doc.care_profile_id, 'gp').then((c) => (c?.id ? { id: c.id, name: c.name } : null));
   const to = doc.to_provider_id ? ((await conn('providers').where({ id: doc.to_provider_id }).first('name')) as { name: string } | undefined) : undefined;
   const title = to?.name ? `Get a new referral for ${to.name}` : 'Get a new referral';
   const from = w?.name ? `The referral from ${w.name}` : 'The referral';
-  const body = `${from} runs out on ${formatDay(until)}. Book ${gp?.name ?? 'their GP'} before then for a new one.`;
+  const body = `${from} runs out on ${formatDay(until, country)}. Book ${gp?.name ?? 'their GP'} before then for a new one.`;
   const due = nineAm(addDays(until, -RENEW_DAYS_BEFORE), zone);
 
   if (task && !task.completed) {

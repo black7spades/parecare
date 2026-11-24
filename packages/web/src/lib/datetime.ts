@@ -1,4 +1,4 @@
-import { format } from 'date-fns';
+import { format } from './dateFormat';
 
 /**
  * The browser's IANA time zone (e.g. "Australia/Sydney"). Sent with every

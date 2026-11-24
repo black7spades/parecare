@@ -120,6 +120,10 @@ export interface FundingPlan {
   reports_overdue: boolean;
   management: 'agency' | 'plan' | 'self' | null;
   management_label: string | null;
+  /** The local coordinator as the scheme names them: Local Area Coordinator, Social worker. */
+  area_coordinator_label?: string | null;
+  /** The progress report made for the review, when the scheme has one. */
+  progress_report?: string | null;
   plan_manager: ContactSummary | null;
   support_coordinator: ContactSummary | null;
   local_area_coordinator: ContactSummary | null;
@@ -138,18 +142,8 @@ export interface FundingPlan {
   }>;
 }
 
-export const SCHEMES = [
-  { value: 'ndis', label: 'NDIS plan' },
-  { value: 'support_at_home', label: 'Support at Home' },
-  { value: 'home_care_package', label: 'Home Care Package' },
-  { value: 'other', label: 'Other funding' },
-] as const;
-
-export const MANAGEMENT = [
-  { value: 'agency', label: 'Managed by the NDIA' },
-  { value: 'plan', label: 'Plan managed' },
-  { value: 'self', label: 'Self managed' },
-] as const;
+// The schemes and how each is managed are named by the person's country:
+// see useProfileCountry in lib/country.ts.
 
 export interface CareMove {
   id: string;

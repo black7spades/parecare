@@ -3,6 +3,8 @@ import { env } from './env';
 import { redis } from './redis';
 import { encryptSecret, decryptSecret } from './secretbox';
 import { SETTINGS_CATALOG, SETTINGS_BY_KEY, type SettingEntry } from './settingsCatalog';
+import { preset } from '../lib/countries';
+import { systemCountry } from '../services/country';
 
 /**
  * Effective runtime configuration = database override, then the environment
@@ -181,19 +183,22 @@ export function isMessageToneGuardEnabled(): boolean {
 
 /**
  * The single currency every cost and health-spend total is shown in, across
- * the whole account. Defaults to AUD until a super admin changes it.
+ * the whole account. Follows the country PareCare is set to until a super
+ * admin picks another.
  */
 export function getHealthCurrency(): string {
-  return str('health.currency') ?? 'AUD';
+  return str('health.currency') ?? preset(systemCountry()).currency;
 }
 
 /**
- * The month the financial year begins, 1 to 12. Defaults to July (7), the
- * Australian financial year, used by the FY view and the accounting export.
+ * The month the financial year begins, 1 to 12, used by the FY view and the
+ * accounting export. Follows the country (July in Australia, April in the
+ * UK and New Zealand, January elsewhere) until a super admin picks another.
  */
 export function getFinancialYearStartMonth(): number {
-  const m = numOr('health.financial_year_start_month', 7);
-  return m >= 1 && m <= 12 ? m : 7;
+  const fallback = preset(systemCountry()).financial_year_start_month;
+  const m = numOr('health.financial_year_start_month', fallback);
+  return m >= 1 && m <= 12 ? m : fallback;
 }
 
 export function getOAuthConfig() {

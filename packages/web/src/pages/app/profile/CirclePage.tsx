@@ -23,7 +23,7 @@ import {
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { RecordPanel } from '../../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
-import { format } from 'date-fns';
+import { format } from '../../../lib/dateFormat';
 import { RelationshipSelect } from '../../../components/RelationshipSelect';
 import { useProfile } from './ProfileLayout';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';

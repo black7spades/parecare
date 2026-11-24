@@ -1,5 +1,6 @@
 import { asNeededLine, medStatusDescription, MED_STATUSES } from '../../../../lib/care';
-import { format, formatDistanceStrict } from 'date-fns';
+import { formatDistanceStrict } from 'date-fns';
+import { format } from '../../../../lib/dateFormat';
 import { SELECT, localNow } from './shared';
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';

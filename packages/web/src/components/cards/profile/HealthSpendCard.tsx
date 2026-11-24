@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDateOnly, todayDateOnly } from '../../../lib/datetime';
+import { useProfileCountry } from '../../../lib/country';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
@@ -61,9 +62,6 @@ const CATEGORY_LABEL: Record<SpendEntry['category'], string> = {
   other: 'Other',
 };
 const FUNDING_SOURCES = ['self', 'ndis', 'private_health', 'medicare', 'government', 'other'] as const;
-const FUNDING_LABEL: Record<string, string> = {
-  self: 'Self funded', ndis: 'NDIS', private_health: 'Private health', medicare: 'Medicare', government: 'Government', other: 'Other',
-};
 const CLAIM_STATUSES = ['none', 'unclaimed', 'submitted', 'reimbursed'] as const;
 const CLAIM_LABEL: Record<string, string> = {
   none: 'Not claimable', unclaimed: 'Unclaimed', submitted: 'Submitted', reimbursed: 'Reimbursed',
@@ -223,6 +221,8 @@ function EntryModal({ mode, profileId, careName, currencySymbol, entry, onClose,
   onSaved: () => void;
   onClosed?: () => void;
 }) {
+  // Who pays, as the person's country names it: Medicare in Australia, the NHS in the UK.
+  const { config: country } = useProfileCountry(profileId);
   const [amount, setAmount] = useState(entry ? String(entry.amount) : '');
   const [spentOn, setSpentOn] = useState(entry?.spent_on ?? todayDateOnly());
   const [note, setNote] = useState(entry?.description ?? '');
@@ -347,7 +347,7 @@ function EntryModal({ mode, profileId, careName, currencySymbol, entry, onClose,
               <span className="block text-sm font-medium text-ink mb-1">Funding source</span>
               <select className={selectClass} value={funding} onChange={(e) => setFunding(e.target.value)}>
                 <option value="">Not set</option>
-                {FUNDING_SOURCES.map((f) => <option key={f} value={f}>{FUNDING_LABEL[f]}</option>)}
+                {FUNDING_SOURCES.map((f) => <option key={f} value={f}>{country.cost_sources[f]}</option>)}
               </select>
             </label>
             <label className="block">

@@ -3,9 +3,8 @@ import { Fragment, useMemo, useState } from 'react';
 import { CONTACT_LINK } from '../../../components/ContactStrip';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { addDays, addMonths, addWeeks, eachDayOfInterval, endOfDay, endOfMonth, endOfWeek,
-  format, isSameDay, startOfDay, startOfMonth, startOfWeek, subMonths,
-} from 'date-fns';
+import { addDays, addMonths, addWeeks, eachDayOfInterval, endOfDay, endOfMonth, endOfWeek, isSameDay, startOfDay, startOfMonth, startOfWeek, subMonths } from 'date-fns';
+import { format } from '../../../lib/dateFormat';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { PencilIcon, CrossIcon } from '../../../components/ui/icons';

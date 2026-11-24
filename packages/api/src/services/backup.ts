@@ -5,6 +5,8 @@ import * as crypto from 'node:crypto';
 import { db } from '../config/database';
 import { env } from '../config/env';
 import { getBackupConfig, getStorageConfig } from '../config/settings';
+import { preset } from '../lib/countries';
+import { systemCountry } from './country';
 
 /**
  * Copies of this installation, taken on a timer and kept without anyone
@@ -610,11 +612,7 @@ export async function restoreBackup(
 
     return {
       ok: true,
-      message: `Everything has been put back as it was on ${new Date(backup.started_at).toLocaleDateString('en-AU', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      })}. Sign in again to see it.`,
+      message: `Everything has been put back as it was on ${new Date(backup.started_at).toLocaleDateString(preset(systemCountry()).locale, { day: 'numeric', month: 'long', year: 'numeric' })}. Sign in again to see it.`,
     };
   } catch (err) {
     return {

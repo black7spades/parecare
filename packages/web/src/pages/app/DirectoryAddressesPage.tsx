@@ -14,6 +14,7 @@ import { Modal } from '../../components/ui/Modal';
 import { RecordPanel } from '../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../stores/undo';
+import { useCountry } from '../../lib/country';
 
 interface LinkedProfile {
   profile_id: string;
@@ -46,6 +47,10 @@ const SORTS: DataSort<DirectoryAddress>[] = [
 ];
 
 export function DirectoryAddressesPage() {
+  // Address words and examples the way this country writes them.
+  const { config: country } = useCountry();
+  const aw = country.words;
+  const sa = country.sample_address;
   const queryClient = useQueryClient();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<DirectoryAddress | null>(null);
@@ -99,8 +104,8 @@ export function DirectoryAddressesPage() {
             resource="addresses"
             canImport={canEdit}
             onImported={invalidate}
-            templateHeaders={['Label', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country', 'Wi-Fi network name', 'Wi-Fi password']}
-            templateSample={['Home', '1 Main St', '', 'Morayfield', 'QLD', '4506', 'Australia']}
+            templateHeaders={['Label', 'Address line 1', 'Address line 2', aw.suburb, aw.state, aw.postcode, 'Country', 'Wi-Fi network name', 'Wi-Fi password']}
+            templateSample={['Home', sa.line1, '', sa.suburb, sa.state, sa.postcode, sa.country]}
           />
           {canEdit ? <Button onClick={() => { setEditing(null); setEditorOpen(true); }}>Add address</Button> : null}
         </div>
@@ -162,7 +167,7 @@ export function DirectoryAddressesPage() {
                 ) : null}
                 <SortableTh label="Label" sortKey="label" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Address" sortKey="address" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
-                <SortableTh label="Suburb" sortKey="suburb" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label={aw.suburb} sortKey="suburb" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Wi-Fi network" sortKey="wifi" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Linked to" sortKey="profiles" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 {canEdit ? <th className="px-3 py-2 w-36" /> : null}
@@ -237,9 +242,9 @@ export function DirectoryAddressesPage() {
             { label: 'Label', value: current.label },
             { label: 'Address line 1', value: current.address_line1 },
             { label: 'Address line 2', value: current.address_line2 },
-            { label: 'Suburb', value: current.address_suburb },
-            { label: 'State', value: current.address_state },
-            { label: 'Postcode', value: current.address_postcode },
+            { label: aw.suburb, value: current.address_suburb },
+            { label: aw.state, value: current.address_state },
+            { label: aw.postcode, value: current.address_postcode },
             { label: 'Country', value: current.address_country },
             // The Wi-Fi password stays in the editor, where showing it is a deliberate act.
             { label: 'Wi-Fi network', value: current.wifi_network_name },

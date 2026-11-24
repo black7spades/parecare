@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import { format } from './dateFormat';
 import { api } from '../api/client';
 import { useNoticeStore } from '../stores/notice';
 

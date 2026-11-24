@@ -1,10 +1,12 @@
 import type { Knex } from 'knex';
 import { journeyItemAction as currentAction } from '../journeys/itemActions';
 
-// The columns this migration made; the website column comes in 121.
+// The columns this migration made; the website column comes in 121 and the
+// kind of national service in 123.
 const journeyItemAction = (...args: Parameters<typeof currentAction>) => {
-  const { action_url: _url, ...cols } = currentAction(...args);
+  const { action_url: _url, action_service: _service, ...cols } = currentAction(...args);
   void _url;
+  void _service;
   return cols;
 };
 

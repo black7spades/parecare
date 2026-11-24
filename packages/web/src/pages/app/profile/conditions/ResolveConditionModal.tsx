@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { format } from 'date-fns';
+import { format } from '../../../../lib/dateFormat';
 import { Button } from '../../../../components/ui/Button';
 import { Input, Textarea } from '../../../../components/ui/Input';
 import { Modal } from '../../../../components/ui/Modal';

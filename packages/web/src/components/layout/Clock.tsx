@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { format } from 'date-fns';
+import { format } from '../../lib/dateFormat';
 
 /**
  * The current date and time, shown in the top bar on every screen. Time is
