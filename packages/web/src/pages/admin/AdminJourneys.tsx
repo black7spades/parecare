@@ -846,7 +846,7 @@ const STEP_CATEGORIES = [
   { value: 'results', label: 'Results' },
   { value: 'medical_record', label: 'Medical record' },
   { value: 'care_plan', label: 'Care plan' },
-  { value: 'advance_care_directive', label: currentDirectiveTerm() },
+  { value: 'advance_care_directive', label: 'Advance care directive' },
   { value: 'poa', label: 'Power of attorney' },
   { value: 'will', label: 'Will' },
   { value: 'identity', label: 'Identity' },
@@ -942,7 +942,7 @@ function StepActionEditor({
           <label htmlFor={`${idPrefix}-category`} className="block text-xs text-muted mb-1">Document category</label>
           <select id={`${idPrefix}-category`} className={SELECT_CLASS} value={task.action_document_category ?? ''} disabled={readOnly} onChange={(e) => onChange({ action_document_category: e.target.value || null })}>
             <option value="">Choose when uploading</option>
-            {STEP_CATEGORIES.map((c) => (
+            {STEP_CATEGORIES.map((c) => (c.value === 'advance_care_directive' ? { ...c, label: currentDirectiveTerm() } : c)).map((c) => (
               <option key={c.value} value={c.value}>{c.label}</option>
             ))}
           </select>

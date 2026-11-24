@@ -189,7 +189,7 @@ export function ServicesTable({
                           </Button>
                         </>
                       )}
-                      {s.source !== 'original' && (s.has_original || s.added) ? (
+                      {s.source === (everyone ? 'everyone' : 'own') ? (
                         <Button size="xs" variant={s.added ? 'ghost-danger' : 'ghost'} loading={busy === `reset:${s.kind}`} onClick={() => backToOriginal(s)}>
                           {s.added ? 'Remove' : 'Back to the original'}
                         </Button>

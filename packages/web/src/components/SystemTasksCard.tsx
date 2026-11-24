@@ -46,7 +46,8 @@ const SELECT =
  */
 export function SystemTasksCard() {
   const role = useAuthStore((s) => s.account?.role);
-  const isAdmin = role === 'admin' || role === 'super_admin';
+  // Whoever runs PareCare: the country also sets the currency, which only a super admin changes.
+  const isAdmin = role === 'super_admin';
   const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: ['system-tasks'],

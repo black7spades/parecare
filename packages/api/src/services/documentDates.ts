@@ -130,6 +130,13 @@ export async function referralValidity(conn: Conn, docId: string, opts: { dateCh
   const rule = preset(country).referral;
   // Worked out only where referrals run out by rule (Medicare in Australia).
   const ours = !!rule && doc.category_key === 'referral' && !!issued && !doc.no_expiry && (!before || doc.valid_until_worked_out);
+  // Moved to a country where referrals do not run out by rule: an end date
+  // that was only worked out goes, and with it the "get a new referral" task.
+  if (!rule && doc.category_key === 'referral' && doc.valid_until_worked_out && before) {
+    await conn('documents').where({ id: doc.id }).update({ valid_from: null, valid_from_appointment_id: null, valid_until: null, valid_until_worked_out: false });
+    await syncRenewalTask(conn, doc.id, { dateChanged: true });
+    return;
+  }
   if (ours) {
     const w = await writer(conn, doc.from_provider_id, country);
     const months = w?.months ?? rule.gp_months;

@@ -474,7 +474,8 @@ export function fundingScheme(code: string | null | undefined, kind: string | nu
  * the first guess offered at first run, changed in one tap if it is wrong.
  */
 export function inferCountry(timeZone?: string | null, language?: string | null): CountryCode {
-  const region = (language ?? '').split(/[-_]/)[1]?.toUpperCase();
+  // "en_GB.UTF-8" and "en-AU@euro": the encoding and modifier are not part of the region.
+  const region = (language ?? '').split('.')[0]!.split('@')[0]!.split(/[-_]/)[1]?.toUpperCase();
   if (region === 'UK') return 'GB';
   if (isCountryCode(region)) return region;
   const tz = timeZone ?? '';

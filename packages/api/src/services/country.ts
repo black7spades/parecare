@@ -65,10 +65,15 @@ export async function loadCountrySettings(conn: Conn = db): Promise<CountrySetti
     // Phone numbers in notes and steps are read the way this country writes them.
     setPhoneCountry(isCountryCode(row?.country) ? row!.country : guessedCountry());
     return row;
-  } catch {
-    // Before migrations have run there is nothing to read yet.
-    cached = { at: Date.now(), row: null };
-    return null;
+  } catch (err) {
+    // Before migrations have run there is no table to read yet.
+    if ((err as { code?: string }).code === '42P01') {
+      cached = { at: Date.now(), row: null };
+      return null;
+    }
+    // Any other failure keeps the last good answer, so a database hiccup
+    // never switches the country, its currency or its services.
+    throw err;
   }
 }
 
@@ -87,7 +92,7 @@ export function guessedCountry(): CountryCode {
 
 /** The country this PareCare is set to, for everyone without their own. */
 export function systemCountry(): CountryCode {
-  if (!cached || Date.now() - cached.at > STALE_MS) void loadCountrySettings();
+  if (!cached || Date.now() - cached.at > STALE_MS) void loadCountrySettings().catch((err) => console.warn('Country settings could not be read; keeping the last ones:', (err as Error).message));
   const c = cached?.row?.country;
   return isCountryCode(c) ? c : guessedCountry();
 }
@@ -149,6 +154,14 @@ export async function setAccountCountry(conn: Conn, accountId: string, country: 
  */
 async function renameCountryWords(conn: Conn, accountIds: string[], from: CountryCode, to: CountryCode): Promise<void> {
   if (!accountIds.length) return;
+  // Referral end dates worked out by the old country's rule are worked out again, or cleared.
+  if (!!preset(from).referral !== !!preset(to).referral || preset(from).referral?.gp_months !== preset(to).referral?.gp_months) {
+    const { refreshReferrals } = await import('./documentDates');
+    for (let i = 0; i < accountIds.length; i += 500) {
+      const profiles = (await conn('care_profiles').whereIn('account_id', accountIds.slice(i, i + 500)).pluck('id')) as string[];
+      for (const pid of profiles) await refreshReferrals(conn, pid);
+    }
+  }
   // Open "ask for a progress report" tasks name the review the new country's way.
   for (let i = 0; i < accountIds.length; i += 500) {
     const open = (await conn('reminders as r')
@@ -251,7 +264,7 @@ export async function effectiveServices(conn: Conn, country: CountryCode, accoun
         details = { name: m.name, phone: m.phone, website: m.website };
         source = 'own';
         checked = ymd(m.checked_on);
-      } else if (source !== 'everyone') checked = later(checked, ymd(m.checked_on));
+      } else checked = later(checked, ymd(m.checked_on));
     }
     const label = isServiceKind(kind) ? serviceKindLabel(kind) : (m?.label ?? e?.label ?? 'Service');
     out.push({
@@ -451,9 +464,15 @@ export async function remindYearlyCheck(): Promise<void> {
   const admin = (await db('accounts').where({ role: 'super_admin' }).orderBy('created_at', 'asc').first('email')) as { email: string | null } | undefined;
   if (!admin?.email) return;
   const { sendNotificationEmail } = await import('./email');
-  await sendNotificationEmail(admin.email, 'Check the services in PareCare are still right', [
-    { text: 'Once a year, check the national services PareCare sends people to: their names, numbers and websites.', url: `${env.APP_URL}/system/country` },
-  ]).catch((err) => console.warn('Yearly services check email failed:', (err as Error).message));
+  try {
+    await sendNotificationEmail(admin.email, 'Check the services in PareCare are still right', [
+      { text: 'Once a year, check the national services PareCare sends people to: their names, numbers and websites.', url: `${env.APP_URL}/system/country` },
+    ]);
+  } catch (err) {
+    // Not sent, so not recorded: it is tried again tomorrow. The task still shows on their home page.
+    console.warn('Yearly services check email failed:', (err as Error).message);
+    return;
+  }
   const today = localToday();
   if (row) await db('country_settings').where({ id: 1 }).update({ check_emailed_on: today });
   else await db('country_settings').insert({ id: 1, check_emailed_on: today });

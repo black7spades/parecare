@@ -125,6 +125,10 @@ countryRouter.put('/account/services/:kind', async (req, res) => {
 countryRouter.delete('/account/services/:kind', async (req, res) => {
   const scope = await accountScope(req);
   const was = await resetService(db, { ...scope, kind: kindOf(req) });
+  if (!was) {
+    res.status(404).json({ error: 'There is no change of yours to put back for this service.', code: 'NOT_FOUND' });
+    return;
+  }
   res.json({ was, services: await effectiveServices(db, scope.country, scope.accountId) });
 });
 
@@ -141,7 +145,8 @@ countryRouter.post('/account/services/:kind/checked', async (req, res) => {
 // ---------------------------------------------------------------- whoever runs PareCare
 
 export const adminCountryRouter = Router();
-adminCountryRouter.use(requireAuth, requireRole('admin'));
+// The country sets the currency and the financial year too, which only a super admin may change.
+adminCountryRouter.use(requireAuth, requireRole('super_admin'));
 
 async function adminState() {
   const row = await loadCountrySettings();
@@ -203,6 +208,10 @@ adminCountryRouter.put('/services/:kind', async (req, res) => {
 
 adminCountryRouter.delete('/services/:kind', async (req, res) => {
   const was = await resetService(db, { ...(await systemScope()), kind: kindOf(req) });
+  if (!was) {
+    res.status(404).json({ error: 'There is no change to put back for this service.', code: 'NOT_FOUND' });
+    return;
+  }
   res.json({ was, ...(await adminState()) });
 });
 

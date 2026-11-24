@@ -7,7 +7,7 @@ import { uploadFile, deleteFile } from './storage';
 import { composeReport, reportToHtml } from './carePlanReport';
 import { isSelfManaged } from './aiTone';
 import { standardReviewDue } from './carePlanReview';
-import { localiseCareWords, preset } from '../lib/countries';
+import { localiseCareWords, preset, type CountryCode } from '../lib/countries';
 import { profileCountry, systemCountry } from './country';
 
 /**
@@ -964,8 +964,8 @@ const entryName = (fields: PlanEntry['fields'] | undefined | null): string => {
   return typeof v === 'string' ? v : String(v ?? '');
 };
 
-function describeOp(op: DeltaOp, before?: PlanEntry['fields'] | null): string {
-  const section = localiseCareWords(SECTION_LABELS[op.section as PlanSection] ?? op.section, systemCountry());
+function describeOp(op: DeltaOp, before?: PlanEntry['fields'] | null, country: CountryCode = systemCountry()): string {
+  const section = localiseCareWords(SECTION_LABELS[op.section as PlanSection] ?? op.section, country);
   const name = entryName(op.fields) || entryName(before) || op.key;
   if (op.op === 'add') return `Added to ${section}: ${name}`;
   if (op.op === 'remove') return `Removed from ${section}: ${name}`;
@@ -997,7 +997,8 @@ function renderHtml(
   createdAt: Date,
   content: PlanContent,
   changelog: string | null,
-  report: string
+  report: string,
+  country: CountryCode = systemCountry()
 ): string {
   const sections = PLAN_SECTIONS.filter((s) => (content.sections[s] ?? []).length > 0)
     .map((s) => {
@@ -1016,7 +1017,7 @@ function renderHtml(
               .join('')}</tr>`
         )
         .join('');
-      return `<h2>${esc(localiseCareWords(SECTION_LABELS[s], systemCountry()))}</h2><table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+      return `<h2>${esc(localiseCareWords(SECTION_LABELS[s], country))}</h2><table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
     })
     .join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>Care plan for ${esc(profileName)}, version ${version}</title>
@@ -1116,7 +1117,7 @@ async function createVersion(input: CreateVersionInput): Promise<VersionRow> {
     content: input.content,
     sources: await gatherNarrativeSources(input.profileId),
   });
-  const html = renderHtml(name, versionNumber, hash, createdAt, input.content, input.changelog, report);
+  const html = renderHtml(name, versionNumber, hash, createdAt, input.content, input.changelog, report, await profileCountry(db, input.profileId));
   const fileUrl = await uploadFile(
     Buffer.from(html, 'utf8'),
     `${input.profileId}/care-plan-v${versionNumber}-${hash.slice(0, 12)}.html`,
@@ -1203,6 +1204,7 @@ export async function pendingEvents(profileId: string): Promise<PendingEvent[]> 
  * tables and marks any queued events as covered by it.
  */
 export async function generateBaseline(profileId: string, actorId: string | null): Promise<VersionRow> {
+  const planCountry = await profileCountry(db, profileId);
   const factual = await buildTruth(profileId, [...FACTUAL_SECTIONS]);
   const narrative = await synthesizeNarrative(profileId);
   // Sections are stored in presentation order: narrative first.
@@ -1213,7 +1215,7 @@ export async function generateBaseline(profileId: string, actorId: string | null
   const empty: PlanContent = { sections: {} };
   const ops = diffOps(empty, truth, [...PLAN_SECTIONS]);
   const changelog = ['Version 1: initial care plan generated from the care record.']
-    .concat(ops.map((op) => describeOp(op)))
+    .concat(ops.map((op) => describeOp(op, null, planCountry)))
     .join('\n');
   return createVersion({
     profileId,
@@ -1241,6 +1243,7 @@ export interface UpdateResult {
  * version awaiting sign-off instead of an automatically published one.
  */
 export async function applyPending(profileId: string, actorId: string | null): Promise<UpdateResult> {
+  const planCountry = await profileCountry(db, profileId);
   const base = await latestVersion(profileId);
   if (!base) {
     const version = await generateBaseline(profileId, actorId);
@@ -1294,7 +1297,7 @@ export async function applyPending(profileId: string, actorId: string | null): P
   for (const entries of Object.values(base.content.sections)) {
     for (const e of entries) beforeByKey.set(e.key, e);
   }
-  const changelog = ops.map((op) => describeOp(op, beforeByKey.get(op.key)?.fields ?? null)).join('\n');
+  const changelog = ops.map((op) => describeOp(op, beforeByKey.get(op.key)?.fields ?? null, planCountry)).join('\n');
 
   const content = applyOps(afterFacts, narrativeOps);
   const version = await createVersion({
@@ -1320,6 +1323,7 @@ export async function revertToVersion(
   targetVersion: number,
   actorId: string | null
 ): Promise<VersionRow> {
+  const planCountry = await profileCountry(db, profileId);
   const base = await latestVersion(profileId);
   if (!base) {
     throw Object.assign(new Error('No care plan exists yet.'), { status: 404, code: 'NOT_FOUND' });
@@ -1335,7 +1339,7 @@ export async function revertToVersion(
   for (const s of PLAN_SECTIONS) truthLike[s] = targetContent.sections[s] ?? [];
   const ops = diffOps(base.content, truthLike, [...PLAN_SECTIONS]);
   const changelog = [`Restored the plan to version ${targetVersion}.`]
-    .concat(ops.map((op) => describeOp(op)))
+    .concat(ops.map((op) => describeOp(op, null, planCountry)))
     .join('\n');
   return createVersion({
     profileId,
