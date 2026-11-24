@@ -31,3 +31,7 @@
 6. FAIL. No stopped date, stop reason or source appointment on a medicine.
 7. FAIL. Nothing creates it.
 8. FAIL. Equipment has serial and warranty, no return by or service due date.
+
+## Block 12 re-walk (2026-11-25, 0.55.0)
+
+Step 6 FAIL. The owner Edit changes the dose and logs it, but has no why box or who said so. That box is only on Record a change, offered to helpers.
