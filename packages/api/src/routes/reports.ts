@@ -296,7 +296,8 @@ reportsRouter.post('/send', requireAuth, requireAccountRight('can_export_data'),
       recipient.email,
       `${name}: ${report.name}`,
       [
-        `${from} sent you ${name}'s ${report.name.toLowerCase()} through PareCare.`,
+        // Someone sending their own report sends "their" report, not "Sam Nguyen's".
+        `${from} sent you ${from === profile?.full_name || from === profile?.preferred_name ? 'their' : `${name}'s`} ${report.name.toLowerCase()} through PareCare.`,
         ...(docs.length ? ['', `With it: ${docs.map((d) => d.label).join(', ')}.`] : []),
         '',
         'It opens without logging in, for the next 30 days.',

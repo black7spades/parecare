@@ -1,3 +1,4 @@
+import { format } from 'date-fns';
 import { SortableTh } from './data/SortableTh';
 import { useDataView, type DataSort } from './data/useDataView';
 import { DataToolbar } from './data/DataToolbar';
@@ -34,7 +35,7 @@ const cellText = (value: unknown, type: string): string => {
     const s = String(value);
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return formatDateOnly(s, 'd MMM yyyy');
     const d = new Date(s);
-    if (!Number.isNaN(d.getTime())) return d.toLocaleDateString();
+    if (!Number.isNaN(d.getTime())) return format(d, 'd MMM yyyy');
   }
   if (type === 'enum') {
     const s = String(value);

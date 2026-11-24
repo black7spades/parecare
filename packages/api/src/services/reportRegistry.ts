@@ -222,9 +222,11 @@ registerSection({
     }
     if (filters['is_temporary'] === true) query = query.where('medical_conditions.is_temporary', true);
     if (dateRange) {
+      // A condition they still have counts whenever it started.
       query = query.where(function () {
         this.where('medical_conditions.started_on', '>=', dateRange.from)
-          .orWhereNull('medical_conditions.started_on');
+          .orWhereNull('medical_conditions.started_on')
+          .orWhereRaw("coalesce(medical_conditions.status, 'active') <> 'resolved'");
       });
     }
     const rows = await query.select('medical_conditions.*', 'care_profiles.full_name as _profile_name')
