@@ -413,6 +413,7 @@ export function DirectoryAssetEditor({
   profileId,
   initialName,
   fromTaskId,
+  fromJourneyItemId,
 }: {
   open: boolean;
   asset: DirectoryAsset | Asset | null;
@@ -425,6 +426,8 @@ export function DirectoryAssetEditor({
   initialName?: string;
   /** The "Equipment to get" step this is for; saving ticks it off. */
   fromTaskId?: string | null;
+  /** The journey step this is recorded from; saving ticks it off. */
+  fromJourneyItemId?: string | null;
 }) {
   const [name, setName] = useState('');
   const [category, setCategory] = useState('');
@@ -492,7 +495,7 @@ export function DirectoryAssetEditor({
       if (profileId) {
         return asset
           ? api.patch<{ asset: DirectoryAsset }>(`/care-profiles/${profileId}/equipment/${asset.id}`, body)
-          : api.post<{ asset: DirectoryAsset }>(`/care-profiles/${profileId}/equipment`, { ...body, from_task_id: fromTaskId ?? null });
+          : api.post<{ asset: DirectoryAsset }>(`/care-profiles/${profileId}/equipment`, { ...body, from_task_id: fromTaskId ?? null, ...(fromJourneyItemId ? { from_journey_item_id: fromJourneyItemId } : {}) });
       }
       return asset
         ? api.patch<{ asset: DirectoryAsset }>(`/directory/assets/${asset.id}`, body)

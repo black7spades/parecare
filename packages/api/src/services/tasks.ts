@@ -5,7 +5,7 @@ import { accountIdForProfile, withCategory } from './documentCategories';
 import { nextStepTypeIdByKey, resolveNextStepTypeByName, stepBooks } from './nextStepTypes';
 import { contactSummaries, ensureProfessional, linkContact, type ContactSummary } from './professionals';
 import { parseZonedTime, isValidTimeZone } from '../lib/timezone';
-import { REPEAT_CHOICE_VALUES, repeatChoice, repeatColumns, withMonthDay } from '../lib/repeat';
+import { REPEAT_CHOICE_VALUES, advance, nextAfter, repeatChoice, repeatColumns, ruleFor, withMonthDay } from '../lib/repeat';
 import { findPhones, phoneDigits, typeWordIn } from '../lib/phoneText';
 import { providerTypeLabel } from '../lib/providerTypes';
 
@@ -47,6 +47,8 @@ export const taskInputSchema = z.object({
   medical_condition_id: z.string().uuid().optional().nullable(),
   appointment_id: z.string().uuid().optional().nullable(),
   document_ids: z.array(z.string().uuid()).max(50).optional(),
+  // The journey item this task carries out.
+  checklist_item_id: z.string().uuid().optional().nullable(),
   no_infer: z.boolean().optional(),
   no_join: z.boolean().optional(),
 });
@@ -340,6 +342,13 @@ export async function createTask(
   if (!due) throw new TaskProblem('Pick the day it is due.');
   const problem = (await contactProblem(conn, profileId, input.provider_id)) ?? (await assigneeProblem(conn, profileId, input));
   if (problem) throw new TaskProblem(problem, 'PROVIDER_NOT_LINKED');
+  // A journey item of this person's with no task yet.
+  let itemId: string | null = null;
+  if (input.checklist_item_id) {
+    const item = await conn('checklist_items').where({ id: input.checklist_item_id, care_profile_id: profileId }).first('id');
+    const taken = item ? await conn('reminders').where({ checklist_item_id: input.checklist_item_id }).first('id') : null;
+    if (item && !taken) itemId = input.checklist_item_id;
+  }
 
   const filed: Array<{ id: string; name: string }> = [];
   let providerId = input.provider_id ?? null;
@@ -384,6 +393,7 @@ export async function createTask(
         note: opts.joinNote ?? `Added again as “${input.title}”${input.body?.trim() ? `: ${input.body.trim()}` : ''}`,
         documentIds: input.document_ids,
       });
+      if (itemId) await conn('reminders').where({ id: same.id }).whereNull('checklist_item_id').update({ checklist_item_id: itemId });
       const reminder = (await conn('reminders').where({ id: same.id }).first()) as CreateTaskResult['reminder'];
       return { reminder, joined_into: joined, filed };
     }
@@ -406,6 +416,7 @@ export async function createTask(
       next_step_type_id: typeId,
       medical_condition_id: input.medical_condition_id ?? null,
       appointment_id: input.appointment_id ?? null,
+      checklist_item_id: itemId,
       inferred_fields: inferred,
     })
     .returning('*');
@@ -524,6 +535,11 @@ export async function mergeTasks(conn: Conn, opts: { profileId: string; fromId: 
     [opts.intoId, opts.fromId]
   );
   await conn('document_links').where({ entity_type: 'reminders', entity_id: opts.fromId }).delete();
+  // A journey item the newer one carried out is carried out by the one that stays.
+  if (from['checklist_item_id'] && !into['checklist_item_id']) {
+    await conn('reminders').where({ id: opts.fromId }).update({ checklist_item_id: null });
+    await conn('reminders').where({ id: opts.intoId }).update({ checklist_item_id: from['checklist_item_id'] });
+  }
   // Anything waiting on the newer one now waits on the one that stays.
   await conn('appointments').where({ care_profile_id: opts.profileId, from_reminder_id: opts.fromId }).update({ from_reminder_id: opts.intoId });
   await conn('note_forwards').where({ care_profile_id: opts.profileId, target_reminder_id: opts.fromId }).update({ target_reminder_id: opts.intoId });
@@ -531,6 +547,28 @@ export async function mergeTasks(conn: Conn, opts: { profileId: string; fromId: 
     merged_into_id: opts.intoId, completed: true, completed_at: conn.fn.now(), completed_by_account_id: opts.actorId,
   });
   return { into: String(into['id']) };
+}
+
+/**
+ * Done, from something else: a booking with a date, a journey step ticked.
+ * A repeating task is done for this time and comes round again on its rule,
+ * so a yearly check keeps reminding next year; any other task is ticked off.
+ * Returns whether the task was ticked off.
+ */
+export async function finishTask(conn: Conn, opts: { profileId: string; taskId: string; actorId: string | null }): Promise<boolean> {
+  const t = (await conn('reminders').where({ id: opts.taskId, care_profile_id: opts.profileId, completed: false }).first('id', 'next_due_at', 'rrule', 'reminder_type')) as
+    | { id: string; next_due_at: Date; rrule: string | null; reminder_type: string | null }
+    | undefined;
+  if (!t) return false;
+  const rule = ruleFor(t);
+  if (rule) {
+    const zone = await ownerZone(conn, opts.profileId);
+    const next = nextAfter(advance(new Date(t.next_due_at), rule, zone), rule, new Date(), zone);
+    await conn('reminders').where({ id: t.id }).update({ next_due_at: next, last_notified_at: null });
+    return false;
+  }
+  await conn('reminders').where({ id: t.id }).update({ completed: true, completed_at: conn.fn.now(), completed_by_account_id: opts.actorId });
+  return true;
 }
 
 export interface TaskListRow extends Record<string, unknown> {

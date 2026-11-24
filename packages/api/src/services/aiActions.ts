@@ -51,6 +51,7 @@ import {
 } from './lifeEventActions';
 import { ownershipFrom, syncEquipmentTasks } from './equipment';
 import { changeCarePhase } from './journeys';
+import { itemByTitle } from './journeyItems';
 
 /**
  * Actions the assistant can carry out on the user's behalf: logging a care
@@ -133,6 +134,8 @@ const taskFields = {
   for_condition: z.string().max(255).optional().nullable(),
   assign_to: z.string().max(255).optional().nullable(),
   documents: z.array(z.string().max(255)).max(20).optional().nullable(),
+  // The title of the journey step this task carries out; its due date, who is doing it and repeat live on the task.
+  journey_item: z.string().max(255).optional().nullable(),
 };
 
 const addTaskSchema = z.object({
@@ -664,6 +667,8 @@ const bookAppointmentSchema = z.object({
   // "Book a neurologist" or "Dr Patel, neurologist". Booking it ticks the task
   // off and anything forwarded to it lands on this appointment.
   for_next_step: z.string().max(255).optional().nullable(),
+  // The title of the journey step this booking carries out, e.g. "Book a preconception health check".
+  for_journey_item: z.string().max(255).optional().nullable(),
   ...appointmentExtras,
 });
 
@@ -1612,6 +1617,9 @@ async function taskInputFrom(
   }
   const docs = await findDocumentsByNames(a.documents, profileId);
   if (docs.missing.length) notes.push(`No document called ${docs.missing.map((m) => `"${m}"`).join(' or ')} is on file.`);
+  const itemId = 'journey_item' in a && a.journey_item ? await itemByTitle(db, profileId, a.journey_item) : null;
+  if ('journey_item' in a && a.journey_item && !itemId) notes.push(`No open journey step called "${a.journey_item}", so the task is on its own.`);
+  if (itemId && (await db('reminders').where({ checklist_item_id: itemId }).first('id'))) notes.push(`"${a.journey_item}" already has a task, so this one is on its own.`);
   return {
     input: {
       title: a.title,
@@ -1624,6 +1632,7 @@ async function taskInputFrom(
       medical_condition_id: condition?.id ?? null,
       ...assign,
       document_ids: docs.ids,
+      checklist_item_id: itemId,
     },
     notes,
   };
@@ -2685,6 +2694,8 @@ async function executeOne(
         return `${CLARIFY_MARK} I did not book "${action.title}": I could not find an open task or next step called "${action.for_next_step}". Which one is it for?`;
       }
       const extras = await appointmentExtrasInput(action, profileId, account);
+      const journeyItemId = action.for_journey_item ? await itemByTitle(db, profileId, action.for_journey_item) : null;
+      if (action.for_journey_item && !journeyItemId) extras.notes.push(`No open journey step called "${action.for_journey_item}" was found, so the booking is on its own.`);
       // Booked from a letter: the letter goes with them to the visit.
       const letter = currentSourceDocument();
       if (letter) extras.input.bring_document_ids = [...new Set([...(extras.input.bring_document_ids ?? []), letter])];
@@ -2709,6 +2720,7 @@ async function executeOne(
         ...(action.notes ? { notes: action.notes } : {}),
         ...(action.cost_estimate != null ? { cost_estimate: action.cost_estimate } : {}),
         ...(step ? { from_reminder_id: step.id } : {}),
+        ...(journeyItemId ? { from_journey_item_id: journeyItemId } : {}),
         ...extras.input,
         tz: timeZone ?? null,
       };

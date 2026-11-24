@@ -171,6 +171,7 @@ export async function addRecall(
   const same = open.find((t) => rule.covers.test(t.title));
   if (same) {
     await updateTask(conn, { profileId: opts.profileId, taskId: same.id, input: { repeat: rule.repeat }, timeZone: opts.timeZone });
+    await linkJourneyStep(conn, opts.profileId, rule, same.id);
     return { id: same.id, title: same.title, repeat: rule.repeat, joined: true };
   }
   const gp = rule.with_gp ? await mainContact(conn, opts.profileId, 'gp') : null;
@@ -188,7 +189,29 @@ export async function addRecall(
       no_join: true,
     },
   });
+  await linkJourneyStep(conn, opts.profileId, rule, made.reminder.id);
   return { id: made.reminder.id, title: made.reminder.title, repeat: rule.repeat, joined: false };
+}
+
+/**
+ * A journey step for the same check ("Book the over seventy five health
+ * assessment") is carried out by the repeating task, so the step shows its
+ * due date and repeat, and ticking one ticks the other.
+ */
+async function linkJourneyStep(conn: Conn, profileId: string, rule: RecallRule, taskId: string): Promise<void> {
+  const task = (await conn('reminders').where({ id: taskId }).first('checklist_item_id')) as { checklist_item_id: string | null } | undefined;
+  if (!task || task.checklist_item_id) return;
+  const steps = (await conn('checklist_items as ci')
+    .join('care_journey_phases as p', 'ci.care_journey_phase_id', 'p.id')
+    .join('care_journeys as j', 'p.care_journey_id', 'j.id')
+    .where({ 'ci.care_profile_id': profileId, 'ci.completed': false })
+    .whereIn('j.status', ['active', 'paused'])
+    .whereNotNull('p.entered_at')
+    .whereNull('p.locked_at')
+    .whereNotExists((q) => q.select(1).from('reminders as r').whereRaw('r.checklist_item_id = ci.id'))
+    .select('ci.id', 'ci.title')) as Array<{ id: string; title: string }>;
+  const step = steps.find((s) => rule.covers.test(s.title));
+  if (step) await conn('reminders').where({ id: taskId }).update({ checklist_item_id: step.id });
 }
 
 export async function dismissRecall(accountId: string, profileId: string, rule: string): Promise<void> {

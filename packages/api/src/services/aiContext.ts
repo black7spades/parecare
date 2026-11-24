@@ -180,7 +180,7 @@ export async function buildProfileContext(
         : [];
       lines.push(
         `- ${j.name}: currently in phase "${current?.name ?? 'not started'}" of ${phases.length}` +
-          (openTasks.length ? `. Open tasks: ${openTasks.map((t) => t.title).join('; ')}` : '')
+          (openTasks.length ? `. Open steps: ${openTasks.map((t) => t.title + (t.action && t.action !== 'task' ? ` (${t.action === 'open' ? `happens on ${t.action_page}` : t.action}${t.action_provider_type ? ` with ${t.action_provider_type}` : ''})` : '')).join('; ')}` : '')
       );
     }
     sections.push(lines.join('\n'));

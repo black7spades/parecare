@@ -1,5 +1,6 @@
 import type { Knex } from 'knex';
 import { db } from '../config/database';
+import { itemRowsFromTemplate } from './journeyItems';
 
 /**
  * Care journey instances: enrolment copies a template into per-person
@@ -93,15 +94,7 @@ export async function enrolProfileInTemplate(
       .orderBy('sort_order', 'asc');
     if (tasks.length > 0) {
       await trx('checklist_items').insert(
-        tasks.map((task) => ({
-          care_profile_id: opts.careProfileId,
-          care_journey_phase_id: journeyPhase.id,
-          phase: tp.legacy_phase,
-          title: task.title,
-          description: task.description,
-          is_milestone: task.is_milestone,
-          sort_order: task.sort_order,
-        }))
+        itemRowsFromTemplate(tasks, { care_profile_id: opts.careProfileId, care_journey_phase_id: journeyPhase.id, phase: tp.legacy_phase })
       );
     }
   }
@@ -186,15 +179,7 @@ export async function setCurrentJourneyPhase(
         .orderBy('sort_order', 'asc');
       if (tasks.length > 0) {
         await trx('checklist_items').insert(
-          tasks.map((task) => ({
-            care_profile_id: opts.journey.care_profile_id,
-            care_journey_phase_id: target.id,
-            phase: target.legacy_phase,
-            title: task.title,
-            description: task.description,
-            is_milestone: task.is_milestone,
-            sort_order: task.sort_order,
-          }))
+          itemRowsFromTemplate(tasks, { care_profile_id: opts.journey.care_profile_id, care_journey_phase_id: target.id, phase: target.legacy_phase })
         );
       }
     }

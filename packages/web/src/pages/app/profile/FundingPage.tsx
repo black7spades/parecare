@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
@@ -25,7 +25,19 @@ export function FundingPage() {
   const name = firstName(profile);
   const canManage = isOwner || access === 'admin';
   const queryClient = useQueryClient();
-  const [editing, setEditing] = useState<{ plan: FundingPlan | null } | null>(null);
+  const [editing, setEditing] = useState<{ plan: FundingPlan | null; fromJourneyItemId?: string | null } | null>(null);
+  const [params, setParams] = useSearchParams();
+  // Opened from a journey step such as "Apply for funding support": the form opens, and saving ticks the step.
+  useEffect(() => {
+    if (params.get('new') !== '1') return;
+    if (canManage) setEditing({ plan: null, fromJourneyItemId: params.get('from_journey_item') });
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('new');
+      next.delete('from_journey_item');
+      return next;
+    }, { replace: true });
+  }, [params, setParams, canManage]);
   const { data, isLoading, error } = useQuery({
     queryKey: ['funding-plans', profile.id],
     queryFn: () => api.get<{ plans: FundingPlan[] }>(`/care-profiles/${profile.id}/funding-plans`),
@@ -78,7 +90,7 @@ export function FundingPage() {
         plans.map((p) => <PlanCard key={p.id} plan={p} profileId={profile.id} onEdit={() => setEditing({ plan: p })} onDelete={() => deletePlan(p)} />)
       )}
 
-      {editing ? <FundingPlanEditor profileId={profile.id} plan={editing.plan} onClose={() => setEditing(null)} /> : null}
+      {editing ? <FundingPlanEditor profileId={profile.id} plan={editing.plan} fromJourneyItemId={editing.fromJourneyItemId} onClose={() => setEditing(null)} /> : null}
     </div>
   );
 }

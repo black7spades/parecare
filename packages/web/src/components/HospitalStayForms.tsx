@@ -37,9 +37,12 @@ export function HospitalStayModal({
   stay,
   onClose,
   onSaved,
+  fromJourneyItemId,
 }: {
   profileId: string;
   stay?: HospitalStay | null;
+  /** The journey step this is recorded from; saving ticks it off. */
+  fromJourneyItemId?: string | null;
   onClose: () => void;
   onSaved?: (stay: HospitalStay) => void;
 }) {
@@ -65,7 +68,7 @@ export function HospitalStayModal({
       };
       return stay
         ? api.patch<{ stay: HospitalStay }>(`/care-profiles/${profileId}/hospital-stays/${stay.id}`, body)
-        : api.post<{ stay: HospitalStay; filed?: Array<{ id: string; name: string }> }>(`/care-profiles/${profileId}/hospital-stays`, body);
+        : api.post<{ stay: HospitalStay; filed?: Array<{ id: string; name: string }> }>(`/care-profiles/${profileId}/hospital-stays`, { ...body, ...(fromJourneyItemId ? { from_journey_item_id: fromJourneyItemId } : {}) });
     },
     onSuccess: (res) => {
       invalidateStays(queryClient, profileId);

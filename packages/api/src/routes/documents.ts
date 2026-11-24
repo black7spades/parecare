@@ -12,6 +12,7 @@ import { canonicalRole, roleMaySee } from '../lib/circleRoles';
 import { accountIdForProfile, resolveCategoryByName, withCategory } from '../services/documentCategories';
 import { contactSummaries, resolveContactInput } from '../services/professionals';
 import { attachedTo } from '../services/recordLabels';
+import { doneFromItem } from '../services/journeyItems';
 import { referralValidity, validityNote, type DocDates } from '../services/documentDates';
 import type { Knex } from 'knex';
 
@@ -234,6 +235,10 @@ documentsRouter.post(
       await db('document_links').insert(pairs).onConflict(['document_id', 'entity_type', 'entity_id']).ignore();
     }
     const profileId = String(req.params['id']);
+    // Uploaded from a journey step: the step is done.
+    for (const p of pairs.filter((x) => x.entity_type === 'checklists')) {
+      await doneFromItem(db, { profileId, itemId: p.entity_id, actorId: req.account!.id });
+    }
     // The file and its dates are kept either way; only a person who cannot be used is left off.
     const problem = await applyDocumentDetails(db, profileId, docId, parsed.data);
     const warning = problem ? `The file is saved. ${problem}` : undefined;

@@ -8,6 +8,8 @@ export interface BookingParams {
   fromTask?: string | null;
   title?: string | null;
   type?: string | null;
+  /** The journey step this booking carries out. */
+  fromJourneyItem?: string | null;
 }
 
 export function bookingHref(profileId: string, p: BookingParams = {}): string {
@@ -17,6 +19,7 @@ export function bookingHref(profileId: string, p: BookingParams = {}): string {
   if (p.fromTask) q.set('from_task', p.fromTask);
   if (p.title) q.set('title', p.title);
   if (p.type) q.set('type', p.type);
+  if (p.fromJourneyItem) q.set('from_journey_item', p.fromJourneyItem);
   return `/app/${profileId}/appointments?${q.toString()}`;
 }
 

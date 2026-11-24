@@ -29,7 +29,18 @@ const contactRef = (v: PickedContact, before: { id: string | null } | null | und
  * Care Package. Only what kind of plan it is is needed. Reports are due six
  * weeks before the review unless a day is given.
  */
-export function FundingPlanEditor({ profileId, plan, onClose }: { profileId: string; plan?: FundingPlan | null; onClose: () => void }) {
+export function FundingPlanEditor({
+  profileId,
+  plan,
+  onClose,
+  fromJourneyItemId,
+}: {
+  profileId: string;
+  plan?: FundingPlan | null;
+  onClose: () => void;
+  /** The journey step this is recorded from; saving ticks it off. */
+  fromJourneyItemId?: string | null;
+}) {
   const queryClient = useQueryClient();
   const [scheme, setScheme] = useState<string>(plan?.scheme ?? 'ndis');
   const [starts, setStarts] = useState(plan?.starts_on ?? '');
@@ -75,7 +86,7 @@ export function FundingPlanEditor({ profileId, plan, onClose }: { profileId: str
       }
       return plan
         ? api.patch<{ plan: FundingPlan; filed?: Array<{ id: string; name: string }>; report_tasks: number }>(`/care-profiles/${profileId}/funding-plans/${plan.id}`, body)
-        : api.post<{ plan: FundingPlan; filed?: Array<{ id: string; name: string }>; report_tasks: number }>(`/care-profiles/${profileId}/funding-plans`, body);
+        : api.post<{ plan: FundingPlan; filed?: Array<{ id: string; name: string }>; report_tasks: number }>(`/care-profiles/${profileId}/funding-plans`, { ...body, ...(fromJourneyItemId ? { from_journey_item_id: fromJourneyItemId } : {}) });
     },
     onSuccess: (res) => {
       noticeFiled(profileId, res.filed);

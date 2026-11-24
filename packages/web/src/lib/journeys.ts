@@ -32,6 +32,16 @@ export interface JourneyTemplateTask {
   title: string;
   description: string | null;
   is_milestone: boolean;
+  /** What the step does; "auto" works it out from the words, "none" has nothing to tap. */
+  action?: string | null;
+  action_provider_type?: string | null;
+  action_contact_name?: string | null;
+  action_phone?: string | null;
+  action_document_category?: string | null;
+  action_page?: string | null;
+  due_in_days?: number | null;
+  repeat?: string | null;
+  repeat_rrule?: string | null;
 }
 
 export interface JourneyTemplatePhase {

@@ -4,6 +4,10 @@ import type { Knex } from 'knex';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { requireRole } from '../middleware/requireRole';
+import { JOURNEY_ACTIONS, JOURNEY_PAGES, NO_ACTION, type ItemAction } from '../lib/journeyActions';
+import { REPEAT_CHOICE_VALUES, repeatChoice, repeatColumns } from '../lib/repeat';
+import { normaliseProviderType } from '../lib/providerTypes';
+import { journeyItemAction } from '../db/journeys/itemActions';
 
 /**
  * The journey template library. Everyone signed in can browse published
@@ -69,7 +73,7 @@ async function loadFullTemplate(templateId: string) {
   const tasksByPhase = new Map<string, unknown[]>();
   for (const task of tasks) {
     const arr = tasksByPhase.get(task.template_phase_id) ?? [];
-    arr.push(task);
+    arr.push({ ...task, repeat: repeatChoice({ rrule: task.repeat_rrule }) });
     tasksByPhase.set(task.template_phase_id, arr);
   }
   return {
@@ -93,7 +97,43 @@ const taskSchema = z.object({
   title: z.string().min(1).max(255),
   description: z.string().max(2000).optional().nullable(),
   is_milestone: z.boolean().optional(),
+  // What the step does. "auto" works it out from the words; "none" is a step with nothing to tap.
+  action: z.enum([...JOURNEY_ACTIONS, 'auto', 'none']).optional().nullable(),
+  action_provider_type: z.string().max(100).optional().nullable(),
+  action_contact_name: z.string().max(255).optional().nullable(),
+  action_phone: z.string().max(50).optional().nullable(),
+  action_document_category: z.string().max(100).optional().nullable(),
+  action_page: z.enum(JOURNEY_PAGES).optional().nullable(),
+  due_in_days: z.number().int().min(0).max(3650).optional().nullable(),
+  repeat: z.enum(REPEAT_CHOICE_VALUES).optional().nullable(),
+  // A copied template keeps the stored rule.
+  repeat_rrule: z.string().max(255).optional().nullable(),
 });
+
+const clean = (s: string | null | undefined) => (s?.trim() ? s.trim() : null);
+
+/** The action columns a template step is stored with. */
+function taskActionColumns(task: z.infer<typeof taskSchema>): ItemAction {
+  if (!task.action || task.action === 'auto') {
+    const worked = journeyItemAction({ title: task.title, description: task.description, is_milestone: task.is_milestone });
+    return {
+      ...worked,
+      due_in_days: task.due_in_days ?? worked.due_in_days,
+      repeat_rrule: task.repeat ? repeatColumns(task.repeat).rrule : task.repeat_rrule ?? worked.repeat_rrule,
+    };
+  }
+  if (task.action === 'none') return { ...NO_ACTION, due_in_days: task.due_in_days ?? null, repeat_rrule: task.repeat ? repeatColumns(task.repeat).rrule : task.repeat_rrule ?? null };
+  return {
+    action: task.action,
+    action_provider_type: clean(task.action_provider_type) ? normaliseProviderType(task.action_provider_type) : null,
+    action_contact_name: clean(task.action_contact_name),
+    action_phone: clean(task.action_phone),
+    action_document_category: clean(task.action_document_category),
+    action_page: task.action === 'open' ? task.action_page ?? null : null,
+    due_in_days: task.due_in_days ?? null,
+    repeat_rrule: task.repeat ? repeatColumns(task.repeat).rrule : task.repeat_rrule ?? null,
+  };
+}
 const phaseSchema = z.object({
   name: z.string().min(1).max(150),
   description: z.string().max(2000).optional().nullable(),
@@ -141,6 +181,7 @@ async function writeTemplateChildren(trx: Knex.Transaction, templateId: string, 
             description: task.description ?? null,
             is_milestone: task.is_milestone ?? false,
             sort_order: j,
+            ...taskActionColumns(task),
           }))
         );
       }
@@ -232,10 +273,22 @@ journeyTemplatesRouter.post('/:templateId/clone', requireAuth, requireRole('admi
     await writeTemplateChildren(trx, row.id, {
       name: row.name,
       life_stage_ids: source.life_stage_ids,
-      phases: source.phases.map((p: { name: string; description: string | null; tasks: Array<{ title: string; description: string | null; is_milestone: boolean }> }) => ({
+      phases: source.phases.map((p: { name: string; description: string | null; tasks: Array<Record<string, unknown> & { title: string; description: string | null; is_milestone: boolean }> }) => ({
         name: p.name,
         description: p.description,
-        tasks: p.tasks.map((task) => ({ title: task.title, description: task.description, is_milestone: task.is_milestone })),
+        tasks: p.tasks.map((task) => ({
+          title: task.title,
+          description: task.description,
+          is_milestone: task.is_milestone,
+          action: ((task['action'] as string | null) ?? 'none') as z.infer<typeof taskSchema>['action'],
+          action_provider_type: task['action_provider_type'] as string | null,
+          action_contact_name: task['action_contact_name'] as string | null,
+          action_phone: task['action_phone'] as string | null,
+          action_document_category: task['action_document_category'] as string | null,
+          action_page: task['action_page'] as z.infer<typeof taskSchema>['action_page'],
+          due_in_days: task['due_in_days'] as number | null,
+          repeat_rrule: task['repeat_rrule'] as string | null,
+        })),
       })),
       handovers: source.handovers.map((h: { to_template_id: string; label: string }) => ({ to_template_id: h.to_template_id, label: h.label })),
     });

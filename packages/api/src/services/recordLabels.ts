@@ -93,6 +93,7 @@ const KINDS: Record<string, KindSpec> = {
         .whereIn('m.id', ids)
         .select('m.id', conn.raw("coalesce(p.name, 'Care home') as label")),
   },
+  checklists: { kind_label: 'Journey step', page: 'journey', names: simple('checklist_items', 'title') },
   assets: {
     kind_label: 'Equipment',
     page: 'equipment',
@@ -141,4 +142,13 @@ export async function attachedTo(conn: Conn, profileId: string, docIds: string[]
   }
   for (const list of out.values()) list.sort((a, b) => a.kind_label.localeCompare(b.kind_label) || a.label.localeCompare(b.label));
   return out;
+}
+
+/** One record's name and the page that opens it, or null when it is gone or not this person's. */
+export async function recordLabel(conn: Conn, profileId: string, kind: string, id: string): Promise<AttachedTo | null> {
+  const spec = KINDS[kind];
+  if (!spec) return null;
+  const [row] = await spec.names(conn, profileId, [id]);
+  if (!row) return null;
+  return { kind, id, label: (row.label ?? '').trim() || spec.kind_label, kind_label: spec.kind_label, path: recordPath(profileId, kind, id) };
 }

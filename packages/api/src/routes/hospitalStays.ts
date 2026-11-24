@@ -13,6 +13,9 @@ import {
   type StayRow,
 } from '../services/hospitalStays';
 import { TaskProblem } from '../services/tasks';
+import { doneFromItem, journeyItemRef } from '../services/journeyItems';
+
+const fromItemOf = (body: unknown) => journeyItemRef.safeParse((body as Record<string, unknown> | undefined)?.['from_journey_item_id']).data ?? null;
 
 /**
  * Hospital stays for one person: when they went in and came out, where, and
@@ -55,7 +58,12 @@ hospitalStaysRouter.post('/', requireAuth, async (req, res) => {
   }
   const profileId = profileIdOf(req);
   try {
-    const made = await db.transaction((trx) => createStay(trx, { profileId, actorId: req.account!.id, input: parsed.data, timeZone: tz(req) }));
+    const made = await db.transaction(async (trx) => {
+      const m = await createStay(trx, { profileId, actorId: req.account!.id, input: parsed.data, timeZone: tz(req) });
+      // Recorded from a journey step: the step is done.
+      await doneFromItem(trx, { profileId, itemId: fromItemOf(req.body), actorId: req.account!.id, record: { kind: 'hospital-stays', id: m.stay.id } });
+      return m;
+    });
     res.status(201).json({ stay: await oneOut(profileId, made.stay.id), filed: made.filed });
   } catch (err) {
     if (sendProblem(res, err)) return;

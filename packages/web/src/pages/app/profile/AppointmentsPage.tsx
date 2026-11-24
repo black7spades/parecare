@@ -167,8 +167,10 @@ interface NewBooking {
   fromTask: string;
   title: string;
   type: string;
+  /** The journey step this booking carries out. */
+  fromJourneyItem: string;
 }
-const noBooking: NewBooking = { providerId: '', conditionId: '', fromTask: '', title: '', type: '' };
+const noBooking: NewBooking = { providerId: '', conditionId: '', fromTask: '', title: '', type: '', fromJourneyItem: '' };
 
 export function AppointmentsPage() {
   const { profile, careName, canEdit, isOwner, relationship } = useProfile();
@@ -189,6 +191,7 @@ export function AppointmentsPage() {
         fromTask: searchParams.get('from_task') ?? '',
         title: searchParams.get('title') ?? '',
         type: searchParams.get('type') ?? '',
+        fromJourneyItem: searchParams.get('from_journey_item') ?? '',
       });
       setAdding(true);
       setSearchParams({}, { replace: true });
@@ -925,6 +928,7 @@ export function AppointmentsPage() {
           initialType={editing ? 'consultation' : newBooking.type || (fromTask?.kind ? kindForStep(fromTask.kind.name) : 'consultation')}
           initialBringIds={editing ? [] : (fromTask?.documents ?? []).map((d) => d.id)}
           fromReminderId={editing ? '' : fromTask?.id ?? ''}
+          fromJourneyItemId={editing ? '' : newBooking.fromJourneyItem}
           onClose={() => {
             setAdding(false);
             setEditing(null);
@@ -1095,7 +1099,7 @@ export function missingSentence(errors: AppointmentDraftErrors, what = 'This app
 }
 
 /** The draft as the appointments API takes it. */
-export function appointmentBody(d: AppointmentDraft, fromReminderId?: string) {
+export function appointmentBody(d: AppointmentDraft, fromReminderId?: string, fromJourneyItemId?: string) {
   // No date: saved as Not booked yet, waiting on a to-do. A date with no time
   // is any time that day.
   const allDay = !!d.startDate && !d.startTime;
@@ -1130,6 +1134,7 @@ export function appointmentBody(d: AppointmentDraft, fromReminderId?: string) {
     cost_actual: d.costActual.trim() === '' ? null : Number(d.costActual),
     tz: browserTimeZone() ?? null,
     ...(fromReminderId ? { from_reminder_id: fromReminderId } : {}),
+    ...(fromJourneyItemId ? { from_journey_item_id: fromJourneyItemId } : {}),
   };
 }
 
@@ -1509,6 +1514,7 @@ export function AppointmentEditor({
   initialConditionId = '',
   initialBringIds = [],
   fromReminderId = '',
+  fromJourneyItemId = '',
   onClose,
   onSaved,
 }: {
@@ -1526,6 +1532,8 @@ export function AppointmentEditor({
   initialBringIds?: string[];
   /** The task or next step this appointment carries out; saving ticks it off. */
   fromReminderId?: string;
+  /** The journey step this appointment carries out; a booking with a date ticks it off. */
+  fromJourneyItemId?: string;
   onClose: () => void;
   /** Gets the saved appointment, e.g. so notes can be forwarded to a new one. */
   onSaved: (saved?: { id: string }, info?: { series_move: { from_starts_at: string; later: number } | null; starts_at: string | null }) => void;
@@ -1557,7 +1565,7 @@ export function AppointmentEditor({
 
   const saveMutation = useMutation({
     mutationFn: () => {
-      const body = appointmentBody(draft, isNew && fromReminderId ? fromReminderId : undefined);
+      const body = appointmentBody(draft, isNew && fromReminderId ? fromReminderId : undefined, isNew && fromJourneyItemId ? fromJourneyItemId : undefined);
       type Saved = {
         appointment: { id: string; starts_at: string | null };
         filed?: Array<{ id: string; name: string }>;
@@ -1571,6 +1579,10 @@ export function AppointmentEditor({
       noticeFiled(profileId, res?.filed);
       refreshContacts(queryClient);
       void queryClient.invalidateQueries({ queryKey: ['tasks', profileId] });
+      if (fromJourneyItemId) {
+        void queryClient.invalidateQueries({ queryKey: ['journey-checklist'] });
+        void queryClient.invalidateQueries({ queryKey: ['journeys', profileId] });
+      }
       onSaved(res?.appointment, { series_move: res?.series_move ?? null, starts_at: res?.appointment?.starts_at ?? null });
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not save the appointment.'),

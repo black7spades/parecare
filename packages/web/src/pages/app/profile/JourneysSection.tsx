@@ -6,7 +6,14 @@ import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { useAuthStore } from '../../../stores/auth';
-import type { ChecklistItem, ChecklistNote } from '../../../lib/care';
+import { useHiddenIds, useUndoStore } from '../../../stores/undo';
+import { TrashIcon } from '../../../components/ui/icons';
+import { LinkedText } from '../../../components/LinkedText';
+import { StepAction, StepTaskLine, StepTaskModal } from '../../../components/JourneyStep';
+import { firstName } from '../../../lib/lifeEvents';
+import type { ChecklistItem, ChecklistNote, CircleMember } from '../../../lib/care';
+import { UploadDocumentModal } from './DocumentsPage';
+import { useProfile } from './ProfileLayout';
 import {
   matchingLifeStages,
   type CareJourney,
@@ -24,7 +31,6 @@ import {
  */
 export function JourneysSection({
   profileId,
-  careName,
   dateOfBirth,
   dueDate,
 }: {
@@ -35,6 +41,8 @@ export function JourneysSection({
 }) {
   const [enrolOpen, setEnrolOpen] = useState(false);
   const [showPast, setShowPast] = useState(false);
+  const { profile, isSelf } = useProfile();
+  const name = firstName(profile);
 
   const { data, isLoading } = useQuery({
     queryKey: ['journeys', profileId],
@@ -47,7 +55,7 @@ export function JourneysSection({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-ink">{careName ? `${careName}'s care journeys` : 'Care journeys'}</h2>
+        <h2 className="text-base font-semibold text-ink">{isSelf ? 'Your care journeys' : `${name}'s care journeys`}</h2>
         <Button size="sm" variant="secondary" onClick={() => setEnrolOpen(true)}>
           Add a journey
         </Button>
@@ -58,7 +66,7 @@ export function JourneysSection({
       ) : active.length === 0 ? (
         <div className="card text-center py-8">
           <p className="text-sm text-muted mb-3">
-            No journey underway. A journey gives {careName || 'this person'} phases to move through and a checklist for
+            No journey underway. A journey gives {isSelf ? 'you' : name} phases to move through and a checklist for
             each one, from the library or built from scratch.
           </p>
           <Button size="sm" onClick={() => setEnrolOpen(true)}>
@@ -88,7 +96,7 @@ export function JourneysSection({
         open={enrolOpen}
         onClose={() => setEnrolOpen(false)}
         profileId={profileId}
-        careName={careName}
+        careName={isSelf ? 'you' : name}
         dateOfBirth={dateOfBirth}
         dueDate={dueDate}
       />
@@ -229,14 +237,9 @@ function JourneyCard({ profileId, journey }: { profileId: string; journey: CareJ
         })}
         {!ended ? (
           <li>
-            <button
-              type="button"
-              className="ml-1 rounded-full px-2 py-1 text-xs text-muted hover:text-ink"
-              title="Add a phase to this journey only"
-              onClick={() => setAddPhaseOpen(true)}
-            >
-              + phase
-            </button>
+            <Button size="xs" variant="ghost" className="ml-1" title="Add a phase to this journey only" onClick={() => setAddPhaseOpen(true)}>
+              Add a phase
+            </Button>
           </li>
         ) : null}
       </ol>
@@ -273,11 +276,22 @@ function JourneyCard({ profileId, journey }: { profileId: string; journey: CareJ
           This adds a phase to this journey only. The library version is unchanged.
         </p>
         <Input label="Phase name" value={newPhaseName} onChange={(e) => setNewPhaseName(e.target.value)} />
+        {error && addPhaseOpen ? <p className="text-sm text-red-600 mt-2" role="alert">{error}</p> : null}
         <div className="flex justify-end gap-2 mt-4">
           <Button variant="ghost" onClick={() => setAddPhaseOpen(false)}>
             Cancel
           </Button>
-          <Button loading={addPhaseMutation.isPending} disabled={!newPhaseName.trim()} onClick={() => addPhaseMutation.mutate()}>
+          <Button
+            loading={addPhaseMutation.isPending}
+            onClick={() => {
+              if (!newPhaseName.trim()) {
+                setError('Write the phase name first.');
+                return;
+              }
+              setError('');
+              addPhaseMutation.mutate();
+            }}
+          >
             Add phase
           </Button>
         </div>
@@ -352,21 +366,35 @@ function HandoverModal({
  */
 function PhaseChecklist({ profileId, phase, readOnly }: { profileId: string; phase: CareJourneyPhase; readOnly: boolean }) {
   const queryClient = useQueryClient();
+  const { canEdit, isOwner, access, profile } = useProfile();
+  // Only the owner or an admin keeps the funding plan.
+  const fundingManager = isOwner || access === 'admin' ? null : profile.manager_name ?? 'Whoever manages this profile';
+  const deferDelete = useUndoStore((s) => s.deferDelete);
+  const hidden = useHiddenIds();
   const [newTitle, setNewTitle] = useState('');
+  const [addMissing, setAddMissing] = useState('');
   const [openNotesId, setOpenNotesId] = useState<string | null>(null);
+  const [taskFor, setTaskFor] = useState<ChecklistItem | null>(null);
+  const [uploadFor, setUploadFor] = useState<ChecklistItem | null>(null);
 
   const listKey = ['journey-checklist', profileId, phase.id];
   const { data, isLoading } = useQuery({
     queryKey: listKey,
     queryFn: () => api.get<{ items: ChecklistItem[] }>(`/care-profiles/${profileId}/checklists?journey_phase_id=${phase.id}`),
   });
-  const items = data?.items ?? [];
+  const { data: circleData } = useQuery({
+    queryKey: ['circle', profileId],
+    queryFn: () => api.get<{ members: CircleMember[] }>(`/care-profiles/${profileId}/circle`),
+    enabled: !!uploadFor,
+  });
+  const items = (data?.items ?? []).filter((i) => !hidden.has(i.id));
   const locked = phase.state === 'locked';
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: listKey });
     void queryClient.invalidateQueries({ queryKey: ['journeys', profileId] });
     void queryClient.invalidateQueries({ queryKey: ['achievements', profileId] });
+    void queryClient.invalidateQueries({ queryKey: ['tasks', profileId] });
   };
 
   const toggleMutation = useMutation({
@@ -393,13 +421,17 @@ function PhaseChecklist({ profileId, phase, readOnly }: { profileId: string; pha
     },
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/care-profiles/${profileId}/checklists/${id}`),
-    onSuccess: invalidate,
-  });
+  // Deleting a step is held back a few seconds with Undo.
+  const deleteItem = (item: ChecklistItem) =>
+    deferDelete({
+      message: `Deleted “${item.title}”.`,
+      ids: [item.id],
+      commit: () => api.delete(`/care-profiles/${profileId}/checklists/${item.id}`),
+      onCommitted: invalidate,
+    });
 
   const done = items.filter((i) => i.completed).length;
-  const disabled = readOnly || locked;
+  const disabled = readOnly || locked || !canEdit;
 
   return (
     <div className="rounded-md border border-border bg-surface p-3">
@@ -420,17 +452,18 @@ function PhaseChecklist({ profileId, phase, readOnly }: { profileId: string; pha
       ) : items.length === 0 ? (
         <p className="text-sm text-muted">Nothing on this phase's checklist yet.</p>
       ) : (
-        <ul className="space-y-2.5">
+        <ul className="space-y-3">
           {items.map((item) => (
             <li key={item.id} className="flex items-start gap-3 group">
               <input
                 type="checkbox"
+                aria-label={`${item.title} done`}
                 className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary"
                 checked={item.completed}
                 disabled={disabled && !item.completed}
                 onChange={(e) => !disabled && toggleMutation.mutate({ id: item.id, completed: e.target.checked })}
               />
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 space-y-1">
                 <p className={`text-sm ${item.completed ? 'line-through text-muted' : 'text-ink'}`}>
                   {item.title}
                   {item.is_milestone ? (
@@ -439,38 +472,44 @@ function PhaseChecklist({ profileId, phase, readOnly }: { profileId: string; pha
                     </span>
                   ) : null}
                 </p>
-                {item.description ? <p className="text-xs text-muted">{item.description}</p> : null}
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    className="text-xs text-primary hover:underline mt-0.5"
-                    onClick={() => setOpenNotesId((v) => (v === item.id ? null : item.id))}
-                  >
-                    {item.note_count > 0 ? `Notes (${item.note_count})` : 'Add a note'}
-                  </button>
+                {item.description ? (
+                  <div className="text-xs text-muted">
+                    <LinkedText text={item.description} profileId={profileId} canEdit={!disabled} />
+                  </div>
+                ) : null}
+                <StepAction
+                  profileId={profileId}
+                  item={item}
+                  canAct={!disabled}
+                  onUpload={setUploadFor}
+                  onSetTask={setTaskFor}
+                  onDone={(i) => toggleMutation.mutate({ id: i.id, completed: true })}
+                  doneLoading={toggleMutation.isPending && toggleMutation.variables?.id === item.id}
+                  fundingManager={fundingManager}
+                />
+                <StepTaskLine profileId={profileId} item={item} canAct={!disabled} onSetTask={setTaskFor} />
+                <div className="flex items-center gap-1 flex-wrap">
+                  <Button size="xs" variant="ghost" onClick={() => setOpenNotesId((v) => (v === item.id ? null : item.id))}>
+                    {item.note_count > 0 ? `Notes, ${item.note_count}` : 'Add a note'}
+                  </Button>
                   {!disabled ? (
-                    <button
-                      type="button"
-                      className="text-xs text-muted hover:text-ink mt-0.5"
+                    <Button
+                      size="xs"
+                      variant="ghost"
                       title="A milestone is celebrated in the Memory Book timeline. Everything completed still lands in the achievements record."
                       onClick={() => milestoneMutation.mutate({ id: item.id, is_milestone: !item.is_milestone })}
                     >
                       {item.is_milestone ? 'Unmark milestone' : 'Mark as milestone'}
-                    </button>
+                    </Button>
+                  ) : null}
+                  {!disabled && !item.completed ? (
+                    <Button size="xs" variant="ghost-danger" aria-label={`Delete ${item.title}`} title="Delete" onClick={() => deleteItem(item)}>
+                      <TrashIcon />
+                    </Button>
                   ) : null}
                 </div>
                 {openNotesId === item.id ? <ItemNotesThread profileId={profileId} itemId={item.id} /> : null}
               </div>
-              {!disabled && !item.completed ? (
-                <button
-                  type="button"
-                  aria-label={`Delete ${item.title}`}
-                  className="text-muted hover:text-red-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-sm px-1"
-                  onClick={() => deleteMutation.mutate(item.id)}
-                >
-                  ✕
-                </button>
-              ) : null}
             </li>
           ))}
         </ul>
@@ -478,19 +517,52 @@ function PhaseChecklist({ profileId, phase, readOnly }: { profileId: string; pha
 
       {!disabled ? (
         <form
-          className="mt-3 flex gap-2"
+          className="mt-3 space-y-1"
           onSubmit={(e) => {
             e.preventDefault();
-            if (newTitle.trim()) addMutation.mutate(newTitle.trim());
+            if (!newTitle.trim()) {
+              setAddMissing('Write the step first, then add it.');
+              document.getElementById(`new-step-${phase.id}`)?.focus();
+              return;
+            }
+            setAddMissing('');
+            addMutation.mutate(newTitle.trim());
           }}
         >
-          <div className="flex-1">
-            <Input placeholder="Add a goal or task for this phase…" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} />
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <Input
+                id={`new-step-${phase.id}`}
+                aria-label="A step for this phase"
+                placeholder="Add a step, e.g. Book the dentist"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+              />
+            </div>
+            <Button type="submit" variant="secondary" loading={addMutation.isPending}>
+              Add
+            </Button>
           </div>
-          <Button type="submit" variant="secondary" loading={addMutation.isPending} disabled={!newTitle.trim()}>
-            Add
-          </Button>
+          {addMissing ? <p className="text-xs text-red-600" role="alert">{addMissing}</p> : null}
         </form>
+      ) : null}
+
+      {taskFor ? <StepTaskModal profileId={profileId} item={taskFor} onClose={() => setTaskFor(null)} /> : null}
+      {uploadFor ? (
+        <UploadDocumentModal
+          profileId={profileId}
+          members={circleData?.members ?? []}
+          initialFile={null}
+
+          initialCategoryKey={uploadFor.action_document_category ?? ''}
+          link={{ kind: 'checklists', id: uploadFor.id }}
+          onClose={() => setUploadFor(null)}
+          onUploaded={() => {
+            setUploadFor(null);
+            invalidate();
+            void queryClient.invalidateQueries({ queryKey: ['documents', profileId] });
+          }}
+        />
       ) : null}
     </div>
   );
@@ -501,6 +573,7 @@ export function ItemNotesThread({ profileId, itemId }: { profileId: string; item
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState('');
   const [photo, setPhoto] = useState<File | null>(null);
+  const [noteMissing, setNoteMissing] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
 
   const { data, isLoading } = useQuery({
@@ -551,7 +624,12 @@ export function ItemNotesThread({ profileId, itemId }: { profileId: string; item
         className="space-y-2"
         onSubmit={(e) => {
           e.preventDefault();
-          if (draft.trim()) addMutation.mutate();
+          if (!draft.trim()) {
+            setNoteMissing('Write the note first, then save.');
+            return;
+          }
+          setNoteMissing('');
+          addMutation.mutate();
         }}
       >
         <Input
@@ -569,10 +647,11 @@ export function ItemNotesThread({ profileId, itemId }: { profileId: string; item
             className="flex-1 text-xs text-muted file:mr-2 file:rounded-md file:border-0 file:bg-primary-50 file:px-2 file:py-1 file:text-xs file:text-primary hover:file:bg-primary-100"
             onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
           />
-          <Button type="submit" size="sm" variant="secondary" loading={addMutation.isPending} disabled={!draft.trim()}>
+          <Button type="submit" size="sm" variant="secondary" loading={addMutation.isPending}>
             Save
           </Button>
         </div>
+        {noteMissing ? <p className="text-xs text-red-600" role="alert">{noteMissing}</p> : null}
       </form>
     </div>
   );
