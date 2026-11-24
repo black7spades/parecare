@@ -225,7 +225,7 @@ const sendSchema = z.object({
  * documents with it. Documents shared only with some roles never go. With no
  * email set up here, the link comes back to send another way.
  */
-reportsRouter.post('/send', requireAuth, async (req, res) => {
+reportsRouter.post('/send', requireAuth, requireAccountRight('can_export_data'), async (req, res) => {
   const parsed = sendSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ error: 'Choose who to send it to.', code: 'VALIDATION_ERROR' });
@@ -250,7 +250,12 @@ reportsRouter.post('/send', requireAuth, async (req, res) => {
   }
   // Someone outside the circle reads it, so only what the whole circle may see goes.
   const result = await generateReport({ profileIds: [profileId], sections: report.sections, dateRange: report.dateRange ?? null, includeAiNarrative: false });
-  if (report.narrative?.trim()) result.aiNarrative = report.narrative.trim();
+  // Pare's summary was written from the sender's view. When a documents
+  // section could hold documents shared only with some roles, it stays home.
+  const hasHeld = report.sections.some((sec) => sec.key === 'documents')
+    ? !!(await db('documents').where({ care_profile_id: profileId }).whereRaw('coalesce(array_length(visible_to_roles, 1), 0) > 0').first('id'))
+    : false;
+  if (report.narrative?.trim() && !hasHeld) result.aiNarrative = report.narrative.trim();
   const docs = document_ids.length
     ? ((await db('documents')
         .whereIn('id', document_ids)

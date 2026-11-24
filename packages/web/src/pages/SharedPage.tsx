@@ -1,3 +1,4 @@
+import { CONTACT_LINK } from '../components/ContactStrip';
 import { useEffect, type ReactNode } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -7,6 +8,7 @@ import { Button } from '../components/ui/Button';
 import { EmergencySheetView, type EmergencySheet } from '../components/EmergencySheetView';
 import { ReportSectionTable, type ReportResult } from '../components/ReportTables';
 import { PhoneLink } from '../components/cards/profile/links';
+import { forgetOffline, keepOffline } from '../lib/offline';
 
 /**
  * The page a share link opens, with no login and no app around it: an
@@ -28,6 +30,7 @@ interface SharedAppointment {
   bring: string[];
   going: Array<{ name: string; is_driver: boolean }>;
   interpreter_language: string | null;
+  status: string;
 }
 
 type SharedPayload =
@@ -62,16 +65,32 @@ export function SharedPage() {
   const { token = '' } = useParams<{ token: string }>();
   const { data, error, isLoading } = useQuery({
     queryKey: ['shared', token],
-    queryFn: () => api.get<SharedPayload>(`/shared/${token}`),
+    // offline_saved_at is set only on the copy kept on this phone, served with no signal.
+    queryFn: () => api.get<SharedPayload & { offline_saved_at?: string }>(`/shared/${token}`),
     retry: false,
   });
-  useEffect(() => {
-    if (data) keep(token, data);
-  }, [data, token]);
-
   const turnedOff = error instanceof ApiError && (error.status === 410 || error.status === 404);
-  const copy = !data && error && !turnedOff ? kept(token) : null;
-  const page = data ?? copy?.payload ?? null;
+  useEffect(() => {
+    // An emergency sheet stays on the phone that opened it, for no signal.
+    if (data && !data.offline_saved_at && data.kind === 'emergency_sheet') {
+      keep(token, data);
+      keepOffline([{ url: `/shared/${token}`, body: data }]);
+    }
+  }, [data, token]);
+  useEffect(() => {
+    // A link turned off takes its kept copy with it.
+    if (!turnedOff) return;
+    try {
+      window.localStorage.removeItem(keepKey(token));
+    } catch {
+      /* nothing kept */
+    }
+    forgetOffline([`/shared/${token}`]);
+  }, [turnedOff, token]);
+
+  const fallback = !data && error && !turnedOff ? kept(token) : null;
+  const copy = data?.offline_saved_at ? { saved_at: data.offline_saved_at } : fallback;
+  const page = data ?? fallback?.payload ?? null;
 
   return (
     <div className="min-h-screen bg-surface">
@@ -92,7 +111,7 @@ export function SharedPage() {
           <>
             {copy ? (
               <p className="rounded-md border-l-4 border-l-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900/10 dark:text-amber-200 print:hidden" role="status">
-                No connection. This is the copy kept on this phone on {format(new Date(copy.saved_at), 'd MMM yyyy, HH:mm')}.
+                No connection. This is the copy kept on this phone on {format(new Date(copy.saved_at), 'd MMM yyyy, HH:mm')}. It may be out of date.
               </p>
             ) : null}
             <div className="flex flex-wrap items-center justify-between gap-2 print:hidden">
@@ -138,17 +157,22 @@ function AppointmentCard({ token, profileName, a }: { token: string; profileName
         <h1 className="text-2xl font-bold text-ink">{a.title}</h1>
         <p className="text-sm text-muted">For {profileName}</p>
       </div>
+      {a.status === 'cancelled' ? (
+        <p className="rounded-md border-l-4 border-l-red-500 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 dark:bg-red-900/10 dark:text-red-300" role="alert">
+          This appointment has been cancelled. There is no need to go.
+        </p>
+      ) : null}
       <div className="space-y-1">
         <Line label="When">{when}</Line>
         {a.place ? <Line label="Where">{a.place}</Line> : null}
         {a.directions_link ? (
           <Line label="Directions">
-            <a href={a.directions_link} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Open map</a>
+            <a href={a.directions_link} target="_blank" rel="noopener noreferrer" className={CONTACT_LINK}>Open map</a>
           </Line>
         ) : null}
         {a.telehealth_link ? (
           <Line label="Video call">
-            <a href={a.telehealth_link} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Join the video call</a>
+            <a href={a.telehealth_link} target="_blank" rel="noopener noreferrer" className={CONTACT_LINK}>Join the video call</a>
           </Line>
         ) : null}
         {a.provider ? <Line label="With">{[a.provider.name, a.provider.role_label, a.provider.organisation?.name].filter(Boolean).join(', ')}</Line> : null}
@@ -159,9 +183,9 @@ function AppointmentCard({ token, profileName, a }: { token: string; profileName
         {a.bring.length ? <Line label="Bring">{a.bring.join(', ')}</Line> : null}
         {a.preparation ? <Line label="How to get ready">{a.preparation}</Line> : null}
       </div>
-      {a.starts_at ? (
+      {a.starts_at && a.status !== 'cancelled' ? (
         <p className="print:hidden">
-          <a href={`/api/v1/shared/${token}/calendar.ics`} className="text-sm text-primary hover:underline">Add to my calendar</a>
+          <a href={`/api/v1/shared/${token}/calendar.ics`} className={`text-sm ${CONTACT_LINK}`}>Add to my calendar</a>
         </p>
       ) : null}
     </div>
@@ -182,7 +206,7 @@ function ReportView({ token, page }: { token: string; page: Extract<SharedPayloa
           <ul className="space-y-1">
             {page.documents.map((d) => (
               <li key={d.id} className="text-sm">
-                <a href={`/api/v1/shared/${token}/documents/${d.id}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{d.label}</a>
+                <a href={`/api/v1/shared/${token}/documents/${d.id}`} target="_blank" rel="noopener noreferrer" className={CONTACT_LINK}>{d.label}</a>
                 {d.category_name ? <span className="ml-2 text-xs text-muted">{d.category_name}</span> : null}
               </li>
             ))}

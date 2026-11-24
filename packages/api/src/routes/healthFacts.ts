@@ -7,7 +7,7 @@ import { resolveConditionCatalogueId } from './conditionCatalogue';
 import { CONDITION_RESOLUTION_REASONS } from '../lib/conditionResolution';
 import { resolveOptions } from './optionCatalogue';
 import { nextStepsFor } from './appointments';
-import { ALLERGY_SEVERITIES, addAllergy, confirmNoAllergies, noKnownAllergies } from '../services/allergies';
+import { ALLERGY_SEVERITIES, addAllergy, confirmNoAllergies, noKnownAllergies, worked } from '../services/allergies';
 import {
   ATTRIBUTE_DOMAINS,
   ATTRIBUTE_KINDS,
@@ -79,9 +79,16 @@ allergiesRouter.patch('/:allergyId', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
     return;
   }
+  const before = await db('allergies').where({ id: req.params['allergyId'], care_profile_id: req.params['id'] }).first('severity', 'reaction');
+  const changes: Record<string, unknown> = { ...parsed.data };
+  // A reaction of anaphylaxis with no severity given is life threatening.
+  if (!parsed.data.severity && !(parsed.data.severity === undefined && before?.severity)) {
+    const w = worked(null, parsed.data.reaction ?? before?.reaction ?? null);
+    if (w) changes['severity'] = w;
+  }
   const [allergy] = await db('allergies')
     .where({ id: req.params['allergyId'], care_profile_id: req.params['id'] })
-    .update({ ...parsed.data, updated_at: db.fn.now() })
+    .update({ ...changes, updated_at: db.fn.now() })
     .returning('*');
   if (!allergy) {
     res.status(404).json({ error: 'Allergy not found', code: 'NOT_FOUND' });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -14,11 +14,12 @@ import { ShareLinkBox, type ShareLink } from '../../../components/ShareLinkBox';
 import { EmergencySheetView, type EmergencySheet, type SheetAdd } from '../../../components/EmergencySheetView';
 import { ConditionModal, EmergencyContactModal, GpModal, MedicationModal } from '../../../components/QuickAddModals';
 import { useProfile } from './ProfileLayout';
+import { keepOffline, sheetStoreKey } from '../../../lib/offline';
 
 type SheetModal = 'ids' | 'allergy' | 'contact' | 'poa' | 'condition' | 'medication' | 'gp' | 'share' | null;
 
 /** Where the copy kept on this phone lives, and whether one was ever saved. */
-const storeKey = (id: string) => `parecare.emergency-sheet.${id}`;
+const storeKey = sheetStoreKey;
 interface Kept {
   saved_at: string;
   sheet: EmergencySheet;
@@ -50,7 +51,8 @@ export function EmergencySheetPage() {
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['emergency-sheet', profile.id],
-    queryFn: () => api.get<{ sheet: EmergencySheet; link: ShareLink | null }>(`/care-profiles/${profile.id}/emergency-sheet`),
+    // offline_saved_at is set only on the copy kept on this phone, served with no signal.
+    queryFn: () => api.get<{ sheet: EmergencySheet; link: ShareLink | null; offline_saved_at?: string }>(`/care-profiles/${profile.id}/emergency-sheet`),
   });
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ['emergency-sheet', profile.id] });
   const closeModal = () => {
@@ -60,11 +62,23 @@ export function EmergencySheetPage() {
 
   // A copy kept on this phone stays up to date each time the sheet opens.
   const kept = readKept(profile.id);
+  const keepNow = (sheetData: NonNullable<typeof data>) => {
+    writeKept(profile.id, sheetData.sheet);
+    keepOffline([
+      { url: `/care-profiles/${profile.id}/emergency-sheet`, body: { sheet: sheetData.sheet, link: null } },
+      { url: `/care-profiles/${profile.id}`, body: queryClient.getQueryData(['care-profile', profile.id]) },
+    ]);
+  };
   useEffect(() => {
-    if (data?.sheet && readKept(profile.id)) writeKept(profile.id, data.sheet);
+    if (data?.sheet && !data.offline_saved_at && readKept(profile.id)) keepNow(data);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, profile.id]);
-  const offline = isError && !data && kept;
-  const sheet = data?.sheet ?? (offline ? kept.sheet : null);
+  // With no signal: the kept copy, from the offline helper or from this browser.
+  const servedKept = data?.offline_saved_at ?? null;
+  const fallback = isError && !data && kept ? kept : null;
+  const offlineAt = servedKept ?? fallback?.saved_at ?? null;
+  const offline = !!offlineAt;
+  const sheet = data?.sheet ?? fallback?.sheet ?? null;
 
   const confirmNone = useMutation({
     mutationFn: () => api.post(`/care-profiles/${profile.id}/allergies/none`, {}),
@@ -83,18 +97,16 @@ export function EmergencySheetPage() {
   };
 
   const saveOnPhone = () => {
-    if (!sheet) return;
-    if (!writeKept(profile.id, sheet)) {
+    if (!data?.sheet || offline) {
+      setSavedNote('There is no connection, so the copy already on this phone is the one shown.');
+      return;
+    }
+    if (!writeKept(profile.id, data.sheet)) {
       setSavedNote('This browser would not keep a copy. Print the sheet instead, or try another browser.');
       return;
     }
-    // Ask the offline helper to keep the page itself too.
-    try {
-      navigator.serviceWorker?.controller?.postMessage({ type: 'keep-offline', urls: [window.location.pathname] });
-    } catch {
-      /* the saved copy still opens from this page */
-    }
-    setSavedNote('Saved on this phone. It opens without internet.');
+    keepNow(data);
+    setSavedNote('Saved on this phone. It opens without internet until you log out.');
   };
 
   return (
@@ -120,7 +132,7 @@ export function EmergencySheetPage() {
       {error ? <p className="mb-3 text-sm text-red-600 print:hidden" role="alert">{error}</p> : null}
       {offline ? (
         <p className="mb-3 rounded-md border-l-4 border-l-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900/10 dark:text-amber-200 print:hidden" role="status">
-          No connection. This is the copy saved on this phone on {format(new Date(kept.saved_at), 'd MMM yyyy, HH:mm')}.
+          No connection. This is the copy saved on this phone on {format(new Date(offlineAt!), 'd MMM yyyy, HH:mm')}. It may be out of date.
         </p>
       ) : null}
 
@@ -197,8 +209,11 @@ function ShareSheetModal({ profileId, link, onClose }: { profileId: string; link
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'The link could not be turned back on just now. Try again in a moment.'),
   });
+  const asked = useRef(false);
   useEffect(() => {
-    if (!link && !make.isPending && !make.isSuccess && !offNote) make.mutate();
+    if (asked.current) return;
+    asked.current = true;
+    if (!link) make.mutate();
     // Only on opening.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

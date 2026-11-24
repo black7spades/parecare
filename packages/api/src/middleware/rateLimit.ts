@@ -9,7 +9,10 @@ export function rateLimit(opts: { windowMs: number; max: number }) {
   const hits = new Map<string, { count: number; resetAt: number }>();
   return (req: Request, res: Response, next: NextFunction): void => {
     const now = Date.now();
-    const key = req.ip ?? 'unknown';
+    // Behind the web server every request comes from it; the visitor is the
+    // first address it forwards.
+    const forwarded = String(req.headers['x-forwarded-for'] ?? '').split(',')[0]?.trim();
+    const key = forwarded || req.ip || 'unknown';
     const entry = hits.get(key);
     if (!entry || entry.resetAt <= now) {
       hits.set(key, { count: 1, resetAt: now + opts.windowMs });

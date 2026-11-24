@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { forgetEverythingOffline } from '../lib/offline';
 
 export type AccountRole = 'super_admin' | 'admin' | 'user';
 
@@ -31,7 +32,11 @@ export const useAuthStore = create<AuthState>()(
       setAuth: (token, account) => set({ token, account }),
       updateAccount: (account) =>
         set((state) => (state.account ? { account: { ...state.account, ...account } } : state)),
-      clearAuth: () => set({ token: null, account: null }),
+      clearAuth: () => {
+        // A shared device keeps nothing about anyone once they log out.
+        forgetEverythingOffline();
+        set({ token: null, account: null });
+      },
     }),
     { name: 'parecare-auth' }
   )

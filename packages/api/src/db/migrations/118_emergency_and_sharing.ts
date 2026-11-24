@@ -84,6 +84,10 @@ export async function up(knex: Knex): Promise<void> {
   await knex.raw(
     "ALTER TABLE share_links ADD CONSTRAINT share_links_kind_check CHECK (kind IN ('emergency_sheet', 'appointment', 'report'))"
   );
+  // One emergency sheet link on at a time for each person.
+  await knex.raw(
+    "CREATE UNIQUE INDEX share_links_one_sheet_link ON share_links (care_profile_id) WHERE kind = 'emergency_sheet' AND revoked_at IS NULL"
+  );
 
   for (const name of HEALTH_FUNDS) {
     const exists = await knex('option_catalogue').where({ category: 'health_fund' }).whereRaw('lower(name) = lower(?)', [name]).first('id');

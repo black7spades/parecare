@@ -1,5 +1,6 @@
 import type { Knex } from 'knex';
 import { db } from '../config/database';
+import { dateInZone } from '../lib/timezone';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -32,7 +33,7 @@ export function severityFrom(text: string | null | undefined): AllergySeverity |
 }
 
 /** Anaphylaxis is always life threatening, so it is never left unsaid. */
-const worked = (severity: AllergySeverity | null | undefined, reaction: string | null | undefined): AllergySeverity | null =>
+export const worked = (severity: AllergySeverity | null | undefined, reaction: string | null | undefined): AllergySeverity | null =>
   severity ?? (/anaphyla/i.test(reaction ?? '') ? 'life_threatening' : null);
 
 export async function addAllergy(
@@ -58,7 +59,10 @@ export async function addAllergy(
 export async function confirmNoAllergies(conn: Conn, profileId: string, accountId: string): Promise<{ ok: true } | { ok: false; count: number }> {
   const count = Number(((await conn('allergies').where({ care_profile_id: profileId }).count('* as n').first()) as { n: string | number } | undefined)?.n ?? 0);
   if (count > 0) return { ok: false, count };
-  const today = new Date().toISOString().slice(0, 10);
+  const zone = ((await conn('care_profiles as cp').join('accounts as a', 'a.id', 'cp.account_id').where('cp.id', profileId).first('a.timezone')) as
+    | { timezone: string | null }
+    | undefined)?.timezone ?? null;
+  const today = dateInZone(new Date(), zone);
   await conn('care_profiles').where({ id: profileId }).update({ no_known_allergies_on: today, no_known_allergies_by: accountId });
   return { ok: true };
 }

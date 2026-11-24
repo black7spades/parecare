@@ -114,6 +114,7 @@ export interface SharedAppointment {
   bring: string[];
   going: Array<{ name: string; is_driver: boolean }>;
   interpreter_language: string | null;
+  status: string;
 }
 
 export async function appointmentForSending(
@@ -159,6 +160,7 @@ export async function appointmentForSending(
       bring: ics.bring,
       going: (a!.attendees ?? []).map((g) => ({ name: g.name, is_driver: !!g.is_driver })),
       interpreter_language: row['interpreter_needed'] ? ((row['interpreter_language'] as string | null) ?? 'Needed') : null,
+      status: String(row['status'] ?? 'scheduled'),
     },
   };
 }
@@ -174,7 +176,7 @@ export async function ownerZone(profileId: string, conn: Conn = db): Promise<str
 /** One appointment as a calendar file. */
 export async function appointmentIcs(profileId: string, appointmentId: string, conn: Conn = db): Promise<{ filename: string; body: string } | null> {
   const found = await appointmentForSending(profileId, appointmentId, conn);
-  if (!found || !found.shared.starts_at) return null;
+  if (!found || !found.shared.starts_at || found.shared.status === 'cancelled') return null;
   const zone = await ownerZone(profileId, conn);
   const safe = found.shared.title.replace(/[^\w -]+/g, '').trim().replace(/\s+/g, '-').toLowerCase() || 'appointment';
   return { filename: `${safe}.ics`, body: calendarText(found.shared.title, appointmentEvent(found.ics, zone)) };
@@ -221,6 +223,15 @@ export async function resolveRecipient(
     return { name: person.name, email, provider_id: null, circle_member_id: m.id };
   }
   if ('account_id' in to) {
+    const tied = await conn('care_profiles as cp')
+      .where('cp.id', profileId)
+      .andWhere((w) =>
+        w.where('cp.account_id', to.account_id).orWhereExists(
+          conn('care_circle_members as m').whereRaw('m.care_profile_id = cp.id').where({ 'm.account_id': to.account_id, 'm.invite_accepted': true })
+        )
+      )
+      .first('cp.id');
+    if (!tied) throw new SendProblem('That person is not in the care circle. Pick someone from the list, or type their email.');
     const person = await personSummary(conn, { account_id: to.account_id });
     if (!person?.email) throw new SendProblem('That person could not be found. Pick someone else.');
     return { name: person.name, email: person.email, provider_id: null, circle_member_id: null };

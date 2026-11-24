@@ -325,13 +325,16 @@ const parseTimes = (v: string | undefined): string[] =>
     })
     .filter((t): t is string => t !== null);
 
+/** A number as people write it: 60, not 60.000. */
+const numCell = (v: unknown): string => (v === null || v === undefined || v === '' ? '' : String(Number(v)));
+
 // The medications import/export descriptor — the first consumer of the
 // reusable dataPort toolkit. Other resources add their own descriptor.
 const medPort: PortDescriptor<MedRow, MedInsert> = {
   resource: 'medications',
   columns: [
     { key: 'name', header: 'Name', aliases: ['medication', 'drug', 'medicine'], toCell: (r) => r.name },
-    { key: 'units_per_dose', header: 'Units per dose', aliases: ['unit', 'units', 'quantity per dose'], toCell: (r) => (r.units_per_dose ?? '').toString() },
+    { key: 'units_per_dose', header: 'Units per dose', aliases: ['unit', 'units', 'quantity per dose'], toCell: (r) => numCell(r.units_per_dose) },
     { key: 'dose_amount', header: 'Dose amount', aliases: ['dose', 'dosage', 'strength'], toCell: (r) => r.dose_amount ?? '' },
     { key: 'dose_unit', header: 'Dose measure', aliases: ['measure', 'dose unit'], toCell: (r) => r.dose_unit ?? '' },
     { key: 'form', header: 'Type', aliases: ['form'], toCell: (r) => r.form ?? '' },
@@ -347,9 +350,9 @@ const medPort: PortDescriptor<MedRow, MedInsert> = {
     { key: 'as_needed_for', header: 'As needed for', aliases: ['prn for', 'what it is for'], toCell: (r) => r.as_needed_for ?? '' },
     { key: 'min_hours_between_doses', header: 'Hours between doses', aliases: ['minimum hours', 'gap', 'hours apart', 'at least hours apart'], toCell: (r) => (r.min_hours_between_doses == null ? '' : String(Number(r.min_hours_between_doses))) },
     { key: 'max_doses_per_day', header: 'Most in 24 hours', aliases: ['max per day', 'maximum per day', 'most per day', 'no more than per day'], toCell: (r) => (r.max_doses_per_day == null ? '' : String(r.max_doses_per_day)) },
-    { key: 'supply', header: 'A full pack provides', aliases: ['supply', 'stock', 'quantity', 'on hand', 'supply in units', 'pack size'], toCell: (r) => (r.supply ?? '').toString() },
-    { key: 'supply_remaining', header: 'Units left', aliases: ['remaining', 'supply remaining'], toCell: (r) => (r.supply_remaining ?? '').toString() },
-    { key: 'packs_on_hand', header: 'Packs on hand', aliases: ['packs', 'packs left', 'unopened packs'], toCell: (r) => (r.packs_on_hand ?? '').toString() },
+    { key: 'supply', header: 'A full pack provides', aliases: ['supply', 'stock', 'quantity', 'on hand', 'supply in units', 'pack size'], toCell: (r) => numCell(r.supply) },
+    { key: 'supply_remaining', header: 'Units left', aliases: ['remaining', 'supply remaining'], toCell: (r) => numCell(r.supply_remaining) },
+    { key: 'packs_on_hand', header: 'Packs on hand', aliases: ['packs', 'packs left', 'unopened packs'], toCell: (r) => numCell(r.packs_on_hand) },
     { key: 'repeats_due', header: 'Repeats due', aliases: ['repeat', 'repeat due'], toCell: (r) => dayCell(r.repeats_due) ?? '' },
     { key: 'supplier', header: 'Supplier', aliases: ['pharmacy', 'supplied by'], toCell: (r) => r.supplier ?? '' },
     { key: 'supplier_order_url', header: 'Order link', aliases: ['order url', 'reorder link', 'order'], toCell: (r) => r.supplier_order_url ?? '' },

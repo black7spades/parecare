@@ -56,8 +56,19 @@ shareLinksRouter.post('/', requireAuth, async (req, res) => {
   }
   const profileId = String(req.params['id']);
   const existing = await activeEmergencyLink(profileId);
-  const link = existing ?? (await createShareLink(db, { profileId, kind: 'emergency_sheet', createdBy: req.account!.id }));
-  res.status(existing ? 200 : 201).json({ link: linkOut(link) });
+  if (existing) {
+    res.json({ link: linkOut(existing) });
+    return;
+  }
+  try {
+    const link = await createShareLink(db, { profileId, kind: 'emergency_sheet', createdBy: req.account!.id });
+    res.status(201).json({ link: linkOut(link) });
+  } catch (err) {
+    // Two taps at once: one link is made, and both get it.
+    const made = await activeEmergencyLink(profileId);
+    if (!made) throw err;
+    res.json({ link: linkOut(made) });
+  }
 });
 
 shareLinksRouter.delete('/:linkId', requireAuth, async (req, res) => {
@@ -108,6 +119,11 @@ shareLinksRouter.post('/:linkId/restore', requireAuth, async (req, res) => {
  */
 export const sharedRouter = Router();
 sharedRouter.use(rateLimit({ windowMs: 60_000, max: 60 }));
+// Never kept by a browser or a proxy: a link turned off, or back on, answers fresh.
+sharedRouter.use((_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 
 const turnedOff = (by: string | null) =>
   by ? `This link has been turned off. Ask ${by} for a new one.` : 'This link does not open anything. Ask whoever sent it for a new one.';
@@ -122,7 +138,6 @@ sharedRouter.get('/:token', async (req, res) => {
     });
     return;
   }
-  res.setHeader('Cache-Control', 'no-store');
   res.json(opened.page);
 });
 
@@ -160,7 +175,7 @@ sharedRouter.get('/:token/documents/:docId', async (req, res) => {
     res.redirect(await getDownloadUrl(doc.file_url));
     return;
   }
-  const localPath = path.join(getStorageConfig().localPath, doc.file_url.slice('/uploads/'.length));
+  const localPath = path.resolve(getStorageConfig().localPath, doc.file_url.slice('/uploads/'.length));
   if (doc.mime_type) res.setHeader('Content-Type', doc.mime_type);
   res.setHeader('Content-Disposition', `inline; filename="${doc.label.replace(/[^\w .-]/g, '_')}${path.extname(doc.file_url)}"`);
   res.sendFile(localPath, (err) => {

@@ -1,3 +1,4 @@
+import { CONTACT_LINK } from './ContactStrip';
 import type { ReactNode } from 'react';
 import { format } from 'date-fns';
 import { Button } from './ui/Button';
@@ -96,7 +97,7 @@ const DocLinks = ({ docs, href }: { docs: SheetDocument[]; href?: (id: string) =
     <span className="flex flex-wrap gap-x-3">
       {docs.map((d) =>
         href ? (
-          <a key={d.id} href={href(d.id)} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+          <a key={d.id} href={href(d.id)} target="_blank" rel="noopener noreferrer" className={CONTACT_LINK}>
             {d.label}
           </a>
         ) : (
