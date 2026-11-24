@@ -109,7 +109,13 @@ function TaskCompletionModal({
         <div>
           <p className="text-sm font-medium text-ink">{task.title}</p>
           {task.body ? <p className="text-xs text-muted mt-1">{task.body}</p> : null}
-          {repeatOf(task) !== 'once' ? <p className="text-xs text-muted mt-1">It repeats {repeatLabel(repeatOf(task)).toLowerCase()}, so it comes round again on its next date.</p> : null}
+          {repeatOf(task) !== 'once' ? (
+            <p className="text-xs text-muted mt-1">
+              {reason === 'no_longer_needed'
+                ? 'No longer needed stops it repeating. It will not come round again.'
+                : `It repeats ${repeatLabel(repeatOf(task)).toLowerCase()}, so it comes round again on its next date.`}
+            </p>
+          ) : null}
         </div>
 
         {needsBooking(task) ? (
@@ -731,12 +737,19 @@ export function TasksPage() {
                 label: 'Done before',
                 value: (t.rounds_done ?? []).length ? (
                   <ul className="space-y-0.5">
-                    {(t.rounds_done ?? []).map((r) => (
-                      <li key={r.id}>
-                        {format(new Date(r.done_at), 'd MMM yyyy')}
-                        {r.done_by_name ? <span className="text-muted">, {r.done_by_name}</span> : null}
-                      </li>
-                    ))}
+                    {(t.rounds_done ?? []).map((r) => {
+                      const felt = SENTIMENTS.find((x) => x.value === r.sentiment);
+                      const why = r.completion_reason ? COMPLETION_REASONS.find((x) => x.value === r.completion_reason)?.label ?? r.completion_reason : null;
+                      return (
+                        <li key={r.id}>
+                          <span>{format(new Date(r.done_at), 'd MMM yyyy')}</span>
+                          {r.done_by_name ? <span className="text-muted">, {r.done_by_name}</span> : null}
+                          {felt ? <span className="ml-1" title={felt.label}>{felt.emoji}</span> : null}
+                          {why ? <span className="block text-xs text-muted">{why}</span> : null}
+                          {r.completion_note ? <span className="block text-xs text-muted">{r.completion_note}</span> : null}
+                        </li>
+                      );
+                    })}
                   </ul>
                 ) : null,
               },

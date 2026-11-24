@@ -5,7 +5,7 @@ import { actionColumnsOf, type ItemAction } from '../lib/journeyActions';
 import { REPEAT_CHOICE_VALUES, repeatChoice, repeatColumns, type RepeatChoice } from '../lib/repeat';
 import { mainContact, type ContactSummary } from './professionals';
 import { recordLabel, type AttachedTo } from './recordLabels';
-import { createTask, markTaskDone, undoRound, updateTask } from './tasks';
+import { createTask, markTaskDone, undoRound, updateTask, type TaskRound } from './tasks';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -85,9 +85,9 @@ export async function setItemDone(
     /** A task the caller has already finished, so a repeating one is not moved on twice. */
     taskHandled?: string | null;
   },
-): Promise<void> {
+): Promise<TaskRound | null> {
   const item = await itemFor(conn, opts.profileId, opts.itemId);
-  if (!item) return;
+  if (!item) return null;
   const update: Record<string, unknown> = {};
   if (opts.record) {
     update['linked_record_kind'] = opts.record.kind;
@@ -106,13 +106,15 @@ export async function setItemDone(
   const task = (await conn('reminders').where({ checklist_item_id: item.id, care_profile_id: opts.profileId }).first('id', 'completed', 'merged_into_id')) as
     | { id: string; completed: boolean; merged_into_id: string | null }
     | undefined;
-  if (!task) return;
+  if (!task) return null;
   if (opts.completed && !task.completed && task.id !== opts.taskHandled) {
-    await markTaskDone(conn, { profileId: opts.profileId, taskId: task.id, actorId: opts.actorId, fromItemId: item.id });
+    return (await markTaskDone(conn, { profileId: opts.profileId, taskId: task.id, actorId: opts.actorId, fromItemId: item.id }))?.round ?? null;
   } else if (!opts.completed && !task.completed) {
     // A repeating task this step moved on a round goes back to when it was due.
-    const round = (await conn('reminder_rounds').where({ reminder_id: task.id, ticked_item_id: item.id }).orderBy('done_at', 'desc').first('id')) as { id: string } | undefined;
-    if (round) await undoRound(conn, { profileId: opts.profileId, taskId: task.id, roundId: round.id });
+    const round = (await conn('reminder_rounds').where({ reminder_id: task.id }).orderBy('done_at', 'desc').first('id', 'ticked_item_id')) as
+      | { id: string; ticked_item_id: string | null }
+      | undefined;
+    if (round?.ticked_item_id === item.id) await undoRound(conn, { profileId: opts.profileId, taskId: task.id, roundId: round.id });
   } else if (!opts.completed && task.completed && !task.merged_into_id) {
     // Unticking reopens a task the step closed, never one joined into another
     // or a booking to-do whose appointment already has its date.
@@ -121,6 +123,7 @@ export async function setItemDone(
       await conn('reminders').where({ id: task.id }).update({ completed: false, completed_at: null, completed_by_account_id: null });
     }
   }
+  return null;
 }
 
 /** Something was done from an item: a booking with a date, an upload, a record. */

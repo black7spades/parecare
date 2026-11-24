@@ -187,7 +187,6 @@ export const ITEM_ACTION_SWEEP: Record<string, ActionSpec | null> = {
   'Answer the honest questions': open('substance-use'),
   'Set a quit date or start date within two weeks': task({ due: 14 }),
   'Book a support appointment': book('gp'),
-  'Choose your aids before day one': service(SERVICES.quitline),
   'Log every day of the new habit': task({ repeat: 'daily' }),
   'Book the follow up for week four': book('gp', { due: 28 }),
   'Handle the first slip as data': open('care-log'),

@@ -591,11 +591,12 @@ export async function markTaskDone(
 ): Promise<{ round: TaskRound | null } | null> {
   const t = (await conn('reminders')
     .where({ id: opts.taskId, care_profile_id: opts.profileId, completed: false })
-    .first('id', 'title', 'next_due_at', 'rrule', 'reminder_type', 'checklist_item_id')) as
-    | { id: string; title: string; next_due_at: Date; rrule: string | null; reminder_type: string | null; checklist_item_id: string | null }
+    .first('id', 'title', 'next_due_at', 'rrule', 'reminder_type', 'checklist_item_id', 'last_notified_at')) as
+    | { id: string; title: string; next_due_at: Date; rrule: string | null; reminder_type: string | null; checklist_item_id: string | null; last_notified_at: Date | null }
     | undefined;
   if (!t) return null;
-  const rule = ruleFor(t);
+  // "No longer needed" ends a repeating task rather than bringing it round again.
+  const rule = opts.completion_reason === 'no_longer_needed' ? null : ruleFor(t);
   if (!rule) {
     await conn('reminders').where({ id: t.id }).update({
       completed: true,
@@ -635,6 +636,7 @@ export async function markTaskDone(
       completion_reason: opts.completion_reason ?? null,
       completion_note: opts.completion_note ?? null,
       ticked_item_id: tickedItem,
+      last_notified_at: t.last_notified_at,
     })
     .returning('id');
   await conn('reminders').where({ id: t.id }).update({ next_due_at: next, last_notified_at: null });
@@ -643,11 +645,13 @@ export async function markTaskDone(
 
 /** Undo a round: the task is due when it was, and the step it ticked opens again. */
 export async function undoRound(conn: Conn, opts: { profileId: string; taskId: string; roundId: string }): Promise<boolean> {
-  const r = (await conn('reminder_rounds').where({ id: opts.roundId, reminder_id: opts.taskId, care_profile_id: opts.profileId }).first()) as
-    | { id: string; due_at: Date; ticked_item_id: string | null }
+  const newest = (await conn('reminder_rounds').where({ reminder_id: opts.taskId, care_profile_id: opts.profileId }).orderBy('done_at', 'desc').first()) as
+    | { id: string; due_at: Date; ticked_item_id: string | null; last_notified_at: Date | null }
     | undefined;
-  if (!r) return false;
-  await conn('reminders').where({ id: opts.taskId, care_profile_id: opts.profileId }).update({ next_due_at: r.due_at, last_notified_at: null });
+  // Only the latest round can be undone, so the task never winds back past a later one.
+  if (!newest || newest.id !== opts.roundId) return false;
+  const r = newest;
+  await conn('reminders').where({ id: opts.taskId, care_profile_id: opts.profileId }).update({ next_due_at: r.due_at, last_notified_at: r.last_notified_at });
   if (r.ticked_item_id) {
     await conn('checklist_items').where({ id: r.ticked_item_id, care_profile_id: opts.profileId }).update({ completed: false, completed_at: null, completed_by: null, achieved_on: null });
   }
@@ -698,13 +702,17 @@ export async function enrichTasks(conn: Conn, profileId: string, rows: TaskListR
     .where('rr.care_profile_id', profileId)
     .whereIn('rr.reminder_id', ids)
     .orderBy('rr.done_at', 'desc')
-    .select('rr.id', 'rr.reminder_id', 'rr.due_at', 'rr.done_at', 'a.display_name as done_by_name')) as Array<{
+    .select('rr.id', 'rr.reminder_id', 'rr.due_at', 'rr.done_at', 'rr.sentiment', 'rr.completion_reason', 'rr.completion_note', 'a.display_name as done_by_name')) as Array<{
     id: string; reminder_id: string; due_at: Date; done_at: Date; done_by_name: string | null;
+    sentiment: number | null; completion_reason: string | null; completion_note: string | null;
   }>;
-  const roundsByTask = new Map<string, Array<{ id: string; due_at: Date; done_at: Date; done_by_name: string | null }>>();
+  type RoundOut = Omit<(typeof roundRows)[number], 'reminder_id'>;
+  const roundsByTask = new Map<string, RoundOut[]>();
   for (const r of roundRows) {
     const list = roundsByTask.get(r.reminder_id) ?? [];
-    if (list.length < 10) list.push({ id: r.id, due_at: r.due_at, done_at: r.done_at, done_by_name: r.done_by_name });
+    const { reminder_id: _r, ...rest } = r;
+    void _r;
+    if (list.length < 10) list.push(rest);
     roundsByTask.set(r.reminder_id, list);
   }
 

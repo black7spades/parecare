@@ -118,13 +118,14 @@ checklistsRouter.patch('/:itemId', requireAuth, async (req, res) => {
   const profileId = String(req.params['id']);
   const itemId = String(req.params['itemId']);
   // Ticking the item ticks its task, and the other way round.
+  let round: Awaited<ReturnType<typeof setItemDone>> = null;
   if (fields.completed !== undefined) {
     const exists = await db('checklist_items').where({ id: itemId, care_profile_id: profileId }).first('id');
     if (!exists) {
       res.status(404).json({ error: 'Item not found', code: 'NOT_FOUND' });
       return;
     }
-    await db.transaction((trx) => setItemDone(trx, { profileId, itemId, actorId: req.account!.id, completed: fields.completed!, achievedOn: fields.achieved_on ?? null }));
+    round = await db.transaction((trx) => setItemDone(trx, { profileId, itemId, actorId: req.account!.id, completed: fields.completed!, achievedOn: fields.achieved_on ?? null }));
   }
   const updates: Partial<ChecklistItem> = { ...fields } as Partial<ChecklistItem>;
   delete (updates as Record<string, unknown>)['completed'];
@@ -147,7 +148,7 @@ checklistsRouter.patch('/:itemId', requireAuth, async (req, res) => {
       body: note.trim(),
     });
   }
-  res.json({ item: await oneItem(profileId, item.id) });
+  res.json({ item: await oneItem(profileId, item.id), round });
 });
 
 /**

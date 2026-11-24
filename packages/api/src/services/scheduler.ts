@@ -95,6 +95,14 @@ async function tick(): Promise<void> {
       updates.last_notified_at = null;
     }
     await db('reminders').where({ id: reminder.id }).update(updates);
+    // A new round is due: the journey step it carries out is open again.
+    const itemId = (reminder as unknown as { checklist_item_id?: string | null }).checklist_item_id;
+    if (rule && itemId) {
+      await db('checklist_items')
+        .where({ id: itemId, completed: true })
+        .update({ completed: false, completed_at: null, completed_by: null, achieved_on: null })
+        .catch((err) => console.warn('Reopening a journey step failed:', (err as Error).message));
+    }
   }
 }
 
