@@ -1,6 +1,7 @@
 import type { Knex } from 'knex';
 import { z } from 'zod';
 import { db } from '../config/database';
+import { resultsToDiscuss } from './testResults';
 import { deliverForwards } from './noteForwards';
 import { appointmentPlaceColumns, contactSummaries, ensureProfessional, fillProfessionalGaps, linkContact, type KnownPlace } from './professionals';
 import { createTask, ownerZone } from './tasks';
@@ -545,7 +546,7 @@ export async function enrichAppointments(conn: Conn, profileId: string, rows: Ar
   if (rows.length === 0) return rows;
   const ids = rows.map((r) => r.id);
   const taskIds = rows.map((r) => r['from_reminder_id']).filter(Boolean) as string[];
-  const [contacts, attendees, bring, series, tasks, taskNotes] = await Promise.all([
+  const [contacts, attendees, bring, series, tasks, taskNotes, results, testResults] = await Promise.all([
     contactSummaries(conn, rows.map((r) => r['provider_id'] as string | null), profileId),
     conn('appointment_attendees as t')
       .leftJoin('care_circle_members as m', 't.circle_member_id', 'm.id')
@@ -563,6 +564,9 @@ export async function enrichAppointments(conn: Conn, profileId: string, rows: Ar
     taskIds.length
       ? conn('record_notes as n').leftJoin('accounts as a', 'n.author_account_id', 'a.id').where({ 'n.entity_type': 'reminders' }).whereIn('n.entity_id', taskIds).orderBy('n.created_at', 'asc').select('n.id', 'n.entity_id', 'n.body', 'n.created_at', 'a.display_name as author_name')
       : Promise.resolve([]),
+    // Results to talk about at each visit, and the results of each test.
+    resultsToDiscuss(conn, profileId, ids),
+    conn('test_results').where({ care_profile_id: profileId }).whereIn('appointment_id', ids).select('id', 'appointment_id', 'test_name', 'reported_on'),
   ]);
   const group = <T extends Record<string, unknown>>(list: T[], key: string) => {
     const m = new Map<string, T[]>();
@@ -577,6 +581,7 @@ export async function enrichAppointments(conn: Conn, profileId: string, rows: Ar
   const seriesBy = new Map((series as Array<{ id: string; rrule: string; repeat_until: Date | string | null }>).map((s) => [s.id, s]));
   const taskBy = new Map((tasks as Array<{ id: string; title: string; body: string | null; completed_at: Date | null }>).map((t) => [t.id, t]));
   const notesBy = group(taskNotes as Array<Record<string, unknown>>, 'entity_id');
+  const resultsOfTest = group(testResults as Array<Record<string, unknown>>, 'appointment_id');
   return rows.map((r) => {
     const s = r['series_id'] ? seriesBy.get(r['series_id'] as string) : undefined;
     const t = r['from_reminder_id'] ? taskBy.get(r['from_reminder_id'] as string) : undefined;
@@ -588,6 +593,8 @@ export async function enrichAppointments(conn: Conn, profileId: string, rows: Ar
       })),
       bring_documents: (bringBy.get(r.id) ?? []).map((d) => ({ id: d['id'], label: d['label'], category_name: d['category_name'] ?? null })),
       series: s ? { id: s.id, repeat: repeatChoice({ rrule: s.rrule }), repeat_until: s.repeat_until ? String(s.repeat_until instanceof Date ? s.repeat_until.toISOString() : s.repeat_until).slice(0, 10) : null } : null,
+      results_to_discuss: results.get(r.id) ?? [],
+      test_results: (resultsOfTest.get(r.id) ?? []).map((x) => ({ id: x['id'], test_name: x['test_name'], reported_on: x['reported_on'] ?? null })),
       from_task: t ? { id: t.id, title: t.title, body: t.body, completed_at: t.completed_at, notes: (notesBy.get(t.id) ?? []).map((n) => ({ id: n['id'], body: n['body'], created_at: n['created_at'], author_name: n['author_name'] ?? null })) } : null,
     };
   });

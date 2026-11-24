@@ -31,6 +31,7 @@ import {
   ListIcon,
   SparkleIcon,
 } from '../../../components/ui/icons';
+import { HouseIcon, BeakerIcon, WheelchairIcon, WalletIcon } from '../../../components/ui/icons';
 
 /** A nav glyph component; takes an optional size for the sidebar. */
 export type NavIcon = ComponentType<{ size?: number }>;
@@ -43,6 +44,8 @@ export type NavIcon = ComponentType<{ size?: number }>;
 export interface NavContext {
   kind: 'person' | 'pet';
   lifeStage: string | null;
+  /** Their own profile, so a label can say "I". */
+  self?: boolean;
 }
 
 export interface ProfileNavItem {
@@ -56,7 +59,12 @@ export interface ProfileNavItem {
   end?: boolean;
   /** Whether this section belongs for this person at all. Absent means always. */
   shows?: (ctx: NavContext) => boolean;
+  /** The label for this person, when it changes with who they are: "Where I live". */
+  labelFor?: (ctx: NavContext) => string;
 }
+
+/** The label a nav item shows for this person. */
+export const navLabel = (item: ProfileNavItem, ctx: NavContext): string => item.labelFor?.(ctx) ?? item.label;
 
 export interface ProfileNavGroup {
   key: string;
@@ -79,6 +87,13 @@ export const PROFILE_NAV: ProfileNavGroup[] = [
       { key: 'achievements', to: 'achievements', label: 'Achievements', icon: TrophyIcon },
       { key: 'circle', to: 'circle', label: 'Care circle', icon: UsersIcon },
       { key: 'plan', to: 'plan', label: 'Care plan', icon: ClipboardIcon },
+      {
+        key: 'where-they-live',
+        to: 'where-they-live',
+        label: 'Where they live',
+        icon: HouseIcon,
+        labelFor: (c) => (c.self ? 'Where I live' : 'Where they live'),
+      },
     ],
   },
   {
@@ -91,6 +106,8 @@ export const PROFILE_NAV: ProfileNavGroup[] = [
       { key: 'neurotypes', to: 'neurotypes', label: 'Neurotypes', icon: BrainIcon, shows: (c) => c.kind !== 'pet' },
       { key: 'medications', to: 'medications', label: 'Medications', icon: PillIcon },
       { key: 'treatments', to: 'treatments', label: 'Treatments', icon: ActivityIcon },
+      { key: 'test-results', to: 'test-results', label: 'Test results', icon: BeakerIcon },
+      { key: 'equipment', to: 'equipment', label: 'Equipment', icon: WheelchairIcon },
       // Not for a pet, nor for an unborn baby or an infant.
       { key: 'substance-use', to: 'substance-use', label: 'Substance use', icon: MugIcon, shows: (c) => c.kind !== 'pet' && c.lifeStage !== 'expecting' && c.lifeStage !== 'infant' },
       { key: 'care-needs', to: 'care-needs', label: 'Care needs', icon: HandHeartIcon },
@@ -106,6 +123,7 @@ export const PROFILE_NAV: ProfileNavGroup[] = [
       { key: 'tasks', to: 'tasks', label: 'Tasks', icon: CheckSquareIcon },
       { key: 'documents', to: 'documents', label: 'Documents', icon: FileIcon },
       { key: 'providers', to: 'providers', label: 'Contacts', icon: StethoscopeIcon },
+      { key: 'funding', to: 'funding', label: 'Funding', icon: WalletIcon, shows: (c) => c.kind !== 'pet' },
       { key: 'emergency', to: 'emergency', label: 'Emergency sheet', icon: EmergencyIcon },
     ],
   },

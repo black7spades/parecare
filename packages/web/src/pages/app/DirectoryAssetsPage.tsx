@@ -15,6 +15,8 @@ import { RECORD_ROW_CLASS, useRecordPanel } from '../../components/record/useRec
 import { useHiddenIds, useUndoStore } from '../../stores/undo';
 import { useHealthConfig } from '../../lib/appConfig';
 import type { Asset, Supplier } from '../../lib/care';
+import { OWNERSHIP, ownershipLabel } from '../../lib/lifeEvents';
+import { formatDateOnly } from '../../lib/datetime';
 import { ContactStrip } from '../../components/ContactStrip';
 
 interface LinkedProfile {
@@ -103,8 +105,8 @@ export function DirectoryAssetsPage() {
             resource="assets"
             canImport={canEdit}
             onImported={invalidate}
-            templateHeaders={['Unit name', 'Category', 'Serial or unit number', 'Make or model', 'Price', 'Purchase date', 'Bought from', 'Warranty expiry', 'Condition', 'Location', 'Notes']}
-            templateSample={['Electric hospital bed', 'Bed', 'SN-42815', 'Invacare Medley', '1450.00', '2025-03-11', 'Independence Australia', '2028-03-11', 'good', 'Main bedroom', 'Adjustable head and legs']}
+            templateHeaders={['Unit name', 'Category', 'Serial or unit number', 'Make or model', 'Price', 'Purchase date', 'Bought from', 'Warranty expiry', 'Condition', 'Location', 'Ownership', 'Return by', 'Service due', 'Notes']}
+            templateSample={['Electric hospital bed', 'Bed', 'SN-42815', 'Invacare Medley', '1450.00', '2025-03-11', 'Independence Australia', '2028-03-11', 'good', 'Main bedroom', 'Owned', '', '2026-09-01', 'Adjustable head and legs']}
           />
           {canEdit ? (
             <Button onClick={() => { setEditing(null); setEditorOpen(true); }}>
@@ -277,6 +279,9 @@ export function DirectoryAssetsPage() {
             { label: 'Purchase date', value: current.purchase_date },
 
             { label: 'Warranty expiry', value: current.warranty_expiry },
+            { label: 'Ownership', value: ownershipLabel(current.ownership) },
+            { label: 'Return by', value: formatDateOnly(current.return_by) },
+            { label: 'Service due', value: formatDateOnly(current.service_due_on) },
             { label: 'Condition', value: current.condition ? (CONDITION_LABEL[current.condition] ?? current.condition) : null },
             { label: 'Location', value: current.location },
             { label: 'Useful life', value: current.useful_life_years != null ? `${current.useful_life_years} years` : null },
@@ -405,12 +410,21 @@ export function DirectoryAssetEditor({
   currencySymbol,
   onClose,
   onSaved,
+  profileId,
+  initialName,
+  fromTaskId,
 }: {
   open: boolean;
-  asset: DirectoryAsset | null;
+  asset: DirectoryAsset | Asset | null;
   currencySymbol: string;
   onClose: () => void;
   onSaved: (saved?: DirectoryAsset) => void;
+  /** Saved from a person's Equipment page: filed in the register and linked to them. */
+  profileId?: string;
+  /** A name to start with, such as from an "Equipment to get" step. */
+  initialName?: string;
+  /** The "Equipment to get" step this is for; saving ticks it off. */
+  fromTaskId?: string | null;
 }) {
   const [name, setName] = useState('');
   const [category, setCategory] = useState('');
@@ -431,10 +445,16 @@ export function DirectoryAssetEditor({
   const [usefulLife, setUsefulLife] = useState('');
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
+  const [ownership, setOwnership] = useState('');
+  const [returnBy, setReturnBy] = useState('');
+  const [serviceDue, setServiceDue] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setName(asset?.name ?? '');
+    setName(asset?.name ?? initialName ?? '');
+    setOwnership(asset?.ownership ?? '');
+    setReturnBy(asset?.return_by ?? '');
+    setServiceDue(asset?.service_due_on ?? '');
     setCategory(asset?.category ?? '');
     setSerialNumber(asset?.serial_number ?? '');
     setMakeModel(asset?.make_model ?? '');
@@ -447,7 +467,7 @@ export function DirectoryAssetEditor({
     setLocation(asset?.location ?? '');
     setNotes(asset?.notes ?? '');
     setError('');
-  }, [asset, open]);
+  }, [asset, open, initialName]);
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -464,7 +484,16 @@ export function DirectoryAssetEditor({
         useful_life_years: usefulLife.trim() === '' ? null : Number(usefulLife),
         location: location.trim() || null,
         notes: notes.trim() || null,
+        ownership: ownership || null,
+        // Only equipment that goes back has a day it goes back.
+        return_by: ownership === 'loaned' || ownership === 'hired' ? returnBy || null : null,
+        service_due_on: serviceDue || null,
       };
+      if (profileId) {
+        return asset
+          ? api.patch<{ asset: DirectoryAsset }>(`/care-profiles/${profileId}/equipment/${asset.id}`, body)
+          : api.post<{ asset: DirectoryAsset }>(`/care-profiles/${profileId}/equipment`, { ...body, from_task_id: fromTaskId ?? null });
+      }
       return asset
         ? api.patch<{ asset: DirectoryAsset }>(`/directory/assets/${asset.id}`, body)
         : api.post<{ asset: DirectoryAsset }>('/directory/assets', body);
@@ -476,7 +505,7 @@ export function DirectoryAssetEditor({
   if (!open) return null;
   const selectClass = 'w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
   return (
-    <Modal open onClose={onClose} title={asset ? `Edit ${asset.name}` : 'Add asset'} wide>
+    <Modal open onClose={onClose} title={asset ? `Edit ${asset.name}` : profileId ? 'Add equipment' : 'Add asset'} wide>
       <form
         className="space-y-4"
         onSubmit={(e) => {
@@ -508,17 +537,32 @@ export function DirectoryAssetEditor({
           <Input label="Purchase date" type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
           <div>
             <Input
-              label="Supplier"
+              label="From"
               value={supplier}
               onChange={(e) => setSupplier(e.target.value)}
               placeholder="e.g. Independence Australia"
               list="asset-supplier-options"
-              hint="Pick one on file, or type a new one and it is filed as a supplier."
+              hint="Who it was bought, borrowed or hired from. A new name is filed as a supplier."
             />
             <datalist id="asset-supplier-options">
               {(suppliersData?.suppliers ?? []).map((sup) => <option key={sup.id} value={sup.name} />)}
             </datalist>
           </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <label className="block">
+            <span className="block text-sm font-medium text-ink mb-1">Ownership</span>
+            <select className={selectClass} value={ownership} onChange={(e) => setOwnership(e.target.value)}>
+              <option value="">Not set</option>
+              {OWNERSHIP.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </label>
+          {ownership === 'loaned' || ownership === 'hired' ? (
+            <Input label="Return by" type="date" value={returnBy} onChange={(e) => setReturnBy(e.target.value)} hint="A task to return it is set a week before." />
+          ) : (
+            <div />
+          )}
+          <Input label="Service due" type="date" value={serviceDue} onChange={(e) => setServiceDue(e.target.value)} hint="A task to book the service is set two weeks before." />
         </div>
         <div className="grid grid-cols-2 gap-2">
           <Input label="Warranty expiry" type="date" value={warrantyExpiry} onChange={(e) => setWarrantyExpiry(e.target.value)} />

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import type { Knex } from 'knex';
 import { db } from '../config/database';
+import { rosterFor } from '../services/roster';
 import { requireAuth } from '../middleware/auth';
 import { getCareAccess } from '../middleware/subscriptionGate';
 import {
@@ -36,6 +37,11 @@ const plainError = 'The task did not save. Check each box and try again.';
 remindersRouter.get('/', requireAuth, async (req, res) => {
   const status = String(req.query['status'] ?? 'open');
   const profileId = String(req.params['id']);
+  // The roster: the week's repeating tasks, by who does them, day by day.
+  if (req.query['view'] === 'roster') {
+    res.json({ roster: await rosterFor(db, profileId, typeof req.query['week'] === 'string' ? req.query['week'] : null) });
+    return;
+  }
   const query = db('reminders as r')
     .leftJoin('accounts as a', 'r.completed_by_account_id', 'a.id')
     .leftJoin('accounts as cl', 'r.claimed_by', 'cl.id')

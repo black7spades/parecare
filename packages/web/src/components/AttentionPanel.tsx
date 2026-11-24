@@ -19,7 +19,7 @@ import { usePareOn } from '../lib/aiStatus';
 export interface AttentionItem {
   profile_id: string;
   profile_name: string;
-  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'reorder_overdue' | 'unresolved_outcome' | 'appointment_cost';
+  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'reorder_overdue' | 'unresolved_outcome' | 'appointment_cost' | 'still_in_hospital';
   label: string;
   detail: string | null;
   section: string;
@@ -65,6 +65,7 @@ const ATTENTION_ICON: Record<AttentionItem['kind'], string> = {
   reorder_overdue: '🚚',
   unresolved_outcome: '⚠️',
   appointment_cost: '💷',
+  still_in_hospital: '🏥',
 };
 
 /**
@@ -428,7 +429,20 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                   </Button>
                 ) : null}
                 {it.kind === 'unrecorded_dose' ? doseActions(it) : null}
-                {it.dismissible ? (
+                {it.kind === 'still_in_hospital' ? (
+                  <>
+                    {/* Asked again in a fortnight while the stay stays open. */}
+                    <Button size="xs" variant="ghost" className="whitespace-nowrap" loading={dismiss.isPending && dismiss.variables === it.key} onClick={() => dismiss.mutate(it.key)}>
+                      Yes, still there
+                    </Button>
+                    {it.next_action?.href ? (
+                      <Button size="xs" variant="secondary" className="whitespace-nowrap" onClick={() => navigate(it.next_action!.href!)}>
+                        {it.next_action.label}
+                      </Button>
+                    ) : null}
+                  </>
+                ) : null}
+                {it.dismissible && it.kind !== 'still_in_hospital' ? (
                   <Button
                     size="xs"
                     variant="ghost"

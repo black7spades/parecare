@@ -58,9 +58,44 @@ const KINDS: Record<string, KindSpec> = {
         .whereIn('p.id', ids)
         .select('p.id', 'p.name as label'),
   },
+  'hospital-stays': {
+    kind_label: 'Hospital stay',
+    page: 'where-they-live',
+    names: (conn, profileId, ids) =>
+      conn('hospital_stays as s')
+        .leftJoin('providers as p', 'p.id', 's.hospital_provider_id')
+        .where('s.care_profile_id', profileId)
+        .whereIn('s.id', ids)
+        .select('s.id', conn.raw("concat_ws(', ', coalesce(p.name, 'Hospital'), to_char(s.admitted_on, 'DD Mon YYYY')) as label")),
+  },
+  results: { kind_label: 'Test result', page: 'test-results', names: simple('test_results', 'test_name') },
+  'funding-plans': {
+    kind_label: 'Funding plan',
+    page: 'funding',
+    names: (conn, profileId, ids) =>
+      conn('funding_plans')
+        .where('care_profile_id', profileId)
+        .whereIn('id', ids)
+        .select(
+          'id',
+          conn.raw(
+            "concat_ws(', ', CASE scheme WHEN 'ndis' THEN 'NDIS plan' WHEN 'support_at_home' THEN 'Support at Home' WHEN 'home_care_package' THEN 'Home Care Package' ELSE 'Other funding' END, to_char(starts_on, 'DD Mon YYYY')) as label"
+          )
+        ),
+  },
+  'care-moves': {
+    kind_label: 'Move into care',
+    page: 'where-they-live',
+    names: (conn, profileId, ids) =>
+      conn('care_moves as m')
+        .leftJoin('providers as p', 'p.id', 'm.facility_provider_id')
+        .where('m.care_profile_id', profileId)
+        .whereIn('m.id', ids)
+        .select('m.id', conn.raw("coalesce(p.name, 'Care home') as label")),
+  },
   assets: {
     kind_label: 'Equipment',
-    page: null,
+    page: 'equipment',
     names: (conn, profileId, ids) =>
       conn('assets as a')
         .join('care_profile_assets as cpa', 'cpa.asset_id', 'a.id')
@@ -72,7 +107,6 @@ const KINDS: Record<string, KindSpec> = {
 
 /** The path that opens a record of this kind. */
 export function recordPath(profileId: string, kind: string, id: string): string {
-  if (kind === 'assets') return `/app/directory/assets?record=${id}`;
   const page = KINDS[kind]?.page;
   return page ? `/app/${profileId}/${page}?record=${id}` : `/app/${profileId}?record=${id}`;
 }

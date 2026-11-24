@@ -1,5 +1,6 @@
 import { db } from '../config/database';
 import { reachAction, supplyContext, taskContacts, type NextAction } from './alertContacts';
+import { longOpenStays, profilesInHospital } from './hospitalStays';
 import type { ContactSummary } from './professionals';
 import { taskBooks } from './tasks';
 import { formatInZone, hmInZone, startOfDayInZone } from '../lib/timezone';
@@ -393,10 +394,10 @@ export async function countAttentionItems(accountId: string): Promise<number> {
 export interface AttentionItem {
   profile_id: string;
   profile_name: string;
-  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'reorder_overdue' | 'unresolved_outcome' | 'appointment_cost';
+  kind: 'overdue_task' | 'unrecorded_dose' | 'stale_question' | 'out_of_stock' | 'reorder_overdue' | 'unresolved_outcome' | 'appointment_cost' | 'still_in_hospital';
   label: string;
   detail: string | null;
-  section: 'tasks' | 'medications' | 'mar' | 'questions' | 'appointments';
+  section: 'tasks' | 'medications' | 'mar' | 'questions' | 'appointments' | 'where-they-live';
   /** A stable identifier for this item, for React keys and for dismissal. */
   key: string;
   /** Pressing enough to lead the list and stand out. */
@@ -464,6 +465,10 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
     arr.push({ id: r.id, title: r.title, starts_at: r.starts_at });
     apptCostByProfile.set(r.care_profile_id, arr);
   }
+  // In hospital, the hospital gives the medicines: dose and supply items
+  // pause. A stay open two weeks or more asks whether they are still there.
+  const [inHospital, longStays] = await Promise.all([profilesInHospital(db, profileIds), longOpenStays(profileIds)]);
+  const longStayBy = new Map(longStays.map((st) => [st.care_profile_id, st]));
   // Who to call for each medicine and task the list names.
   const medIds = data.profiles.flatMap((s) => [...s.outOfStockMedications, ...s.reorderOverdueMedications].map((m) => m.id));
   const supply = await supplyContext(medIds);
@@ -477,10 +482,30 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
   const items: AttentionItem[] = [];
   for (const s of data.profiles) {
     const name = s.profile.preferred_name ?? s.profile.full_name;
+    const paused = inHospital.has(s.profile.id);
+    const longStay = longStayBy.get(s.profile.id);
+    if (longStay) {
+      items.push({
+        profile_id: s.profile.id,
+        profile_name: name,
+        kind: 'still_in_hospital',
+        label: `Is ${name} still in ${longStay.hospital_name ?? 'hospital'}?`,
+        detail: `in hospital for ${longStay.days} days`,
+        section: 'where-they-live',
+        // Asked again each fortnight the stay stays open.
+        key: `still_in_hospital:${longStay.id}:${Math.floor(longStay.days / 14)}`,
+        urgent: false,
+        dismissible: true,
+        record_kind: 'hospital-stays',
+        record_id: longStay.id,
+        contact: null,
+        next_action: { kind: 'open', label: 'Record the discharge', href: `/app/${s.profile.id}/where-they-live?discharge=${longStay.id}` },
+      });
+    }
     // An out-of-stock medication is urgent: without a repeat the next dose
     // cannot be given. Each medication is its own item so it can be set aside
     // on its own once a repeat is arranged.
-    for (const m of s.outOfStockMedications) {
+    for (const m of paused ? [] : s.outOfStockMedications) {
       items.push({
         profile_id: s.profile.id,
         profile_name: name,
@@ -500,7 +525,7 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
     }
     // A repeat ordered but still not replenished after the stale window: the
     // order may have been missed or delayed, so chase it up.
-    for (const m of s.reorderOverdueMedications) {
+    for (const m of paused ? [] : s.reorderOverdueMedications) {
       items.push({
         profile_id: s.profile.id,
         profile_name: name,
@@ -539,7 +564,7 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
           : reachAction(contact) ?? open(s.profile.id, 'tasks', r.id),
       });
     }
-    if (s.overdueMedications.length > 0) {
+    if (!paused && s.overdueMedications.length > 0) {
       items.push({
         profile_id: s.profile.id,
         profile_name: name,

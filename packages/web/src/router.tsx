@@ -68,6 +68,10 @@ const OverviewPage = lazy(() => import('./pages/app/profile/OverviewPage').then(
 const PlanPage = lazy(() => import('./pages/app/profile/PlanPage').then((m) => ({ default: m.PlanPage })));
 const MedicationsPage = lazy(() => import('./pages/app/profile/MedicationsPage').then((m) => ({ default: m.MedicationsPage })));
 const MarPage = lazy(() => import('./pages/app/profile/MarPage').then((m) => ({ default: m.MarPage })));
+const WhereTheyLivePage = lazy(() => import('./pages/app/profile/WhereTheyLivePage').then((m) => ({ default: m.WhereTheyLivePage })));
+const TestResultsPage = lazy(() => import('./pages/app/profile/TestResultsPage').then((m) => ({ default: m.TestResultsPage })));
+const EquipmentPage = lazy(() => import('./pages/app/profile/EquipmentPage').then((m) => ({ default: m.EquipmentPage })));
+const FundingPage = lazy(() => import('./pages/app/profile/FundingPage').then((m) => ({ default: m.FundingPage })));
 const ConditionsPage = lazy(() => import('./pages/app/profile/ConditionsPage').then((m) => ({ default: m.ConditionsPage })));
 const DocumentsPage = lazy(() => import('./pages/app/profile/DocumentsPage').then((m) => ({ default: m.DocumentsPage })));
 const NeurotypePage = lazy(() => import('./pages/app/profile/NeurotypePage').then((m) => ({ default: m.NeurotypePage })));
@@ -184,6 +188,10 @@ export const router = createBrowserRouter([
           { path: 'neurotypes', element: <NeurotypePage /> },
           { path: 'medications', element: <MedicationsPage /> },
           { path: 'treatments', element: <TreatmentsPage /> },
+          { path: 'where-they-live', element: <WhereTheyLivePage /> },
+          { path: 'test-results', element: <TestResultsPage /> },
+          { path: 'equipment', element: <EquipmentPage /> },
+          { path: 'funding', element: <FundingPage /> },
           { path: 'substance-use', element: <SubstanceUsePage /> },
           { path: 'tasks', element: <TasksPage /> },
           { path: 'health-status', element: <Navigate to="../conditions" replace /> },

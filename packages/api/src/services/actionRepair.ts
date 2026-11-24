@@ -52,6 +52,11 @@ export const PROFILE_ACTION_REFERENCE = [
   '- {"type":"reschedule_task","title":the open task title,"due_at":"ISO, or YYYY-MM-DD for any time that day","repeat":optional "once|daily|weekly|fortnightly|monthly|three_monthly|six_monthly|yearly"}',
   '- {"type":"record_cost","amount":number,"spent_on":optional YYYY-MM-DD,"description":optional,"funding_source":optional "self|ndis|private_health|medicare|government|other"}',
   '- {"type":"record_reading","treatment_name":exact name,"observed_at":optional ISO,"status":"completed|partial|skipped|refused","notes":required unless completed,"values":[{"metric_name":exact measure name,"value_number":number}]}',
+  '- {"type":"record_hospital_stay","hospital":required,"admitted_on":YYYY-MM-DD,"discharged_on":optional,"ward":optional,"treating_team":optional,"reason":optional}',
+  '- {"type":"record_discharge","discharged_on":YYYY-MM-DD,"follow_up_days":optional number,"follow_up_with":optional name}',
+  '- {"type":"record_result","test_name":required,"collected_on":optional,"reported_on":optional,"summary":optional,"doctor_view":"normal|follow_up|not_seen","ordered_by":optional,"lab":optional,"for_appointment":optional title,"values":[{"name":measure,"value_number":number,"unit":optional,"range_low":optional,"range_high":optional,"flag":"low|high|normal"}]}',
+  '- {"type":"set_funding_plan","scheme":"ndis|support_at_home|home_care_package|other","starts_on":optional,"ends_on":optional,"review_on":optional,"management":"agency|plan|self","plan_manager":optional,"support_coordinator":optional,"local_area_coordinator":optional,"budgets":[{"name","amount":number}]}',
+  '- {"type":"record_move_into_care","care_home":required,"entry_on":optional,"agreement_signed_on":optional,"payment_choice":"lump_sum|daily|mix","notice_given_on":optional,"room":optional}',
 ].join('\n');
 
 /** Compact reference for the dashboard assistant, which wraps per profile. */

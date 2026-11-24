@@ -20,6 +20,8 @@ import { LinkedText } from '../../../components/LinkedText';
 import { REPEAT_CHOICES, repeatLabel, repeatRank } from '../../../lib/repeat';
 import { bookingHref } from '../../../lib/booking';
 import { noticeFiled, refreshContacts } from '../../../stores/notice';
+import { RecallsCard } from '../../../components/RecallsCard';
+import { RosterView } from '../../../components/RosterView';
 import {
   JoinedNotice,
   TaskEditor,
@@ -52,6 +54,9 @@ const byTitle = (a: Task, b: Task) => a.title.localeCompare(b.title);
 const byText = (x: string | null | undefined, y: string | null | undefined) => (x ?? '￿').localeCompare(y ?? '￿');
 /** Done by booking, and not booked yet. */
 const needsBooking = (t: Task) => !t.completed && !!t.books && !t.booked_appointment;
+/** What an "Equipment to get" step is for: its details, else its title less "Equipment to get". */
+export const equipmentName = (t: { title: string; body?: string | null }) =>
+  (t.body?.trim() || t.title.replace(/^equipment to get[:,]?\s*/i, '').trim() || t.title).slice(0, 255);
 
 const TASK_SORTS: DataSort<Task>[] = [
   { key: 'default', label: 'Open first, then by due', compare: (a, b) => (Number(a.completed) - Number(b.completed)) || (dueValue(a) - dueValue(b)) || byTitle(a, b) },
@@ -196,6 +201,8 @@ export function TasksPage() {
   const [bulkNote, setBulkNote] = useState<{ text: string; waiting: { id: string; appointment_id: string } | null } | null>(null);
   const [completingTask, setCompletingTask] = useState<Task | null>(null);
   const [editing, setEditing] = useState<{ task: Task; focus?: 'who' } | null>(null);
+  // The list, or the roster of who does which repeating task each day.
+  const [view, setView] = useState<'list' | 'roster'>('list');
   const missing = taskMissing(draft);
 
   const { data, isLoading } = useQuery({
@@ -392,10 +399,28 @@ export function TasksPage() {
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_20rem] items-start">
       <div className="space-y-3 min-w-0">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink">Tasks</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-semibold text-ink">Tasks</h2>
+            <div className="inline-flex rounded-md bg-surface-2 p-0.5" role="group" aria-label="Show tasks as">
+              {(['list', 'roster'] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={view === v}
+                  onClick={() => setView(v)}
+                  className={`rounded px-2.5 py-1 text-xs ${view === v ? 'bg-card text-ink font-medium shadow-sm' : 'text-muted hover:text-ink'}`}
+                >
+                  {v === 'list' ? 'List' : 'Roster'}
+                </button>
+              ))}
+            </div>
+          </div>
           <span className="text-xs text-muted">{openCount} open · {visible.length} in the record</span>
         </div>
+
+        {view === 'roster' ? <RosterView profileId={profile.id} /> : null}
+        <div className={view === 'roster' ? 'hidden' : 'space-y-3'}>
 
         {joined ? (
           <JoinedNotice profileId={profile.id} joined={joined.info} create={joined.create} onDone={() => { setJoined(null); invalidate(); }} />
@@ -585,8 +610,11 @@ export function TasksPage() {
             </tbody>
           </table>
         </div>
+        </div>
       </div>
 
+      <div className="space-y-4">
+      <RecallsCard profileId={profile.id} canEdit={canEdit} />
       {canEdit ? (
         <form
           className="card space-y-3"
@@ -609,6 +637,7 @@ export function TasksPage() {
           </Button>
         </form>
       ) : null}
+      </div>
 
       {panel.current ? (() => {
         const t = panel.current;
@@ -620,6 +649,10 @@ export function TasksPage() {
             : []),
           ...(!t.completed && t.claimed_by === account?.id
             ? [{ label: 'Release', onRun: () => releaseMutation.mutate(t.id), pending: releaseMutation.isPending }]
+            : []),
+          // Equipment to get: file it once it is here, and the step is done.
+          ...(!t.completed && t.kind?.system_key === 'equipment'
+            ? [{ label: 'Add to equipment', onRun: () => navigate(`/app/${profile.id}/equipment?${new URLSearchParams({ new: '1', name: equipmentName(t), from_task: t.id }).toString()}`) }]
             : []),
         ];
         const sentiment = SENTIMENTS.find((x) => x.value === t.sentiment);

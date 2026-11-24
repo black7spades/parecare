@@ -13,7 +13,7 @@ import {
   storeProviderType,
   syncPracticeMembers,
 } from '../services/providerPractices';
-import { fitTypeToKind, isOrganisationType, normaliseProviderType, PRACTICE_TYPE, type ProviderKind } from '../lib/providerTypes';
+import { fitTypeToKind, isFacility, isOrganisationType, normaliseProviderType, PRACTICE_TYPE, type ProviderKind } from '../lib/providerTypes';
 import type { Provider, CareProfileProvider } from '../types';
 import { similarName } from '../lib/providerNames';
 import { linkContactToSuppliers, setContactStanding } from '../services/professionals';
@@ -218,6 +218,12 @@ providersRouter.get('/', requireAuth, async (req, res) => {
     .where({ 'cpp.care_profile_id': req.params['id'] })
     .select(...PROVIDER_COLS)
     .orderBy('p.name', 'asc');
+  // ?facility=1: only the places someone stays, for the hospital stay, the
+  // move into care and the "Where they live" pickers.
+  if (req.query['facility']) {
+    res.json({ providers: rows.filter((r: { provider_type: string | null; name: string; kind?: string | null }) => r.kind !== 'person' && isFacility(r.provider_type, r.name)) });
+    return;
+  }
   res.json({ providers: rows });
 });
 

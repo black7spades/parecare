@@ -350,6 +350,15 @@ const ENTITY_LABELS: Record<string, string> = {
   appointments: 'appointment',
   calendar: 'calendar entry',
   records: 'note',
+  'hospital-stays': 'hospital stay',
+  results: 'test result',
+  'funding-plans': 'funding plan',
+  'care-moves': 'move into care',
+  equipment: 'equipment',
+  assets: 'equipment',
+  recalls: 'suggested reminder',
+  identifiers: 'ID numbers',
+  'emergency-contacts': 'emergency contact',
 };
 
 export const entityLabel = (type: string) => ENTITY_LABELS[type] ?? type;
@@ -1474,6 +1483,14 @@ export interface Asset {
   depreciated_amount?: number | null;
   /** Current book value (price less depreciation so far), computed. */
   book_value?: number | null;
+  /** owned | loaned | hired */
+  ownership?: 'owned' | 'loaned' | 'hired' | null;
+  /** When loaned or hired equipment goes back (YYYY-MM-DD). */
+  return_by?: string | null;
+  /** When it is next due a service (YYYY-MM-DD). */
+  service_due_on?: string | null;
+  /** Its return and service tasks, on a person's Equipment page. */
+  tasks?: Array<{ id: string; title: string; next_due_at: string; all_day: boolean; completed: boolean }>;
 }
 
 /**

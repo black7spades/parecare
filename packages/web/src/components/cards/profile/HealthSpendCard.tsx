@@ -7,6 +7,7 @@ import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { CardShell } from '../CardShell';
 import type { CardProps } from '../types';
+import type { FundingPlan } from '../../../lib/lifeEvents';
 
 /** What this care is costing, and what has been claimed back. */
 export function HealthSpendCard({ profileId, careName }: CardProps) {
@@ -33,6 +34,8 @@ interface SpendEntry {
   reimbursed_amount: number | null;
   account_code: string | null;
   receipts: SpendReceipt[] | null;
+  /** Counts against this budget of their funding plan. */
+  funding_budget_category_id?: string | null;
 }
 interface SpendResponse {
   summary: {
@@ -231,7 +234,17 @@ function EntryModal({ mode, profileId, careName, currencySymbol, entry, onClose,
   const [accountCode, setAccountCode] = useState(entry?.account_code ?? '');
   const [status, setStatus] = useState<string>(entry?.status ?? 'confirmed');
   const [receipts, setReceipts] = useState<SpendReceipt[]>(entry?.receipts ?? []);
+  const queryClient = useQueryClient();
+  const [budgetId, setBudgetId] = useState(entry?.funding_budget_category_id ?? '');
+  const [missing, setMissing] = useState('');
   const [error, setError] = useState('');
+  // Their funding plan's budgets, for "Counts against".
+  const { data: plansData } = useQuery({
+    queryKey: ['funding-plans', profileId],
+    queryFn: () => api.get<{ plans: FundingPlan[] }>(`/care-profiles/${profileId}/funding-plans`),
+    retry: false,
+  });
+  const budgets = (plansData?.plans ?? []).flatMap((p) => p.budgets.map((b) => ({ id: b.id, label: `${p.scheme_label}: ${b.name}` })));
   const selectClass = 'w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
   const body = () => ({
@@ -244,6 +257,7 @@ function EntryModal({ mode, profileId, careName, currencySymbol, entry, onClose,
     claim_status: claimStatus,
     reimbursed_amount: reimbursed.trim() === '' ? null : Number(reimbursed),
     account_code: accountCode.trim() || null,
+    funding_budget_category_id: budgetId || null,
     ...(mode === 'edit' ? { status } : {}),
   });
 
@@ -251,7 +265,11 @@ function EntryModal({ mode, profileId, careName, currencySymbol, entry, onClose,
     mutationFn: () => mode === 'add'
       ? api.post(`/care-profiles/${profileId}/health-spend`, body())
       : api.patch(`/care-profiles/${profileId}/health-spend/${entry!.id}`, body()),
-    onSuccess: () => { onSaved(); if (mode === 'add') onClose(); },
+    onSuccess: () => {
+      onSaved();
+      void queryClient.invalidateQueries({ queryKey: ['funding-plans', profileId] });
+      if (mode === 'add') onClose();
+    },
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not save the cost.'),
   });
 
@@ -286,7 +304,19 @@ function EntryModal({ mode, profileId, careName, currencySymbol, entry, onClose,
   const title = mode === 'add' ? `Add a cost for ${careName}` : `${entry?.item_name ?? 'Cost'}`;
   return (
     <Modal open onClose={onClose} title={title} wide>
-      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (amount.trim()) mutation.mutate(); }}>
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          // Save always answers: say what is missing.
+          if (!amount.trim()) {
+            setMissing('Write the amount first, then save.');
+            return;
+          }
+          setMissing('');
+          mutation.mutate();
+        }}
+      >
         <div className="grid grid-cols-2 gap-2">
           <Input label={`Amount (${currencySymbol})`} type="number" min="0" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} required />
           <Input label="Date spent" type="date" value={spentOn} onChange={(e) => setSpentOn(e.target.value)} required />
@@ -331,6 +361,15 @@ function EntryModal({ mode, profileId, careName, currencySymbol, entry, onClose,
             <Input label={`Claimable (${currencySymbol})`} type="number" min="0" step="any" value={claimable} onChange={(e) => setClaimable(e.target.value)} hint="How much you expect back." />
             <Input label={`Reimbursed (${currencySymbol})`} type="number" min="0" step="any" value={reimbursed} onChange={(e) => setReimbursed(e.target.value)} hint="How much has come back." />
           </div>
+          {budgets.length > 0 ? (
+            <label className="block">
+              <span className="block text-sm font-medium text-ink mb-1">Counts against</span>
+              <select className={selectClass} value={budgetId} onChange={(e) => setBudgetId(e.target.value)}>
+                <option value="">No budget</option>
+                {budgets.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+              </select>
+            </label>
+          ) : null}
         </div>
 
         {mode === 'edit' ? (
@@ -360,9 +399,10 @@ function EntryModal({ mode, profileId, careName, currencySymbol, entry, onClose,
           ) : <span />}
           <div className="flex gap-2">
             <Button type="button" variant="ghost" onClick={onClose}>{mode === 'edit' ? 'Done' : 'Cancel'}</Button>
-            <Button type="submit" loading={mutation.isPending} disabled={!amount.trim()}>Save</Button>
+            <Button type="submit" loading={mutation.isPending}>Save</Button>
           </div>
         </div>
+        {missing ? <p className="text-sm text-red-600 text-right" role="alert">{missing}</p> : null}
       </form>
     </Modal>
   );

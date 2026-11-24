@@ -189,6 +189,25 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
     expand: (a) =>
       `Link this existing entry from the directory to this profile, without creating a duplicate. It may be a provider (by name) or an address (by its label or street). If it is an address, also set it as where they live: ${a}`,
   },
+  {
+    name: 'hospital',
+    hint: 'where they went in and when',
+    description: 'Record a hospital stay or the discharge, e.g. /hospital went into Box Hill Hospital yesterday, ward 5 West, after a fall',
+    expand: (a) =>
+      `Record this hospital stay with record_hospital_stay, or with record_discharge when they have come home (see the GP within the days given, otherwise 7): ${a}`,
+  },
+  {
+    name: 'result',
+    hint: 'the test and what it showed',
+    description: 'Record a test result, e.g. /result blood test on Monday, HbA1c 6.8 % (normal 4 to 6), ordered by Dr Raman',
+    expand: (a) => `Record this test result with record_result, one value per measure with its unit and normal range: ${a}`,
+  },
+  {
+    name: 'funding',
+    hint: 'the plan dates and budgets',
+    description: 'Record an NDIS plan or aged care package, e.g. /funding NDIS plan 1 Jan to 31 Dec, review 1 Nov, capacity building 12000',
+    expand: (a) => `Record this funding plan with set_funding_plan, with its dates, how it is managed, its contacts and budgets: ${a}`,
+  },
 ];
 
 export interface ExpandedCommand {

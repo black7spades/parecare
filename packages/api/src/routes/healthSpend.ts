@@ -83,7 +83,19 @@ const accountingFields = {
   claim_status: z.enum(CLAIM_STATUSES as unknown as [string, ...string[]]).optional(),
   reimbursed_amount: z.coerce.number().min(0).max(1e9).optional().nullable(),
   account_code: z.string().max(50).optional().nullable(),
+  // Counts against this budget of their funding plan.
+  funding_budget_category_id: z.string().uuid().optional().nullable(),
 };
+
+/** A budget belongs to this person's funding plan, else it is not set. */
+async function budgetFor(profileId: string, id: string | null | undefined): Promise<string | null> {
+  if (!id) return null;
+  const row = await db('funding_budget_categories as b')
+    .join('funding_plans as p', 'p.id', 'b.funding_plan_id')
+    .where({ 'b.id': id, 'p.care_profile_id': profileId })
+    .first('b.id');
+  return row ? id : null;
+}
 
 const manualSchema = z.object({
   amount: z.coerce.number().min(0).max(1e9),
@@ -115,6 +127,7 @@ healthSpendRouter.post('/', async (req, res) => {
       claim_status: claimStatus,
       reimbursed_amount: d.reimbursed_amount ?? null,
       account_code: d.account_code ?? null,
+      funding_budget_category_id: await budgetFor(profileIdOf(req), d.funding_budget_category_id),
       created_by_account_id: req.account!.id,
     })
     .returning('*');
@@ -152,6 +165,7 @@ healthSpendRouter.patch('/:entryId', async (req, res) => {
   set('claim_status');
   set('reimbursed_amount');
   set('account_code');
+  if (d.funding_budget_category_id !== undefined) update['funding_budget_category_id'] = await budgetFor(profileIdOf(req), d.funding_budget_category_id);
 
   const [entry] = await db('health_spend_entries')
     .where({ id: req.params['entryId'], care_profile_id: profileIdOf(req) })

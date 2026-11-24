@@ -9,6 +9,7 @@ import { Input, Textarea } from '../../../../components/ui/Input';
 import { Modal } from '../../../../components/ui/Modal';
 import { checkLimits } from '../../../../lib/asNeeded';
 import type { MedicationRecord } from '../../../../lib/care';
+import { askIfHome } from '../../../../stores/homeDose';
 
 // Outcomes that stand on their own. Refused, omitted and held need a note
 // saying why.
@@ -94,7 +95,10 @@ export function AdministerModal({ profileId, med, personName, scheduledFor, init
       right_route: !!routeGiven.trim(),
       right_time: true,
     }),
-    onSuccess: onSaved,
+    onSuccess: (res) => {
+      askIfHome(profileId, res);
+      onSaved();
+    },
     onError: (err) => {
       // The server found it inside the gap or over the most: say so here.
       if (err instanceof ApiError && err.code === 'OUTSIDE_LIMITS' && err.data?.['limits']) {

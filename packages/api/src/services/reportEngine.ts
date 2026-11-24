@@ -246,8 +246,13 @@ export const SYSTEM_PRESETS: Omit<ReportPreset, 'id' | 'created_at' | 'updated_a
         { key: 'care_journeys', fields: [], filters: { status: 'active' } },
         { key: 'tasks', fields: ['title', 'completed', 'completed_at', 'sentiment', 'desired_outcome'], filters: { has_sentiment: true } },
         { key: 'treatments', fields: ['treatment_name', 'treatment_category', 'observed_at', 'status', 'readings'], filters: {} },
+        // The plan period's care log, appointments and spend, for the review.
+        { key: 'care_log', fields: [], filters: {} },
+        { key: 'appointments', fields: [], filters: {} },
+        { key: 'health_spend_detail', fields: [], filters: {} },
       ],
-      dateRangePreset: '90d',
+      // The person's funding plan dates, when they have a plan.
+      dateRangePreset: 'plan',
       includeAiNarrative: true,
       aiPrompt: 'Write this as an NDIS progress report. Focus on measurable outcomes, goal progress, task completion rates, and treatment adherence. Use evidence-based language suitable for an NDIS plan review.',
       profileFilter: { kind: 'person' },

@@ -4,6 +4,7 @@ import { contactLine, supplyContext } from './alertContacts';
 import { dateInZone, hmInZone, startOfDayInZone } from '../lib/timezone';
 import { DOSE_AUDIT_ENTITY } from '../lib/doseOutcome';
 import { perDoseDrawdown } from './medicationSupply';
+import { profilesInHospital } from './hospitalStays';
 
 /**
  * Watches: the alerts a person sets up for themselves, evaluated against the
@@ -559,6 +560,12 @@ async function marReportHits(watch: WatchRow, ctx: EvalContext): Promise<WatchHi
 
 /** Everything this watch has to say right now, given its scope and horizon. */
 export async function evaluateWatch(watch: WatchRow, ctx: EvalContext): Promise<WatchHit[]> {
+  // In hospital, the hospital gives the medicines: supply and dose watches
+  // pause until the discharge is recorded.
+  if (watch.metric === 'medication_supply' || watch.metric === 'dose_overdue') {
+    const inHospital = await profilesInHospital(db, ctx.profiles.map((p) => p.id));
+    if (inHospital.size) ctx = { ...ctx, profiles: ctx.profiles.filter((p) => !inHospital.has(p.id)) };
+  }
   switch (watch.metric) {
     case 'medication_supply':
       return supplyHits(watch, ctx);

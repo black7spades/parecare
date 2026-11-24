@@ -44,7 +44,7 @@ export async function fillProfessionalGaps(conn: Conn, providerId: string, place
 
 export async function ensureProfessional(
   conn: Conn,
-  opts: { profileId: string; name: string; providerType?: string | null; place?: KnownPlace | null; phone?: string | null }
+  opts: { profileId: string; name: string; providerType?: string | null; place?: KnownPlace | null; phone?: string | null; kind?: 'person' | 'organisation' }
 ): Promise<{ id: string; name: string; created: boolean } | null> {
   const name = opts.name.trim();
   if (!name) return null;
@@ -69,7 +69,7 @@ export async function ensureProfessional(
   } else {
     const { columns } = await providerWriteColumns(accountId, {
       name,
-      kind: 'person',
+      kind: opts.kind ?? 'person',
       provider_type: opts.providerType?.trim() || 'specialist',
     });
     const [row] = await conn('providers').insert({ account_id: accountId, ...columns }).returning(['id', 'name']);
@@ -455,7 +455,8 @@ export async function resolveContactInput(
   conn: Conn,
   profileId: string,
   input: { id?: string | null; name?: string | null; type?: string | null; phone?: string | null },
-  defaultType: string
+  defaultType: string,
+  kind?: 'person' | 'organisation'
 ): Promise<{ id: string | null; filed: { id: string; name: string } | null } | { error: string }> {
   if (input.id) {
     const linked = await conn('care_profile_providers').where({ care_profile_id: profileId, provider_id: input.id }).first('id');
@@ -472,7 +473,7 @@ export async function resolveContactInput(
     return { id: input.id, filed: null };
   }
   if (input.name?.trim()) {
-    const pro = await ensureProfessional(conn, { profileId, name: input.name, providerType: input.type?.trim() || defaultType, phone: input.phone });
+    const pro = await ensureProfessional(conn, { profileId, name: input.name, providerType: input.type?.trim() || defaultType, phone: input.phone, kind });
     if (!pro) return { id: null, filed: null };
     return { id: pro.id, filed: pro.created ? { id: pro.id, name: pro.name } : null };
   }

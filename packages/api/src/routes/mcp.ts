@@ -135,6 +135,11 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   reschedule_task: 'Move one of a person\'s tasks to a new time.',
   record_cost: 'Record a health cost for a person, with who paid and any claim.',
   record_reading: 'Record a reading for a person\'s treatment, such as a blood pressure or CPAP session.',
+  record_hospital_stay: 'Record that a person went into hospital: which hospital, the day, the ward and why. Their medicine reminders pause while the stay is open.',
+  record_discharge: 'Record that a person left hospital. Adds a task to see their GP within the days the letter gives, and a task to look over the care plan.',
+  record_result: 'Record a test result for a person, one value per measure, linked to the test and shown at the next visit with whoever ordered it.',
+  set_funding_plan: 'Record or change a person\'s NDIS plan or aged care package: its dates, how it is managed, its contacts and budgets.',
+  record_move_into_care: 'Record a person moving into a care home: the dates, the payment choice and notice, keeping their previous home.',
 };
 
 /** Actions that change the medication list wait for the person to agree. */

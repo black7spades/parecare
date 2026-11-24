@@ -1,4 +1,6 @@
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
+import { isFacilityProvider } from '../lib/lifeEvents';
 import { Input } from './ui/Input';
 import { AddressFields, addressFrom, addressPayload, emptyAddress, type AddressValue } from './AddressFields';
 import {
@@ -126,15 +128,24 @@ const selectClass =
 export function ResidenceFields({
   value,
   onChange,
-  providers,
+  providers: allProviders,
+  profileId,
+  onLeave,
 }: {
   value: ResidenceValue;
   onChange: (v: ResidenceValue) => void;
-  /** Facilities already linked to this profile, for the picker. Empty while creating. */
+  /** Contacts linked to this profile; only the places someone stays are offered. Empty while creating. */
   providers: Provider[];
+  /** The person, for the link to record a hospital stay instead. */
+  profileId?: string;
+  /** Called as that link is followed, to close the form it sits in. */
+  onLeave?: () => void;
 }) {
   const set = (patch: Partial<ResidenceValue>) => onChange({ ...value, ...patch });
   const facility = isFacilityResidence(value.residence_type);
+  // Only places someone stays, never the GP or the pharmacy. The one already
+  // chosen stays listed whatever it is filed as.
+  const providers = allProviders.filter((p) => isFacilityProvider(p) || p.id === value.residence_provider_id);
   // Whichever facility source is active: an existing one, or a new one.
   const facilitySource = value.add_new_facility ? '__new__' : value.residence_provider_id;
 
@@ -157,6 +168,14 @@ export function ResidenceFields({
             </option>
           ))}
         </select>
+        {value.residence_type === 'hospital' && profileId ? (
+          <p className="mt-1 text-xs text-muted">
+            For someone who lives in hospital.{' '}
+            <Link to={`/app/${profileId}/where-they-live?stay=new`} onClick={onLeave} className="text-primary hover:underline">
+              Record a short stay as a hospital stay instead
+            </Link>
+          </p>
+        ) : null}
       </div>
 
       {facility ? (

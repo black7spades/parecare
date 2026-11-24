@@ -17,13 +17,8 @@ import { composeEmergencySheet } from '../services/emergencySheet';
 import { CIRCLE_ROLE_VALUES } from '../lib/circleRoles';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
 import { resolveAddress, linkAddressToProfile } from '../services/addresses';
-import {
-  enrolProfileInTemplate,
-  findLegacyJourney,
-  phaseState,
-  setCurrentJourneyPhase,
-  type JourneyPhaseRow,
-} from '../services/journeys';
+import { changeCarePhase, enrolProfileInTemplate } from '../services/journeys';
+import { openStaySummary } from '../services/hospitalStays';
 import type { CareProfile, CarePhase } from '../types';
 
 const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -947,6 +942,8 @@ careProfilesRouter.get('/:id', requireAuth, async (req, res) => {
     can_edit_profile: canEditProfile,
     can_manage_editors: canManageEditors,
     situation: await buildSituation(profile),
+    // In hospital now: the banner says where, and medicine reminders pause.
+    open_stay: await openStaySummary(db, profile.id),
   });
 });
 
@@ -1165,32 +1162,14 @@ careProfilesRouter.patch('/:id/phase', requireAuth, async (req, res) => {
   // The journey system is the source of truth: this legacy endpoint
   // drives the profile's ageing journey, which mirrors itself back onto
   // current_phase and care_phase_history.
-  const result = await db.transaction(async (trx) => {
-    let journey = await findLegacyJourney(profile.id, trx);
-    if (!journey) {
-      const ageing = await trx('journey_templates').where({ slug: 'more-help-at-home' }).first();
-      if (!ageing) return { ok: false as const, code: 'NOT_FOUND' as const };
-      const phases = await trx('journey_template_phases').where({ template_id: ageing.id }).orderBy('sort_order', 'asc');
-      const startAt = phases.findIndex((p) => p.legacy_phase === oldPhase);
-      journey = await enrolProfileInTemplate(trx, {
-        careProfileId: profile.id,
-        templateId: ageing.id,
-        createdByAccountId: req.account!.id,
-        startAtSortOrder: Math.max(0, startAt),
-      });
-    }
-    const journeyPhases: JourneyPhaseRow[] = await trx('care_journey_phases')
-      .where({ care_journey_id: journey.id })
-      .orderBy('sort_order', 'asc');
-    const target = journeyPhases.find((p) => p.legacy_phase === newPhase && phaseState(p) !== 'current');
-    if (!target) return { ok: false as const, code: 'NOT_FOUND' as const };
-    return setCurrentJourneyPhase(trx, {
-      journey,
-      targetPhaseId: target.id,
+  const result = await db.transaction((trx) =>
+    changeCarePhase(trx, {
+      profileId: profile.id,
+      phase: newPhase,
       actorAccountId: req.account!.id,
       actorIsSuperAdmin: req.account!.role === 'super_admin',
-    });
-  });
+    })
+  );
 
   if (!result.ok) {
     if (result.code === 'PHASE_LOCKED') {

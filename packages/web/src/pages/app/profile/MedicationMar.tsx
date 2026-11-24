@@ -17,6 +17,8 @@ import { SortableTh } from '../../../components/data/SortableTh';
 import { RecordPanel } from '../../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
+import { askIfHome } from '../../../stores/homeDose';
+import type { OpenStay } from '../../../lib/lifeEvents';
 
 const SELECT = 'rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
@@ -147,13 +149,29 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
   }, [period, anchor]);
 
   const chartKey = ['med-chart', profileId, from.toISOString(), to.toISOString()];
-  type ChartData = { medications: MedicationRecord[]; administrations: ChartAdmin[] };
+  type ChartData = {
+    medications: MedicationRecord[];
+    administrations: ChartAdmin[];
+    paused_by_stay?: OpenStay | null;
+    stays?: Array<{ id: string; admitted_on: string; discharged_on: string | null }>;
+  };
   const { data } = useQuery({
     queryKey: chartKey,
     queryFn: () => api.get<ChartData>(`/care-profiles/${profileId}/medications/chart?from=${from.toISOString()}&to=${to.toISOString()}`),
   });
   const meds = data?.medications ?? [];
   const admins = data?.administrations ?? [];
+  // In hospital: the hospital gives the medicines, so nothing is due here
+  // from the day they went in.
+  const stay = data?.paused_by_stay ?? null;
+  const stays = data?.stays ?? [];
+  // A day in hospital, open stay or past: the day they went in, up to the
+  // day before they came home.
+  const inHospitalOn = (d: Date) => {
+    const day = format(d, 'yyyy-MM-dd');
+    return stays.some((s) => day >= s.admitted_on && (!s.discharged_on || day < s.discharged_on));
+  };
+  const pausedDay = inHospitalOn(anchor);
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['med-chart', profileId] });
@@ -183,6 +201,7 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
       return { prev };
     },
     onError: (_e, _v, ctx) => { if (ctx?.prev !== undefined) queryClient.setQueryData(chartKey, ctx.prev); },
+    onSuccess: (res) => askIfHome(profileId, res),
     onSettled: () => invalidate(),
   });
 
@@ -193,7 +212,8 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
   const summary = useMemo(() => {
     let expected = 0;
     // An as-needed medicine has no due times, even if old ones are still saved.
-    for (const m of meds) if (!m.as_needed) for (const day of days) for (const t of m.schedule_times ?? []) {
+    // Days in hospital have nothing due here: the hospital gives the medicines.
+    for (const m of meds) if (!m.as_needed) for (const day of days) if (!inHospitalOn(day)) for (const t of m.schedule_times ?? []) {
       if (new Date(`${format(day, 'yyyy-MM-dd')}T${t}:00`) <= now) expected += 1;
     }
     // Scheduled doses are counted against their times. An as-needed dose is
@@ -214,7 +234,7 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
     const asNeededGiven = admins.filter((a) => kindOf(a.medication_id) === 'as_needed' && isGivenStatus(a.status)).length;
     const otherGiven = admins.filter((a) => kindOf(a.medication_id) === 'other' && isGivenStatus(a.status)).length;
     return { expected, given, exceptions, asNeededGiven, otherGiven, missed: expected > 0 ? Math.max(0, expected - scheduledAdmins.length) : 0 };
-  }, [meds, admins, days]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [meds, admins, days, stays]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const label = period === 'day' ? format(anchor, 'EEEE d MMMM yyyy')
     : period === 'week' ? `${format(from, 'd MMM')} – ${format(to, 'd MMM yyyy')}`
@@ -287,6 +307,15 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
 
       {meds.length === 0 ? (
         <p className="text-sm text-muted py-6 text-center">No active medications to chart.</p>
+      ) : period === 'day' && pausedDay ? (
+        <div className="card text-center py-6 space-y-1">
+          <p className="text-sm text-ink">
+            {stay && format(anchor, 'yyyy-MM-dd') >= stay.admitted_on
+              ? `Nothing is due here while ${personName} is in ${stay.hospital_name ?? 'hospital'}. The hospital gives the medicines.`
+              : `${personName} was in hospital this day, so nothing was due here. The hospital gave the medicines.`}
+          </p>
+          {stay ? <p className="text-xs text-muted">Doses start being due again once the discharge is recorded.</p> : null}
+        </div>
       ) : period === 'day' ? (
         <DayGrid meds={meds} admins={admins} day={anchor} now={now} canAdminister={canAdminister}
           onQuick={quick} onLogAllDue={logAllDue}

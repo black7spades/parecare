@@ -10,11 +10,20 @@ interface DueReminder extends Reminder {
   owner_timezone: string | null;
 }
 
-async function resolveRecipient(reminder: DueReminder): Promise<{ email: string; name: string } | null> {
+/**
+ * Who a due task's reminder goes to: whoever it is assigned to, at their
+ * login's email or, for someone added by name, the email kept for them. Added
+ * by name with no email, the reminder goes to whoever manages the profile,
+ * with a line saying to remind them by phone.
+ */
+export async function resolveRecipient(
+  reminder: Pick<DueReminder, 'assigned_account_id' | 'assigned_to' | 'profile_owner_id'>
+): Promise<{ email: string; name: string; note: string | null } | null> {
   if (reminder.assigned_account_id) {
     const acc = await db('accounts').where({ id: reminder.assigned_account_id }).first('email', 'display_name');
-    if (acc) return { email: acc.email, name: acc.display_name };
+    if (acc) return { email: acc.email, name: acc.display_name, note: null };
   }
+  let note: string | null = null;
   if (reminder.assigned_to) {
     const member = await db('care_circle_members')
       .leftJoin('accounts', 'care_circle_members.account_id', 'accounts.id')
@@ -22,16 +31,23 @@ async function resolveRecipient(reminder: DueReminder): Promise<{ email: string;
       .select(
         'care_circle_members.display_name',
         'care_circle_members.invited_email',
-        'accounts.email as account_email'
+        'care_circle_members.email as member_email',
+        'care_circle_members.phone as member_phone',
+        'accounts.email as account_email',
+        'accounts.phone as account_phone'
       )
       .first();
     if (member) {
-      const email = member.account_email ?? member.invited_email;
-      if (email) return { email, name: member.display_name };
+      const email = member.account_email ?? member.member_email ?? member.invited_email;
+      if (email) return { email, name: member.display_name, note: null };
+      const phone = member.account_phone ?? member.member_phone;
+      note = phone
+        ? `${member.display_name} has no email in PareCare. Remind them on ${phone}.`
+        : `${member.display_name} has no email or phone in PareCare. Remind them yourself, and add their phone in the care circle.`;
     }
   }
   const owner = await db('accounts').where({ id: reminder.profile_owner_id }).first();
-  return owner ? { email: owner.email, name: owner.display_name } : null;
+  return owner ? { email: owner.email, name: owner.display_name, note } : null;
 }
 
 let lastSeriesTopUp = 0;
@@ -64,7 +80,8 @@ async function tick(): Promise<void> {
   for (const reminder of due) {
     const recipient = await resolveRecipient(reminder);
     if (recipient) {
-      await sendReminderEmail(recipient.email, recipient.name, reminder.title, reminder.body).catch((err) =>
+      const body = [recipient.note, reminder.body].filter(Boolean).join(' ') || null;
+      await sendReminderEmail(recipient.email, recipient.name, reminder.title, body).catch((err) =>
         console.warn(`Reminder email failed for "${reminder.title}":`, (err as Error).message)
       );
     }

@@ -1,6 +1,7 @@
 import { useAuthStore } from '../stores/auth';
 import { useSubscriptionStore } from '../stores/subscription';
 import { refreshAfterDoses } from '../lib/queryClient';
+import { browserTimeZone } from '../lib/datetime';
 
 const BASE = '/api/v1';
 
@@ -61,6 +62,7 @@ interface RequestOptions {
 
 async function request<T>(path: string, options: RequestInit = {}, reqOpts: RequestOptions = {}): Promise<T> {
   const token = useAuthStore.getState().token;
+  const zone = browserTimeZone();
 
   const controller = reqOpts.timeoutMs ? new AbortController() : undefined;
   const timer = controller ? window.setTimeout(() => controller.abort(), reqOpts.timeoutMs) : undefined;
@@ -73,6 +75,8 @@ async function request<T>(path: string, options: RequestInit = {}, reqOpts: Requ
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        // Where the person is, so a day the server works out is their day.
+        ...(zone ? { 'X-Time-Zone': zone } : {}),
         ...(options.headers ?? {}),
       },
     });

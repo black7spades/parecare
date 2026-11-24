@@ -327,6 +327,8 @@ export async function dosesDue(
     .where('m.active', true)
     .where('m.as_needed', false)
     .whereRaw(COURSE_RUNNING_SQL)
+    // In hospital, the hospital gives the medicines: nothing is due here.
+    .whereNotExists(conn('hospital_stays as hs').whereRaw('hs.care_profile_id = m.care_profile_id').whereNull('hs.discharged_on'))
     .select('m.id', 'm.care_profile_id', 'c.name', 'm.dose', 'm.route', 'm.instructions', 'm.with_food', 'm.critical', 'm.schedule_times')
     .orderBy('c.name', 'asc')) as Array<{
     id: string;

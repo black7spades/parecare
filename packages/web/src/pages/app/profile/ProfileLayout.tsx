@@ -21,6 +21,9 @@ import {
 import type { Situation } from '../../../lib/situation';
 import { useAuthStore } from '../../../stores/auth';
 import { formatDateOnly, todayDateOnly } from '../../../lib/datetime';
+import type { OpenStay } from '../../../lib/lifeEvents';
+import { DischargeModal } from '../../../components/HospitalStayForms';
+import { useHomeDoseStore } from '../../../stores/homeDose';
 
 export interface ProfileContext {
   profile: CareProfile;
@@ -37,6 +40,10 @@ export interface ProfileContext {
   phaseHistory: PhaseHistoryEntry[];
   /** The person's composed situation, when it has loaded. */
   situation: Situation | null;
+  /** In hospital now: where, since when. Medicine reminders are paused. */
+  openStay: OpenStay | null;
+  /** Their own profile: "Where I live" rather than "Where they live". */
+  isSelf: boolean;
 }
 
 export function useProfile(): ProfileContext {
@@ -51,6 +58,7 @@ interface ProfileResponse {
   can_edit_profile?: boolean;
   can_manage_editors?: boolean;
   situation?: Situation | null;
+  open_stay?: OpenStay | null;
 }
 
 type AlertLevel = 'red' | 'yellow' | 'green' | null;
@@ -121,6 +129,8 @@ export function ProfileLayout() {
     careName,
     phaseHistory: data.phase_history ?? [],
     situation: data.situation ?? null,
+    openStay: data.open_stay ?? null,
+    isSelf,
   };
 
   const canDismissAlert =
@@ -207,6 +217,9 @@ export function ProfileLayout() {
         </div>
       </div>
 
+      {context.openStay ? <HospitalStayBanner stay={context.openStay} profileId={profile.id} canEdit={context.canEdit} /> : null}
+      <HomeDoseQuestionBar profileId={profile.id} hospitalName={context.openStay?.hospital_name ?? null} />
+
       {activeHealth.length > 0 ? (
         <HealthAlertBar
           statuses={activeHealth}
@@ -228,6 +241,60 @@ export function ProfileLayout() {
       <Suspense fallback={<RouteFallback />}>
         <Outlet context={context} />
       </Suspense>
+    </div>
+  );
+}
+
+/**
+ * "In Box Hill Hospital, Ward 5 West, since 3 Nov 2026. Medicine reminders
+ * are paused." Shown on every page of the person while a stay is open, with
+ * the one thing to do next.
+ */
+export function HospitalStayBanner({ stay, profileId, canEdit }: { stay: OpenStay; profileId: string; canEdit: boolean }) {
+  const [discharging, setDischarging] = useState(false);
+  const where = [stay.hospital_name ?? 'hospital', stay.ward].filter(Boolean).join(', ');
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-md border-l-4 border-l-amber-400 bg-amber-50 px-3 py-2 dark:bg-amber-900/10" role="status">
+      <p className="flex-1 min-w-[12rem] text-sm text-ink">
+        In {where}, since {formatDateOnly(stay.admitted_on)}. Medicine reminders are paused.
+      </p>
+      {canEdit ? (
+        <Button size="sm" onClick={() => setDischarging(true)}>
+          Record the discharge
+        </Button>
+      ) : null}
+      {discharging ? <DischargeModal profileId={profileId} stayId={stay.id} hospitalName={stay.hospital_name} onClose={() => setDischarging(false)} /> : null}
+    </div>
+  );
+}
+
+/**
+ * "Dorothy is shown as in hospital. Are they home?" Asked when a dose is
+ * recorded at home while a stay is open, so a stay is never left open by
+ * mistake and the reminders come back.
+ */
+function HomeDoseQuestionBar({ profileId, hospitalName }: { profileId: string; hospitalName: string | null }) {
+  const question = useHomeDoseStore((s) => s.question);
+  const clear = useHomeDoseStore((s) => s.clear);
+  const [discharging, setDischarging] = useState<string | null>(null);
+  if (discharging) {
+    return <DischargeModal profileId={profileId} stayId={discharging} hospitalName={hospitalName} onClose={() => setDischarging(null)} />;
+  }
+  if (!question || question.profileId !== profileId) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-md border-l-4 border-l-amber-400 bg-amber-50 px-3 py-2 dark:bg-amber-900/10" role="alert">
+      <p className="flex-1 min-w-[12rem] text-sm text-ink">{question.text}</p>
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={() => {
+          setDischarging(question.stay_id);
+          clear();
+        }}
+      >
+        Yes, record the discharge
+      </Button>
+      <Button size="sm" variant="ghost" onClick={clear}>No, keep the stay open</Button>
     </div>
   );
 }

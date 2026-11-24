@@ -377,7 +377,7 @@ export function EditProfileModal({
             <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
           </>
         )}
-        <ResidenceFields value={residence} onChange={setResidence} providers={providers} />
+        <ResidenceFields value={residence} onChange={setResidence} providers={providers} profileId={profile.id} onLeave={onClose} />
         <ContactDetails value={contact} onChange={setContact} providers={providers} />
         {isPet ? (
           <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
