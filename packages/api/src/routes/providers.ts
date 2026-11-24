@@ -12,6 +12,7 @@ import {
   inheritContact,
   storeProviderType,
   syncPracticeMembers,
+  whereNamed,
 } from '../services/providerPractices';
 import { fitTypeToKind, isFacility, isOrganisationType, normaliseProviderType, PRACTICE_TYPE, type ProviderKind } from '../lib/providerTypes';
 import type { Provider, CareProfileProvider } from '../types';
@@ -228,8 +229,26 @@ providersRouter.get('/', requireAuth, async (req, res) => {
 });
 
 providersRouter.post('/', requireAuth, async (req, res) => {
-  const { provider_id, ...rest } = req.body;
+  const { provider_id, ensure, ...rest } = req.body;
   const profileId = req.params['id'] as string;
+
+  // First setup sends `ensure`: someone already in Contacts by this name is
+  // linked as they are, so trying setup again never files them twice. An
+  // empty phone is filled from what was typed.
+  if (ensure === true && typeof rest.name === 'string' && rest.name.trim()) {
+    const same = (await db('providers')
+      .where({ account_id: req.account!.id })
+      .where((w) => whereNamed(w as unknown as Parameters<typeof whereNamed>[0], rest.name))
+      .first('id', 'phone')) as { id: string; phone: string | null } | undefined;
+    if (same) {
+      await db('care_profile_providers').insert({ care_profile_id: profileId, provider_id: same.id }).onConflict(['care_profile_id', 'provider_id']).ignore();
+      if (!same.phone?.trim() && typeof rest.phone === 'string' && rest.phone.trim()) {
+        await db('providers').where({ id: same.id }).update({ phone: rest.phone.trim().slice(0, 50) });
+      }
+      res.status(200).json({ provider: await selectLinked(profileId, same.id), already_saved: true });
+      return;
+    }
+  }
 
   if (provider_id) {
     const existing = await db<Provider>('providers')

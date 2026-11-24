@@ -255,8 +255,12 @@ export async function changeCarePhase(
   let journey = await findLegacyJourney(profile.id, trx);
   if (!journey) {
     const ageing = await trx('journey_templates').where({ slug: 'more-help-at-home' }).first();
-    if (!ageing) {
-      // No ageing journey on this server: the phase is still recorded.
+    // The ageing journey is only for someone 65 or over, or whose age is not
+    // known; anyone younger has the phase recorded and no ageing journey.
+    const born = (await trx('care_profiles').where({ id: profile.id }).first('date_of_birth', 'kind')) as { date_of_birth: string | Date | null; kind: string } | undefined;
+    const age = ageFromBirth(born?.date_of_birth ?? null);
+    if (!ageing || born?.kind === 'pet' || (age !== null && age < 65)) {
+      // No ageing journey here, or it does not fit them: the phase is still recorded.
       await trx('care_profiles').where({ id: profile.id }).update({ current_phase: opts.phase, updated_at: trx.fn.now() });
       return { ok: true, changed: true };
     }
@@ -281,4 +285,74 @@ export async function changeCarePhase(
     actorIsSuperAdmin: opts.actorIsSuperAdmin,
   });
   return result.ok ? { ok: true, changed: true } : result;
+}
+
+/** Whole years between a date of birth and today. */
+function ageFromBirth(dob: string | Date | null | undefined): number | null {
+  if (!dob) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dob instanceof Date ? dob.toISOString() : String(dob));
+  if (!m) return null;
+  const now = new Date();
+  let age = now.getUTCFullYear() - Number(m[1]);
+  const before = now.getUTCMonth() + 1 < Number(m[2]) || (now.getUTCMonth() + 1 === Number(m[2]) && now.getUTCDate() < Number(m[3]));
+  if (before) age -= 1;
+  return age;
+}
+
+/** The everyday journey for each life stage, first that fits wins. */
+const DEFAULT_JOURNEY_ORDER = ['expecting-a-baby', 'newborn-first-year', 'owning-my-own-health', 'preventive-health', 'ageing-well'];
+/** The ageing journey: only for someone 65 or over, never an adult under 65 or a child. */
+const AGEING_JOURNEY = 'more-help-at-home';
+
+/**
+ * A new person created with no journey chosen, through the API, Pare or an
+ * import, gets the everyday journey for their age: worked out from the date
+ * of birth (or a due date), matched to the life stages the library is
+ * organised by. Someone 65 or over who arrives at a later care phase opens
+ * the ageing journey at that phase, as before. With no age known, nothing
+ * is guessed. Pets are left alone. Returns the journey's name, or null.
+ */
+export async function enrolDefaultJourney(
+  trx: Knex.Transaction,
+  profile: { id: string; kind?: string | null; date_of_birth?: string | Date | null; due_date?: string | Date | null; current_phase?: string | null },
+  actorId: string | null
+): Promise<string | null> {
+  if (profile.kind === 'pet') return null;
+  const age = ageFromBirth(profile.date_of_birth ?? null);
+  const expecting = age === null && !!profile.due_date;
+  if (age === null && !expecting) return null;
+
+  if (age !== null && age >= 65 && profile.current_phase && profile.current_phase !== 'early_concern') {
+    const ageing = await trx('journey_templates').where({ slug: AGEING_JOURNEY, status: 'published' }).first('id', 'name');
+    if (ageing) {
+      const phases = await trx('journey_template_phases').where({ template_id: ageing.id }).orderBy('sort_order', 'asc');
+      const startAt = phases.findIndex((p: { legacy_phase: string | null }) => p.legacy_phase === profile.current_phase);
+      await enrolProfileInTemplate(trx, { careProfileId: profile.id, templateId: ageing.id, createdByAccountId: actorId, startAtSortOrder: Math.max(0, startAt) });
+      return ageing.name as string;
+    }
+  }
+
+  const stages = (await trx('life_stages').where((w) => void w.whereNull('retired').orWhere('retired', false))) as Array<{
+    id: string; min_age_years: number | null; max_age_years: number | null; applies_before_birth: boolean;
+  }>;
+  const fitting = stages.filter((s) =>
+    expecting
+      ? s.applies_before_birth
+      : !s.applies_before_birth && (s.min_age_years !== null || s.max_age_years !== null) &&
+        (s.min_age_years === null || age! >= s.min_age_years) && (s.max_age_years === null || age! <= s.max_age_years)
+  );
+  if (fitting.length === 0) return null;
+  const candidates = (await trx('journey_templates as t')
+    .join('journey_template_life_stages as l', 'l.template_id', 't.id')
+    .whereIn('l.life_stage_id', fitting.map((s) => s.id))
+    .where({ 't.status': 'published', 't.kind': 'life_stage' })
+    .whereNot('t.slug', AGEING_JOURNEY)
+    .distinct('t.id', 't.slug', 't.name')) as Array<{ id: string; slug: string | null; name: string }>;
+  const ranked = candidates
+    .filter((c) => c.slug && DEFAULT_JOURNEY_ORDER.includes(c.slug))
+    .sort((a, b) => DEFAULT_JOURNEY_ORDER.indexOf(a.slug!) - DEFAULT_JOURNEY_ORDER.indexOf(b.slug!));
+  const pick = ranked[0];
+  if (!pick) return null;
+  await enrolProfileInTemplate(trx, { careProfileId: profile.id, templateId: pick.id, createdByAccountId: actorId });
+  return pick.name;
 }

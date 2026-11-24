@@ -28,6 +28,7 @@ import { RelationshipSelect } from '../../../components/RelationshipSelect';
 import { useProfile } from './ProfileLayout';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar } from '../../../components/data/DataToolbar';
+import { CONTACT_LINK } from '../../../components/ContactStrip';
 
 const byName = (a: CircleMember, b: CircleMember) => a.display_name.localeCompare(b.display_name);
 
@@ -45,7 +46,7 @@ const PRO_SORTS: DataSort<Provider>[] = [
 ];
 
 export function CirclePage() {
-  const { profile, canManageEditors, careName } = useProfile();
+  const { profile, canManageEditors, careName, voice } = useProfile();
   const queryClient = useQueryClient();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -160,7 +161,7 @@ export function CirclePage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <div>
           <h2 className="text-base font-semibold text-ink">Care circle</h2>
-          <EditableSubheader copyKey="profile.circle.subheader" vars={{ name: careName }} />
+          <EditableSubheader copyKey="profile.circle.subheader" voice={voice} />
         </div>
         {canManageEditors ? (
           <div className="flex gap-2 self-start sm:self-auto">
@@ -175,7 +176,7 @@ export function CirclePage() {
       ) : members.length === 0 && professionals.length === 0 ? (
         <div className="card text-center py-10">
           <p className="text-sm text-muted mb-4">
-            No one in the circle yet. Add the people around {careName}: family, friends, a neighbour, their doctor. Nobody needs an account. Invite anyone who should log in too.
+            No one in the circle yet. Add the people around {voice.object}: family, friends, a neighbour, {voice.isSelf ? 'your' : 'their'} doctor. Nobody needs an account. Invite anyone who should log in too.
           </p>
           {canManageEditors ? <Button onClick={() => setAddOpen(true)}>Add someone</Button> : null}
         </div>
@@ -289,7 +290,7 @@ export function CirclePage() {
           <h3 className="text-sm font-semibold text-ink">Professionals</h3>
           <p className="text-xs text-muted mb-3">
             From Contacts, so the same person is linked to appointments and referrals. Change their details in{' '}
-            <Link to={`/app/${profile.id}/providers`} className="text-primary hover:underline">Contacts</Link>.
+            <Link to={`/app/${profile.id}/providers`} className={`${CONTACT_LINK}`}>Contacts</Link>.
           </p>
           {professionals.length > 4 ? (
             <DataToolbar
@@ -443,7 +444,7 @@ export function CirclePage() {
               {
                 label: 'Email',
                 value: (m.email ?? m.invited_email ?? m.account_email)
-                  ? <a href={`mailto:${m.email ?? m.invited_email ?? m.account_email}`} className="text-primary hover:underline">{m.email ?? m.invited_email ?? m.account_email}</a>
+                  ? <a href={`mailto:${m.email ?? m.invited_email ?? m.account_email}`} className={`${CONTACT_LINK}`}>{m.email ?? m.invited_email ?? m.account_email}</a>
                   : null,
               },
               { label: 'What they do', value: m.role_description },

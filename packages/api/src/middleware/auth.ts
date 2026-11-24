@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import { db } from '../config/database';
 import { env } from '../config/env';
 import type { Account } from '../types';
+import { isValidTimeZone } from '../lib/timezone';
 
 /**
  * Personal access tokens (created under Account settings) authenticate
@@ -86,6 +87,14 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     if (account.sessions_valid_from && payload.iat && payload.iat * 1000 < new Date(account.sessions_valid_from).getTime() - 1000) {
       res.status(401).json({ error: 'You were signed out when the password changed. Sign in again.', code: 'SESSION_ENDED' });
       return;
+    }
+    // An account that has never said where it is takes its zone from the
+    // device it signs in on, so its reminders, dose times and whole-day
+    // dates are worked out on its own clock rather than UTC.
+    const zone = req.headers['x-time-zone'];
+    if (!account.timezone && typeof zone === 'string' && isValidTimeZone(zone)) {
+      account.timezone = zone;
+      void db('accounts').where({ id: account.id }).whereNull('timezone').update({ timezone: zone }).catch(() => {});
     }
     req.account = account;
     next();

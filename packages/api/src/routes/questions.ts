@@ -7,66 +7,98 @@ import { requireAccountRight } from '../middleware/accountRights';
 import { mediateQuestion } from '../services/ai';
 import { guardMessageTone, toneBlockBody } from '../services/messageTone';
 import type { CareProfile, OpenQuestion } from '../types';
+import { QuestionProblem, questionInputSchema, questionsOut, saveQuestion } from '../services/questions';
 
 export const questionsRouter = Router({ mergeParams: true });
 
 questionsRouter.get('/', requireAuth, async (req, res) => {
-  const questions = await db<OpenQuestion>('open_questions')
-    .where({ care_profile_id: req.params['id'] })
-    .orderBy('created_at', 'desc');
+  const questions = await questionsOut(db, String(req.params['id']));
   res.json({ questions });
 });
 
+/** One question as the list returns it. */
+const oneQuestion = async (profileId: string, id: string) =>
+  (await questionsOut(db, profileId, (q) => void q.where('q.id', id)))[0] ?? null;
+
 questionsRouter.post('/', requireAuth, async (req, res) => {
-  const schema = z.object({
-    title: z.string().min(1).max(255),
-    body: z.string().optional().nullable(),
-  });
-  const parsed = schema.safeParse(req.body);
+  const parsed = questionInputSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    res.status(400).json({ error: 'Write the question first, then save it.', code: 'VALIDATION_ERROR' });
     return;
   }
+  const profileId = String(req.params['id']);
 
   // Questions are a communications surface too, so the same tone guard applies.
-  const verdict = await guardMessageTone(
-    String(req.params['id']),
-    [parsed.data.title, parsed.data.body].filter(Boolean).join('\n')
-  );
+  const verdict = await guardMessageTone(profileId, [parsed.data.title, parsed.data.body].filter(Boolean).join('\n'));
   if (!verdict.ok) {
     res.status(422).json(toneBlockBody(verdict));
     return;
   }
 
-  const [question] = await db<OpenQuestion>('open_questions')
-    .insert({ care_profile_id: req.params['id'], ...parsed.data })
-    .returning('*');
-
-  res.status(201).json({ question });
+  try {
+    const saved = await db.transaction((trx) =>
+      saveQuestion(trx, { profileId, actorId: req.account!.id, actorMemberId: req.careAccess?.member?.id ?? null, input: parsed.data })
+    );
+    res.status(201).json({ question: await oneQuestion(profileId, saved.id), filed: saved.filed });
+  } catch (err) {
+    if (err instanceof QuestionProblem) {
+      res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
+      return;
+    }
+    throw err;
+  }
 });
 
 questionsRouter.patch('/:questionId', requireAuth, async (req, res) => {
-  const schema = z.object({
+  const schema = questionInputSchema.partial().extend({
     status: z.enum(['open', 'resolved', 'deferred']).optional(),
-    resolution: z.string().optional().nullable(),
+    resolution: z.string().max(4000).optional().nullable(),
     resolved_at: z.string().datetime().optional().nullable(),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR' });
+    res.status(400).json({ error: 'The question did not save. Check the question is written, then save it again.', code: 'VALIDATION_ERROR' });
     return;
   }
-
-  const [question] = await db<OpenQuestion>('open_questions')
-    .where({ id: req.params['questionId'], care_profile_id: req.params['id'] })
-    .update(parsed.data)
-    .returning('*');
-
-  if (!question) {
-    res.status(404).json({ error: 'Question not found', code: 'NOT_FOUND' });
-    return;
+  const profileId = String(req.params['id']);
+  const questionId = String(req.params['questionId']);
+  const { status, resolution, resolved_at, ...input } = parsed.data;
+  // New words go through the same tone guard as a new question.
+  if (input.title !== undefined || input.body !== undefined) {
+    const verdict = await guardMessageTone(profileId, [input.title, input.body].filter(Boolean).join('\n'));
+    if (!verdict.ok) {
+      res.status(422).json(toneBlockBody(verdict));
+      return;
+    }
   }
-  res.json({ question });
+  try {
+    const found = await db.transaction(async (trx) => {
+      const exists = await trx('open_questions').where({ id: questionId, care_profile_id: profileId }).first('id');
+      if (!exists) return false;
+      if (Object.keys(input).length) {
+        await saveQuestion(trx, { profileId, actorId: req.account!.id, input, questionId });
+      }
+      const state: Record<string, unknown> = {};
+      if (status !== undefined) state['status'] = status;
+      if (resolution !== undefined) state['resolution'] = resolution?.trim() || null;
+      if (resolved_at !== undefined) state['resolved_at'] = resolved_at;
+      if (status === 'resolved' && resolved_at === undefined) state['resolved_at'] = trx.fn.now();
+      if (status === 'open') state['resolved_at'] = null;
+      if (Object.keys(state).length) await trx('open_questions').where({ id: questionId }).update(state);
+      return true;
+    });
+    if (!found) {
+      res.status(404).json({ error: 'Question not found', code: 'NOT_FOUND' });
+      return;
+    }
+    res.json({ question: await oneQuestion(profileId, questionId) });
+  } catch (err) {
+    if (err instanceof QuestionProblem) {
+      res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
+      return;
+    }
+    throw err;
+  }
 });
 
 questionsRouter.delete('/:questionId', requireAuth, async (req, res) => {

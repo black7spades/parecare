@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { isFacilityProvider } from '../lib/lifeEvents';
 import { Input } from './ui/Input';
 import { AddressFields, addressFrom, addressPayload, emptyAddress, type AddressValue } from './AddressFields';
+import { CONTACT_LINK } from './ContactStrip';
 import {
   RESIDENCE_TYPES,
   ROOM_AREA_TYPES,
@@ -171,7 +172,7 @@ export function ResidenceFields({
         {value.residence_type === 'hospital' && profileId ? (
           <p className="mt-1 text-xs text-muted">
             For someone who lives in hospital.{' '}
-            <Link to={`/app/${profileId}/where-they-live?stay=new`} onClick={onLeave} className="text-primary hover:underline">
+            <Link to={`/app/${profileId}/where-they-live?stay=new`} onClick={onLeave} className={`${CONTACT_LINK}`}>
               Record a short stay as a hospital stay instead
             </Link>
           </p>

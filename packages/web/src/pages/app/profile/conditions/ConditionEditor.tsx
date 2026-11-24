@@ -13,7 +13,7 @@ import { CodesSection } from './CodesSection';
 import { FunctionsSection } from './FunctionsSection';
 import { ResolutionFields } from './ResolveConditionModal';
 import type { MedicalCondition } from '../../../../lib/care';
-import { ContactPicker, changedContactFieldsAs, pickedFrom, type PickedContact } from '../../../../components/ContactPicker';
+import { ContactPicker, contactProblem, changedContactFieldsAs, pickedFrom, type PickedContact } from '../../../../components/ContactPicker';
 
 export function ConditionEditor({
   profileId,
@@ -298,6 +298,12 @@ export function ConditionEditor({
               // Save always answers: say what is missing.
               if (!name.trim()) {
                 setError('Write the condition name first, then save.');
+                return;
+              }
+              const unpicked = contactProblem(treating, 'who treats it');
+              if (unpicked) {
+                setError(unpicked);
+                document.getElementById('condition-treating')?.focus();
                 return;
               }
               setError('');

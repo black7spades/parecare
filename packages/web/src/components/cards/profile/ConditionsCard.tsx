@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { cap, type Voice } from '../../../lib/voice';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../api/client';
@@ -7,17 +8,18 @@ import { ConditionModal } from '../../../components/QuickAddModals';
 import { conditionCategoryLabel, conditionStatusLabel, type MedicalCondition } from '../../../lib/care';
 import { CardShell } from '../CardShell';
 import type { CardProps } from '../types';
+import { CONTACT_LINK } from '../../ContactStrip';
 
 /** What is going on with somebody's health, and a way to add to it. */
-export function ConditionsCard({ profileId, canEdit, careName }: CardProps) {
+export function ConditionsCard({ profileId, canEdit, careName, voice }: CardProps) {
   return (
     <CardShell>
-      <ConditionsOverview profileId={profileId} canEdit={canEdit} careName={careName} />
+      <ConditionsOverview profileId={profileId} canEdit={canEdit} careName={careName} voice={voice} />
     </CardShell>
   );
 }
 
-function buildConditionsSummary(conditions: MedicalCondition[], careName: string): string {
+function buildConditionsSummary(conditions: MedicalCondition[], voice: Voice): string {
   if (conditions.length === 0) return '';
   const active = conditions.filter((c) => c.status !== 'resolved');
   const resolved = conditions.filter((c) => c.status === 'resolved');
@@ -32,7 +34,7 @@ function buildConditionsSummary(conditions: MedicalCondition[], careName: string
 
   if (neurotypes.length > 0) {
     parts.push(
-      `${careName} is neurodivergent: ${neurotypes.map((c) => c.name).join(', ')}.`
+      `${cap(voice.subject)} ${voice.isSelf ? 'are' : 'is'} neurodivergent: ${neurotypes.map((c) => c.name).join(', ')}.`
     );
   }
 
@@ -63,11 +65,12 @@ function buildConditionsSummary(conditions: MedicalCondition[], careName: string
 function ConditionsOverview({
   profileId,
   canEdit,
-  careName,
+  voice,
 }: {
   profileId: string;
   canEdit: boolean;
   careName: string;
+  voice: Voice;
 }) {
   const [viewMode, setViewMode] = useState<'summary' | 'list'>('summary');
   const [adding, setAdding] = useState(false);
@@ -95,7 +98,7 @@ function ConditionsOverview({
     );
   }
 
-  const summary = buildConditionsSummary(conditions, careName);
+  const summary = buildConditionsSummary(conditions, voice);
 
   const pillClass = (active: boolean) =>
     active
@@ -113,7 +116,7 @@ function ConditionsOverview({
             A-Z list
           </button>
         </div>
-        <Link to="conditions" className="text-xs text-primary hover:underline">
+        <Link to="conditions" className={`${CONTACT_LINK} text-xs`}>
           Manage conditions
         </Link>
       </div>

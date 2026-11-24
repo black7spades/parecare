@@ -15,7 +15,7 @@ import { useAssistantStore } from '../../stores/assistant';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { Avatar } from '../../components/ui/Avatar';
-import { DOSE_ENTITY, POA_TYPES, PET_SPECIES, conditionStatusLabel, doseActivityWords, type DeathChange } from '../../lib/care';
+import { DOSE_ENTITY, POA_TYPES, PET_SPECIES, activityWords, conditionStatusLabel, doseActivityWords, isSelfRelationship, type DeathChange } from '../../lib/care';
 
 /** One sentence for a date of death recorded or cleared on several people at once. */
 function deathsSentence(deaths: DeathChange[]): string {
@@ -39,7 +39,8 @@ function deathsSentence(deaths: DeathChange[]): string {
   return out.join(' ');
 }
 import { AttentionPanel } from '../../components/AttentionPanel';
-import { useAiStatus, AI_WARMING_MESSAGE } from '../../lib/aiStatus';
+import { useAiStatus, usePareOn, AI_WARMING_MESSAGE } from '../../lib/aiStatus';
+import { PareOffNote } from '../../components/PareOffNote';
 import { BulkLinkProviderPicker, BulkLinkAddressPicker, BulkLinkOwnerPicker, BulkLinkCarerPicker } from './homeboard/BulkLinkPickers';
 
 interface SummaryJourney {
@@ -123,7 +124,7 @@ type SortKey = 'name' | 'activity' | 'journey';
 /** What a search for a person matches: their name, preferred name and room. */
 const findText = (p: ProfileSummary) => [p.full_name, p.preferred_name, p.room_number ? `room ${p.room_number}` : null, p.room_number].filter(Boolean).join(' ').toLowerCase();
 
-const poaLabel = (type: string | null) => POA_TYPES.find((t) => t.value === type)?.label ?? 'POA';
+const poaLabel = (type: string | null) => POA_TYPES.find((t) => t.value === type)?.label ?? 'Power of attorney';
 
 /** The journey used when sorting by journey: first active, phase order breaks ties. */
 const firstJourney = (p: ProfileSummary): SummaryJourney | null => p.journeys[0] ?? null;
@@ -165,6 +166,7 @@ export function Dashboard() {
   // plainly here rather than leaving Pare looking broken.
   const { data: aiStatus } = useAiStatus();
   const preparing = aiStatus?.state === 'preparing';
+  const pareOn = usePareOn();
 
   const pinMutation = useMutation({
     mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
@@ -294,12 +296,13 @@ export function Dashboard() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <h1>Welcome, {account?.display_name}</h1>
-        {account?.can_create_care_profiles !== false ? (
-          <Link to="/app/profiles/new">
-            <Button size="sm">Add care profile</Button>
-          </Link>
+        {/* With nobody added yet, the welcome below holds the one first step. */}
+        {account?.can_create_care_profiles !== false && profiles.length > 0 ? (
+          <Button size="sm" onClick={() => navigate('/app/profiles/new')}>Add care profile</Button>
         ) : null}
       </div>
+
+      {profiles.length > 0 ? <PareOffNote /> : null}
 
       {preparing ? (
         <div className="rounded-lg border border-border bg-surface-2 px-4 py-3 text-sm text-muted" role="status">
@@ -311,7 +314,7 @@ export function Dashboard() {
         <p className="text-sm text-muted">Loading…</p>
       ) : profiles.length === 0 ? (
         account?.can_create_care_profiles !== false ? (
-          <PareWelcomeCard />
+          pareOn ? <PareWelcomeCard /> : <FirstStepCard />
         ) : (
           <div className="card text-center py-12">
             <p className="text-muted">
@@ -641,6 +644,22 @@ export function Dashboard() {
  * takes the first message right here. A proper full-width welcome, not a
  * floating bubble. The form path stays available for people who prefer it.
  */
+function FirstStepCard() {
+  const navigate = useNavigate();
+  return (
+    <div className="card py-8 px-6 sm:px-10 space-y-4">
+      <h2 className="text-sm font-semibold text-ink">Start with one person</h2>
+      <p className="text-sm text-ink max-w-2xl">
+        PareCare keeps everything about the people you look after in one place: their medicines, appointments,
+        contacts and papers. Start with whoever is on your mind, or with yourself. A name is enough; the rest is
+        asked one step at a time, and every step can be skipped.
+      </p>
+      <Button onClick={() => navigate('/app/profiles/new')}>Add the first person</Button>
+      <PareOffNote />
+    </div>
+  );
+}
+
 function PareWelcomeCard() {
   const openWithMessage = useAssistantStore((s) => s.openWithMessage);
   const [draft, setDraft] = useState('');
@@ -689,7 +708,7 @@ function PareWelcomeCard() {
       {empty ? <p className="text-sm text-red-600 mt-2" role="alert">Write who you want to start with, for example My mum Dorothy, then send it.</p> : null}
       <p className="text-xs text-muted mt-4">
         Prefer to fill in a form yourself?{' '}
-        <Link to="/app/profiles/new" className="text-primary hover:underline">
+        <Link to="/app/profiles/new" className={CONTACT_LINK}>
           Create a care profile directly
         </Link>
       </p>
@@ -730,7 +749,7 @@ const ContactRows = ({ p }: { p: ProfileSummary }) => (
     ) : null}
     {p.primary_email ? (
       <Row label="Email">
-        <a href={`mailto:${p.primary_email}`} className="text-primary hover:underline truncate" onClick={(e) => e.stopPropagation()}>
+        <a href={`mailto:${p.primary_email}`} className={`${CONTACT_LINK} truncate`} onClick={(e) => e.stopPropagation()}>
           {p.primary_email}
         </a>
       </Row>
@@ -802,7 +821,7 @@ function ProfileCard({
             <h3 className="mb-0.5 truncate">{p.full_name}</h3>
             {p.relationship || p.preferred_name ? (
               <p className="text-xs text-muted truncate">
-                {[p.relationship ? `Your ${p.relationship}` : null, p.preferred_name ? `Known as ${p.preferred_name}` : null].filter(Boolean).join(' · ')}
+                {[p.relationship ? (isSelfRelationship(p.relationship) ? 'Your own profile' : /^resident$/i.test(p.relationship.trim()) ? 'Resident' : `Your ${p.relationship.toLowerCase()}`) : null, p.preferred_name ? `Known as ${p.preferred_name}` : null].filter(Boolean).join(' · ')}
               </p>
             ) : null}
             {!collapsed ? (
@@ -878,7 +897,7 @@ function ProfileCard({
         ) : null}
         <ContactRows p={p} />
         {showPoa.length > 0 ? (
-          <Row label="POA / executor">
+          <Row label="Power of attorney">
             <span className="text-ink">
               {showPoa.map((h) => `${h.display_name} (${poaLabel(h.poa_type)}${h.poa_activated ? ', active' : ''})`).join(', ')}
             </span>
@@ -896,7 +915,7 @@ function ProfileCard({
             <span className="text-muted">
               {p.last_activity.entity_type === DOSE_ENTITY
                 ? `${p.last_activity.actor_name ?? 'Someone'} ${doseActivityWords(p.last_activity.action, p.last_activity.summary)}`
-                : p.last_activity.summary || `${p.last_activity.action} ${p.last_activity.entity_type}`}
+                : `${p.last_activity.actor_name ?? 'Someone'} ${activityWords(p.last_activity.action, p.last_activity.entity_type)}${p.last_activity.summary ? `: ${p.last_activity.summary}` : ''}`}
               {' · '}
               {formatDistanceToNow(new Date(p.last_activity.created_at), { addSuffix: true })}
             </span>
@@ -1058,7 +1077,7 @@ function ProfileTable({
                     </button>
                   </td>
                   <td data-field="name" className="px-3 py-2">
-                    <Link to={`/app/${p.id}`} className="font-medium text-primary hover:underline">
+                    <Link to={`/app/${p.id}`} className={`${CONTACT_LINK} font-medium`}>
                       {p.full_name}
                     </Link>
                   </td>
@@ -1097,7 +1116,7 @@ function ProfileTable({
                   <td data-field="kin_phone" className="px-3 py-2 whitespace-nowrap">{p.next_of_kin?.phone ? tel(p.next_of_kin.phone, p.next_of_kin.name) : ''}</td>
                   <td data-field="updated" className="px-3 py-2 text-muted">
                     {p.last_activity
-                      ? `${p.last_activity.summary || `${p.last_activity.action} ${p.last_activity.entity_type}`} · ${formatDistanceToNow(new Date(p.last_activity.created_at), { addSuffix: true })}`
+                      ? `${p.last_activity.summary || activityWords(p.last_activity.action, p.last_activity.entity_type)} · ${formatDistanceToNow(new Date(p.last_activity.created_at), { addSuffix: true })}`
                       : ''}
                   </td>
                 </tr>

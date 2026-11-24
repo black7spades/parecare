@@ -28,7 +28,7 @@ const ACTION_TITLE: Record<string, string> = {
   file_document: 'Document', add_asset: 'Equipment', add_provider: 'Contact', add_medication: 'New medicine', add_treatment: 'Treatment', add_task: 'Task', log_event: 'Note',
   record_appointment_outcome: 'How an appointment went', update_medication: 'Change to a medicine', stop_medication: 'Stop a medicine',
   book_appointment: 'Appointment', add_condition: 'Condition', add_allergy: 'Allergy', record_cost: 'Cost',
-  set_id_numbers: 'ID numbers',
+  set_id_numbers: 'ID numbers', raise_question: 'Question to ask', answer_question: 'Answer to a question',
 };
 const humanize = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/, (c) => c.toUpperCase());
 const inputClass = 'w-full rounded-md border border-border bg-card px-2 py-1 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';

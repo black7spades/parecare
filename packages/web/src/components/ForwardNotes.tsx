@@ -8,6 +8,7 @@ import type { NextStep } from '../lib/nextSteps';
 import { Button } from './ui/Button';
 import { Textarea } from './ui/Input';
 import { Modal } from './ui/Modal';
+import { CONTACT_LINK } from './ContactStrip';
 
 /**
  * Forwarding what was noted at one appointment to another. A forwarded piece
@@ -197,7 +198,7 @@ export function ForwardTags({ profileId, forwards, canEdit }: { profileId: strin
           <span>
             {f.waiting ? 'Waiting to go to ' : 'Forwarded to '}
             {f.to_appointment_id ? (
-              <Link to={appointmentRecordLink(profileId, f.to_appointment_id)} className="text-primary hover:underline">{f.to_label}</Link>
+              <Link to={appointmentRecordLink(profileId, f.to_appointment_id)} className={`${CONTACT_LINK}`}>{f.to_label}</Link>
             ) : (
               f.to_label
             )}
@@ -231,7 +232,7 @@ export function ForwardedFromTag({ profileId, from }: { profileId: string; from:
     <p className="text-xs text-muted">
       From{' '}
       {from.appointment_id ? (
-        <Link to={appointmentRecordLink(profileId, from.appointment_id)} className="text-primary hover:underline">{from.label}</Link>
+        <Link to={appointmentRecordLink(profileId, from.appointment_id)} className={`${CONTACT_LINK}`}>{from.label}</Link>
       ) : (
         from.label
       )}{' '}

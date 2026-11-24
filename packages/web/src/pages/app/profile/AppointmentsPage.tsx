@@ -17,7 +17,7 @@ import { ForwardNotesModal, ForwardedText, type SentForward, pickedItems } from 
 import type { NextStep } from '../../../lib/nextSteps';
 import { MedicationForm } from './medications/MedicationForm';
 import { UploadDocumentModal } from './DocumentsPage';
-import { SELF_RELATIONSHIP, personKey, type CircleMember, type ContactSummary, type Task } from '../../../lib/care';
+import { SELF_RELATIONSHIP, personKey, type AppointmentQuestion, type CircleMember, type ContactSummary, type Task } from '../../../lib/care';
 import { RecordPanel } from '../../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
@@ -26,6 +26,7 @@ import { useHealthConfig } from '../../../lib/appConfig';
 import { noticeFiled, refreshContacts, useNoticeStore } from '../../../stores/notice';
 import { AddressFields, addressFrom, addressPayload, emptyAddress, hasAddress, type AddressValue } from '../../../components/AddressFields';
 import { CONTACT_LINK, ContactStrip } from '../../../components/ContactStrip';
+import { EmptyState } from '../../../components/EmptyState';
 import { SendAppointmentModal, downloadAppointmentIcs } from '../../../components/SendAppointmentModal';
 import { ContactPicker } from '../../../components/ContactPicker';
 import { LinkedText } from '../../../components/LinkedText';
@@ -88,6 +89,8 @@ export interface Appointment {
   series?: { id: string; repeat: string; repeat_until: string | null } | null;
   /** Results to talk about at this visit. */
   results_to_discuss?: TestResult[];
+  /** Questions to ask at this visit: asked for it, or for whoever it is with. */
+  questions?: AppointmentQuestion[];
   /** Results recorded for this test appointment. */
   test_results?: Array<{ id: string; test_name: string; reported_on: string | null }>;
   from_task?: {
@@ -174,7 +177,7 @@ interface NewBooking {
 const noBooking: NewBooking = { providerId: '', conditionId: '', fromTask: '', title: '', type: '', fromJourneyItem: '' };
 
 export function AppointmentsPage() {
-  const { profile, careName, canEdit, isOwner, relationship } = useProfile();
+  const { profile, careName, canEdit, isOwner, relationship, voice, access } = useProfile();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const notice = useNoticeStore((s) => s.show);
@@ -415,9 +418,9 @@ export function AppointmentsPage() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-sm font-semibold text-ink">Appointments</h2>
-          <EditableSubheader copyKey="profile.appointments.subheader" vars={{ name: careName }} />
+          <EditableSubheader copyKey="profile.appointments.subheader" voice={voice} />
         </div>
-        {canEdit ? <Button size="sm" onClick={() => setAdding(true)}>Add appointment</Button> : null}
+        {canEdit && appointments.length > 0 ? <Button size="sm" onClick={() => setAdding(true)}>Add appointment</Button> : null}
       </div>
 
       {forwardError ? (
@@ -463,13 +466,20 @@ export function AppointmentsPage() {
 
       {isLoading ? (
         <p className="text-sm text-muted">Loading...</p>
+      ) : appointments.length === 0 ? (
+        <EmptyState
+          says="Visits, tests and therapy sessions go here, with who, where and what to bring."
+          actionLabel="Add an appointment"
+          onAction={() => setAdding(true)}
+          canAdd={canEdit}
+          access={access}
+          name={careName}
+          page="Appointments page"
+          managerName={profile.manager_name}
+        />
       ) : dv.view.length === 0 ? (
         <div className="card text-center py-10">
-          <p className="text-sm text-muted">
-            {appointments.length === 0
-              ? `No appointments recorded for ${careName} yet.`
-              : 'No appointments match your search or filters.'}
-          </p>
+          <p className="text-sm text-muted">No appointments match your search or filters.</p>
         </div>
       ) : (
         <div className="card p-0 overflow-x-auto">
@@ -517,7 +527,7 @@ export function AppointmentsPage() {
                   <td className="px-3 py-2 text-ink hidden lg:table-cell">{a.provider_name ?? ''}</td>
                   <td className="px-3 py-2 whitespace-nowrap hidden xl:table-cell">
                     {a.provider?.phone ? (
-                      <a href={`tel:${a.provider.phone.replace(/[^\d+]/g, '')}`} className="text-primary hover:underline" aria-label={`Call ${a.provider.name} on ${a.provider.phone}`}>
+                      <a href={`tel:${a.provider.phone.replace(/[^\d+]/g, '')}`} className={CONTACT_LINK} aria-label={`Call ${a.provider.name} on ${a.provider.phone}`}>
                         {a.provider.phone}
                       </a>
                     ) : null}
@@ -738,6 +748,7 @@ export function AppointmentsPage() {
               <p className="text-sm text-muted">No one linked yet.</p>
             )}
           </section>
+          <AppointmentQuestions profileId={profile.id} appointment={current} canEdit={canEdit} onChanged={invalidate} />
           <section>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Documents to bring</h3>
             {(current.bring_documents ?? []).length === 0 ? (
@@ -746,7 +757,7 @@ export function AppointmentsPage() {
               <ul className="space-y-1">
                 {current.bring_documents!.map((d) => (
                   <li key={d.id} className="text-sm">
-                    <Link to={`/app/${profile.id}/documents?doc=${d.id}`} className="text-primary hover:underline break-words">{d.label}</Link>
+                    <Link to={`/app/${profile.id}/documents?doc=${d.id}`} className={`${CONTACT_LINK} break-words`}>{d.label}</Link>
                     {d.category_name ? <span className="ml-2 text-xs text-muted">{d.category_name}</span> : null}
                   </li>
                 ))}
@@ -757,7 +768,7 @@ export function AppointmentsPage() {
             <section>
               <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">From the task</h3>
               <p className="text-sm">
-                <Link to={`/app/${profile.id}/tasks?record=${current.from_task.id}`} className="text-primary hover:underline">{current.from_task.title}</Link>
+                <Link to={`/app/${profile.id}/tasks?record=${current.from_task.id}`} className={CONTACT_LINK}>{current.from_task.title}</Link>
                 {current.from_task.completed_at ? <span className="text-muted">, done {format(new Date(current.from_task.completed_at), 'd MMM yyyy')}</span> : null}
               </p>
               {current.from_task.body ? (
@@ -782,7 +793,7 @@ export function AppointmentsPage() {
 
       {outcomeAppointment ? (
         <OutcomeModal
-          key={outcomeAppointment.id}
+          key={`outcome-${outcomeAppointment.id}`}
           profileId={profile.id}
           appointment={outcomeAppointment}
           canEdit={canEdit}
@@ -954,6 +965,73 @@ export function AppointmentsPage() {
   );
 }
 
+/**
+ * What to ask at this visit, on screen when they get there: questions asked
+ * for it, and those for whoever it is with that have no visit yet. One box
+ * adds another, already tied to this visit.
+ */
+function AppointmentQuestions({ profileId, appointment, canEdit, onChanged }: { profileId: string; appointment: Appointment; canEdit: boolean; onChanged: () => void }) {
+  const queryClient = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [text, setText] = useState('');
+  const [error, setError] = useState('');
+  const questions = appointment.questions ?? [];
+  const add = useMutation({
+    mutationFn: () => api.post(`/care-profiles/${profileId}/questions`, { title: text.trim(), appointment_id: appointment.id }),
+    onSuccess: () => {
+      setText('');
+      setAdding(false);
+      setError('');
+      onChanged();
+      void queryClient.invalidateQueries({ queryKey: ['questions', profileId] });
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'The question did not save. Try again in a moment.'),
+  });
+  return (
+    <section>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Questions to ask</h3>
+      {questions.length === 0 ? (
+        <p className="text-sm text-muted">No questions for this visit yet.</p>
+      ) : (
+        <ul className="space-y-1">
+          {questions.map((q) => (
+            <li key={q.id} className="text-sm">
+              <Link to={`/app/${profileId}/questions?record=${q.id}`} className={`${CONTACT_LINK} break-words`}>{q.title}</Link>
+              {q.status === 'resolved' && q.resolution ? <span className="block text-xs text-muted">They said: {q.resolution}</span> : null}
+              {q.status === 'open' && !q.appointment_id && q.ask ? <span className="block text-xs text-muted">For {q.ask.name}, on the next visit with them</span> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      {canEdit ? (
+        adding ? (
+          <form
+            className="mt-2 space-y-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!text.trim()) {
+                setError('Write the question first, then add it.');
+                document.getElementById('appt-question')?.focus();
+                return;
+              }
+              add.mutate();
+            }}
+          >
+            <Input id="appt-question" label="Question" value={text} onChange={(e) => { setText(e.target.value); setError(''); }} placeholder="e.g. Can the dose be lowered?" />
+            {error ? <p className="text-sm text-red-600" role="alert">{error}</p> : null}
+            <div className="flex gap-2">
+              <Button type="submit" size="xs" variant="secondary" loading={add.isPending}>Add question</Button>
+              <Button type="button" size="xs" variant="ghost" onClick={() => { setAdding(false); setError(''); }}>Cancel</Button>
+            </div>
+          </form>
+        ) : (
+          <Button size="xs" variant="ghost" className="mt-2" onClick={() => setAdding(true)}>Add a question</Button>
+        )
+      ) : null}
+    </section>
+  );
+}
+
 interface ProviderFull {
   id: string;
   name: string;
@@ -982,6 +1060,12 @@ export interface AppointmentDraft {
   providerId: string;
   /** A new name typed for who it is with: filed in Contacts on save. */
   newProviderName: string;
+  /**
+   * Whether that typed name was chosen as a new contact. False while it is
+   * only typed, so a part of a name never files anyone; left out when the
+   * name came from somewhere already settled, such as a referral.
+   */
+  providerIsNew?: boolean;
   /** What that new person does, when known, e.g. from a referral. */
   newProviderType: string;
   /** Their phone: for a new name, or a contact with no number yet. */
@@ -1078,6 +1162,8 @@ function draftFromAppointment(a: Appointment): AppointmentDraft {
 export interface AppointmentDraftErrors {
   title?: string;
   startDate?: string;
+  /** A name typed for who it is with, not yet picked or added. */
+  who?: string;
 }
 
 /**
@@ -1088,6 +1174,9 @@ export function appointmentDraftErrors(d: AppointmentDraft, requireDate = false)
   const errors: AppointmentDraftErrors = {};
   if (!d.title.trim()) errors.title = 'Say what it is for, e.g. Neurology appointment.';
   if (requireDate && !d.startDate) errors.startDate = 'Pick the day it is on. A booked appointment keeps its date.';
+  if (!d.providerId && d.newProviderName.trim() && d.providerIsNew === false) {
+    errors.who = `Pick ${d.newProviderName.trim()} from the list, or choose Add ${d.newProviderName.trim()} as a new contact.`;
+  }
   return errors;
 }
 
@@ -1098,7 +1187,8 @@ export const draftIsBookable = (d: AppointmentDraft, requireDate = false) =>
 /** One sentence naming what is missing, for beside the Save button. */
 export function missingSentence(errors: AppointmentDraftErrors, what = 'This appointment'): string {
   const parts = [errors.title ? 'what it is for' : null, errors.startDate ? 'a start date' : null].filter(Boolean);
-  return parts.length ? `${what} needs ${parts.join(' and ')}.` : '';
+  const needs = parts.length ? `${what} needs ${parts.join(' and ')}.` : '';
+  return [needs, errors.who ? `For who it is with, ${errors.who[0]!.toLowerCase()}${errors.who.slice(1)}` : ''].filter(Boolean).join(' ');
 }
 
 /** The draft as the appointments API takes it. */
@@ -1234,9 +1324,9 @@ export function AppointmentFields({
       ? last.attendees!.map((p) => ({ key: p.account_id ? personKey({ account_id: p.account_id }) : personKey({ circle_member_id: p.circle_member_id! }), isDriver: p.is_driver }))
       : [];
   };
-  const pickContact = (providerId: string, name: string, providerType: string, phone: string) => {
+  const pickContact = (providerId: string, name: string, providerType: string, phone: string, isNew: boolean) => {
     if (!providerId) {
-      set({ providerId: '', newProviderName: name, newProviderType: providerType, providerPhone: phone });
+      set({ providerId: '', newProviderName: name, newProviderType: providerType, providerPhone: phone, providerIsNew: isNew });
       return;
     }
     const provider = providers.find((p) => p.id === providerId);
@@ -1300,8 +1390,8 @@ export function AppointmentFields({
           id={`${idPrefix}-with`}
           label="With"
           profileId={profileId}
-          value={{ providerId: value.providerId, name: pickedName, providerType: value.newProviderType, phone: value.providerPhone }}
-          onChange={(v) => pickContact(v.providerId, v.name, v.providerType, v.phone)}
+          value={{ providerId: value.providerId, name: pickedName, providerType: value.newProviderType, phone: value.providerPhone, isNew: value.providerIsNew !== false }}
+          onChange={(v) => pickContact(v.providerId, v.name, v.providerType, v.phone, !!v.isNew)}
         />
       </Group>
 
@@ -1609,6 +1699,7 @@ export function AppointmentEditor({
               const missing = appointmentDraftErrors(draft, requireDate);
               if (missing.title) document.getElementById('appt-title')?.focus();
               else if (missing.startDate) document.getElementById('appt-date')?.focus();
+              else if (missing.who) document.getElementById('appt-with')?.focus();
               if (Object.keys(missing).length === 0) saveMutation.mutate();
             }}
           >

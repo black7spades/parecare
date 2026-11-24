@@ -17,6 +17,7 @@ import { formatDateOnly } from '../../../lib/datetime';
 import { bookingHref } from '../../../lib/booking';
 import { DOCTOR_VIEWS, doctorViewLabel, firstName, flagLabel, whose, type ResultValue, type TestResult } from '../../../lib/lifeEvents';
 import { useProfile } from './ProfileLayout';
+import { EmptyState } from '../../../components/EmptyState';
 
 const byText = (a: string | null | undefined, b: string | null | undefined) => (a ?? '').localeCompare(b ?? '');
 const byDay = (a: string | null | undefined, b: string | null | undefined) => (a ?? '0000').localeCompare(b ?? '0000');
@@ -40,7 +41,7 @@ export const visitLine = (a: { title: string; starts_at: string | null; provider
  * measure in its own row, and the visit it is to be talked about at.
  */
 export function TestResultsPage() {
-  const { profile, canEdit, isSelf } = useProfile();
+  const { profile, canEdit, isSelf, access, careName } = useProfile();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -104,10 +105,16 @@ export function TestResultsPage() {
       {isLoading ? (
         <p className="text-sm text-muted">Loading…</p>
       ) : results.length === 0 ? (
-        <div className="card text-center py-10 space-y-3">
-          <p className="text-sm text-ink">Results from blood tests, scans and other tests go here, shown at the next visit.</p>
-          {canEdit ? <Button onClick={() => setEditing({ result: null })}>Add a result</Button> : null}
-        </div>
+        <EmptyState
+          says="Results from blood tests, scans and other tests go here, shown at the next visit."
+          actionLabel="Add a result"
+          onAction={() => setEditing({ result: null })}
+          canAdd={canEdit}
+          access={access}
+          name={careName}
+          page="Test results page"
+          managerName={profile.manager_name}
+        />
       ) : (
         <>
           <DataToolbar

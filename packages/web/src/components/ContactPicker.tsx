@@ -37,7 +37,7 @@ export function ContactPicker({
   placeholder = 'Search Contacts or type a new name',
   hint,
   defaultType,
-  confirmNew = false,
+  confirmNew = true,
 }: {
   id: string;
   label?: string;
@@ -52,7 +52,8 @@ export function ContactPicker({
   defaultType?: string;
   /**
    * Typing never files anyone on its own: the matches are offered first,
-   * and only "Add ... as a new contact" makes a new one.
+   * and only "Add ... as a new contact" makes a new one. On everywhere; a
+   * form that really wants a typed name filed as it stands can turn it off.
    */
   confirmNew?: boolean;
 }) {
@@ -94,7 +95,15 @@ export function ContactPicker({
         value={value.name}
         autoComplete="off"
         onFocus={() => setOpen(true)}
-        onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+        onBlur={() => {
+          window.setTimeout(() => setOpen(false), 150);
+          // A name typed in full that is exactly one contact is that contact.
+          if (!value.providerId && !value.isNew && q) {
+            const exact = [...linked, ...(data?.providers ?? [])].filter((p) => p.name.trim().toLowerCase() === lower);
+            const unique = exact.filter((p, i) => exact.findIndex((x) => x.id === p.id) === i);
+            if (unique.length === 1) onChange({ providerId: unique[0]!.id, name: unique[0]!.name, providerType: unique[0]!.provider_type, phone: '', isNew: false });
+          }
+        }}
         onChange={(e) => {
           setOpen(true);
           onChange({ ...value, providerId: '', isNew: false, name: e.target.value });
@@ -176,6 +185,17 @@ export function ContactPicker({
       ) : null}
     </div>
   );
+}
+
+/**
+ * A part of a name never files a contact on its own. Returns the sentence a
+ * form shows beside its Save when a name was typed but neither picked from
+ * the list nor added as new, else null. `what` names the box: "who it is with".
+ */
+export function contactProblem(v: PickedContact, what = 'who it is with'): string | null {
+  const name = v.name.trim();
+  if (!name || v.providerId || v.isNew) return null;
+  return `For ${what}, pick ${name} from the list, or choose Add ${name} as a new contact.`;
 }
 
 /** The fields a form sends for who it is with. */

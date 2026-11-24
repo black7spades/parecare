@@ -5,6 +5,7 @@ import { api } from '../../../api/client';
 import { CardShell } from '../CardShell';
 import type { CardProps } from '../types';
 import type { Appointment } from '../../../pages/app/profile/AppointmentsPage';
+import { CONTACT_LINK } from '../../ContactStrip';
 
 /** What is coming in the next fortnight. */
 export function UpcomingCard({ profileId }: CardProps) {
@@ -49,7 +50,7 @@ function UpcomingEvents({ profileId }: { profileId: string }) {
   return (
     <div>
       <div className="flex items-center justify-between gap-2 mb-2">
-        <Link to="calendar" className="text-xs text-primary hover:underline">
+        <Link to="calendar" className={`${CONTACT_LINK} text-xs`}>
           Open the calendar
         </Link>
       </div>
@@ -81,7 +82,7 @@ function UpcomingEvents({ profileId }: { profileId: string }) {
               {nextAppt && e.id === nextApptEvent?.id && (nextAppt.provider?.phone || (nextAppt.bring_documents ?? []).length) ? (
                 <span className="basis-full flex flex-wrap gap-x-3 pl-0.5 text-xs text-muted">
                   {nextAppt.provider?.phone ? (
-                    <a href={`tel:${nextAppt.provider.phone.replace(/[^0-9+]/g, '')}`} className="text-primary hover:underline" aria-label={`Call ${nextAppt.provider.name} on ${nextAppt.provider.phone}`}>
+                    <a href={`tel:${nextAppt.provider.phone.replace(/[^0-9+]/g, '')}`} className={`${CONTACT_LINK}`} aria-label={`Call ${nextAppt.provider.name} on ${nextAppt.provider.phone}`}>
                       {nextAppt.provider.phone}
                     </a>
                   ) : null}

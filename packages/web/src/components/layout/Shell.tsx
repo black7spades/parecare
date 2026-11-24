@@ -10,6 +10,7 @@ import { CaptureSheet } from '../CaptureSheet';
 import { InstallPrompt } from '../InstallPrompt';
 import { ProfileSwitcher } from './ProfileSwitcher';
 import { useAssistantStore } from '../../stores/assistant';
+import { usePareOn } from '../../lib/aiStatus';
 import { NotificationsBell } from './NotificationsBell';
 import { UndoBar } from '../UndoBar';
 import { NoticeBar } from '../NoticeBar';
@@ -134,8 +135,11 @@ function ProfileNavRow({
 }) {
   const Icon = item.icon;
   const setAssistantOpen = useAssistantStore((s) => s.setOpen);
+  const pareOn = usePareOn();
   // "Ask PareCare" is no longer a page of its own: it opens the assistant,
   // already scoped to the person whose profile is open. One way to ask Pare.
+  // With no assistant attached it is not offered at all.
+  if (item.key === 'ai' && !pareOn) return null;
   if (item.key === 'ai') {
     return (
       <div className="group relative">

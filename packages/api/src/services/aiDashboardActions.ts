@@ -4,6 +4,7 @@ import { accountHasRight } from '../middleware/accountRights';
 import { getEffectiveTier, PLAN_LIMITS, getCareAccess } from '../middleware/subscriptionGate';
 import { extractActionBlocks, collectActions, crossProfileActionSchema, resolveProfileByName, toJsonSchema, type CrossProfileAction, type ExtractedActions } from './aiActions';
 import { addPracticeMember } from './providerPractices';
+import { enrolDefaultJourney } from './journeys';
 import type { Account, CareProfile } from '../types';
 
 /**
@@ -46,6 +47,8 @@ const createProfileSchema = z.object({
   relationship: z.string().max(100).optional().nullable(),
   species: z.string().max(60).optional().nullable(),
   breed: z.string().max(120).optional().nullable(),
+  // Their date of birth, when the user gave it, so the journey that fits their age is started.
+  date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
 });
 
 // Pare never completes a task itself. It proposes completion, which the app
@@ -176,12 +179,15 @@ async function createProfile(
       owner_relationship: (action.relationship ?? '').trim() || null,
       species: action.kind === 'pet' ? (action.species ?? '').trim() || null : null,
       breed: action.kind === 'pet' ? (action.breed ?? '').trim() || null : null,
+      date_of_birth: action.date_of_birth ?? null,
       current_phase: 'early_concern',
     })
     .returning('*');
+  // The everyday journey for their age, the same as the form gives.
+  const journey = await db.transaction((trx) => enrolDefaultJourney(trx, profile, account.id));
 
   return {
-    outcome: `Created a care profile for ${fullName}.`,
+    outcome: `Created a care profile for ${fullName}.${journey ? ` Started the ${journey} journey, which fits their age.` : ''}`,
     clientAction: { action: 'profile_created', profile_id: profile.id, name: fullName },
   };
 }

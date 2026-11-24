@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { Button } from '../../components/ui/Button';
 import { EmergencySheetView, type EmergencySheet as Sheet } from '../../components/EmergencySheetView';
+import { CONTACT_LINK } from '../../components/ContactStrip';
 
 /**
  * Emergency sheets for many people at once, one to a printed page, for a
@@ -33,7 +34,7 @@ export function EmergencySheetsPage() {
       {ids.length === 0 ? (
         <div className="card text-center py-10 space-y-2">
           <p className="text-sm text-ink">Choose the people whose sheets you need on the Homeboard, then Print emergency sheets.</p>
-          <Link to="/app" className="text-sm text-primary hover:underline">Go to the Homeboard</Link>
+          <Link to="/app" className={`${CONTACT_LINK} text-sm`}>Go to the Homeboard</Link>
         </div>
       ) : isLoading ? (
         <p className="text-sm text-muted">Putting the sheets together.</p>

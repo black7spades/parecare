@@ -20,6 +20,35 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.54.0',
+    date: '2026-11-25',
+    summary: 'Questions go to the visit they are for, first setup asks for medicines, pharmacy, ID numbers, the directive and power of attorney, and everything works without Pare.',
+    groups: [
+      { heading: 'Added', items: [
+        'Questions go to the visit. A question can name who to ask and the visit to ask it at. Name the GP and it goes on the next visit with them, and says so, so it is on screen when you get there. The appointment lists its questions to ask, with a box to add another.',
+        'What did they say? After a visit, How did it go lists the questions brought to it, each with a box for what they said. Saving the answer marks the question answered.',
+        'First setup asks the things that matter. Setting up a new person now asks for their medicines with how much and when, their pharmacy, their ID numbers, whether they have an advance care directive and where it is kept, and who holds power of attorney. The person named as their carer can be picked as who to call in an emergency, and as who holds power of attorney, without typing them again.',
+        'Setting up your own profile speaks to you. On your own profile, setup and every page say you and your: Your pharmacy, Medicines you take, Who looks after your care.',
+        'A short list of journeys to start with. Setting up a new person offers up to five journeys that fit their age, with See all journeys and a search box for the rest, instead of every journey at once.',
+        'Empty pages say what they are for. Medications, Appointments, the medication record, Questions, Test results, Equipment and Where they live each say what goes there and give one first step. Someone helping on a shift is told who adds things there, and that they can too where they are allowed.',
+      ] },
+      { heading: 'Changed', items: [
+        'Works the same without Pare. When no assistant is set up, the Pare button, Ask Pare, File with Pare and Read with Pare are hidden. A photo or an upload opens the plain filing form instead: what it is, the date written, who it is from and to, and what it is for. Each alert keeps its plain next step, such as Call, Mark as ordered or Open. Whoever runs this PareCare sees one line on where to switch Pare on; nobody else is told to ask anyone.',
+        'Names, not relationship words. Pages say the person\'s name, Dorothy, rather than mother\'s or resident, and your on your own profile. The home card for your own profile reads Your own profile.',
+        'Typing part of a name never adds a contact. Every box that names a contact offers the matches first, and only Add them as a new contact files someone new. A name typed in full that matches one contact picks them.',
+        'New people get a journey that fits. A person added with no journey chosen, from a list, a file or Pare, starts the everyday journey for their age. A child or an adult under 65 is never put on the ageing journey.',
+        'Plain words for doses. Doses read Skipped, Paused on advice and Took it themselves, and the activity list reads Linda added an appointment.',
+        'Links stand out. Links to records, phone numbers and pages are the deeper green, underlined, everywhere.',
+        'Setup that fails can be tried again. If setup stops part way, it says so in plain words, keeps everything typed, and Try again carries on from where it stopped without adding anything twice.',
+      ] },
+      { heading: 'Fixed', items: [
+        'Times on your own clock. An account that had never told PareCare where it is now takes its time zone from the device it signs in on, so reminders, dose times and whole day dates are worked out on its own clock.',
+        'Screen readers hear the right window. A window opened over another, such as an upload over an appointment, reads out its own title, and Escape closes only the top one.',
+        'Saving a question\'s changes. Editing a question now saves the new words, who to ask and the visit.',
+      ] },
+    ],
+  },
+  {
     version: '0.53.1',
     date: '2026-11-24',
     summary: 'Repeating tasks come round again wherever they are ticked, and journey steps that need a service give its number and website.',

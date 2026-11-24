@@ -7,7 +7,8 @@ import { db } from '../config/database';
 import { auditContext, currentAuditSource, currentSourceDocument, currentUndoBatch, type AuditSource } from './auditContext';
 import { applyDocumentDetails } from '../routes/documents';
 import { STOP_REASON_LABELS, recordMedicationChange, stopMedication, stopReasonFrom } from './medicationChanges';
-import { findSameBookingTask, joinTask } from './tasks';
+import { findSameBookingTask, inferTaskIntent, joinTask } from './tasks';
+import { answerQuestions, saveQuestion } from './questions';
 import { nextStepTypeIdByKey } from './nextStepTypes';
 import type { Account, CareAccess, CareCircleMember, CareProfile } from '../types';
 import { parseZonedTime, formatInZone, dateInZone, isValidTimeZone } from '../lib/timezone';
@@ -450,6 +451,18 @@ const raiseQuestionSchema = z.object({
   type: z.literal('raise_question'),
   title: z.string().min(1).max(255),
   body: z.string().optional().nullable(),
+  // Who to ask, by name or what they do ("Dr Okafor", "the GP"), and the
+  // visit to ask at, by its title. Left out, the question goes on the next
+  // visit with whoever it names.
+  ask: z.string().max(255).optional().nullable(),
+  ask_at: z.string().max(255).optional().nullable(),
+});
+
+// What was said to a question, at a visit or anywhere: it resolves it.
+const answerQuestionSchema = z.object({
+  type: z.literal('answer_question'),
+  title: z.string().min(1).max(255),
+  answer: z.string().min(1).max(4000),
 });
 
 const setCarePhaseSchema = z.object({
@@ -867,6 +880,7 @@ export const actionSchema = z.discriminatedUnion('type', [
   updateSymptomSchema,
   addTreatmentSchema,
   raiseQuestionSchema,
+  answerQuestionSchema,
   setCarePhaseSchema,
   addProviderSchema,
   addAssetSchema,
@@ -1538,6 +1552,17 @@ async function appointmentByTitle(profileId: string, title: string | null | unde
     .orderByRaw('starts_at DESC NULLS LAST')
     .first('id'));
   return (row as { id: string } | undefined)?.id ?? null;
+}
+
+/** A visit coming up, by title: the soonest one ahead with that title, else the latest. */
+async function upcomingAppointmentByTitle(profileId: string, title: string): Promise<string | null> {
+  const ahead = (await db('appointments')
+    .where({ care_profile_id: profileId, status: 'scheduled' })
+    .where((w) => void w.whereNull('starts_at').orWhere('starts_at', '>=', db.raw("now() - interval '2 hours'")))
+    .whereRaw('title ilike ?', [`%${title.trim()}%`])
+    .orderByRaw('starts_at ASC NULLS LAST')
+    .first('id')) as { id: string } | undefined;
+  return ahead?.id ?? (await appointmentByTitle(profileId, title));
 }
 
 /**
@@ -2278,17 +2303,58 @@ async function executeOne(
       return `Added the treatment ${action.name}${action.condition_name ? ` for ${action.condition_name}` : ''}.${practitioner.note}`;
     }
     case 'raise_question': {
-      const [questionRow] = await db('open_questions')
-        .insert({
-          care_profile_id: profileId,
-          title: action.title.trim(),
-          body: action.body ?? null,
-          status: 'open',
+      // Who to ask: someone in Contacts by name or by what they do, or a
+      // new name filed there. The visit: the one named, else the next with them.
+      let providerId: string | null = null;
+      let askNote = '';
+      if (action.ask?.trim()) {
+        const guess = await inferTaskIntent(db, profileId, (await accountIdForProfile(profileId))!, { title: action.ask.trim() });
+        if (guess.providerId) providerId = guess.providerId;
+        else if (/[A-Z]/.test(action.ask) && !/\b(the|my|her|his|their)\b/i.test(action.ask)) {
+          const who = await namedContact(profileId, action.ask, null, 'other');
+          providerId = who.id;
+          askNote = who.note;
+        }
+      }
+      const appointmentId = action.ask_at?.trim() ? await upcomingAppointmentByTitle(profileId, action.ask_at) : null;
+      const saved = await db.transaction((trx) =>
+        saveQuestion(trx, {
+          profileId,
+          actorId: account.id,
+          input: {
+            title: action.title.trim(),
+            body: action.body ?? null,
+            ...(providerId ? { provider_id: providerId } : {}),
+            ...(appointmentId ? { appointment_id: appointmentId } : {}),
+          },
         })
-        .returning('id');
-      await audit(profileId, account.id, 'questions', `raised ${action.title}`, questionRow?.id);
-      await linkSource('questions', questionRow?.id);
-      return `Raised the question "${action.title}" for the care circle.`;
+      );
+      await audit(profileId, account.id, 'questions', `raised ${action.title}`, saved.id);
+      await linkSource('questions', saved.id);
+      const placed = (await db('open_questions as q')
+        .leftJoin('appointments as a', 'a.id', 'q.appointment_id')
+        .leftJoin('providers as p', 'p.id', 'q.provider_id')
+        .where('q.id', saved.id)
+        .first('a.title as visit', 'p.name as who')) as { visit: string | null; who: string | null } | undefined;
+      const where = placed?.visit ? ` It is on ${placed.visit}, to ask ${placed.who ?? 'then'}.` : placed?.who ? ` It is for ${placed.who}.` : '';
+      return `Raised the question "${action.title}".${where}${askNote}`;
+    }
+    case 'answer_question': {
+      // The open one first, newest first, so a question raised again is the one answered.
+      const q = (await db('open_questions')
+        .where({ care_profile_id: profileId })
+        .whereRaw('lower(title) = lower(?)', [action.title.trim()])
+        .orderByRaw("(status = 'open') DESC, created_at DESC")
+        .first('id', 'title')) ?? (await db('open_questions')
+        .where({ care_profile_id: profileId, status: 'open' })
+        .whereRaw('title ilike ?', [`%${action.title.trim()}%`])
+        .orderBy('created_at', 'desc')
+        .first('id', 'title'));
+      if (!q) return `No question "${action.title}" was found, so nothing was answered.`;
+      await db.transaction((trx) => answerQuestions(trx, { profileId, appointmentId: null, answers: [{ question_id: q.id, answer: action.answer }] }));
+      await audit(profileId, account.id, 'questions', `answered ${q.title}`, q.id);
+      await linkSource('questions', q.id);
+      return `Answered "${q.title}" and marked it resolved.`;
     }
     case 'set_care_phase': {
       // Through the care journey, the same as the screen: history locks.

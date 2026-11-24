@@ -93,7 +93,7 @@ const STATUS_FILTER: DataFilter<MedicalCondition> = {
 
 
 export function ConditionsPage() {
-  const { profile, careName, canEdit } = useProfile();
+  const { profile, careName, canEdit, voice } = useProfile();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [adding, setAdding] = useState(false);
@@ -224,7 +224,7 @@ export function ConditionsPage() {
             <h2 className="text-base font-semibold text-ink">Conditions</h2>
             <PagePurpose kind="entry" />
           </div>
-          <EditableSubheader copyKey="profile.conditions.subheader" vars={{ name: careName }} />
+          <EditableSubheader copyKey="profile.conditions.subheader" voice={voice} />
         </div>
         {canEdit ? <Button size="sm" onClick={() => setAdding(true)}>Add condition</Button> : null}
       </div>
@@ -260,9 +260,9 @@ export function ConditionsPage() {
         <div className="card text-center py-10">
           <p className="text-sm text-muted">
             {conditions.length === 0
-              ? `No conditions recorded for ${careName} yet.`
+              ? `No conditions recorded for ${voice.object} yet.`
               : listed.length === 0
-                ? `No current conditions for ${careName}.`
+                ? `No current conditions for ${voice.object}.`
                 : 'No conditions match your search or filters.'}
           </p>
           {conditions.length === 0 && canEdit ? (

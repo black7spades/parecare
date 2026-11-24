@@ -6,6 +6,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { useAuthStore } from '../stores/auth';
 import { RelationshipSelect } from '../components/RelationshipSelect';
+import { CONTACT_LINK } from '../components/ContactStrip';
 
 interface InviteInfo {
   display_name: string;
@@ -232,7 +233,7 @@ export function InvitePage() {
                   </Button>
                   <p className="text-xs text-muted text-center">
                     Already use PareCare with a different email?{' '}
-                    <Link to={`/login?next=${next}`} className="text-primary hover:underline">
+                    <Link to={`/login?next=${next}`} className={`${CONTACT_LINK}`}>
                       Sign in instead
                     </Link>
                   </p>

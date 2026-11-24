@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { cap, type Voice } from '../../../lib/voice';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { CardAiSummary } from '../../../pages/app/profile/CardAiSummary';
@@ -6,6 +7,7 @@ import { diagnosisStatusLabel, neurotypeLabelText, type CareDocument, type Medic
 import { keys } from '../../../lib/queryKeys';
 import { CardShell, CardTrouble, CardWaiting } from '../CardShell';
 import type { CardProps } from '../types';
+import { CONTACT_LINK } from '../../ContactStrip';
 
 /**
  * How somebody's mind works, when that has been recorded.
@@ -15,7 +17,7 @@ import type { CardProps } from '../types';
  * a thumb, and disappearing on a failed request would mean nobody ever learns
  * the records were there.
  */
-export function NeurotypesCard({ profileId, canEdit, careName }: CardProps) {
+export function NeurotypesCard({ profileId, canEdit, careName, voice }: CardProps) {
   const { data, isPending, isError } = useQuery({
     queryKey: keys.conditions(profileId),
     queryFn: () => api.get<{ conditions: MedicalCondition[] }>(`/care-profiles/${profileId}/conditions`),
@@ -29,19 +31,20 @@ export function NeurotypesCard({ profileId, canEdit, careName }: CardProps) {
 
   return (
     <CardShell>
-      <NeurotypesOverview profileId={profileId} careName={careName} canEdit={canEdit} neurotypes={neurotypes} />
+      <NeurotypesOverview profileId={profileId} careName={careName} voice={voice} canEdit={canEdit} neurotypes={neurotypes} />
     </CardShell>
   );
 }
 
 function NeurotypesOverview({
   profileId,
-  careName,
+  voice,
   canEdit,
   neurotypes,
 }: {
   profileId: string;
   careName: string;
+  voice: Voice;
   canEdit: boolean;
   neurotypes: MedicalCondition[];
 }) {
@@ -57,8 +60,8 @@ function NeurotypesOverview({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm text-ink">{careName} is neurodivergent.</p>
-        <Link to="neurotypes" className="text-xs text-primary hover:underline">
+        <p className="text-sm text-ink">{cap(voice.subject)} {voice.isSelf ? 'are' : 'is'} neurodivergent.</p>
+        <Link to="neurotypes" className={`${CONTACT_LINK} text-xs`}>
           Manage neurotypes
         </Link>
       </div>
@@ -79,7 +82,7 @@ function NeurotypesOverview({
               {doc ? (
                 <Link
                   to={`documents?doc=${doc.id}`}
-                  className="text-xs text-primary hover:underline"
+                  className={`${CONTACT_LINK} text-xs`}
                   title="Open the diagnosis document in Documents"
                 >
                   Diagnosis document: {doc.label}

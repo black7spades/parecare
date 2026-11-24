@@ -3,15 +3,25 @@ import { useAuthStore } from '../../stores/auth';
 import { useSiteCopyStore } from '../../stores/siteCopy';
 import { siteCopyApi } from '../../api/siteCopy';
 import { SITE_COPY_DEFAULTS } from '../../lib/siteCopyDefaults';
+import type { Voice } from '../../lib/voice';
 
 interface Props {
   copyKey: string;
   fallback?: string;
   vars?: Record<string, string>;
+  /**
+   * Who the page is about, to the viewer. On their own profile the words
+   * come from the ".self" version of the copy ("Your medicines..."), and
+   * {name} is always their name, never a relationship word.
+   */
+  voice?: Voice;
   className?: string;
 }
 
-export function EditableSubheader({ copyKey, fallback, vars, className = '' }: Props) {
+export function EditableSubheader({ copyKey: baseKey, fallback, vars: givenVars, voice, className = '' }: Props) {
+  const selfKey = `${baseKey}.self`;
+  const copyKey = voice?.isSelf && SITE_COPY_DEFAULTS[selfKey] !== undefined ? selfKey : baseKey;
+  const vars = voice ? { name: voice.name, possessive: voice.possessive, ...givenVars } : givenVars;
   const role = useAuthStore((s) => s.account?.role);
   const isSuperAdmin = role === 'super_admin';
   const { copy, loaded, load, setCopy } = useSiteCopyStore();
@@ -22,7 +32,7 @@ export function EditableSubheader({ copyKey, fallback, vars, className = '' }: P
 
   useEffect(() => { void load(); }, [load]);
 
-  const defaultText = fallback ?? SITE_COPY_DEFAULTS[copyKey] ?? '';
+  const defaultText = (copyKey === baseKey ? fallback : undefined) ?? SITE_COPY_DEFAULTS[copyKey] ?? '';
   const rawText = copy[copyKey] ?? defaultText;
 
   const interpolate = (t: string) => {

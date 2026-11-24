@@ -21,6 +21,7 @@ import { GenerateWizard } from './plan/GenerateWizard';
 import { SignModal } from './plan/SignModal';
 import { InviteReviewerModal } from './plan/InviteReviewerModal';
 import { AccessModal } from './plan/AccessModal';
+import { CONTACT_LINK } from '../../../components/ContactStrip';
 import {
   
   
@@ -53,7 +54,7 @@ interface GenerationJob {
 }
 
 export function PlanPage() {
-  const { profile, careName, canEdit } = useProfile();
+  const { profile, careName, canEdit, voice } = useProfile();
   const queryClient = useQueryClient();
   const account = useAuthStore((s) => s.account);
 
@@ -200,7 +201,7 @@ export function PlanPage() {
             <h2 className="text-base font-semibold text-ink">Care plan</h2>
             <PagePurpose kind="output" />
           </div>
-          <EditableSubheader copyKey="profile.plan.subheader" vars={{ name: careName }} />
+          <EditableSubheader copyKey="profile.plan.subheader" voice={voice} />
         </div>
         <Link to="../emergency">
           <Button type="button" variant="secondary" size="sm">
@@ -646,7 +647,7 @@ function VersionsCard({
       <h3 className="text-sm font-semibold text-ink mb-1">Versions</h3>
       <p className="text-xs text-muted mb-3">
         Every version is also filed in{' '}
-        <Link to="../documents" className="text-primary hover:underline">
+        <Link to="../documents" className={`${CONTACT_LINK}`}>
           Documents
         </Link>{' '}
         and can be exported to PDF with its version number and integrity hash embedded.

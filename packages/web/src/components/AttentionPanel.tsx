@@ -241,7 +241,7 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
 
   const doseActions = (it: AttentionItem) => (
     <>
-      <Link to={`/app/${it.profile_id}/mar`} className="text-xs text-primary hover:underline whitespace-nowrap px-1">
+      <Link to={`/app/${it.profile_id}/mar`} className={`${CONTACT_LINK} text-xs whitespace-nowrap px-1`}>
         Check records
       </Link>
       <Button
@@ -490,8 +490,14 @@ export function AttentionPanel({ profileId }: { profileId?: string }) {
                   </Button>
                 ) : null}
                 {!pareOn && (it.kind === 'reorder_overdue' || it.kind === 'appointment_cost') ? (
-                  <Link to={itemPath(it)} className="text-xs text-primary hover:underline whitespace-nowrap px-1">
+                  <Link to={itemPath(it)} className={`${CONTACT_LINK} text-xs whitespace-nowrap px-1`}>
                     {it.kind === 'reorder_overdue' ? 'Mark as arrived' : 'Add what it cost'}
+                  </Link>
+                ) : null}
+                {/* The plain next step when nothing else is offered: open the record itself. */}
+                {it.next_action?.kind === 'open' && it.next_action.href ? (
+                  <Link to={it.next_action.href} className={`${CONTACT_LINK} text-xs whitespace-nowrap px-1`} aria-label={`Open ${it.label}`}>
+                    {it.next_action.label}
                   </Link>
                 ) : null}
                 {pareOn ? (

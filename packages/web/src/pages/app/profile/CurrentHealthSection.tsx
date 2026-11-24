@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { voiceFor, type Voice } from '../../../lib/voice';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
@@ -13,6 +14,7 @@ import {
 import { SymptomsSection } from './ConditionSymptoms';
 import { ConditionTracking } from './ConditionTracking';
 import { formatDateOnly } from '../../../lib/datetime';
+import { CONTACT_LINK } from '../../../components/ContactStrip';
 
 /** The passing-health kinds offered when recording from this card. */
 const CURRENT_HEALTH_CATEGORIES = CONDITION_CATEGORIES.filter((c) =>
@@ -55,11 +57,14 @@ export function CurrentHealthSection({
   profileId,
   canEdit,
   careName,
+  voice,
 }: {
   profileId: string;
   canEdit: boolean;
   careName: string;
+  voice?: Voice;
 }) {
+  voice = voice ?? voiceFor(careName, false);
   const [adding, setAdding] = useState(false);
   // Which condition has its tracking thread open. Collapsed by default so the
   // card stays a glance, and opens into the full history on demand.
@@ -91,7 +96,7 @@ export function CurrentHealthSection({
     return (
       <div className="flex items-center gap-2 flex-wrap">
         <p className="text-sm text-muted">
-          Nothing going on right now. When {careName} has an illness or injury, record it and it will show
+          Nothing going on right now. When {voice.subject} {voice.isSelf ? 'have' : 'has'} an illness or injury, record it and it will show
           here with its symptoms.
         </p>
         {canEdit ? (
@@ -110,7 +115,7 @@ export function CurrentHealthSection({
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-muted">
-          Illnesses and injuries {careName} is going through right now. Slide a symptom to log how it is
+          Illnesses and injuries {voice.subject} {voice.isSelf ? 'are' : 'is'} going through right now. Slide a symptom to log how it is
           today; every change is kept as a dated reading for that illness.
         </p>
         <span className="flex items-center gap-2 whitespace-nowrap">
@@ -119,7 +124,7 @@ export function CurrentHealthSection({
               Add illness or injury
             </Button>
           ) : null}
-          <Link to="conditions" className="text-xs text-primary hover:underline">
+          <Link to="conditions" className={`${CONTACT_LINK} text-xs`}>
             Manage conditions
           </Link>
         </span>

@@ -18,6 +18,7 @@ import { OWNERSHIP, firstName, ownershipLabel, whose } from '../../../lib/lifeEv
 import type { Asset } from '../../../lib/care';
 import { DirectoryAssetEditor } from '../DirectoryAssetsPage';
 import { useProfile } from './ProfileLayout';
+import { EmptyState } from '../../../components/EmptyState';
 
 const byText = (a: string | null | undefined, b: string | null | undefined) => (a ?? '').localeCompare(b ?? '');
 const byDay = (a: string | null | undefined, b: string | null | undefined) => (a ?? '9999').localeCompare(b ?? '9999');
@@ -37,7 +38,7 @@ const SORTS: DataSort<Asset>[] = [
  * same records as the account's equipment register.
  */
 export function EquipmentPage() {
-  const { profile, canEdit, isSelf } = useProfile();
+  const { profile, canEdit, isSelf, access, careName } = useProfile();
   const name = firstName(profile);
   const queryClient = useQueryClient();
   const health = useHealthConfig();
@@ -110,10 +111,16 @@ export function EquipmentPage() {
       {isLoading ? (
         <p className="text-sm text-muted">Loading…</p>
       ) : items.length === 0 ? (
-        <div className="card text-center py-10 space-y-3">
-          <p className="text-sm text-ink">Wheelchairs, hoists, CPAP machines and anything on loan go here, with when it goes back.</p>
-          {canEdit ? <Button onClick={() => setEditing({ asset: null })}>Add equipment</Button> : null}
-        </div>
+        <EmptyState
+          says="Wheelchairs, hoists, CPAP machines and anything on loan go here, with when it goes back."
+          actionLabel="Add equipment"
+          onAction={() => setEditing({ asset: null })}
+          canAdd={canEdit}
+          access={access}
+          name={careName}
+          page="Equipment page"
+          managerName={profile.manager_name}
+        />
       ) : (
         <>
           <DataToolbar

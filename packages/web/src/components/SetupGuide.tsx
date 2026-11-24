@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from './ui/Button';
 import { Modal } from './ui/Modal';
+import { CONTACT_LINK } from './ContactStrip';
 
 /**
  * A walkthrough for something that has to be done on someone else's website.
@@ -142,7 +143,7 @@ export function SetupGuide({
               href={step.link.url}
               target="_blank"
               rel="noreferrer"
-              className="inline-block text-sm text-primary hover:underline"
+              className={`${CONTACT_LINK} inline-block text-sm`}
             >
               {step.link.label}
             </a>

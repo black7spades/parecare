@@ -28,7 +28,27 @@ export const isAddedPerson = (m: { account_id: string | null; invitation_id: str
 
 const blankToNull = (v: string | null | undefined) => (v && v.trim() ? v.trim() : null);
 
-export async function addCirclePerson(profileId: string, input: CirclePersonInput) {
+export async function addCirclePerson(profileId: string, input: CirclePersonInput, opts: { sameNameIsSamePerson?: boolean } = {}) {
+  // First setup tried again names the same people again: the same name
+  // added by name is then the same person, filled in, never added twice.
+  // Anywhere else two people may share a name, so each is added.
+  const same = !opts.sameNameIsSamePerson ? undefined : (await db('care_circle_members')
+    .where({ care_profile_id: profileId })
+    .whereNull('account_id')
+    .whereNull('invitation_id')
+    .whereRaw('lower(trim(display_name)) = lower(trim(?))', [input.display_name])
+    .first()) as (Record<string, unknown> & { id: string; display_name: string }) | undefined;
+  if (same) {
+    const fill: Record<string, unknown> = {};
+    for (const k of ['relationship', 'role_description', 'phone', 'email', 'poa_type'] as const) {
+      const v = blankToNull(input[k] as string | null | undefined);
+      if (v && !same[k]) fill[k] = v;
+    }
+    if (fill['poa_type']) fill['poa_activated'] = input.poa_activated ?? false;
+    if (Object.keys(fill).length === 0) return same;
+    const [updated] = await db('care_circle_members').where({ id: same.id }).update(fill).returning('*');
+    return updated as Record<string, unknown> & { id: string; display_name: string };
+  }
   const [member] = await db('care_circle_members')
     .insert({
       care_profile_id: profileId,

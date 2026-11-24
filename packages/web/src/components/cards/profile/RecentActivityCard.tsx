@@ -6,6 +6,7 @@ import { DOSE_ENTITY, doseActivityWords, entityLabel } from '../../../lib/care';
 import { useAuthStore } from '../../../stores/auth';
 import { CardEmpty, CardShell, CardTrouble, CardWaiting } from '../CardShell';
 import type { CardProps } from '../types';
+import { CONTACT_LINK } from '../../ContactStrip';
 
 interface RecentEntry {
   id: string;
@@ -131,7 +132,7 @@ export function RecentActivityCard({ profileId }: CardProps) {
   if (isError || !data) return <CardShell><CardTrouble what="Recent activity" /></CardShell>;
 
   const allLink = (
-    <Link to={`/app/${profileId}/activity`} className="text-sm text-primary hover:underline">
+    <Link to={`/app/${profileId}/activity`} className={`${CONTACT_LINK} text-sm`}>
       See all activity
     </Link>
   );

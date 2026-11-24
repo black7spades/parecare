@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { Link } from 'react-router-dom';
 import { personKey, type PickablePerson } from '../lib/care';
 import { PhoneLink } from './cards/profile/links';
+import { CONTACT_LINK } from './ContactStrip';
 
 /** Everyone who can be picked for a job around a person: you first, then the circle. */
 export function usePickablePeople(profileId: string) {
@@ -62,7 +63,7 @@ export function PersonPicker({
           ) : picked.label === 'You' ? (
             <>
               No phone on your account yet.{' '}
-              <Link to="/account/settings" className="text-primary hover:underline">Add your phone</Link>
+              <Link to="/account/settings" className={`${CONTACT_LINK}`}>Add your phone</Link>
             </>
           ) : (
             'No phone on file yet.'

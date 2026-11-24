@@ -1,7 +1,7 @@
 import { db } from '../config/database';
 import { reachAction, supplyContext, taskContacts, type NextAction } from './alertContacts';
 import { longOpenStays, profilesInHospital } from './hospitalStays';
-import type { ContactSummary } from './professionals';
+import { contactSummaries, type ContactSummary } from './professionals';
 import { taskBooks } from './tasks';
 import { formatInZone, hmInZone, startOfDayInZone } from '../lib/timezone';
 import type { Account, CareProfile } from '../types';
@@ -474,6 +474,13 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
   const supply = await supplyContext(medIds);
   const overdue = data.profiles.flatMap((s) => s.overdueReminders.map((r) => ({ ...r, care_profile_id: s.profile.id })));
   const taskContact = await taskContacts(overdue);
+  // Who to ask the oldest quiet question, so the alert can say who to ring.
+  const staleIds = data.profiles.map((s) => s.oldestStaleQuestionId).filter((x): x is string => !!x);
+  const askRows = staleIds.length
+    ? ((await db('open_questions').whereIn('id', staleIds).whereNotNull('provider_id').select('id', 'provider_id', 'care_profile_id')) as Array<{ id: string; provider_id: string; care_profile_id: string }>)
+    : [];
+  const askContacts = askRows.length ? await contactSummaries(db, askRows.map((r) => r.provider_id)) : new Map<string, ContactSummary>();
+  const askFor = new Map(askRows.map((r) => [r.id, askContacts.get(r.provider_id) ?? null]));
   const open = (profileId: string, section: string, recordId: string | null): NextAction => ({
     kind: 'open',
     label: 'Open',
@@ -598,7 +605,7 @@ export async function gatherAttentionItems(accountId: string, timeZone?: string 
         dismissible: false,
         record_kind: s.oldestStaleQuestionId ? 'questions' : null,
         record_id: s.oldestStaleQuestionId,
-        contact: null,
+        contact: s.oldestStaleQuestionId ? askFor.get(s.oldestStaleQuestionId) ?? null : null,
         next_action: open(s.profile.id, 'questions', s.oldestStaleQuestionId),
       });
     }

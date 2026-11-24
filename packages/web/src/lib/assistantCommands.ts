@@ -152,9 +152,15 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
   },
   {
     name: 'question',
-    hint: 'the question for the care circle',
-    description: 'Raise a question, e.g. /question should we look at respite care for August?',
-    expand: (a) => `Raise this question for the care circle: ${a}`,
+    hint: 'the question and who to ask',
+    description: 'Write down a question to ask, e.g. /question ask Dr Okafor whether the dose can come down',
+    expand: (a) => `Raise this question, and put it on the next visit with whoever it names: ${a}`,
+  },
+  {
+    name: 'answer',
+    hint: 'the question and what they said',
+    description: 'Write down what a doctor or the family said, e.g. /answer the dose question: keep it the same for now',
+    expand: (a) => `Answer this question already raised, and mark it resolved: ${a}`,
   },
   {
     name: 'provider',

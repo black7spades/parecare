@@ -9,6 +9,7 @@ import { CatalogueCombo, OptionChips } from '../../../components/CatalogueCombo'
 import { PagePurpose } from '../../../components/PagePurpose';
 import { useProfile } from './ProfileLayout';
 import { type CareDocument, type CarePlan } from '../../../lib/care';
+import { CONTACT_LINK } from '../../../components/ContactStrip';
 
 /**
  * The data entry home for the facts the care plan owns itself:
@@ -26,7 +27,7 @@ const EMPTY_PLAN: CarePlan = {
 };
 
 export function CareNeedsPage() {
-  const { profile, careName, canEdit } = useProfile();
+  const { profile, careName, canEdit, voice } = useProfile();
   const queryClient = useQueryClient();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
@@ -73,9 +74,9 @@ export function CareNeedsPage() {
             <PagePurpose kind="entry" />
           </div>
           <p className="text-sm text-muted">
-            Day-to-day needs, the advance care directive, and who to call for {careName}. Changes save
+            {voice.isSelf ? 'Your day-to-day needs, your advance care directive, and who to call for you.' : `Day-to-day needs, the advance care directive, and who to call for ${careName}.`} Changes save
             straight away and flow into the{' '}
-            <Link to="../plan" className="text-primary hover:underline">
+            <Link to="../plan" className={`${CONTACT_LINK}`}>
               care plan
             </Link>
             .
@@ -130,7 +131,7 @@ export function CareNeedsPage() {
         <h3 className="text-sm font-semibold text-ink">Advance care directive</h3>
         <p className="text-sm text-muted mb-3">
           The document itself lives in{' '}
-          <Link to="../documents" className="text-primary hover:underline">
+          <Link to="../documents" className={`${CONTACT_LINK}`}>
             Documents
           </Link>
           .
@@ -205,7 +206,7 @@ function DirectiveSection({
         <ul className="space-y-1">
           {directiveDocs.map((d) => (
             <li key={d.id} className="text-sm">
-              <Link to="../documents" className="text-primary hover:underline">
+              <Link to="../documents" className={`${CONTACT_LINK}`}>
                 {d.label}
               </Link>{' '}
               <span className="text-muted">added {format(new Date(d.created_at), 'd MMM yyyy')}</span>

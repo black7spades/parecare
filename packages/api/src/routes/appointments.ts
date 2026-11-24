@@ -25,6 +25,7 @@ import {
   updateAppointment,
 } from '../services/booking';
 import { createTask, findSameBookingTask, joinTask } from '../services/tasks';
+import { answerQuestions, questionsForAppointments } from '../services/questions';
 import { refreshReferrals } from '../services/documentDates';
 import { sendShareEmail } from '../services/email';
 import {
@@ -82,8 +83,12 @@ async function fullAppointment(profileId: string, id: string) {
   const row = await appointmentSelect(profileId).andWhere('a.id', id).first();
   if (!row) return null;
   const [enriched] = await enrichAppointments(db, profileId, [serializeAppointment(row)]);
-  const [steps, forwarded] = await Promise.all([nextStepsFor([id]), forwardsSentFor([id])]);
-  return { ...enriched, next_steps: steps.get(id) ?? [], forwarded: forwarded.get(id) ?? [] };
+  const [steps, forwarded, asks] = await Promise.all([
+    nextStepsFor([id]),
+    forwardsSentFor([id]),
+    questionsForAppointments(db, profileId, [row as { id: string; provider_id: string | null; status: string; starts_at: Date | null }]),
+  ]);
+  return { ...enriched, next_steps: steps.get(id) ?? [], forwarded: forwarded.get(id) ?? [], questions: asks.get(id) ?? [] };
 }
 
 /**
@@ -141,16 +146,19 @@ appointmentsRouter.get('/', requireAuth, async (req, res) => {
   if (req.query['to']) query.where('a.starts_at', '<=', new Date(String(req.query['to'])));
   const appointments = (await query.orderBy('a.starts_at', 'asc')) as Array<Record<string, unknown> & { id: string }>;
   const ids = appointments.map((a) => a.id);
-  const [steps, forwarded, enriched] = await Promise.all([
+  const [steps, forwarded, enriched, asks] = await Promise.all([
     nextStepsFor(ids),
     forwardsSentFor(ids),
     enrichAppointments(db, profileId, appointments.map((a) => serializeAppointment(a))),
+    // What to ask at each visit, so it is on screen when they get there.
+    questionsForAppointments(db, profileId, appointments as Array<{ id: string; provider_id: string | null; status: string; starts_at: Date | null }>),
   ]);
   res.json({
     appointments: enriched.map((a) => ({
       ...a,
       next_steps: steps.get(a.id) ?? [],
       forwarded: forwarded.get(a.id) ?? [],
+      questions: asks.get(a.id) ?? [],
     })),
   });
 });
@@ -181,6 +189,8 @@ const outcomeSchema = z.object({
     )
     .max(30)
     .default([]),
+  // What they said to each question asked at the visit. Each answer resolves its question.
+  answers: z.array(z.object({ question_id: z.string().uuid(), answer: z.string().max(4000) })).max(50).default([]),
   tz: z.string().max(64).optional().nullable(),
 });
 
@@ -349,7 +359,13 @@ appointmentsRouter.put('/:appointmentId/outcome', requireAuth, async (req, res) 
       fields['outcome'] = text;
       fields['outcome_recorded_at'] = text ? trx.fn.now() : null;
     }
-    if (appointment.status === 'scheduled' && (parsed.data.outcome?.trim() || parsed.data.next_steps.length > 0)) {
+    const answered = await answerQuestions(trx, {
+      profileId,
+      appointmentId: appointment.id,
+      actorMemberId: req.careAccess?.member?.id ?? null,
+      answers: parsed.data.answers,
+    });
+    if (appointment.status === 'scheduled' && (parsed.data.outcome?.trim() || parsed.data.next_steps.length > 0 || answered > 0)) {
       fields['status'] = 'completed';
     }
     await trx('appointments').where({ id: appointment.id }).update(fields);

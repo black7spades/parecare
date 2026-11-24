@@ -9,6 +9,12 @@
 //   daughter@bench.test  daughter caring for her mum
 //   manager@bench.test   aged care home manager (professional tier, user role)
 //   worker@bench.test    support worker, contributor on mum + 6 residents
+// Everyone in the test world lives in Melbourne, so the seed works in
+// Melbourne time whatever the bench machine's own clock says, and tells the
+// server so: a visit at 10:30 is 10:30 in Melbourne, daylight saving or not.
+// Run the bench browser in Melbourne time too (see the verify skill).
+process.env.TZ = process.env.BENCH_TZ ?? 'Australia/Melbourne';
+const BENCH_ZONE = process.env.TZ;
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -25,12 +31,15 @@ const at = (days, hour = 9, min = 0) => {
   d.setHours(hour, min, 0, 0);
   return d.toISOString();
 };
-const dateOnly = (days) => new Date(Date.now() + days * DAY).toISOString().slice(0, 10);
+const dateOnly = (days) => {
+  const d = new Date(Date.now() + days * DAY);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 async function call(method, url, token, body) {
   const res = await fetch(API + url, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: { 'Content-Type': 'application/json', 'X-Time-Zone': BENCH_ZONE, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
@@ -76,7 +85,7 @@ async function upload(token, pid, label, category, text, link, extra = {}) {
   if (link) { fd.append('link_entity_type', link.type); fd.append('link_entity_id', link.id); }
   // Date written, who it is from and to, and the like (Wave 3).
   for (const [k, v] of Object.entries(extra)) fd.append(k, String(v));
-  const res = await fetch(`${API}/care-profiles/${pid}/documents`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
+  const res = await fetch(`${API}/care-profiles/${pid}/documents`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'X-Time-Zone': BENCH_ZONE }, body: fd });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) console.warn('  ! upload failed', res.status, JSON.stringify(j).slice(0, 120));
   return j.document;
@@ -264,8 +273,11 @@ for (const rid of R.slice(0, 6)) await invite(manT, rid, 'carer');
 const { templates } = await call('GET', '/journey-templates', dauT);
 const slugId = (s) => templates.find((t) => t.slug === s)?.id;
 await call('POST', `/care-profiles/${mum.id}/journeys`, dauT, { template_id: slugId('ageing-well') });
-const prev = await call('POST', `/care-profiles/${me.id}/journeys`, meT, { template_id: slugId('preventive-health') });
-const prevId = prev.journey?.id;
+// Sam's profile was made with no journey chosen, so it already has the one
+// that fits a 38 year old (Wave 8). Use it rather than adding a second.
+const samJourneys = (await call('GET', `/care-profiles/${me.id}/journeys`, meT)).journeys ?? [];
+const prevId = samJourneys.find((j) => j.template_id === slugId('preventive-health'))?.id
+  ?? (await call('POST', `/care-profiles/${me.id}/journeys`, meT, { template_id: slugId('preventive-health') })).journey?.id;
 if (prevId) {
   const { journeys } = await call('GET', `/care-profiles/${me.id}/journeys`, meT);
   const change = journeys.find((j) => j.id === prevId)?.phases.find((p) => p.name === 'Making the change');

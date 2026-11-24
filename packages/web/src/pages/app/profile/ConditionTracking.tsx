@@ -6,6 +6,7 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
+import { CONTACT_LINK } from '../../../components/ContactStrip';
 import {
   CONDITION_LOG_TYPES,
   conditionLogTypeLabel,
@@ -223,7 +224,7 @@ export function ConditionTracking({
         {appointments.length === 0 ? (
           <p className="text-xs text-muted">
             None booked for this yet.{' '}
-            <Link to={`/app/${profileId}/appointments`} className="text-primary hover:underline">Make an appointment</Link>{' '}
+            <Link to={`/app/${profileId}/appointments`} className={`${CONTACT_LINK}`}>Make an appointment</Link>{' '}
             and choose this condition to tie it here.
           </p>
         ) : (
@@ -236,7 +237,7 @@ export function ConditionTracking({
                   {a.starts_at ? (
                     <span className="text-xs text-muted">{format(new Date(a.starts_at), 'd MMM yyyy, HH:mm')}</span>
                   ) : (
-                    <Link to={`/app/${profileId}/appointments?book=${a.id}`} className="text-xs text-primary hover:underline">Not booked yet, book it</Link>
+                    <Link to={`/app/${profileId}/appointments?book=${a.id}`} className={`${CONTACT_LINK} text-xs`}>Not booked yet, book it</Link>
                   )}
                   {a.starts_at ? <span className="badge bg-surface-2 text-muted text-[10px] capitalize">{a.status}</span> : null}
                 </div>
@@ -248,7 +249,7 @@ export function ConditionTracking({
                         <span className={`text-ink ${s.completed ? 'line-through' : ''}`}>{s.title}</span>
                         <span className="text-muted">{s.type_name}</span>
                         {s.led_to && !s.led_to.starts_at ? (
-                          <Link to={`/app/${profileId}/appointments?book=${s.led_to.id}`} className="text-primary hover:underline">
+                          <Link to={`/app/${profileId}/appointments?book=${s.led_to.id}`} className={`${CONTACT_LINK}`}>
                             {s.led_to.title}, not booked yet, book it
                           </Link>
                         ) : (
@@ -280,7 +281,7 @@ export function ConditionTracking({
         {documents.length === 0 ? (
           <p className="text-xs text-muted">
             None filed for this yet.{' '}
-            <Link to="../documents" className="text-primary hover:underline">Upload a document</Link>{' '}
+            <Link to="../documents" className={`${CONTACT_LINK}`}>Upload a document</Link>{' '}
             and choose this condition to file it here.
           </p>
         ) : (
@@ -305,7 +306,7 @@ export function ConditionTracking({
         {treatments.length === 0 ? (
           <p className="text-xs text-muted">
             None recorded for this yet.{' '}
-            <Link to={`/app/${profileId}/treatments`} className="text-primary hover:underline">Add a treatment</Link>{' '}
+            <Link to={`/app/${profileId}/treatments`} className={`${CONTACT_LINK}`}>Add a treatment</Link>{' '}
             and choose this condition to tie it here.
           </p>
         ) : (

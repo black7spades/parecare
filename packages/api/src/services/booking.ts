@@ -8,6 +8,7 @@ import { createTask, finishTask, ownerZone } from './tasks';
 import { doneFromItem, itemFor } from './journeyItems';
 import { withCategory } from './documentCategories';
 import { refreshReferrals } from './documentDates';
+import { placeQuestionsFor } from './questions';
 import { REPEAT_CHOICE_VALUES, advance, repeatChoice, repeatColumns } from '../lib/repeat';
 import { dateInZone, parseZonedTime, isValidTimeZone } from '../lib/timezone';
 
@@ -452,6 +453,8 @@ export async function bookAppointment(
   // A first visit with a specialist starts the count on their referral.
   await refreshReferrals(conn, profileId);
   const row = (await conn('appointments').where({ id }).first()) as BookResult['appointment'];
+  // Questions waiting for this contact go on this visit when it is the next.
+  await placeQuestionsFor(conn, profileId, (row as { provider_id?: string | null }).provider_id);
   return { appointment: row, filed };
 }
 
@@ -547,6 +550,11 @@ export async function updateAppointment(
   }
   // Moved or cancelled: a referral counting from this visit counts again.
   await refreshReferrals(conn, profileId);
+  // Questions for the contact follow to whichever visit is now next.
+  const beforeProvider = (before as { provider_id?: string | null }).provider_id ?? null;
+  const afterProvider = (fresh as { provider_id?: string | null }).provider_id ?? null;
+  await placeQuestionsFor(conn, profileId, afterProvider);
+  if (beforeProvider && beforeProvider !== afterProvider) await placeQuestionsFor(conn, profileId, beforeProvider);
   return { appointment: fresh, filed, series_move: seriesMove };
 }
 

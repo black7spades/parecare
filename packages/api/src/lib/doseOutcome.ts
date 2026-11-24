@@ -20,10 +20,10 @@ export const isGivenStatus = (status: string): boolean => GIVEN_STATUSES.has(sta
 
 const OUTCOME_WORDS: Record<string, string> = {
   given: 'given',
-  self_administered: 'self-administered',
+  self_administered: 'taken by themselves',
   refused: 'refused',
-  omitted: 'omitted',
-  held: 'held',
+  omitted: 'skipped',
+  held: 'paused on advice',
   not_in_stock: 'not in stock',
 };
 

@@ -4,7 +4,7 @@ import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
-import { ContactPicker, contactPayload, emptyContact, type PickedContact } from '../../../components/ContactPicker';
+import { ContactPicker, contactProblem, contactPayload, emptyContact, type PickedContact } from '../../../components/ContactPicker';
 import { PersonPicker } from '../../../components/PersonPicker';
 import { DocumentAttach } from '../../../components/DocumentAttach';
 import { useNextStepTypes } from '../../../lib/nextSteps';
@@ -60,12 +60,15 @@ export function draftFromTask(t: Task): TaskDraft {
 }
 
 /** What is missing, in the words shown beside Save. */
-export function taskMissing(d: TaskDraft): { title?: string; dueDate?: string; sentence: string } {
-  const out: { title?: string; dueDate?: string } = {};
+export function taskMissing(d: TaskDraft): { title?: string; dueDate?: string; who?: string; sentence: string } {
+  const out: { title?: string; dueDate?: string; who?: string } = {};
   if (!d.title.trim()) out.title = 'Say what needs doing, e.g. Book a neurologist.';
   if (!d.dueDate) out.dueDate = 'Pick the day it is due.';
+  const who = contactProblem(d.who);
+  if (who) out.who = who;
   const parts = [out.title ? 'what needs doing' : null, out.dueDate ? 'a due date' : null].filter(Boolean);
-  return { ...out, sentence: parts.length ? `This task needs ${parts.join(' and ')}.` : '' };
+  const sentence = [parts.length ? `This task needs ${parts.join(' and ')}.` : '', who ?? ''].filter(Boolean).join(' ');
+  return { ...out, sentence };
 }
 
 /** The draft as the tasks API takes it. */
@@ -352,6 +355,7 @@ export function TaskEditor({
           setError('');
           if (missing.title) document.getElementById('edit-task-title')?.focus();
           else if (missing.dueDate) document.getElementById('edit-task-date')?.focus();
+          else if (missing.who) document.getElementById('edit-task-who')?.focus();
           else save.mutate();
         }}
       >

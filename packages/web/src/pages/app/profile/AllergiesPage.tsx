@@ -27,7 +27,7 @@ const SORTS: DataSort<Allergy>[] = [
  * allergy (the care plan, the emergency sheet) reads from here.
  */
 export function AllergiesPage() {
-  const { profile, careName, canEdit } = useProfile();
+  const { profile, canEdit, voice } = useProfile();
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Allergy | null>(null);
@@ -81,7 +81,7 @@ export function AllergiesPage() {
             <h2 className="text-base font-semibold text-ink">Allergies</h2>
             <PagePurpose kind="entry" />
           </div>
-          <EditableSubheader copyKey="profile.allergies.subheader" vars={{ name: careName }} />
+          <EditableSubheader copyKey="profile.allergies.subheader" voice={voice} />
         </div>
         {canEdit ? (
           <Button size="sm" onClick={() => setAdding(true)}>
@@ -122,7 +122,7 @@ export function AllergiesPage() {
           ) : allergies.length === 0 ? (
             <div className="space-y-3">
               <p className="text-sm text-ink">
-                Record anything {careName} must not be given, so it shows on the emergency sheet and the medicine round.
+                Record anything {voice.subject} must not be given, so it shows on the emergency sheet and the medicine round.
               </p>
               {canEdit ? (
                 <div className="flex flex-wrap justify-center gap-2">

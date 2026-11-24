@@ -31,6 +31,7 @@ import { Modal } from '../../components/ui/Modal';
 import { RecordPanel, type RecordLink } from '../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../stores/undo';
+import { CONTACT_LINK } from '../../components/ContactStrip';
 import {
   KIND_WORDS,
   providerTypeFilterOptions,
@@ -420,7 +421,7 @@ function DirectoryProvidersPage({ kind }: { kind: ProviderKind }) {
                   ) : null}
                   <td className="px-3 py-2">
                     {p.phone ? (
-                      <a href={`tel:${p.phone}`} className="text-primary hover:underline">{p.phone}</a>
+                      <a href={`tel:${p.phone}`} className={`${CONTACT_LINK}`}>{p.phone}</a>
                     ) : <span className="text-muted">-</span>}
                   </td>
                   <td className="px-3 py-2 text-muted max-w-48 truncate">{p.address || '-'}</td>

@@ -20,6 +20,7 @@ import { Modal } from '../../../components/ui/Modal';
 import { useProfile } from './ProfileLayout';
 import { AppointmentEditor } from './AppointmentsPage';
 import type { Task } from '../../../lib/care';
+import { CONTACT_LINK } from '../../../components/ContactStrip';
 
 type CalendarEvent = Omit<Task, 'kind'> & {
   kind?: string;
@@ -275,11 +276,11 @@ export function CalendarPage() {
 
         <p className="text-xs text-muted mt-3">
           Tasks and appointments from the{' '}
-          <Link to="../tasks" className="text-primary hover:underline">
+          <Link to="../tasks" className={`${CONTACT_LINK}`}>
             Tasks page
           </Link>{' '}
           and{' '}
-          <Link to="../appointments" className="text-primary hover:underline">
+          <Link to="../appointments" className={`${CONTACT_LINK}`}>
             Appointments page
           </Link>{' '}
           appear here automatically.

@@ -11,8 +11,9 @@ import { Button } from './ui/Button';
 import { Input, Textarea } from './ui/Input';
 import { Modal } from './ui/Modal';
 import { NotePicker, pickedItems, useForwardCandidates, type PickState, type SentForward } from './ForwardNotes';
-import { ContactPicker, emptyContact, type PickedContact } from './ContactPicker';
-import { ContactStrip } from './ContactStrip';
+import { ContactPicker, contactProblem, emptyContact, type PickedContact } from './ContactPicker';
+import type { AppointmentQuestion } from '../lib/care';
+import { ContactStrip, CONTACT_LINK } from './ContactStrip';
 import { JoinedNotice, type JoinedInfo } from '../pages/app/profile/TaskEditor';
 import { addressFrom } from './AddressFields';
 import { Link } from 'react-router-dom';
@@ -47,6 +48,8 @@ export interface OutcomeAppointment {
   outcome?: string | null;
   next_steps?: NextStep[];
   forwarded?: SentForward[];
+  /** Questions to ask at this visit. */
+  questions?: AppointmentQuestion[];
 }
 
 interface DraftStep {
@@ -109,6 +112,11 @@ export function OutcomeModal({
   const quick = QUICK_STEP_KEYS.map((k) => types.find((t) => t.system_key === k)).filter((t): t is NonNullable<typeof t> => !!t);
 
   const [outcome, setOutcome] = useState(appointment.outcome ?? '');
+  // What they said to each question brought to the visit.
+  const openQuestions = (appointment.questions ?? []).filter((q) => q.status === 'open');
+  const answeredQuestions = (appointment.questions ?? []).filter((q) => q.status === 'resolved' && q.resolution);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const answered = Object.entries(answers).filter(([, a]) => a.trim());
   const [drafts, setDrafts] = useState<DraftStep[]>([]);
   const [nextKey, setNextKey] = useState(1);
   const [comboKey, setComboKey] = useState(0);
@@ -169,13 +177,17 @@ export function OutcomeModal({
     Object.fromEntries(candidates.map((c) => [c.key, d.send[c.key] ?? { on: d.sendDefault }]));
   // A booking here can wait for its date, so only what it is for is needed.
   const unfinished = drafts.filter((d) => d.booking && !draftIsBookable(d.booking, false));
-  const nothingToSave = !outcome.trim() && drafts.length === 0 && !(appointment.outcome ?? '');
+  const nothingToSave = !outcome.trim() && drafts.length === 0 && answered.length === 0 && !(appointment.outcome ?? '');
+  // A part of a name never files a contact on its own.
+  const unpicked = drafts.map((d) => (d.books ? contactProblem(d.who, `who the ${d.type.toLowerCase()} is with`) : null));
+  const firstUnpicked = unpicked.findIndex((u) => !!u);
   // Every reason Save cannot go yet, in words, so nobody is left guessing.
   const problems = [
     ...unfinished.map((d) =>
       `${missingSentence(appointmentDraftErrors(d.booking!, false), `The booking for ${d.who.name.trim() || d.type}`)} Add it, or choose Not now.`
     ),
-    ...(nothingToSave ? ['Write what happened, or add a next step, then save.'] : []),
+    ...unpicked.filter((u): u is string => !!u),
+    ...(nothingToSave ? ['Write what happened, answer a question, or add a next step, then save.'] : []),
   ];
   const trySave = () => {
     setTried(true);
@@ -191,6 +203,8 @@ export function OutcomeModal({
       const el = document.getElementById(`book-${first.key}-${missing.title ? 'title' : 'date'}`);
       el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
       el?.focus({ preventScroll: true });
+    } else if (firstUnpicked >= 0) {
+      document.getElementById(`who-${drafts[firstUnpicked]!.key}`)?.focus();
     } else if (nothingToSave) {
       document.getElementById('outcome-what-happened')?.focus();
     }
@@ -203,6 +217,7 @@ export function OutcomeModal({
     void queryClient.invalidateQueries({ queryKey: ['tasks', profileId] });
     void queryClient.invalidateQueries({ queryKey: ['notifications'] });
     void queryClient.invalidateQueries({ queryKey: ['next-step-types', profileId] });
+    void queryClient.invalidateQueries({ queryKey: ['questions', profileId] });
     refreshContacts(queryClient);
   };
 
@@ -225,6 +240,7 @@ export function OutcomeModal({
               : {}),
           forward: d.books ? pickedItems(candidates, picksFor(d)) : [],
         })),
+        answers: answered.map(([question_id, answer]) => ({ question_id, answer: answer.trim() })),
         tz: browserTimeZone() ?? null,
       });
       // Book what was booked here. Each booking ticks its step off and
@@ -300,6 +316,36 @@ export function OutcomeModal({
           onChange={(e) => setOutcome(e.target.value)}
         />
 
+        {openQuestions.length > 0 || answeredQuestions.length > 0 ? (
+          <div>
+            <p className="text-sm font-medium text-ink mb-2">Questions to ask</p>
+            <ul className="space-y-3">
+              {answeredQuestions.map((q) => (
+                <li key={q.id} className="rounded-md border border-border px-3 py-2">
+                  <p className="text-sm text-ink">{q.title}</p>
+                  <p className="text-xs text-muted">They said: {q.resolution}</p>
+                </li>
+              ))}
+              {openQuestions.map((q) => (
+                <li key={q.id} className="rounded-md border border-border px-3 py-2 space-y-1">
+                  <p className="text-sm text-ink">{q.title}</p>
+                  {q.ask ? <p className="text-xs text-muted">To ask {q.ask.name}</p> : null}
+                  <Textarea
+                    id={`answer-${q.id}`}
+                    label="What did they say?"
+                    aria-label={`What did they say to: ${q.title}`}
+                    hint="Saving this marks the question answered."
+                    rows={2}
+                    disabled={!canEdit}
+                    value={answers[q.id] ?? ''}
+                    onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                  />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         {existing.length > 0 ? (
           <div>
             <p className="text-sm font-medium text-ink mb-2">Next steps so far</p>
@@ -317,7 +363,7 @@ export function OutcomeModal({
                         <ContactStrip contact={s.provider} size="compact" book={false} />
                       </div>
                     ) : s.provider_id && s.provider_name ? (
-                      <Link to={`/app/${profileId}/providers?record=${s.provider_id}`} className="text-xs text-primary hover:underline">
+                      <Link to={`/app/${profileId}/providers?record=${s.provider_id}`} className={`${CONTACT_LINK} text-xs`}>
                         {s.provider_name}
                       </Link>
                     ) : null}

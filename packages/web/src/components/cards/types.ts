@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import type { CareProfile } from '../../lib/care';
 import type { Situation } from '../../lib/situation';
+import type { Voice } from '../../lib/voice';
 
 /**
  * A card is a piece of somebody's record that knows how to fetch itself,
@@ -20,6 +21,8 @@ export interface CardContext {
   isOwner: boolean;
   canEdit: boolean;
   careName: string;
+  /** "you" and "your" on their own profile, else their name. */
+  voice: Voice;
   /** The person's composed situation, when it has loaded. */
   situation: Situation | null;
 }
@@ -30,6 +33,8 @@ export interface CardProps {
   canEdit: boolean;
   isOwner: boolean;
   careName: string;
+  /** "you" and "your" on their own profile, else their name. */
+  voice: Voice;
 }
 
 export interface CardDefinition {

@@ -8,7 +8,7 @@ export function describeAiError(err: unknown): string {
     // fault; say it is still getting ready, in the same words as elsewhere.
     if (err.code === 'AI_MODEL_PREPARING') return AI_WARMING_MESSAGE;
     if (err.code === 'AI_NOT_CONFIGURED' || /api key/i.test(err.message)) {
-      return 'Pare is not set up on this server yet. A system administrator can switch it on in System settings.';
+      return 'Pare is switched off here, so this was not done. Everything else works without it.';
     }
     return err.message;
   }

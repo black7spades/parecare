@@ -10,10 +10,11 @@ import { Modal } from '../../../components/ui/Modal';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar, type ToolbarBulkAction } from '../../../components/data/DataToolbar';
 import { IngestModal } from '../../../components/IngestModal';
+import { usePareOn } from '../../../lib/aiStatus';
 import { CIRCLE_ROLES, EXPIRING_CATEGORY_KEYS, circleRoleLabel, type CareDocument, type CircleMember } from '../../../lib/care';
 import { categoryNameOf, documentCategoriesKey, useDocumentCategories } from '../../../lib/documentCategories';
 import { SortableTh } from '../../../components/data/SortableTh';
-import { ContactPicker, changedContactFieldsAs, contactFieldsAs, emptyContact, pickedFrom, type PickedContact } from '../../../components/ContactPicker';
+import { ContactPicker, contactProblem, changedContactFieldsAs, contactFieldsAs, emptyContact, pickedFrom, type PickedContact } from '../../../components/ContactPicker';
 import { CONTACT_LINK, ContactStrip } from '../../../components/ContactStrip';
 import { formatDateOnly } from '../../../lib/datetime';
 import { DocumentCategoryField } from '../../../components/DocumentCategoryField';
@@ -99,6 +100,7 @@ function AttachedList({ doc, limit }: { doc: CareDocument; limit?: number }) {
 export function DocumentsPage() {
   const { profile, canEdit, isOwner } = useProfile();
   const queryClient = useQueryClient();
+  const pareOn = usePareOn();
   // The upload dialog: closed, open with nothing picked, or open with a
   // file someone dropped onto the list.
   const [uploading, setUploading] = useState<{ file: File | null } | null>(null);
@@ -259,7 +261,7 @@ export function DocumentsPage() {
           <PagePurpose kind="entry" />
           {canEdit ? (
             <div className="ml-auto flex flex-wrap gap-2">
-              <Button size="sm" variant="secondary" onClick={() => setIngesting(true)}>Upload and file with Pare</Button>
+              {pareOn ? <Button size="sm" variant="secondary" onClick={() => setIngesting(true)}>Upload and file with Pare</Button> : null}
               {/* The empty state carries its own Upload button, so this one
                   waits until there is a list to sit above. */}
               {documents.length > 0 ? (
@@ -390,7 +392,7 @@ export function DocumentsPage() {
                         <Button size="sm" variant="secondary" onClick={() => setViewing(doc)}>
                           View
                         </Button>
-                        {canEdit ? (
+                        {canEdit && pareOn ? (
                           <Button size="sm" variant="secondary" title="Pare reads it and proposes what to file from it" onClick={() => setReading(doc)}>
                             Read with Pare
                           </Button>
@@ -461,7 +463,7 @@ export function DocumentsPage() {
             onEdit={() => setEditing(doc)}
             extra={[
               { label: 'View', onRun: () => setViewing(doc) },
-              { label: 'Read with Pare', onRun: () => setReading(doc) },
+              ...(pareOn ? [{ label: 'Read with Pare', onRun: () => setReading(doc) }] : []),
               { label: 'Download', onRun: () => void download(doc) },
             ]}
             onDelete={() => {
@@ -512,7 +514,7 @@ export function DocumentsPage() {
           doc={viewing}
           onClose={() => setViewing(null)}
           onDownload={() => void download(viewing)}
-          onRead={canEdit ? () => { setReading(viewing); setViewing(null); } : undefined}
+          onRead={canEdit && pareOn ? () => { setReading(viewing); setViewing(null); } : undefined}
         />
       ) : null}
 
@@ -974,7 +976,7 @@ const withoutExtension = (name: string) => name.replace(/\.[^.]+$/, '');
  */
 export function UploadDocumentModal({
   profileId,
-  members,
+  members: givenMembers,
   initialFile,
   initialLabel = '',
   initialConditionId = '',
@@ -985,7 +987,8 @@ export function UploadDocumentModal({
   onUploaded,
 }: {
   profileId: string;
-  members: CircleMember[];
+  /** The circle, for who can see it. Fetched here when not given. */
+  members?: CircleMember[];
   initialFile: File | null;
   /** Prefill the name, e.g. from a document an appointment said to file. */
   initialLabel?: string;
@@ -1001,6 +1004,12 @@ export function UploadDocumentModal({
   /** A warning says the file saved but a detail could not be used. */
   onUploaded: (doc: CareDocument, warning?: string) => void;
 }) {
+  const { data: circleData } = useQuery({
+    queryKey: ['circle', profileId],
+    queryFn: () => api.get<{ members: CircleMember[] }>(`/care-profiles/${profileId}/circle`),
+    enabled: !givenMembers,
+  });
+  const members = givenMembers ?? circleData?.members ?? [];
   const [tried, setTried] = useState(false);
   const [file, setFile] = useState<File | null>(initialFile);
   const [label, setLabel] = useState(initialLabel || (initialFile ? withoutExtension(initialFile.name) : ''));
@@ -1052,7 +1061,9 @@ export function UploadDocumentModal({
     !label.trim() ? 'a name' : null,
     restricted && roles.length === 0 ? 'who can see it' : null,
   ].filter(Boolean) as string[];
-  const canSave = missing.length === 0;
+  // A part of a name never files a contact on its own.
+  const contactIssue = contactProblem(dates.from, 'who it is from') ?? contactProblem(dates.to, 'who it is to');
+  const canSave = missing.length === 0 && !contactIssue;
 
   return (
     <Modal open onClose={onClose} title="Upload a document">
@@ -1063,6 +1074,7 @@ export function UploadDocumentModal({
           setTried(true);
           if (canSave) mutation.mutate();
           else if (!file) document.getElementById('upload-doc-file')?.focus();
+          else if (contactIssue) document.getElementById(contactProblem(dates.from) ? 'upload-doc-from' : 'upload-doc-to')?.focus();
         }}
       >
         <div>
@@ -1115,7 +1127,7 @@ export function UploadDocumentModal({
         </DocumentDetailsFields>
         {uploadError ? <p className="text-sm text-red-600">{uploadError}</p> : null}
         {tried && !canSave ? (
-          <p className="text-sm text-red-600" role="alert">This upload needs {missing.join(' and ')}.</p>
+          <p className="text-sm text-red-600" role="alert">{[missing.length ? `This upload needs ${missing.join(' and ')}.` : '', contactIssue ?? ''].filter(Boolean).join(' ')}</p>
         ) : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
@@ -1149,7 +1161,8 @@ function EditDocumentModal({ profileId, doc, members, onClose, onSaved }: { prof
 
   // Save always answers: what is missing is named beside it.
   const missing = [!editLabel.trim() ? 'a name' : null, restricted && roles.length === 0 ? 'who can see it' : null].filter(Boolean) as string[];
-  const canSave = missing.length === 0;
+  const contactIssue = contactProblem(dates.from, 'who it is from') ?? contactProblem(dates.to, 'who it is to');
+  const canSave = missing.length === 0 && !contactIssue;
 
   return (
     <Modal open onClose={onClose} title="Edit document">
@@ -1170,7 +1183,7 @@ function EditDocumentModal({ profileId, doc, members, onClose, onSaved }: { prof
           <DocumentDatesFields idPrefix="edit-doc" profileId={profileId} category={editCategory} value={dates} onChange={setDates} note={doc.validity_note} />
         </DocumentDetailsFields>
         {editError ? <p className="text-sm text-red-600">{editError}</p> : null}
-        {tried && !canSave ? <p className="text-sm text-red-600" role="alert">This document needs {missing.join(' and ')}.</p> : null}
+        {tried && !canSave ? <p className="text-sm text-red-600" role="alert">{[missing.length ? `This document needs ${missing.join(' and ')}.` : '', contactIssue ?? ''].filter(Boolean).join(' ')}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={mutation.isPending}>Save</Button>

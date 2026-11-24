@@ -31,10 +31,17 @@ wakes the owner's other containers. Ask once before starting anything, then:
    `http://localhost:5173`; 127.0.0.1 does not work, because it listens on
    IPv6 only. Drive the browser with the Playwright MCP tools, not a fresh
    Playwright install.
-4. Git Bash on this machine chokes on long heredocs that contain
+4. The test world lives in Melbourne, and this machine runs on Brisbane
+   time, which is an hour behind during daylight saving. `seed.mjs` works
+   in Melbourne time and tells the server so, whatever the machine's clock.
+   Run the bench browser in Melbourne time too, or every time reads an hour
+   early: after opening a page with the Playwright MCP, run
+   `async (page) => { const s = await page.context().newCDPSession(page); await s.send('Emulation.setTimezoneOverride', { timezoneId: 'Australia/Melbourne' }); }`
+   with `browser_run_code_unsafe`, then reload. It lasts for that tab.
+5. Git Bash on this machine chokes on long heredocs that contain
    apostrophes or backticks. Write patch scripts to a scratchpad file and
    run them, rather than inlining them.
-5. Stop everything afterwards: the API, Vite, and the stack script.
+6. Stop everything afterwards: the API, Vite, and the stack script.
    Stopping the background shell does not kill the node servers here. Find
    whatever still listens on 3001, 5173, 5433 and 6380 (Get-NetTCPConnection
    in PowerShell), check the command line is ours, and stop it. The

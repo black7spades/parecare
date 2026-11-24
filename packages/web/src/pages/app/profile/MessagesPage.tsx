@@ -11,7 +11,7 @@ import { useProfile } from './ProfileLayout';
 import type { ChatMessage } from '../../../lib/care';
 
 export function MessagesPage() {
-  const { profile, careName } = useProfile();
+  const { profile, careName, voice } = useProfile();
   const queryClient = useQueryClient();
   const me = useAuthStore((s) => s.account);
   const isAdmin = me?.role === 'admin' || me?.role === 'super_admin';
@@ -74,7 +74,7 @@ export function MessagesPage() {
   return (
     <div className="card flex flex-col" style={{ minHeight: '28rem' }}>
       <h2 className="text-base font-semibold text-ink mb-1">Messages</h2>
-      <EditableSubheader copyKey="profile.messages.subheader" vars={{ name: careName }} className="mb-2" />
+      <EditableSubheader copyKey="profile.messages.subheader" voice={voice} className="mb-2" />
 
       {isAdmin && guardData ? (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-xs">

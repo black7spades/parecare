@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { PagePurpose } from '../../../components/PagePurpose';
@@ -8,6 +8,9 @@ import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { Modal } from '../../../components/ui/Modal';
 import { CartIcon, CheckIcon, PackageIcon, PencilIcon, PillIcon, TrashIcon } from '../../../components/ui/icons';
 import { useProfile } from './ProfileLayout';
+import { EmptyState } from '../../../components/EmptyState';
+import { UploadDocumentModal } from './DocumentsPage';
+import { useNoticeStore } from '../../../stores/notice';
 import { MedicationForm } from './medications/MedicationForm';
 import { ReplenishModal } from './medications/ReplenishModal';
 import { RecordChangeModal } from './medications/RecordChangeModal';
@@ -114,12 +117,21 @@ const medSorts = (mainPharmacy: string | null): DataSort<MedicationRecord>[] => 
 ];
 
 export function MedicationsPage() {
-  const { profile, access, canEdit, careName, relationship } = useProfile();
+  const { profile, access, canEdit, careName, relationship, voice } = useProfile();
   const navigate = useNavigate();
   const [addingPharmacy, setAddingPharmacy] = useState(false);
   const selfCare = relationship === SELF_RELATIONSHIP;
   const queryClient = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
+  const [uploadingScript, setUploadingScript] = useState(false);
+  // ?new=1 arrives from an empty Medication record: open Add a medicine.
+  const [medParams, setMedParams] = useSearchParams();
+  useEffect(() => {
+    if (medParams.get('new') !== '1') return;
+    setAddOpen(true);
+    setMedParams((prev) => { const n = new URLSearchParams(prev); n.delete('new'); return n; }, { replace: true });
+  }, [medParams, setMedParams]);
+  const notice = useNoticeStore((st) => st.show);
   const [editing, setEditing] = useState<MedicationRecord | null>(null);
   const [confirmBulkLog, setConfirmBulkLog] = useState(false);
   // What went wrong with the last quick action, said plainly rather than nothing.
@@ -417,7 +429,7 @@ export function MedicationsPage() {
             </button>
             <span className="ml-2"><PagePurpose kind="entry" /></span>
           </h2>
-          <EditableSubheader copyKey="profile.medications.subheader" vars={{ name: careName }} className="mt-1" />
+          <EditableSubheader copyKey="profile.medications.subheader" voice={voice} className="mt-1" />
         </div>
         {listOpen ? (
           <div className="flex flex-wrap gap-2 self-start sm:self-auto">
@@ -429,7 +441,7 @@ export function MedicationsPage() {
               templateHeaders={['Name', 'Units per dose', 'Dose amount', 'Dose measure', 'Type', 'Route', 'With food', 'As needed', 'Times', 'How often', 'Instructions', 'Critical', 'Condition', 'As needed for', 'Hours between doses', 'Most in 24 hours', 'A full pack provides', 'Units left', 'Packs on hand', 'Repeats due', 'Supplier', 'Order link', 'Prescribed by', 'Prescriber phone', 'Repeats left', 'Last day of the course', 'Active', 'Last day taken', 'Why it stopped']}
               templateSample={['Metformin', '1', '500', 'mg', 'Tablet', 'By mouth', 'Yes', 'No', '08:00; 20:00', 'Twice a day', 'Take with a full glass of water', 'No', 'Type 2 diabetes', '', '', '', '60', '42', '2', '2026-12-01', 'City Pharmacy', 'https://citypharmacy.example/reorder', 'Dr Rachel Cohen', '03 9560 4422', '5', '', 'Yes', '', '']}
             />
-            {canManageMeds ? <Button onClick={() => setAddOpen(true)}>Add medication</Button> : null}
+            {canManageMeds && meds.length > 0 ? <Button onClick={() => setAddOpen(true)}>Add medication</Button> : null}
           </div>
         ) : null}
       </div>
@@ -457,7 +469,32 @@ export function MedicationsPage() {
         </div>
       ) : null}
 
-      {listOpen ? (
+      {listOpen && data && meds.length === 0 ? (
+        <EmptyState
+          says={`Medicines ${voice.subject} ${voice.isSelf ? 'take go' : 'takes go'} here, with when and how much. Add the first one, or upload a script or a pharmacy list.`}
+          actionLabel="Add a medicine"
+          onAction={() => setAddOpen(true)}
+          canAdd={canManageMeds}
+          access={access}
+          name={careName}
+          page="Medicines page"
+          managerName={profile.manager_name}
+          extra={<Button variant="secondary" onClick={() => setUploadingScript(true)}>Upload a script</Button>}
+        />
+      ) : null}
+      {uploadingScript ? (
+        <UploadDocumentModal
+          profileId={profile.id}
+          initialFile={null}
+          initialCategoryKey="prescription"
+          onClose={() => setUploadingScript(false)}
+          onUploaded={(doc) => {
+            setUploadingScript(false);
+            notice({ message: `${doc.label} is saved in Documents. Add each medicine on it with Add a medicine.` });
+          }}
+        />
+      ) : null}
+      {listOpen && meds.length > 0 ? (
         <>
           <DataToolbar
             search={dv.search}
@@ -531,7 +568,7 @@ export function MedicationsPage() {
       <div className="pt-2">
         <p className="text-sm text-muted">
           Looking for dose logging? The{' '}
-          <Link to="../mar" className="text-primary hover:underline">Medication record</Link>{' '}
+          <Link to="../mar" className={`${CONTACT_LINK}`}>Medication record</Link>{' '}
           is under Management, where each dose given is logged and reviewed.
         </p>
       </div>
@@ -760,7 +797,7 @@ export function MedicationsPage() {
       <Modal open={confirmBulkLog} onClose={() => setConfirmBulkLog(false)} title="Record all doses">
         <p className="text-sm text-muted mb-4">
           Record a dose as given, now, for <span className="font-medium text-ink">{dv.selectedRows.length}</span> selected
-          medication{dv.selectedRows.length === 1 ? '' : 's'}? Each is logged to the MAR against {profile.full_name}.
+          medication{dv.selectedRows.length === 1 ? '' : 's'}? Each is written in the medication record for {profile.full_name}.
         </p>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setConfirmBulkLog(false)}>Cancel</Button>
