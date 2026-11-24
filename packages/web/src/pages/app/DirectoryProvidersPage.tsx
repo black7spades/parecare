@@ -32,6 +32,7 @@ import { RecordPanel, type RecordLink } from '../../components/record/RecordPane
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../stores/undo';
 import { CONTACT_LINK } from '../../components/ContactStrip';
+import { useCountry } from '../../lib/country';
 import {
   KIND_WORDS,
   providerTypeFilterOptions,
@@ -87,6 +88,10 @@ export function DirectoryProfessionalsPage() {
 }
 
 function DirectoryProvidersPage({ kind }: { kind: ProviderKind }) {
+  // Address words and examples the way this country writes them.
+  const { config: country } = useCountry();
+  const aw = country.words;
+  const sa = country.sample_address;
   const words = KIND_WORDS[kind];
   const SORTS = sortsFor(kind);
   const slug = kind === 'organisation' ? 'organisations' : 'professionals';
@@ -236,11 +241,11 @@ function DirectoryProvidersPage({ kind }: { kind: ProviderKind }) {
             resource={slug}
             canImport={canEdit}
             onImported={invalidate}
-            templateHeaders={['Name', 'Type', basedAtLabel(kind), 'Phone', 'Email', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country', 'Booking link', 'Directions']}
+            templateHeaders={['Name', 'Type', basedAtLabel(kind), 'Phone', 'Email', 'Address line 1', 'Address line 2', aw.suburb, aw.state, aw.postcode, 'Country', 'Booking link', 'Directions']}
             templateSample={
               kind === 'organisation'
-                ? ['Neuro Clinic', 'Clinic', 'Health Hub Morayfield', '07 5555 5555', 'clinic@example.com', '1 Main St', '', 'Morayfield', 'QLD', '4506', 'Australia', '', '']
-                : ['Dr Jane Smith', 'GP', 'City Medical', '07 5555 5555', 'jane@example.com', '1 Main St', '', 'Morayfield', 'QLD', '4506', 'Australia', '', '']
+                ? ['Neuro Clinic', 'Clinic', 'City Health Hub', country.phone_example, 'clinic@example.com', sa.line1, '', sa.suburb, sa.state, sa.postcode, sa.country, '', '']
+                : ['Dr Jane Smith', 'GP', 'City Medical', country.phone_example, 'jane@example.com', sa.line1, '', sa.suburb, sa.state, sa.postcode, sa.country, '', '']
             }
           />
           {canEdit ? (
@@ -808,7 +813,7 @@ function DirectoryProviderEditor({
         <ProviderTypeField key={`type-${provider?.id ?? 'new'}`} id="dir-provider-type" value={type} onChange={setType} kind={kind} />
         <Input
           label="Name"
-          placeholder={kind === 'organisation' ? 'e.g. Health Hub Morayfield' : 'e.g. Dr Carly Examplename'}
+          placeholder={kind === 'organisation' ? 'e.g. City Health Hub' : 'e.g. Dr Carly Examplename'}
           value={name}
           onChange={(e) => setName(e.target.value)}
           required

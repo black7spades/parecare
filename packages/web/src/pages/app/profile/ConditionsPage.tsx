@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import { format } from '../../../lib/dateFormat';
 import { formatDateOnly } from '../../../lib/datetime';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';

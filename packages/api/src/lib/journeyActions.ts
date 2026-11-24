@@ -26,15 +26,21 @@ export interface ItemAction {
   action_phone: string | null;
   action_document_category: string | null;
   action_page: JourneyPage | null;
-  /** A service's own website, with its finder or form: "Find a provider" on My Aged Care. */
+  /** A typed-in website for the number, with its finder or form. */
   action_url: string | null;
+  /**
+   * A kind of national service (lib/countries.ts), such as carer support:
+   * its name, number and website come from the country's services when the
+   * step is shown, so they are right wherever the person lives.
+   */
+  action_service: string | null;
   due_in_days: number | null;
   repeat_rrule: string | null;
 }
 
 export const NO_ACTION: ItemAction = {
   action: null, action_provider_type: null, action_contact_name: null, action_phone: null,
-  action_document_category: null, action_page: null, action_url: null, due_in_days: null, repeat_rrule: null,
+  action_document_category: null, action_page: null, action_url: null, action_service: null, due_in_days: null, repeat_rrule: null,
 };
 
 /** The short form the catalogue sweep is written in. */
@@ -48,6 +54,8 @@ export interface ActionSpec {
   category?: string;
   page?: JourneyPage;
   url?: string;
+  /** A kind of national service, from lib/countries.ts. */
+  service?: string;
   due?: number;
   repeat?: RepeatChoice;
 }
@@ -61,6 +69,7 @@ export function fromSpec(s: ActionSpec): ItemAction {
     action_document_category: s.category ?? null,
     action_page: s.page ?? null,
     action_url: s.url ?? null,
+    action_service: s.service ?? null,
     due_in_days: s.due ?? null,
     repeat_rrule: s.repeat ? repeatColumns(s.repeat).rrule : null,
   };
@@ -151,7 +160,7 @@ export function actionForItem(
     if (!spec) return NO_ACTION;
     const out = fromSpec(spec);
     // A call to a number in the words: the number comes from the description.
-    if (out.action === 'call' && !out.action_phone) {
+    if (out.action === 'call' && !out.action_phone && !out.action_service) {
       const desc = item.description ?? '';
       const p = findPhones(desc)[0];
       if (p) {
@@ -165,7 +174,7 @@ export function actionForItem(
 }
 
 export const ITEM_ACTION_COLUMNS = [
-  'action', 'action_provider_type', 'action_contact_name', 'action_phone', 'action_document_category', 'action_page', 'action_url', 'due_in_days', 'repeat_rrule',
+  'action', 'action_provider_type', 'action_contact_name', 'action_phone', 'action_document_category', 'action_page', 'action_url', 'action_service', 'due_in_days', 'repeat_rrule',
 ] as const;
 
 /** Just the action columns of a row, for copying a template task into a journey. */

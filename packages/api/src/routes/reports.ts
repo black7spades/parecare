@@ -7,6 +7,8 @@ import { z } from 'zod';
 import { getRegistry, generateReport, toCsv, SYSTEM_PRESETS, type ReportPreset } from '../services/reportEngine';
 import { sendShareEmail } from '../services/email';
 import { SendProblem, createShareLink, linkOut, resolveRecipient, sendToSchema, shareUrl } from '../services/shareLinks';
+import { fundingScheme, localiseCareWords } from '../lib/countries';
+import { accountCountry } from '../services/country';
 
 export const reportsRouter = Router();
 
@@ -121,8 +123,15 @@ reportsRouter.get('/outcome-analysis', requireAuth, async (req, res) => {
 
 // ── Report generator endpoints ─────────────────────────────────────────
 
-reportsRouter.get('/registry', requireAuth, async (_req, res) => {
-  res.json({ sections: getRegistry() });
+reportsRouter.get('/registry', requireAuth, async (req, res) => {
+  // Built-in words in the account's country's terms: an advance decision in the UK.
+  const country = await accountCountry(db, req.account!.id);
+  const sections = getRegistry().map((s) => ({
+    ...s,
+    description: localiseCareWords(s.description, country),
+    fields: s.fields.map((f) => ({ ...f, label: localiseCareWords(f.label, country) })),
+  }));
+  res.json({ sections });
 });
 
 reportsRouter.get('/profiles', requireAuth, async (req, res) => {
@@ -337,7 +346,18 @@ reportsRouter.get('/presets', requireAuth, async (req, res) => {
   const dbSystemIds = new Set(dbPresets.filter((p) => p.is_system).map((p) => p.name));
   const mergedSystem = systemFromCode.filter((p) => !dbSystemIds.has(p.name));
 
-  res.json({ presets: [...mergedSystem, ...dbPresets] });
+  // The funding plan progress report is named for the account's country: the
+  // NDIS progress report in Australia, a progress report for the review elsewhere.
+  const country = await accountCountry(db, account.id);
+  const scheme = fundingScheme(country, 'ndis');
+  const local = (p: Record<string, unknown>) => {
+    if (!p['is_system'] || p['name'] !== 'NDIS progress report' || country === 'AU') return p;
+    const name = scheme.progress_report ?? 'Progress report for the review';
+    const config = { ...(p['config'] as Record<string, unknown>), aiPrompt: `Write this as a progress report for a ${scheme.label} review. Focus on measurable outcomes, goal progress, task completion rates, and treatment adherence. Use evidence-based language suitable for a funding plan review.` };
+    return { ...p, name, description: `Journey progress, task completion rates, outcome ratings, and milestone tracking for ${scheme.label} reviews.`, config };
+  };
+
+  res.json({ presets: [...mergedSystem, ...dbPresets].map((p) => local(p as Record<string, unknown>)) });
 });
 
 reportsRouter.post('/presets', requireAuth, async (req, res) => {

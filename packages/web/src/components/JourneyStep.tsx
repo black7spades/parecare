@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import { format } from '../lib/dateFormat';
 import { api } from '../api/client';
 import { Button } from './ui/Button';
 import { Modal } from './ui/Modal';
 import { PersonPicker } from './PersonPicker';
 import { CONTACT_LINK } from './ContactStrip';
+import { ServiceEditor } from './ServicesTable';
 import { bookingHref } from '../lib/booking';
 import { REPEAT_CHOICES, repeatLabel, type RepeatChoice } from '../lib/repeat';
 import { parseDateOnly } from '../lib/datetime';
@@ -22,6 +23,63 @@ import {
 } from '../lib/journeyActions';
 
 const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
+
+/**
+ * A step that books something and also points to a national line, such as
+ * "Book a support appointment" with the quit smoking line beside it.
+ */
+function ServiceBeside({ item }: { item: ChecklistItem }) {
+  if (!item.action_service || item.action_service_missing) return null;
+  const name = item.action_contact_name;
+  if (item.action_phone) {
+    return (
+      <a href={telHref(item.action_phone)} className={`text-sm ${CONTACT_LINK}`} aria-label={`Call ${name ?? ''} on ${item.action_phone}`.replace('  ', ' ')}>
+        {name ? `${name} ${item.action_phone}` : item.action_phone}
+      </a>
+    );
+  }
+  return item.action_url ? (
+    <a href={item.action_url} target="_blank" rel="noopener noreferrer" className={`text-sm ${CONTACT_LINK}`}>
+      {name ? `${name} website` : 'Their website'}
+    </a>
+  ) : null;
+}
+
+/**
+ * Add the number for this service: a step whose national service has no
+ * number where the person lives. Saved for their account, so every step and
+ * page that uses the service has it from now on.
+ */
+function AddServiceNumber({ profileId, item, open, onClose }: { profileId: string; item: ChecklistItem; open: boolean; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  return (
+    <ServiceEditor
+      open={open}
+      title={`Add the number for ${item.action_service_label ? item.action_service_label.toLowerCase() : 'this service'}`}
+      service={{
+        kind: item.action_service ?? '',
+        label: item.action_service_label ?? 'Service',
+        name: null,
+        phone: null,
+        website: null,
+        source: 'original',
+        has_original: false,
+        added: false,
+        checked_on: null,
+        missing: true,
+      }}
+      everyone={false}
+      onClose={onClose}
+      onSave={async (v) => {
+        await api.put(`/care-profiles/${profileId}/country/services/${encodeURIComponent(item.action_service ?? '')}`, { name: v.name, phone: v.phone, website: v.website });
+        void queryClient.invalidateQueries({ queryKey: ['journey-checklist'] });
+        void queryClient.invalidateQueries({ queryKey: ['journeys', profileId] });
+        void queryClient.invalidateQueries({ queryKey: ['country'] });
+        onClose();
+      }}
+    />
+  );
+}
 
 /** "Tue 3 Dec" for a task's due date; a whole day reads as the day only. */
 export function dueLabel(task: Pick<JourneyItemTask, 'next_due_at' | 'all_day'>): string {
@@ -57,6 +115,7 @@ export function StepAction({
 }) {
   const navigate = useNavigate();
   const action = item.action;
+  const [adding, setAdding] = useState(false);
 
   // What was done from the step, said plainly.
   const appt = item.appointment;
@@ -117,6 +176,7 @@ export function StepAction({
           Book it
         </Button>
         {contact ? <span className="text-xs text-muted">With {contact.name}</span> : null}
+        <ServiceBeside item={item} />
       </span>
     );
   }
@@ -141,6 +201,34 @@ export function StepAction({
   if (action === 'call') {
     const phone = item.action_phone ?? item.action_contact?.phone ?? null;
     const name = item.action_contact_name ?? item.action_contact?.name ?? null;
+    if (!phone && item.action_service && item.action_url) {
+      // A service with a website but no single number, such as a local council.
+      return (
+        <span className="flex flex-wrap items-center gap-2">
+          <a href={item.action_url} target="_blank" rel="noopener noreferrer" className={`text-sm ${CONTACT_LINK}`}>
+            {name ? `${name} website` : 'Their website'}
+          </a>
+          {done}
+        </span>
+      );
+    }
+    if (!phone && item.action_service) {
+      // Nothing on file for this service where they live: never a dead end.
+      return (
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted">No number for {item.action_service_label ? item.action_service_label.toLowerCase() : 'this service'} yet.</span>
+          <Button size="xs" variant="secondary" onClick={() => setAdding(true)}>
+            Add the number for this service
+          </Button>
+          {item.task ? null : (
+            <Button size="xs" variant="ghost" onClick={() => onSetTask(item)}>
+              Add a task
+            </Button>
+          )}
+          <AddServiceNumber profileId={profileId} item={item} open={adding} onClose={() => setAdding(false)} />
+        </span>
+      );
+    }
     if (!phone) {
       // No number to call yet: it can still be a task with a date.
       return (
@@ -205,7 +293,7 @@ export function StepTaskLine({ profileId, item, canAct, onSetTask }: { profileId
   if (!t) {
     // "Add a task" is already the step's own button; a done step or a milestone with nothing to do needs no date.
     if (!canAct || item.completed || item.action === 'task' || !item.action) return null;
-    if (item.action === 'call' && !(item.action_phone ?? item.action_contact?.phone)) return null;
+    if (item.action === 'call' && !(item.action_phone ?? item.action_contact?.phone ?? item.action_url)) return null;
     return (
       <Button size="xs" variant="ghost" onClick={() => onSetTask(item)}>
         Set a date

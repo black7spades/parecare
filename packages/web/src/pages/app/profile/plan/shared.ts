@@ -1,4 +1,4 @@
-import { format } from 'date-fns';
+import { format } from '../../../../lib/dateFormat';
 import { PLAN_SECTION_ORDER } from '../../../../lib/care';
 
 /** Helpers the care plan screen and its dialogs both need. */

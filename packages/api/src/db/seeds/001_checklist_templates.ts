@@ -32,9 +32,8 @@ export const PHASE_CHECKLISTS: Record<string, Array<{ title: string; description
   ],
   home_with_support: [
     {
-      title: 'Contact My Aged Care for an assessment',
-      description:
-        'In Australia, call 1800 200 422 or visit myagedcare.gov.au to start the ACAT/ACAS process.',
+      title: 'Ask for an aged care assessment',
+      description: 'Call the aged care assessment service to start the assessment.',
     },
     {
       title: 'Arrange a home safety assessment',
@@ -117,7 +116,7 @@ export const PHASE_CHECKLISTS: Record<string, Array<{ title: string; description
     },
     {
       title: 'Notify relevant organisations of address change',
-      description: 'Medicare, Centrelink, bank, electoral roll, subscriptions.',
+      description: 'Their health and government services, bank, electoral roll, subscriptions.',
     },
   ],
   residential_ongoing: [

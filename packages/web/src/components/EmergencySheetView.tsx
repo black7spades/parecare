@@ -1,11 +1,10 @@
 import { CONTACT_LINK } from './ContactStrip';
 import type { ReactNode } from 'react';
-import { format } from 'date-fns';
+import { format } from '../lib/dateFormat';
 import { Button } from './ui/Button';
 import { PoaBadge } from './PoaBadge';
 import { EmailLink, PhoneLink } from './cards/profile/links';
 import {
-  DVA_CARD_COLOURS,
   poaLabel,
   residenceTypeLabel,
   roomAreaTypeLabel,
@@ -37,6 +36,12 @@ export interface EmergencySheet {
     address: string | null;
   };
   identifiers: Identifiers;
+  /** The ID numbers their country uses, labelled and written as on the card. */
+  id_lines?: Array<{ key: string; label: string; value: string }>;
+  /** Who to ring in an emergency where they live. */
+  emergency_number?: { name: string | null; phone: string | null; missing: boolean };
+  /** What their country calls a written record of treatment wishes. */
+  directive_term?: string;
   allergies: Array<{ substance: string; reaction: string | null; severity: string | null }>;
   no_known_allergies: { on: string; by_name: string | null } | null;
   conditions: string[];
@@ -107,7 +112,6 @@ const DocLinks = ({ docs, href }: { docs: SheetDocument[]; href?: (id: string) =
     </span>
   ) : null;
 
-const monthYear = (d: string | null) => (d ? formatDateOnly(d, 'MM/yyyy') : null);
 
 export function EmergencySheetView({
   sheet,
@@ -132,15 +136,28 @@ export function EmergencySheetView({
     r.room_number ? `Room ${r.room_number}` : null,
     r.room_area_name ? `${r.room_area_name}${r.room_area_type ? ` ${roomAreaTypeLabel(r.room_area_type)}` : ''}` : null,
   ].filter(Boolean).join(', ');
-  const hasIds = Object.values(ids).some((v) => v !== null && v !== '');
+  // The numbers their country uses, as the server lays them out; a copy kept
+  // on a phone from before shows every number it has.
+  const idLines =
+    sheet.id_lines ??
+    (Object.entries(ids) as Array<[string, unknown]>)
+      .filter(([, v]) => v !== null && v !== '')
+      .map(([k, v]) => ({ key: k, label: k.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()), value: String(v) }));
+  const hasIds = idLines.length > 0;
+  const directiveTerm = sheet.directive_term ?? 'Advance care directive';
+  const emergency = sheet.emergency_number;
   const edm = sheet.eating_drinking_moving;
   const hasNeeds = edm.diet.length + edm.swallowing.length + edm.mobility.length > 0;
-  const dvaColour = DVA_CARD_COLOURS.find((c) => c.value === ids.dva_card_colour)?.label ?? null;
 
   return (
     <div className="print-sheet card space-y-5">
       <div className="border-b border-border pb-3">
         <h1 className="text-xl font-bold text-ink">Emergency information: {p.full_name}</h1>
+        {emergency?.phone ? (
+          <p className="mt-1 text-sm text-ink">
+            In an emergency call <span className="font-bold"><PhoneLink phone={emergency.phone} /></span>
+          </p>
+        ) : null}
       </div>
 
       <Section title="Who this is">
@@ -169,16 +186,9 @@ export function EmergencySheetView({
       <Section title="ID numbers">
         {hasIds ? (
           <div className="space-y-0.5">
-            {ids.medicare_number ? <Line label="Medicare number">{ids.medicare_number.replace(/^(\d{4})(\d{5})(\d)$/, '$1 $2 $3')}</Line> : null}
-            {ids.medicare_irn ? <Line label="Position on the card">{ids.medicare_irn}</Line> : null}
-            {ids.medicare_valid_to ? <Line label="Valid to">{monthYear(ids.medicare_valid_to)}</Line> : null}
-            {ids.ihi_number ? <Line label="Individual Healthcare Identifier">{ids.ihi_number.replace(/(\d{4})(?=\d)/g, '$1 ')}</Line> : null}
-            {ids.dva_number ? <Line label="DVA file number">{ids.dva_number}</Line> : null}
-            {dvaColour ? <Line label="DVA card colour">{dvaColour}</Line> : null}
-            {ids.ndis_number ? <Line label="NDIS number">{ids.ndis_number}</Line> : null}
-            {ids.health_fund_name ? <Line label="Health fund">{ids.health_fund_name}</Line> : null}
-            {ids.health_fund_member_number ? <Line label="Member number">{ids.health_fund_member_number}</Line> : null}
-            {ids.my_aged_care_number ? <Line label="My Aged Care number">{ids.my_aged_care_number}</Line> : null}
+            {idLines.map((l) => (
+              <Line key={l.key} label={l.label}>{l.value}</Line>
+            ))}
           </div>
         ) : (
           <Empty editing={editing} adds={[{ what: 'ids', label: 'Add ID numbers' }]} />
@@ -259,7 +269,7 @@ export function EmergencySheetView({
         )}
       </Section>
 
-      <Section title="Advance care directive">
+      <Section title={directiveTerm}>
         {sheet.advance_care_directive.in_place ? (
           <div className="space-y-0.5">
             <Line label="In place">Yes</Line>

@@ -82,6 +82,15 @@ export interface JourneyItemAction {
   action_page: JourneyPage | null;
   /** The service's website, beside its number. */
   action_url?: string | null;
+  /**
+   * A kind of national service, such as carer support. Its name, number and
+   * website above come from the country's services when the step is shown.
+   */
+  action_service?: string | null;
+  /** What the service is for: "Support for carers". */
+  action_service_label?: string | null;
+  /** The country has no number or website for this service yet. */
+  action_service_missing?: boolean;
   due_in_days: number | null;
   repeat_rrule: string | null;
   /** Worked out from repeat_rrule. */

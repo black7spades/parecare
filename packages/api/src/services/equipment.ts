@@ -6,6 +6,7 @@ import { keepTask } from './keptTasks';
 import { addDays } from './documentDates';
 import { ownerZone } from './tasks';
 import { dateInZone } from '../lib/timezone';
+import { dayText } from '../lib/dayText';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -151,7 +152,7 @@ export async function assetOut(asset: Record<string, unknown>, conn: Conn = db) 
 }
 
 const friendly = (d: string) =>
-  new Date(`${d}T12:00:00Z`).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  dayText(d);
 
 /**
  * The return and service tasks for a piece of equipment, for each person it

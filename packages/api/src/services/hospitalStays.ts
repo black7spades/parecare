@@ -5,6 +5,7 @@ import { contactSummaries, mainContact, resolveContactInput, type ContactSummary
 import { keepTask } from './keptTasks';
 import { addDays } from './documentDates';
 import { todayFor } from './medicationChanges';
+import { dayText } from '../lib/dayText';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -137,7 +138,7 @@ function stayColumns(input: Partial<StayInput>): Record<string, unknown> {
 }
 
 const friendly = (d: string) =>
-  new Date(`${d}T12:00:00Z`).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  dayText(d);
 
 /** Record a stay. One open at a time: an earlier one still open must be discharged first. */
 export async function createStay(

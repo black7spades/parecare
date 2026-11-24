@@ -82,8 +82,12 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   EMAIL_FROM: z.string().email().default('noreply@parecare.app'),
   REMINDER_CHECK_INTERVAL_MS: z.string().transform(Number).default('60000'),
-  HEALTH_CURRENCY: z.enum(['AUD', 'USD', 'GBP', 'EUR', 'NZD', 'CAD']).default('AUD'),
-  HEALTH_FY_START_MONTH: z.string().transform(Number).default('7'),
+  // Both follow the country when not set.
+  HEALTH_CURRENCY: z.enum(['AUD', 'USD', 'GBP', 'EUR', 'NZD', 'CAD']).optional(),
+  HEALTH_FY_START_MONTH: z.string().transform(Number).optional(),
+  // The country to start in (AU, NZ, GB, IE, CA or US) before whoever runs
+  // PareCare picks one. Worked out from the server's clock when not set.
+  COUNTRY: optionalStr,
   GOOGLE_CLIENT_ID: optionalStr,
   GOOGLE_CLIENT_SECRET: optionalStr,
   FACEBOOK_APP_ID: optionalStr,

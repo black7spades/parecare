@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import { format } from '../lib/dateFormat';
 import { api, ApiError } from '../api/client';
 import { Button } from './ui/Button';
 import { ShareLinkBox } from './ShareLinkBox';

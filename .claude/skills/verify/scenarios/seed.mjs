@@ -9,6 +9,8 @@
 //   daughter@bench.test  daughter caring for her mum
 //   manager@bench.test   aged care home manager (professional tier, user role)
 //   worker@bench.test    support worker, contributor on mum + 6 residents
+//   admin@bench.test     whoever runs this PareCare (super admin), for the
+//                        country, its services and the yearly check
 // Everyone in the test world lives in Melbourne, so the seed works in
 // Melbourne time whatever the bench machine's own clock says, and tells the
 // server so: a visit at 10:30 is 10:30 in Melbourne, daylight saving or not.
@@ -258,6 +260,8 @@ await upload(manT, R[0], 'Advance care directive', 'Advance care directive', 'Ad
 // 5. Support worker --------------------------------------------------------
 console.log('Support worker');
 const wkT = await register('worker@bench.test', 'Jess', 'Carter');
+// Wave 9: whoever runs this PareCare. Promoted below.
+await register('admin@bench.test', 'Alex', 'Admin');
 async function invite(ownerT, pid, role) {
   const r = await call('POST', `/care-profiles/${pid}/circle`, ownerT, { invited_email: 'worker@bench.test', display_name: 'Jess Carter', role, permission: 'contributor' });
   const url = r.invite_url ?? '';
@@ -289,6 +293,12 @@ const { Client } = require('pg');
 const c = new Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://parecare:parecare@127.0.0.1:5433/parecare' });
 await c.connect();
 await c.query("update accounts set subscription_tier='professional' where email='manager@bench.test'");
+// Wave 9: the admin runs PareCare, set to Australia, and the yearly check of
+// the national services was last done over a year ago, so it is due now.
+await c.query("update accounts set role='super_admin' where email='admin@bench.test'");
+await c.query(`insert into country_settings (id, country, confirmed_at, services_checked_on)
+  values (1, 'AU', now() - interval '400 days', current_date - 400)
+  on conflict (id) do update set country = 'AU', confirmed_at = excluded.confirmed_at, services_checked_on = excluded.services_checked_on`);
 const { rows } = await c.query("select email, subscription_tier, role from accounts where email like '%@bench.test' order by email");
 console.table(rows);
 await c.end();

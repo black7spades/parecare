@@ -40,13 +40,14 @@ import {
 } from '../../../lib/care';
 import { useProfile } from './ProfileLayout';
 import { Link, useNavigate } from 'react-router-dom';
-import { format } from 'date-fns';
+import { format } from '../../../lib/dateFormat';
 import { ContactStrip } from '../../../components/ContactStrip';
 import { mainTypeWords, summaryFromProvider, type Task } from '../../../lib/care';
 import { CONTACT_LINK } from '../../../components/ContactStrip';
 import { formatDateOnly } from '../../../lib/datetime';
 import { bookingHref } from '../../../lib/booking';
 import { whenText, type Appointment } from './AppointmentsPage';
+import { useCountry } from '../../../lib/country';
 
 const kindOf = (p: { kind?: ProviderKind }): ProviderKind => p.kind ?? 'person';
 const basedAtLabel = (kind: ProviderKind) => (kind === 'organisation' ? 'Part of' : 'Based at');
@@ -63,6 +64,8 @@ const sortsFor = (kind: ProviderKind): DataSort<Provider>[] => [
  * and caseworkers on one tab, the clinics and departments on the other.
  */
 export function ProvidersPage() {
+  // Address words the way this country writes them.
+  const aw = useCountry().config.words;
   const { profile, careName, canEdit, voice } = useProfile();
   const [kind, setKind] = useState<ProviderKind>('person');
   const words = KIND_WORDS[kind];
@@ -429,9 +432,9 @@ export function ProvidersPage() {
                 ? [
                     { label: 'Street', value: p.address_line1 },
                     { label: 'Street line 2', value: p.address_line2 },
-                    { label: 'Suburb', value: p.address_suburb },
-                    { label: 'State', value: p.address_state },
-                    { label: 'Postcode', value: p.address_postcode },
+                    { label: aw.suburb, value: p.address_suburb },
+                    { label: aw.state, value: p.address_state },
+                    { label: aw.postcode, value: p.address_postcode },
                     { label: 'Country', value: p.address_country },
                   ]
                 : [{ label: 'Address', value: p.address }]),
@@ -735,7 +738,7 @@ function ProviderEditor({
         <ProviderTypeField key={`type-${provider?.id ?? 'new'}`} id="provider-type" value={type} onChange={setType} kind={kind} />
         <Input
           label="Name"
-          placeholder={kind === 'organisation' ? 'e.g. Health Hub Morayfield' : 'e.g. Dr Carly Examplename'}
+          placeholder={kind === 'organisation' ? 'e.g. City Health Hub' : 'e.g. Dr Carly Examplename'}
           value={name}
           onChange={(e) => setName(e.target.value)}
           required

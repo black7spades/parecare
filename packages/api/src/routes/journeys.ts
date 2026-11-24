@@ -117,6 +117,8 @@ journeysRouter.post('/', requireAuth, async (req, res) => {
     res.status(404).json({ error: 'Journey not found in the library', code: 'NOT_FOUND' });
     return;
   }
+  // The activity line names the journey: "Linda started a journey: Ageing well".
+  res.locals['auditEntries'] = [{ action: 'created', entity_type: 'journeys', entity_id: journey.id, summary: journey.name ?? null }];
   res.status(201).json({ journey: await journeyWithPhases(journey) });
 });
 

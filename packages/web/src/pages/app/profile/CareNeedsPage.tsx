@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCareWords } from '../../../lib/country';
+import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import { format } from '../../../lib/dateFormat';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { EmergencyContactsEditor } from '../../../components/EmergencyContactsEditor';
@@ -27,6 +28,7 @@ const EMPTY_PLAN: CarePlan = {
 };
 
 export function CareNeedsPage() {
+  const words = useCareWords(useParams().profileId);
   const { profile, careName, canEdit, voice } = useProfile();
   const queryClient = useQueryClient();
   const [saved, setSaved] = useState(false);
@@ -74,7 +76,7 @@ export function CareNeedsPage() {
             <PagePurpose kind="entry" />
           </div>
           <p className="text-sm text-muted">
-            {voice.isSelf ? 'Your day-to-day needs, your advance care directive, and who to call for you.' : `Day-to-day needs, the advance care directive, and who to call for ${careName}.`} Changes save
+            {words(voice.isSelf ? 'Your day-to-day needs, your advance care directive, and who to call for you.' : `Day-to-day needs, the advance care directive, and who to call for ${careName}.`)} Changes save
             straight away and flow into the{' '}
             <Link to="../plan" className={`${CONTACT_LINK}`}>
               care plan
@@ -128,7 +130,7 @@ export function CareNeedsPage() {
       </div>
 
       <div className="card">
-        <h3 className="text-sm font-semibold text-ink">Advance care directive</h3>
+        <h3 className="text-sm font-semibold text-ink">{words('Advance care directive')}</h3>
         <p className="text-sm text-muted mb-3">
           The document itself lives in{' '}
           <Link to="../documents" className={`${CONTACT_LINK}`}>
@@ -166,6 +168,7 @@ function DirectiveSection({
   savePlan: (patch: Partial<CarePlan>) => void;
   canEdit: boolean;
 }) {
+  const words = useCareWords(profileId);
   const { data } = useQuery({
     queryKey: ['documents', profileId],
     queryFn: () => api.get<{ documents: CareDocument[] }>(`/care-profiles/${profileId}/documents`),
@@ -182,7 +185,7 @@ function DirectiveSection({
           disabled={!canEdit}
           onChange={(e) => savePlan({ advance_care_directive: e.target.checked })}
         />
-        An advance care directive is in place
+        {words('An advance care directive is in place').replace(/^An (?=[^aeiouAEIOU])/, 'A ')}
       </label>
       {plan.advance_care_directive ? (
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -226,6 +229,7 @@ function DirectiveSection({
  * advance care directive category, exactly as if it were uploaded there.
  */
 function DirectiveUpload({ profileId }: { profileId: string }) {
+  const words = useCareWords(profileId);
   const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState('');
@@ -250,7 +254,7 @@ function DirectiveUpload({ profileId }: { profileId: string }) {
     <div className="flex flex-wrap items-center gap-2">
       <input
         type="file"
-        aria-label="Upload the advance care directive"
+        aria-label={words('Upload the advance care directive')}
         className="text-sm text-muted file:mr-2 file:rounded-md file:border file:border-border file:bg-card file:px-3 file:py-1.5 file:text-sm file:text-ink file:cursor-pointer"
         onChange={(e) => setFile(e.target.files?.[0] ?? null)}
       />

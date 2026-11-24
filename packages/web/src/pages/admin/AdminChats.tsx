@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { format, formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
+import { format } from '../../lib/dateFormat';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/auth';
 import { adminApi, type AdminChatDetail, type AdminChatSummary } from '../../api/admin';

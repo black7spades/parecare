@@ -1,4 +1,5 @@
 import { parseDateOnly } from './datetime';
+import { currentDirectiveTerm } from './careTerms';
 export const CARE_PHASES = [
   { value: 'early_concern', label: 'Early concern' },
   { value: 'home_with_support', label: 'Home with support' },
@@ -383,7 +384,9 @@ const ENTITY_LABELS: Record<string, string> = {
 export const entityLabel = (type: string) => ENTITY_LABELS[type] ?? type.replace(/[-_]+/g, ' ');
 
 /** "a task", "an appointment". */
-export const withArticle = (noun: string) => `${/^[aeiou]/i.test(noun) && !/^(u[nr]i|use|one)/i.test(noun) ? 'an' : 'a'} ${noun}`;
+export const withArticle = (noun: string) =>
+  // A plural record, such as ID numbers, is "the ID numbers", never "an ID numbers".
+  /numbers$/i.test(noun) ? `the ${noun}` : `${/^[aeiou]/i.test(noun) && !/^(u[nr]i|use|one)/i.test(noun) ? 'an' : 'a'} ${noun}`;
 
 /** The verb for what happened, in everyday words. */
 export const ACTIVITY_VERBS: Record<string, string> = { created: 'added', updated: 'changed', deleted: 'deleted' };
@@ -985,6 +988,16 @@ export interface Identifiers {
   health_fund_name: string | null;
   health_fund_member_number: string | null;
   my_aged_care_number: string | null;
+  // Other countries' numbers; which ones are asked for comes from the country.
+  nhs_number: string | null;
+  nhi_number: string | null;
+  pps_number: string | null;
+  medical_card_number: string | null;
+  health_card_province: string | null;
+  health_card_number: string | null;
+  health_card_version: string | null;
+  medicare_mbi: string | null;
+  medicaid_number: string | null;
 }
 export type IdentifierField = keyof Identifiers;
 export const DVA_CARD_COLOURS = [
@@ -1999,7 +2012,7 @@ export const PLAN_SECTION_ORDER = [
 /** Sections written by the plan editor from the recorded facts. */
 export const PLAN_NARRATIVE_SECTIONS = new Set(['goals', 'strategies', 'risks', 'review']);
 
-export const planSectionLabel = (s: string) => PLAN_SECTION_LABELS[s] ?? s;
+export const planSectionLabel = (s: string) => (s === 'directive' ? currentDirectiveTerm() : PLAN_SECTION_LABELS[s] ?? s);
 
 export const PLAN_VERSION_STATUSES = [
   { value: 'draft', label: 'Draft' },

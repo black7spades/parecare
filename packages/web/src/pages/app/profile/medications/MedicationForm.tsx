@@ -13,7 +13,7 @@ import { SupplierModal } from './SupplierModal';
 import type { CareDocument, MedicationRecord, Supplier } from '../../../../lib/care';
 import type { Appointment } from '../AppointmentsPage';
 import { ContactPicker, contactProblem, changedContactFieldsAs, contactFieldsAs, pickedFrom, type PickedContact } from '../../../../components/ContactPicker';
-import { format } from 'date-fns';
+import { format } from '../../../../lib/dateFormat';
 
 /**
  * The medication editor, laid out as three plain-language sentences:

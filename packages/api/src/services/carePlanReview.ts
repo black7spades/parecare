@@ -1,5 +1,6 @@
 import { db } from '../config/database';
 import { dateInZone, parseZonedTime } from '../lib/timezone';
+import { dayText } from '../lib/dayText';
 
 /**
  * The standard care plan review: at least once a year. The date is set once,
@@ -15,7 +16,7 @@ const REMIND_DAYS_BEFORE = 14;
 const TASK_TITLE = 'Get ready for the care plan review';
 
 const formatDay = (ymd: string): string =>
-  new Date(`${ymd}T12:00:00Z`).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+  dayText(ymd, null, 'long');
 
 async function ownerTimeZone(profileId: string): Promise<string | null> {
   const row = await db('care_profiles as cp')

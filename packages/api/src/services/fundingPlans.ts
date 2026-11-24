@@ -5,11 +5,14 @@ import { keepTask } from './keptTasks';
 import { addDays } from './documentDates';
 import { ownerZone } from './tasks';
 import { dateInZone } from '../lib/timezone';
+import { FUNDING_KINDS, fundingScheme, type CountryCode } from '../lib/countries';
+import { profileCountry } from './country';
 
 type Conn = Knex | Knex.Transaction;
 
 /**
- * A funding plan: an NDIS plan or an aged care package, with its dates, how
+ * A funding plan: disability funding such as an NDIS plan, or an aged care
+ * package such as Support at Home, with its dates, how
  * it is managed, who manages it and coordinates it, and its budgets. Costs
  * can count against a budget, so what is spent and what is left show
  * beside each one. Before the review meeting, every therapist linked to the
@@ -19,26 +22,22 @@ type Conn = Knex | Knex.Transaction;
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const text = (max: number) => z.string().trim().max(max).optional().nullable();
 
-export const SCHEMES = ['ndis', 'support_at_home', 'home_care_package', 'other'] as const;
-export const SCHEME_LABELS: Record<(typeof SCHEMES)[number], string> = {
-  ndis: 'NDIS plan',
-  support_at_home: 'Support at Home',
-  home_care_package: 'Home Care Package',
-  other: 'Other funding',
-};
-/** The words a report task uses for the review: "the NDIS review". */
-const SCHEME_REVIEW: Record<(typeof SCHEMES)[number], string> = {
-  ndis: 'NDIS',
-  support_at_home: 'Support at Home',
-  home_care_package: 'Home Care Package',
-  other: 'funding',
-};
+/**
+ * The kinds of plan. The keys are kinds, named by the person's country
+ * (lib/countries.ts): "ndis" is an NDIS plan in Australia and a personal
+ * budget in the UK.
+ */
+export const SCHEMES = FUNDING_KINDS;
 export const MANAGEMENT = ['agency', 'plan', 'self'] as const;
-export const MANAGEMENT_LABELS: Record<(typeof MANAGEMENT)[number], string> = {
-  agency: 'Managed by the NDIA',
-  plan: 'Plan managed',
-  self: 'Self managed',
-};
+
+/** What a plan of this kind is called where the person lives. */
+export const schemeLabel = (country: CountryCode, scheme: string): string => fundingScheme(country, scheme).label;
+/** How it is managed, in the scheme's own words. */
+export function managementLabel(country: CountryCode, scheme: string, management: string | null): string | null {
+  if (!management) return null;
+  const m = fundingScheme(country, scheme).management ?? fundingScheme('AU', 'other').management!;
+  return m[management as (typeof MANAGEMENT)[number]] ?? null;
+}
 
 /** The kinds of contact asked for a progress report before a review. */
 export const REPORT_TYPES = [
@@ -71,11 +70,12 @@ export type PlanInput = z.infer<typeof planInputSchema>;
 
 export class PlanProblem extends Error {}
 
-const ROLE_TYPES: Record<'plan_manager' | 'support_coordinator' | 'local_area_coordinator', string> = {
+const roleTypes = (country: CountryCode, scheme: string): Record<'plan_manager' | 'support_coordinator' | 'local_area_coordinator', string> => ({
   plan_manager: 'Plan manager',
   support_coordinator: 'Support coordinator',
-  local_area_coordinator: 'Local Area Coordinator',
-};
+  // The local coordinator is a Local Area Coordinator in Australia, a social worker in the UK.
+  local_area_coordinator: fundingScheme(country, scheme).area_coordinator ?? 'Case manager',
+});
 
 export async function savePlan(
   conn: Conn,
@@ -91,6 +91,8 @@ export async function savePlan(
   for (const k of ['scheme', 'starts_on', 'ends_on', 'review_on', 'management'] as const) {
     if (input[k] !== undefined) cols[k] = input[k];
   }
+  const country = await profileCountry(conn, profileId);
+  const ROLE_TYPES = roleTypes(country, String(input.scheme ?? before?.['scheme'] ?? 'other'));
   for (const role of ['plan_manager', 'support_coordinator', 'local_area_coordinator'] as const) {
     const ref = input[role];
     if (ref === undefined) continue;
@@ -161,7 +163,7 @@ export async function reportWriters(conn: Conn, profileId: string): Promise<Arra
 export async function keepReportTasks(conn: Conn, opts: { profileId: string; planId: string; actorId: string | null; timeZone?: string | null }): Promise<number> {
   const plan = (await conn('funding_plans').where({ id: opts.planId }).first()) as Record<string, unknown>;
   const due = (plan['reports_due_on'] as string | null) ?? null;
-  const scheme = SCHEME_REVIEW[plan['scheme'] as (typeof SCHEMES)[number]] ?? 'funding';
+  const scheme = fundingScheme(await profileCountry(conn, opts.profileId), plan['scheme'] as string).review_word;
   const tasks = (await conn('reminders').where({ care_profile_id: opts.profileId, funding_plan_id: opts.planId }).select('id', 'provider_id', 'completed', 'next_due_at')) as Array<{
     id: string;
     provider_id: string | null;
@@ -221,6 +223,7 @@ export async function plansOut(conn: Conn, profileId: string, rows: Array<Record
   if (rows.length === 0) return [];
   const zone = await ownerZone(conn, profileId, timeZone);
   const today = dateInZone(new Date(), zone);
+  const country = await profileCountry(conn, profileId);
   const ids = rows.map((r) => r.id);
   const [budgets, contacts, tasks] = await Promise.all([
     conn('funding_budget_categories').whereIn('funding_plan_id', ids).orderBy('sort_order', 'asc'),
@@ -259,8 +262,10 @@ export async function plansOut(conn: Conn, profileId: string, rows: Array<Record
     const c = (k: string) => (r[k] && contacts.get(r[k] as string)) || null;
     return {
       ...r,
-      scheme_label: SCHEME_LABELS[r['scheme'] as (typeof SCHEMES)[number]] ?? 'Funding',
-      management_label: r['management'] ? MANAGEMENT_LABELS[r['management'] as (typeof MANAGEMENT)[number]] ?? null : null,
+      scheme_label: schemeLabel(country, r['scheme'] as string),
+      management_label: managementLabel(country, r['scheme'] as string, (r['management'] as string | null) ?? null),
+      area_coordinator_label: fundingScheme(country, r['scheme'] as string).area_coordinator,
+      progress_report: fundingScheme(country, r['scheme'] as string).progress_report,
       reports_due_worked_out: !!(r['review_on'] && r['reports_due_on'] === addDays(r['review_on'] as string, -REPORTS_LEAD_DAYS)),
       // Past the day reports were due, the review still to come, and some reports still to come.
       reports_overdue:

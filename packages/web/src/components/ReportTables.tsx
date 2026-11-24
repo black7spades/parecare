@@ -1,4 +1,4 @@
-import { format } from 'date-fns';
+import { format } from '../lib/dateFormat';
 import { SortableTh } from './data/SortableTh';
 import { useDataView, type DataSort } from './data/useDataView';
 import { DataToolbar } from './data/DataToolbar';

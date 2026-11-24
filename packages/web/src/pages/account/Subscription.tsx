@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { format } from 'date-fns';
+import { format } from '../../lib/dateFormat';
 import { subscriptionsApi } from '../../api/subscriptions';
 import { useSubscriptionStore } from '../../stores/subscription';
 import { PricingPlans } from '../../components/PricingPlans';

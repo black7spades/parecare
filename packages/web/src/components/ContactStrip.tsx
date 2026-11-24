@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { format } from 'date-fns';
+import { format } from '../lib/dateFormat';
 import type { ContactSummary } from '../lib/care';
 import { bookingHref } from '../lib/booking';
 import { parseDateOnly } from '../lib/datetime';

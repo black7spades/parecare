@@ -11,6 +11,9 @@ import { BUILT_IN_NEXT_STEPS } from './nextStepTypes';
 const NEXT_STEP_NAMES = BUILT_IN_NEXT_STEPS.map((s) => `"${s.name}"`).join(', ');
 import { isValidTimeZone, nowInZone, dateInZone } from '../lib/timezone';
 import type { Account, CareProfile, CareCircleMember } from '../types';
+import { preset, type CountryCode } from '../lib/countries';
+import { accountCountry, profileCountry } from './country';
+import { costSourceList, coordinatorWord, idFieldList, schemeList, schemeWords } from './countryPrompts';
 
 /**
  * The output contract for a provider that can be constrained to a schema. It
@@ -143,6 +146,7 @@ Never ask someone to be more precise unless two different events would
 be recorded at materially different times depending on the answer.`;
 
 function buildSystemPrompt(
+  country: CountryCode,
   account: Account,
   profile: CareProfile,
   member: CareCircleMember | undefined,
@@ -175,7 +179,7 @@ You can do anything here that can be done by hand on this person's record. The a
 - {"type": "restock_medication", "medication_name": exact name, "packs_on_hand": optional number, "units_remaining": optional number} when someone picks up a repeat ("got 2 packs of Perindopril")
 - {"type": "add_allergy", "substance": required, "reaction": optional, "severity": optional, one of mild | moderate | severe | life_threatening} and {"type": "remove_allergy", "substance": required}
 - {"type": "confirm_no_allergies"} only when the user says they have no known allergies; it fails while any allergy is on the list
-- {"type": "set_id_numbers", any of "medicare_number" (10 digits), "medicare_irn" (the position on the card, 1 to 9), "medicare_valid_to" (YYYY-MM), "ihi_number" (16 digits), "dva_number", "dva_card_colour" (gold | white | orange), "ndis_number" (9 digits starting 43), "health_fund_name", "health_fund_member_number", "my_aged_care_number" (AC then 8 or 9 digits)} for ID numbers read from a card or letter; a number that does not check out is not saved and the reply says so
+- {"type": "set_id_numbers", any of ${idFieldList(country)}} for ID numbers read from a card or letter; a number that does not check out is not saved and the reply says so
 - {"type": "add_condition", "name": required, "category": optional, one of illness | injury | post_operative | recovery | mental_health | chronic_flare | acute_illness | disability | other, "severity": optional mild | moderate | severe | critical, "status": optional active | improving | managed | resolved, "started_on": optional YYYY-MM-DD, "notes": optional, "treated_by": optional who treats it (a contact by name; filed in Contacts if new), "treated_by_type": optional what they do} and {"type": "remove_condition", "name": required}
 - {"type": "update_condition", "name": exact condition name, then any of "treated_by", "treated_by_type", "severity", "status", "notes"} to change a condition already on file, such as who treats it
 - {"type": "log_condition", "condition": required (the condition by name), "body": required (what happened), "entry_type": optional, one of note | symptom_change | treatment | appointment_outcome | test_result | scan_result | other, "title": optional, "occurred_at": optional ISO timestamp} adds to that condition's own tracking log, kept apart from the care log. Use it for how one ongoing thing is going, e.g. an ankle sprained in March that still hurts.
@@ -194,7 +198,7 @@ You can do anything here that can be done by hand on this person's record. The a
 - {"type": "record_hospital_stay", "hospital": the hospital's name (found in Contacts or filed there), "admitted_on": YYYY-MM-DD, "discharged_on"? (YYYY-MM-DD when they are already home), "ward"?, "treating_team"?, "reason"? (why they went in)} records a hospital stay. While a stay is open, medicine reminders pause because the hospital gives the medicines
 - {"type": "record_discharge", "discharged_on": YYYY-MM-DD, "follow_up_days"? (days after leaving to see the GP, from the letter; 7 when it does not say), "follow_up_with"? (who to see, by name; their main GP when left out), "hospital"? and "admitted_on"? (only when no stay is on file yet, to record it too)} records leaving hospital: medicine reminders start again, a "See the GP within N days" task and a "Look over the care plan" task are added, and the letter is filed against the stay
 - {"type": "record_result", "test_name": required (e.g. "Full blood count"), "collected_on"? (YYYY-MM-DD), "reported_on"? (YYYY-MM-DD), "summary"? (what it showed, in plain words), "doctor_view"? (normal | follow_up | not_seen), "ordered_by"? (who ordered it, by name), "lab"? (the pathology or imaging place), "for_appointment"? (the title of the test appointment), "values"? (array of {"name": the measure, e.g. "HbA1c", "value_number"? or "value_text"?, "unit"?, "range_low"?, "range_high"?, "flag"? (low | high | normal)}, one per measure)} records a test result; it is shown at the next visit with whoever ordered it
-- {"type": "set_funding_plan", "scheme": ndis | support_at_home | home_care_package | other, "starts_on"?, "ends_on"?, "review_on"? (the review meeting; reports are due six weeks before), "management"? (agency | plan | self), "plan_manager"?, "support_coordinator"?, "local_area_coordinator"? (each a name, filed in Contacts if new), "budgets"? (array of {"name", "amount": number})} records an NDIS plan or an aged care package; each therapist linked to the person gets a task to ask for their progress report before the review
+- {"type": "set_funding_plan", "scheme": ${schemeList(country)}, "starts_on"?, "ends_on"?, "review_on"? (the review meeting; reports are due six weeks before), "management"? (agency | plan | self), "plan_manager"?, "support_coordinator"?, "local_area_coordinator"? (the ${coordinatorWord(country)}; each a name, filed in Contacts if new), "budgets"? (array of {"name", "amount": number})} records ${schemeWords(country)}; each therapist linked to the person gets a task to ask for their progress report before the review
 - {"type": "record_move_into_care", "care_home": the care home's name (found in Contacts or filed there), "entry_on"? (YYYY-MM-DD moved in), "agreement_signed_on"? (cooling-off ends 14 days after), "payment_choice"? (lump_sum | daily | mix; decided within 28 days of moving in), "notice_given_on"?, "room"?} records a move into care: the care home becomes where they live, their previous home is kept, and their care journey moves on
 - {"type": "file_document", "document": the document's current name from Documents on file, "category"?: the category to file it under (one of theirs, or a short new name such as "Tax", which is added), "label"?: a clearer name for it, "issued_on"? (YYYY-MM-DD, the date it was written), "valid_until"? (YYYY-MM-DD, when it runs out), "no_expiry"? (true when it does not expire), "from_name"? (who wrote it), "from_type"?, "to_name"? (who it is addressed to), "to_type"?, "to_phone"?, "to_practice"? (the clinic they are at)} to file or rename a document already on record, e.g. "put the discharge letter under Hospital". A referral's valid until date is worked out from who wrote it (a GP referral lasts 12 months, a specialist's 3, from the first visit) and a reminder to get a new one is set six weeks before; give "valid_until" only when the letter says otherwise. Filing a referral joins the open task for booking whoever it is to, or adds one
 - {"type": "update_provider", "name": exact name from the record, then any of "kind", "provider_type", "organisation", "phone", "email", "booking_link", "directions_link", "after_hours_phone", "fax", "opening_hours", "main", "no_longer_seeing"} to update an existing provider's details (e.g. adding an email address, making them the main GP, or marking that they are no longer seen)
@@ -214,7 +218,7 @@ You can do anything here that can be done by hand on this person's record. The a
 - {"type": "remove_circle_person", "name": their name in the circle} takes someone who was added by name out of the care circle (people who log in are removed on the Care circle page)
 - {"type": "complete_task", "title": the open task's title, "completion_note": optional short note} ticks a task off
 - {"type": "reschedule_task", "title": the open task's title, "due_at": new ISO time, or YYYY-MM-DD for any time that day, "repeat": optional once | daily | weekly | fortnightly | monthly | three_monthly | six_monthly | yearly} moves a task, including snoozing it
-- {"type": "record_cost", "amount": number, "spent_on": optional YYYY-MM-DD (defaults to today), "description": optional, "tax_amount": optional number, "funding_source": optional self | ndis | private_health | medicare | government | other, "claimable_amount": optional number, "claim_status": optional none | unclaimed | submitted | reimbursed, "account_code": optional} puts a care cost on the spend ledger
+- {"type": "record_cost", "amount": number, "spent_on": optional YYYY-MM-DD (defaults to today), "description": optional, "tax_amount": optional number, "funding_source": optional ${costSourceList(country)}, "claimable_amount": optional number, "claim_status": optional none | unclaimed | submitted | reimbursed, "account_code": optional} puts a care cost on the spend ledger
 - {"type": "record_reading", "treatment_name": exact treatment name from the record, "observed_at": optional ISO time, "status": completed | partial | skipped | refused, "notes": required unless completed, "values": array of {"metric_name": exact measure name on that treatment, "value_number" or "value_text" or "value_boolean"}} logs a session of a treatment and the measurements taken
 - {"type": "need_clarification", "question": what you need to know, "options": optional array of the choices} when you cannot act without an answer
 
@@ -243,8 +247,8 @@ words. It is not where appointments, costs, readings or tasks live.
   entry, so it charts over time.
 - Going into hospital is record_hospital_stay; coming home is
   record_discharge. Never record_appointment_outcome for a hospital stay.
-  A test result is record_result, one value per measure. An NDIS plan or
-  an aged care package is set_funding_plan. Moving into a care home is
+  A test result is record_result, one value per measure. ${schemeWords(country)} is
+  set_funding_plan. Moving into a care home is
   record_move_into_care.
 - Something to be done is add_task; something already done is
   complete_task. Neither is a log entry.
@@ -386,7 +390,7 @@ The user has view-only access, so you cannot record anything for them. If they a
 
 You can also take actions: log a care event, record a medication administration, add or tick off a task, book or move an appointment, record a cost, and record a treatment reading. When you do, you will confirm what you did in plain language.
 
-You are speaking to ${account.display_name}, who is ${accessDescription}. Jurisdiction: Australia. Current date and time where the user is: ${dates.nowLine}. Use this to resolve relative times like "this morning" or "last night". Write every time you emit in an action as the user's own local wall-clock time with no time zone suffix (for example "${dates.today}T11:00:00"); the app converts it to the correct instant using their zone. Never convert times to UTC yourself.
+You are speaking to ${account.display_name}, who is ${accessDescription}. Jurisdiction: ${preset(country).name}. Current date and time where the user is: ${dates.nowLine}. Use this to resolve relative times like "this morning" or "last night". Write every time you emit in an action as the user's own local wall-clock time with no time zone suffix (for example "${dates.today}T11:00:00"); the app converts it to the correct instant using their zone. Never convert times to UTC yourself.
 
 Tone: you are a calm, competent person who knows this person's record inside out. Not a medical professional. Not a chatbot. You speak plainly, you know what you are talking about, and you say "I do not know" when the record does not cover something. Frame guidance as information to take to the relevant professional, not as advice.
 
@@ -429,7 +433,7 @@ export async function sendMessage(
   // and the provider can honour a schema. A viewer's reply is prose only, so
   // it takes the plain text path unchanged.
   const constrained = canWrite && supportsStructuredOutput();
-  const systemPrompt = buildSystemPrompt(account, profile, member, contextBlock, canWrite, timeZone, constrained);
+  const systemPrompt = buildSystemPrompt(await profileCountry(db, profile.id), account, profile, member, contextBlock, canWrite, timeZone, constrained);
   const turns = [
     ...messages.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user' as const, content: newUserMessage },
@@ -468,7 +472,7 @@ function unpackReply(
   return { reply: text, tokensUsed };
 }
 
-function dashboardActionInstructions(dates: ReturnType<typeof promptDates>): string {
+function dashboardActionInstructions(dates: ReturnType<typeof promptDates>, country: CountryCode): string {
   return `
 You can take actions. To take one, append ONE fenced code block per action to the end of your reply, in this exact form:
 
@@ -495,7 +499,7 @@ The profile_actions action is how you do anything else on a person's record: cha
 - {"type": "restock_medication", "medication_name", "packs_on_hand"?, "units_remaining"?} when someone picks up a repeat
 - {"type": "add_allergy", "substance", "reaction"?, "severity"? (mild | moderate | severe | life_threatening)} and {"type": "remove_allergy", "substance"}
 - {"type": "confirm_no_allergies"} only when the user says they have no known allergies; it fails while any allergy is on the list
-- {"type": "set_id_numbers", any of "medicare_number" (10 digits), "medicare_irn" (the position on the card, 1 to 9), "medicare_valid_to" (YYYY-MM), "ihi_number" (16 digits), "dva_number", "dva_card_colour" (gold | white | orange), "ndis_number" (9 digits starting 43), "health_fund_name", "health_fund_member_number", "my_aged_care_number" (AC then 8 or 9 digits)} for ID numbers read from a card or letter; a number that does not check out is not saved and the reply says so
+- {"type": "set_id_numbers", any of ${idFieldList(country)}} for ID numbers read from a card or letter; a number that does not check out is not saved and the reply says so
 - {"type": "add_condition", "name", "category"? (illness | injury | post_operative | recovery | mental_health | chronic_flare | acute_illness | disability | other), "severity"? (mild | moderate | severe | critical), "status"? (active | improving | managed | resolved), "started_on"? (YYYY-MM-DD), "notes"?, "treated_by"? (who treats it), "treated_by_type"?} and {"type": "remove_condition", "name"}
 - {"type": "update_condition", "name", then any of "treated_by", "treated_by_type", "severity", "status", "notes"}
 - {"type": "log_condition", "condition" (by name), "body", "entry_type"? (note | symptom_change | treatment | appointment_outcome | test_result | scan_result | other), "title"?, "occurred_at"?} adds to that condition's own tracking log, separate from the care log.
@@ -513,7 +517,7 @@ The profile_actions action is how you do anything else on a person's record: cha
 - {"type": "record_hospital_stay", "hospital", "admitted_on" (YYYY-MM-DD), "discharged_on"?, "ward"?, "treating_team"?, "reason"?} records a hospital stay; medicine reminders pause while it is open
 - {"type": "record_discharge", "discharged_on" (YYYY-MM-DD), "follow_up_days"? (from the letter; 7 when it does not say), "follow_up_with"? (their main GP when left out), "hospital"? and "admitted_on"? (only when no stay is on file yet)} records leaving hospital and adds the GP follow-up and care plan tasks
 - {"type": "record_result", "test_name", "collected_on"?, "reported_on"?, "summary"?, "doctor_view"? (normal | follow_up | not_seen), "ordered_by"?, "lab"?, "for_appointment"? (the test appointment's title), "values"? (array of {"name", "value_number"? or "value_text"?, "unit"?, "range_low"?, "range_high"?, "flag"? (low | high | normal)})} records a test result, one value per measure
-- {"type": "set_funding_plan", "scheme" (ndis | support_at_home | home_care_package | other), "starts_on"?, "ends_on"?, "review_on"?, "management"? (agency | plan | self), "plan_manager"?, "support_coordinator"?, "local_area_coordinator"?, "budgets"? (array of {"name", "amount"})} records an NDIS plan or aged care package; therapists get report tasks before the review
+- {"type": "set_funding_plan", "scheme" (${schemeList(country)}), "starts_on"?, "ends_on"?, "review_on"?, "management"? (agency | plan | self), "plan_manager"?, "support_coordinator"?, "local_area_coordinator"?, "budgets"? (array of {"name", "amount"})} records ${schemeWords(country)}; therapists get report tasks before the review
 - {"type": "record_move_into_care", "care_home", "entry_on"?, "agreement_signed_on"?, "payment_choice"? (lump_sum | daily | mix), "notice_given_on"?, "room"?} records a move into care; the care home becomes where they live and the old home is kept
 - {"type": "file_document", "document": the document's current name from Documents on file, "category"?: the category to file it under (one of theirs, or a short new name such as "Tax", which is added), "label"?: a clearer name for it, "issued_on"? (YYYY-MM-DD, date written), "valid_until"? (YYYY-MM-DD), "no_expiry"?, "from_name"?, "from_type"?, "to_name"?, "to_type"?, "to_phone"?, "to_practice"?} to file or rename a document already on record, e.g. "put the discharge letter under Hospital". A referral's dates are worked out and it joins the open task for booking whoever it is to
 - {"type": "update_provider", "name": exact name from the record, then any of "kind", "provider_type", "organisation", "phone", "email", "booking_link", "directions_link", "after_hours_phone", "fax", "opening_hours", "main", "no_longer_seeing"} to update an existing provider's details
@@ -532,7 +536,7 @@ The profile_actions action is how you do anything else on a person's record: cha
 - {"type": "remove_circle_person", "name"} takes someone added by name out of the care circle
 - {"type": "complete_task", "title" (the open task's title), "completion_note"?} ticks a task off
 - {"type": "reschedule_task", "title", "due_at" (ISO, or YYYY-MM-DD for any time that day), "repeat"? (once | daily | weekly | fortnightly | monthly | three_monthly | six_monthly | yearly)} moves or snoozes a task
-- {"type": "record_cost", "amount" (number), "spent_on"? (YYYY-MM-DD, defaults to today), "description"?, "tax_amount"?, "funding_source"? (self | ndis | private_health | medicare | government | other), "claimable_amount"?, "claim_status"? (none | unclaimed | submitted | reimbursed), "account_code"?} puts a care cost on that person's spend ledger
+- {"type": "record_cost", "amount" (number), "spent_on"? (YYYY-MM-DD, defaults to today), "description"?, "tax_amount"?, "funding_source"? (${costSourceList(country)}), "claimable_amount"?, "claim_status"? (none | unclaimed | submitted | reimbursed), "account_code"?} puts a care cost on that person's spend ledger
 - {"type": "record_reading", "treatment_name" (exact name on that person's record), "observed_at"?, "status" (completed | partial | skipped | refused), "notes" (required unless completed), "values": array of {"metric_name" (exact measure on that treatment), "value_number" or "value_text" or "value_boolean"}} logs a treatment session and its measurements
 - {"type": "need_clarification", "question", "options"? (array of choices)} when you cannot act without an answer
 
@@ -562,7 +566,7 @@ words. It is not where appointments, costs, readings or tasks live.
   time.
 - Going into hospital is record_hospital_stay; coming home is
   record_discharge, never record_appointment_outcome. A test result is
-  record_result. An NDIS plan or aged care package is set_funding_plan. A
+  record_result. ${schemeWords(country)} is set_funding_plan. A
   move into a care home is record_move_into_care.
 - Something to be done is a task; something already done is complete_task. A repeating
   task is done for this round and comes round again on its next date.
@@ -751,6 +755,7 @@ ${TIME_CONVENTIONS}`;
 }
 
 function buildDashboardSystemPrompt(
+  country: CountryCode,
   account: Account,
   dashboardContext: string,
   profileCount: number,
@@ -793,7 +798,7 @@ You do not use exclamation marks. You do not say "Great question!" or "Absolutel
 ${TONE_CALIBRATION} These people are not all dependents: some manage their own care and only use PareCare to keep their own records. Never write about a capable adult as though they are helpless or under supervision, and do not tell someone to report to or seek permission from anyone when the record shows they run their own care.
 
 When guiding someone to a screen, use the navigate_to_profile action so the app takes them there directly. Do not just describe where to click.
-${dashboardActionInstructions(dates)}${coldStart}
+${dashboardActionInstructions(dates, country)}${coldStart}
 
 ${dashboardContext}`;
 }
@@ -811,7 +816,7 @@ export async function sendDashboardMessage(
   await checkTokenBudget(account);
 
   const constrained = supportsStructuredOutput();
-  const systemPrompt = buildDashboardSystemPrompt(account, dashboardContext, profileCount, timeZone, constrained);
+  const systemPrompt = buildDashboardSystemPrompt(await accountCountry(db, account.id), account, dashboardContext, profileCount, timeZone, constrained);
   const turns = [
     ...messages.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user' as const, content: newUserMessage },

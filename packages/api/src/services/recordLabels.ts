@@ -1,4 +1,6 @@
 import type { Knex } from 'knex';
+import { fundingScheme } from '../lib/countries';
+import { profileCountry } from './country';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -72,16 +74,15 @@ const KINDS: Record<string, KindSpec> = {
   'funding-plans': {
     kind_label: 'Funding plan',
     page: 'funding',
-    names: (conn, profileId, ids) =>
-      conn('funding_plans')
+    names: async (conn, profileId, ids) => {
+      const country = await profileCountry(conn, profileId);
+      const rows = (await conn('funding_plans')
         .where('care_profile_id', profileId)
         .whereIn('id', ids)
-        .select(
-          'id',
-          conn.raw(
-            "concat_ws(', ', CASE scheme WHEN 'ndis' THEN 'NDIS plan' WHEN 'support_at_home' THEN 'Support at Home' WHEN 'home_care_package' THEN 'Home Care Package' ELSE 'Other funding' END, to_char(starts_on, 'DD Mon YYYY')) as label"
-          )
-        ),
+        .select('id', 'scheme', conn.raw("to_char(starts_on, 'DD Mon YYYY') as starts"))) as Array<{ id: string; scheme: string; starts: string | null }>;
+      // The plan as their country names it: an NDIS plan, a personal budget.
+      return rows.map((r) => ({ id: r.id, label: [fundingScheme(country, r.scheme).label, r.starts].filter(Boolean).join(', ') }));
+    },
   },
   'care-moves': {
     kind_label: 'Move into care',

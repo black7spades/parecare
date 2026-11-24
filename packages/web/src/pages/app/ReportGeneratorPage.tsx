@@ -902,7 +902,7 @@ export function ReportGeneratorPage() {
               <label className="text-xs text-muted block mb-1">Custom instructions for the AI (optional)</label>
               <textarea
                 className={SELECT_CLS + ' w-full h-20 resize-y'}
-                placeholder="e.g. Focus on outbreak patterns, or write this as an NDIS progress update..."
+                placeholder="e.g. Focus on outbreak patterns, or write this as a progress update for a funding review..."
                 value={aiPrompt}
                 onChange={(e) => setAiPrompt(e.target.value)}
               />

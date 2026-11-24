@@ -128,7 +128,7 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
   {
     name: 'ids',
     hint: 'ID numbers from a card',
-    description: 'Record ID numbers, e.g. /ids Medicare 2123 45670 1, number 1 on the card, valid to 08/2027',
+    description: 'Record ID numbers from a card, e.g. /ids Medicare 2123 45670 1, number 1 on the card, valid to 08/2027, or /ids NHS number 943 476 5919',
     expand: (a) => `Record these ID numbers on their profile: ${a}`,
   },
   {
@@ -184,7 +184,7 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
   {
     name: 'practice',
     hint: 'who, and the practice they work at',
-    description: 'File someone at their practice, e.g. /practice Dr Carly Examplename at Health Hub Morayfield',
+    description: 'File someone at their practice, e.g. /practice Dr Carly Examplename at City Health Hub',
     expand: (a) =>
       `File this person at their practice in the directory, sharing the practice's address, without linking them to anyone: ${a}`,
   },
@@ -211,7 +211,7 @@ export const ASSISTANT_COMMANDS: AssistantCommand[] = [
   {
     name: 'funding',
     hint: 'the plan dates and budgets',
-    description: 'Record an NDIS plan or aged care package, e.g. /funding NDIS plan 1 Jan to 31 Dec, review 1 Nov, capacity building 12000',
+    description: 'Record a funding plan, such as disability funding or an aged care package, e.g. /funding plan 1 Jan to 31 Dec, review 1 Nov, capacity building 12000',
     expand: (a) => `Record this funding plan with set_funding_plan, with its dates, how it is managed, its contacts and budgets: ${a}`,
   },
 ];

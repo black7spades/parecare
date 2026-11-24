@@ -16,6 +16,7 @@ import { RECORD_ROW_CLASS, useRecordPanel } from '../../components/record/useRec
 import { useHiddenIds, useUndoStore } from '../../stores/undo';
 import type { Supplier } from '../../lib/care';
 import { CONTACT_LINK } from '../../components/ContactStrip';
+import { useCountry } from '../../lib/country';
 
 interface LinkedProfile {
   profile_id: string;
@@ -37,6 +38,10 @@ const SORTS: DataSort<DirectorySupplier>[] = [
 ];
 
 export function DirectorySuppliersPage() {
+  // Address words and examples the way this country writes them.
+  const { config: country } = useCountry();
+  const aw = country.words;
+  const sa = country.sample_address;
   const queryClient = useQueryClient();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<DirectorySupplier | null>(null);
@@ -94,8 +99,8 @@ export function DirectorySuppliersPage() {
             resource="suppliers"
             canImport={canEdit}
             onImported={invalidate}
-            templateHeaders={['Vendor', 'Phone', 'Email', 'Address line 1', 'Address line 2', 'Suburb', 'State', 'Postcode', 'Country', 'Reorder link', 'Directions']}
-            templateSample={['Chemist Warehouse', '07 5555 5555', '', '2 Shop St', '', 'Morayfield', 'QLD', '4506', 'Australia', 'https://chemistwarehouse.example/reorder', 'https://maps.example/chemist']}
+            templateHeaders={['Vendor', 'Phone', 'Email', 'Address line 1', 'Address line 2', aw.suburb, aw.state, aw.postcode, 'Country', 'Reorder link', 'Directions']}
+            templateSample={['Corner Pharmacy', country.phone_example, '', sa.line1, '', sa.suburb, sa.state, sa.postcode, sa.country, 'https://pharmacy.example/reorder', 'https://maps.example/pharmacy']}
           />
           {canEdit ? (
             <Button onClick={() => { setEditing(null); setEditorOpen(true); }}>
@@ -160,7 +165,7 @@ export function DirectorySuppliersPage() {
                   </th>
                 ) : null}
                 <SortableTh label="Vendor" sortKey="name" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
-                <SortableTh label="Suburb" sortKey="suburb" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
+                <SortableTh label={aw.suburb} sortKey="suburb" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Phone" sortKey="phone" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Address" sortKey="address" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
                 <SortableTh label="Medications" sortKey="medications" activeKey={dv.sortKey} dir={dv.sortDir} onToggle={dv.toggleSort} />
@@ -260,7 +265,7 @@ export function DirectorySuppliersPage() {
             { label: 'Phone', value: current.phone ? <a href={`tel:${current.phone}`} className={`${CONTACT_LINK}`}>{current.phone}</a> : null },
             { label: 'Email', value: current.email ? <a href={`mailto:${current.email}`} className={`${CONTACT_LINK}`}>{current.email}</a> : null },
             { label: 'Address', value: current.address },
-            { label: 'Suburb', value: current.address_suburb },
+            { label: aw.suburb, value: current.address_suburb },
             { label: 'Medications', value: current.medication_count > 0 ? String(current.medication_count) : null },
           ]}
           links={[

@@ -17,6 +17,7 @@ import {
   type IdentifierField,
 } from '../../lib/care';
 import { useAuthStore } from '../../stores/auth';
+import { inSentence, useProfileCountry } from '../../lib/country';
 import type { JourneyTemplateSummary } from '../../lib/journeys';
 
 /**
@@ -52,12 +53,27 @@ interface SetupMed {
 const newKey = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 
 const FAILED = 'That did not save. Nothing was added twice. Try again.';
+/** When the fix is on an earlier step: say what, and the main button goes there. */
+const FAILED_FIX = 'That did not save. Nothing was added twice.';
+
+/** The step each save belongs to, so a save that fails can send the person back to it. */
+const STEP_OF_SAVE = (key: string): StepId => {
+  const k = key.split(':')[0]!;
+  const map: Record<string, StepId> = {
+    carer: 'carer', journey: 'carer', condition: 'conditions', neurotype: 'neurotype', allergy: 'allergies', med: 'medicines',
+    gp: 'gp', pharmacy: 'pharmacy', ids: 'ids', directive: 'directive', poa: 'poa', emergency: 'emergency',
+  };
+  return map[k] ?? 'emergency';
+};
 
 export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; onDone: () => void }) {
   const isPet = profile.kind === 'pet';
   const firstName = profile.preferred_name ?? profile.first_name ?? profile.full_name;
   // Your own profile speaks to you.
   const self = !isPet && isSelfRelationship(profile.owner_relationship);
+  // The person's country names their ID numbers and the advance directive.
+  const { config: country } = useProfileCountry(profile.id);
+  const directiveTerm = country.words.advance_directive;
   const their = self ? 'your' : 'their';
   const Their = self ? 'Your' : 'Their';
 
@@ -77,7 +93,7 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
     gp: isPet ? 'Vet' : `${Their} GP`,
     pharmacy: `${Their} pharmacy`,
     ids: 'ID numbers',
-    directive: 'Advance care directive',
+    directive: country.words.advance_directive,
     poa: 'Power of attorney',
     emergency: 'Who to call in an emergency',
   };
@@ -145,6 +161,9 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
   const [saving, setSaving] = useState(false);
   // What has saved, so trying again carries on from where it stopped.
   const done = useRef(new Set<string>());
+  // The save being tried, so a failure can name the step that fixes it.
+  const trying = useRef('');
+  const [fixStep, setFixStep] = useState<StepId | null>(null);
   // The key for a medicine still in the boxes at Finish, the same on every try.
   const typedMedKey = useRef(newKey());
 
@@ -189,6 +208,7 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
   /** Run one save once: skipped when it already saved on an earlier try. */
   async function once(key: string, label: string, run: () => Promise<unknown>, pending: string[]) {
     if (done.current.has(key)) return;
+    trying.current = key;
     pending.push(label);
     await run();
     done.current.add(key);
@@ -198,6 +218,7 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
   async function saveAll() {
     setError('');
     setLeft([]);
+    setFixStep(null);
     setSaving(true);
     const pending: string[] = [];
     // A medicine still in the boxes counts as added.
@@ -282,11 +303,11 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
         await once('ids', 'ID numbers', async () => {
           const res = await api.put<{ problems?: Record<string, string> }>(`/care-profiles/${profile.id}/identifiers`, idChanges);
           const bad = Object.values(res.problems ?? {});
-          if (bad.length) throw new Error(`An ID number did not look right: ${bad[0]} Go back to ID numbers to fix it, or clear the box.`);
+          if (bad.length) throw new Error(`An ID number did not look right: ${bad[0]} Fix it, or clear the box.`);
         }, pending);
       }
       if (directive === 'yes' || directive === 'no') {
-        await once('directive', 'the advance care directive', () =>
+        await once('directive', `the ${inSentence(directiveTerm)}`, () =>
           api.put(`/care-profiles/${profile.id}/plan`, {
             advance_care_directive: directive === 'yes',
             advance_care_directive_location: directive === 'yes' ? directiveWhere.trim() || null : null,
@@ -334,7 +355,10 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
     } catch (err) {
       // Say it plainly, say nothing was doubled, and keep everything typed.
       const why = err instanceof Error && err.message && !/^(request failed|internal|network)/i.test(err.message) ? err.message : '';
-      setError(why ? `${FAILED} ${why}` : FAILED);
+      // A reason the person can fix sends them to that step; anything else is tried again as it is.
+      const fix = why ? STEP_OF_SAVE(trying.current) : null;
+      setFixStep(fix && steps.includes(fix) && fix !== steps[steps.length - 1] ? fix : null);
+      setError(why ? `${fix && fix !== steps[steps.length - 1] ? FAILED_FIX : FAILED} ${why}` : FAILED);
       setLeft([...new Set(pending)]);
       setSaving(false);
     }
@@ -511,7 +535,7 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
         {step === 'directive' ? (
           <fieldset className="space-y-3 text-sm text-ink">
             <legend className="text-sm text-muted mb-1">
-              An advance care directive writes down the care {self ? 'you want' : 'they want'} if {self ? 'you cannot' : 'they cannot'} say. {self ? 'Do you have one?' : 'Do they have one?'}
+              {/^[aeiou]/i.test(directiveTerm) ? 'An' : 'A'} {inSentence(directiveTerm)} writes down the care {self ? 'you want' : 'they want'} if {self ? 'you cannot' : 'they cannot'} say. {self ? 'Do you have one?' : 'Do they have one?'}
             </legend>
             {radio('setup-directive', directive === 'yes', () => setDirective('yes'), 'Yes')}
             {radio('setup-directive', directive === 'no', () => setDirective('no'), 'No')}
@@ -598,7 +622,11 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
         {error ? (
           <div className="rounded-md border-l-4 border-red-400 bg-red-50 dark:bg-red-900/10 px-3 py-2 text-sm text-red-700 dark:text-red-300" role="alert">
             <p>{error}</p>
-            {left.length ? <p className="text-xs mt-1">It stopped at {left[left.length - 1]}. Everything before that is saved; the rest saves when you try again.</p> : null}
+            {left.length ? (
+              <p className="text-xs mt-1">
+                It stopped at {left[left.length - 1]}. Everything before that is saved; the rest saves {fixStep ? `once ${stepTitle[fixStep]} is fixed and you finish again` : 'when you try again'}.
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -612,9 +640,21 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
             {!isLast ? (
               <Button variant="ghost" onClick={() => setStepIndex((i) => i + 1)}>Skip</Button>
             ) : null}
-            <Button loading={saving && isLast} onClick={next}>
-              {isLast ? (error ? 'Try again' : 'Finish') : 'Next'}
-            </Button>
+            {error && fixStep && fixStep !== step ? (
+              // The fix is on an earlier step: the main button goes straight there.
+              <Button
+                onClick={() => {
+                  setStepIndex(steps.indexOf(fixStep));
+                  setError('');
+                }}
+              >
+                Go to {stepTitle[fixStep]}
+              </Button>
+            ) : (
+              <Button loading={saving && isLast} onClick={next}>
+                {isLast ? (error ? 'Try again' : 'Finish') : 'Next'}
+              </Button>
+            )}
           </div>
         </div>
       </div>

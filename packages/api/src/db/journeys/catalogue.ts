@@ -502,7 +502,7 @@ export const JOURNEY_TEMPLATES: CatalogueTemplate[] = [
         name: 'Getting assessed',
         tasks: [
           { title: 'Get on every waiting list at once', description: 'Paediatrician, speech, occupational therapy. Lists are long, join them in parallel, cancel later.' },
-          { title: 'Ask about early support while you wait', description: 'In Australia the National Disability Insurance Scheme early childhood pathway can start before a diagnosis.' },
+          { title: 'Ask about early support while you wait', description: 'Disability funding for young children can often start before a diagnosis.' },
         ],
       },
       {
@@ -755,7 +755,7 @@ export const JOURNEY_TEMPLATES: CatalogueTemplate[] = [
         name: 'Therapy and supports in place',
         tasks: [
           { title: 'Choose supports that fit the child', description: 'Not every recommended therapy suits every child. Trial, log, keep what works.' },
-          { title: 'Apply for funding support', description: 'In Australia, the National Disability Insurance Scheme. Bring the assessment and your logs.' },
+          { title: 'Apply for funding support', description: 'Apply for disability funding. Bring the assessment and your logs.' },
         ],
       },
       {
@@ -1464,7 +1464,7 @@ export const JOURNEY_TEMPLATES: CatalogueTemplate[] = [
         name: 'Making the change',
         tasks: [
           { title: 'Set a quit date or start date within two weeks', description: 'A date makes it real. Add it as a task so PareCare reminds you.' },
-          { title: 'Book a support appointment', description: 'For smoking, your doctor can prescribe support that doubles your odds, and Quitline 13 7848 is free.' },
+          { title: 'Book a support appointment', description: 'For smoking, your doctor can prescribe support that doubles your odds, and the quit line is free.' },
           { title: 'Choose your aids before day one', description: 'Patches, medication, an app or a program, picked and ready before the date, not on it.' },
           { title: 'Log every day of the new habit', description: 'Tick the days. The unbroken chain becomes the motivation.' },
           { title: 'Plan for the three hardest moments', description: 'Know your triggers and write down what you will do instead for each one.' },
@@ -1648,7 +1648,7 @@ export const JOURNEY_TEMPLATES: CatalogueTemplate[] = [
       {
         name: 'Respite and backup',
         tasks: [
-          { title: 'Register with the carer gateway', description: 'In Australia, Carer Gateway 1800 422 737 opens respite, counselling and emergency backup.' },
+          { title: 'Register for carer support', description: 'Support for carers opens respite, counselling and emergency backup.' },
           { title: 'Build the emergency care plan', description: 'If you went down tomorrow, who does what. Written in PareCare where the circle can see it.' },
           { title: 'Take the first real break', description: 'Planned, guilt resisted, actually taken.', milestone: true },
         ],
@@ -1731,7 +1731,7 @@ export const JOURNEY_TEMPLATES: CatalogueTemplate[] = [
       {
         name: 'My baseline',
         tasks: [
-          { title: 'Book the over seventy five health assessment', description: 'Or the full check for your age. A yearly full review is free in Australia from seventy five.' },
+          { title: 'Book the over seventy five health assessment', description: 'Or the full check for your age, once a year.' },
           { title: 'Get strength and balance measured', description: 'A physiotherapist baseline predicts falls before they happen and shows what to train.' },
         ],
       },
@@ -1790,7 +1790,7 @@ export const JOURNEY_TEMPLATES: CatalogueTemplate[] = [
         name: 'Living well with dementia',
         tasks: [
           { title: 'Do the legal paperwork now', description: 'Power of attorney and an advance care directive need capacity. This window matters.' },
-          { title: 'Register with dementia support services', description: 'In Australia, Dementia Australia 1800 100 500 for education, advice and support groups.' },
+          { title: 'Register with dementia support services', description: 'For education, advice and support groups.' },
           { title: 'Build the memory book together', description: 'Photos, stories and voice recordings, gathered while the stories are still theirs to tell.', milestone: true },
           { title: 'Keep doing the loved things, adapted', description: 'The golf gets shorter, the recipes get simpler, the joy stays.', milestone: true },
         ],
@@ -1837,7 +1837,7 @@ export const JOURNEY_TEMPLATES: CatalogueTemplate[] = [
         name: 'Home with support',
         legacy: 'home_with_support',
         tasks: [
-          { title: 'Contact My Aged Care for an assessment', description: 'In Australia, call 1800 200 422 or visit myagedcare.gov.au to start the assessment process.' },
+          { title: 'Ask for an aged care assessment', description: 'Call the aged care assessment service to start the assessment.' },
           { title: 'Arrange a home safety assessment', description: 'An occupational therapist can recommend modifications to reduce fall risk.' },
           { title: 'Set up medication management', description: 'Consider a blister pack dispensing service through your pharmacy.' },
           { title: 'Create a care roster', description: 'Agree on who visits when, and log it in PareCare so everyone can see coverage.' },

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useProfileCountry } from '../../../lib/country';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
@@ -46,6 +47,16 @@ export function FundingPage() {
   });
   const hidden = useHiddenIds();
   const deferDelete = useUndoStore((s) => s.deferDelete);
+  // The schemes where the person lives: "An NDIS plan, Support at Home or a Home Care Package".
+  const { config } = useProfileCountry(profile.id);
+  const schemeNames = config.funding.filter((f) => f.key !== 'other').map((f) => f.label);
+  // "An NDIS plan", "A personal budget": acronyms keep their capitals and their sound.
+  const lead = (w: string) => (/^(Personal|Disability|Home|Other)\b/.test(w) ? w.charAt(0).toLowerCase() + w.slice(1) : w);
+  const article = (w: string) => (/^(NDIS|NHS|HSE|[aeiou])/i.test(w) && !/^(u[nr]i|use)/i.test(w) ? 'An' : 'A');
+  const first = schemeNames[0] ? lead(schemeNames[0]) : '';
+  const schemeSentence = first
+    ? `${article(first)} ${[first, ...schemeNames.slice(1)].slice(0, -1).join(', ')}${schemeNames.length > 1 ? ` or ${schemeNames[schemeNames.length - 1]}` : first}`
+    : 'A funding plan';
   const plans = (data?.plans ?? []).filter((p) => !hidden.has(p.id));
 
   if (!canManage) {
@@ -83,7 +94,7 @@ export function FundingPage() {
         <p className="text-sm text-red-600" role="alert">{error instanceof Error ? error.message : 'The plan could not be loaded. Try again in a moment.'}</p>
       ) : plans.length === 0 ? (
         <div className="card text-center py-10 space-y-3">
-          <p className="text-sm text-ink">An NDIS plan or an aged care package goes here, with its dates, budgets and reports due.</p>
+          <p className="text-sm text-ink">{schemeSentence} goes here, with its dates, budgets and reports due.</p>
           <Button onClick={() => setEditing({ plan: null })}>Add a plan</Button>
         </div>
       ) : (
@@ -109,14 +120,15 @@ function PlanCard({ plan, profileId, onEdit, onDelete }: { plan: FundingPlan; pr
   const dv = useDataView<Budget>({ rows: plan.budgets, getId: (b) => b.id, searchText: (b) => b.name, sorts: BUDGET_SORTS, filters: [], defaultPageSize: 50 });
   const reportTo = plan.ends_on && plan.ends_on < todayDateOnly() ? plan.ends_on : todayDateOnly();
   const reportHref = `/app/reports?${new URLSearchParams({
-    preset: 'NDIS progress report',
+    preset: plan.progress_report ?? 'Progress report for the review',
     profile: profileId,
     ...(plan.starts_on ? { from: plan.starts_on, to: reportTo } : {}),
   }).toString()}`;
   const contacts: Array<[string, FundingPlan['plan_manager']]> = [
     ['Plan manager', plan.plan_manager],
     ['Support coordinator', plan.support_coordinator],
-    ['Local Area Coordinator', plan.local_area_coordinator],
+    // The local coordinator, named as the scheme names them.
+    ...(plan.area_coordinator_label || plan.local_area_coordinator ? [[plan.area_coordinator_label ?? 'Coordinator', plan.local_area_coordinator] as [string, FundingPlan['local_area_coordinator']]] : []),
   ];
   return (
     <section className="card space-y-4">
@@ -220,9 +232,9 @@ function PlanCard({ plan, profileId, onEdit, onDelete }: { plan: FundingPlan; pr
             })}
           </ul>
         )}
-        {plan.scheme === 'ndis' ? (
+        {plan.progress_report ? (
           <p className="text-sm">
-            <Link to={reportHref} className={CONTACT_LINK}>Make the NDIS progress report for the plan period</Link>
+            <Link to={reportHref} className={CONTACT_LINK}>Make the {plan.progress_report.replace(/^Progress/, 'progress')} for the plan period</Link>
           </p>
         ) : null}
       </div>

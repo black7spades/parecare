@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { format } from 'date-fns';
+import { format } from '../../lib/dateFormat';
 import { RELEASES } from '../../lib/releaseNotes';
 import { APP_VERSION, REPO_URL, commitUrl, versionLabel } from '../../lib/version';
 import { useUpdates } from '../../stores/updates';

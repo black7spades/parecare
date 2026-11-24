@@ -14,6 +14,7 @@ import { RECORD_ROW_CLASS, useRecordPanel } from '../../components/record/useRec
 import { ageFrom, phaseLabel, CARE_PHASES, type ProfileKind } from '../../lib/care';
 import { formatDateOnly } from '../../lib/datetime';
 import { CONTACT_LINK } from '../../components/ContactStrip';
+import { useCountry } from '../../lib/country';
 
 interface CircleMember {
   display_name: string;
@@ -98,6 +99,8 @@ export function DirectoryPetsPage() {
 }
 
 function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
+  // Example numbers the way this country writes them.
+  const { config: country } = useCountry();
   const isPeople = kind === 'person';
   const label = isPeople ? 'People' : 'Pets';
   const endpoint = isPeople ? '/directory/people' : '/directory/pets';
@@ -160,8 +163,8 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
               ? ['Name', 'Preferred name', 'Date of birth', 'Pronouns', 'Language', 'Phase', 'Relationship', 'Room', 'GP name', 'GP phone', 'GP practice', 'Next of kin name', 'Next of kin relationship', 'Next of kin phone', 'Next of kin email']
               : ['Name', 'Species', 'Breed', 'Desexed', 'Microchip', 'Date of birth', 'Relationship', 'Contact name', 'Contact phone', 'Contact email']}
             templateSample={isPeople
-              ? ['Marie Rose', 'Marie', '1948-03-14', 'she/her', 'English', 'Residential ongoing', 'Resident', '112', 'Dr Rachel Cohen', '03 9560 4422', 'Glen Waverley Medical', 'Chris Rattray', 'Son', '0412 555 555', 'chris@example.com']
-              : ['Bread Loaf', 'Cat', 'Domestic Shorthair', 'true', '', '2019-06-01', 'Cat', 'Chris Rattray', '07 5555 5555', '']}
+              ? ['Marie Rose', 'Marie', '1948-03-14', 'she/her', 'English', 'Residential ongoing', 'Resident', '112', 'Dr Rachel Cohen', country.phone_example, 'City Medical', 'Chris Rattray', 'Son', country.phone_example, 'chris@example.com']
+              : ['Bread Loaf', 'Cat', 'Domestic Shorthair', 'true', '', '2019-06-01', 'Cat', 'Chris Rattray', country.phone_example, '']}
           />
           {/* Offered to everyone allowed to set up a profile. */}
           {profiles.length > 0 && canCreate ? (

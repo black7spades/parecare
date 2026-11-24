@@ -35,7 +35,7 @@ If they track a condition or symptom, also record a reading against it (severity
 ## Appointments
 - Before: book it with the date, time, place and who it is with. If the practitioner is based at a clinic, name it, and the bigger place it is in, such as a health hub; PareCare files them together.
 - After: log what was said, any change to medication or treatment, questions still open, referrals, and the next step. Raise an open question for anything still undecided.
-- Costs: record what it cost, who pays or reimburses it (NDIS, Medicare, private health, a government program, or themselves) and whether it has been claimed.
+- Costs: record what it cost, who pays or reimburses it (a funding plan, the public health system, private health, a government program, or themselves) and whether it has been claimed.
 
 ## Notes that hold up for a claim or review
 Assessments for support, funding or payments generally look at how a condition affects everyday life over time, not just the diagnosis. Notes are most useful when they are:
@@ -112,7 +112,7 @@ export const GUIDE_PROMPTS: GuidePrompt[] = [
       { name: 'person', description: 'Who it is about.', required: true },
       { name: 'from', description: 'Start date, YYYY-MM-DD.', required: true },
       { name: 'to', description: 'End date, YYYY-MM-DD. Defaults to today.', required: false },
-      { name: 'purpose', description: 'What it is for, e.g. "NDIS plan review".', required: false },
+      { name: 'purpose', description: 'What it is for, e.g. "funding plan review".', required: false },
     ],
     render: (a) =>
       `Use get_records_between for ${a['person']} from ${a['from']} to ${a['to'] || 'today'} and summarise it${a['purpose'] ? ` for ${a['purpose']}` : ''}, following the PareCare recording guide: what happened and how often, how daily life was affected and what help was needed, symptoms over time, appointments and outcomes, costs and their claim status, and what is still unresolved. Quote my entries with their dates. Do not draw medical conclusions or say what I am entitled to.`,

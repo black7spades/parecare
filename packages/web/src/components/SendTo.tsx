@@ -111,7 +111,7 @@ export function SendToPicker({ id, profileId, value, onChange }: { id: string; p
       {value.key === 'other' ? (
         <div className="grid gap-3 sm:grid-cols-2">
           <Input label="Their name" value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} placeholder="e.g. Reception at Epworth" />
-          <Input label="Their email" type="email" value={value.email} onChange={(e) => onChange({ ...value, email: e.target.value })} placeholder="name@clinic.com.au" />
+          <Input label="Their email" type="email" value={value.email} onChange={(e) => onChange({ ...value, email: e.target.value })} placeholder="name@clinic.example" />
         </div>
       ) : null}
     </div>

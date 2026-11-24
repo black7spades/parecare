@@ -1,5 +1,6 @@
 import { Input } from './ui/Input';
 import { AddressAutocomplete } from './AddressAutocomplete';
+import { useCountry } from '../lib/country';
 
 /**
  * A segmented postal address: every part its own field, filled by the same
@@ -65,6 +66,9 @@ export function AddressFields({
   onChange: (v: AddressValue) => void;
   findLabel?: string;
 }) {
+  // Address words and examples the way this country writes them.
+  const { config: country } = useCountry();
+  const aw = country.words;
   const set = (patch: Partial<AddressValue>) => onChange({ ...value, ...patch });
   return (
     <div className="space-y-3">
@@ -87,9 +91,9 @@ export function AddressFields({
       <div className="grid gap-3 sm:grid-cols-2">
         <Input label="Address line 1" value={value.line1} onChange={(e) => set({ line1: e.target.value })} />
         <Input label="Address line 2" value={value.line2} onChange={(e) => set({ line2: e.target.value })} />
-        <Input label="Suburb" value={value.suburb} onChange={(e) => set({ suburb: e.target.value })} />
-        <Input label="State" value={value.state} onChange={(e) => set({ state: e.target.value })} />
-        <Input label="Postcode" value={value.postcode} onChange={(e) => set({ postcode: e.target.value })} />
+        <Input label={aw.suburb} value={value.suburb} onChange={(e) => set({ suburb: e.target.value })} />
+        <Input label={aw.state} value={value.state} onChange={(e) => set({ state: e.target.value })} />
+        <Input label={aw.postcode} value={value.postcode} onChange={(e) => set({ postcode: e.target.value })} />
         <Input label="Country" value={value.country} onChange={(e) => set({ country: e.target.value })} />
       </div>
     </div>

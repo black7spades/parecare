@@ -1,5 +1,7 @@
 import zlib from 'zlib';
 import { BUILT_IN_NEXT_STEPS } from './nextStepTypes';
+import type { CountryCode } from '../lib/countries';
+import { idCardWords, idFieldList, schemeList, schemeWords } from './countryPrompts';
 
 /**
  * Pull readable text out of an uploaded file so the assistant can classify it
@@ -149,13 +151,14 @@ export function buildIngestPrompt(
   today: string,
   knownAddresses: string[] = [],
   categories: string[] = [],
-  medicines: CurrentMedicine[] = []
+  medicines: CurrentMedicine[] = [],
+  country: CountryCode = 'AU'
 ): string {
   const medicineList = medicines.length
     ? `\n\nMedicines already on ${profileName}'s list (name, dose, times):\n${medicines.map((m) => `- ${m.name}${m.dose ? `, ${m.dose}` : ''}${m.times.length ? `, at ${m.times.join(' and ')}` : ''}`).join('\n')}\nA letter that changes one of these is update_medication with its exact name and the reason; one that stops it is stop_medication. Never add_medication for a medicine already on this list.`
     : `\n\n${profileName} has no medicines on the list yet.`;
   const addressGuard = knownAddresses.length
-    ? `\n\nAddresses already on file in this account (they belong to the family, NOT to vendors):\n${knownAddresses.map((a) => `- ${a}`).join('\n')}\nIf an address on the document matches one of these, it is the person's own address (the "invoice to" / "bill to" / "ship to"), so do NOT create a provider or supplier from it. Only a business's own address (usually the letterhead or the top of the page, next to its name, phone and ABN) identifies a vendor.`
+    ? `\n\nAddresses already on file in this account (they belong to the family, NOT to vendors):\n${knownAddresses.map((a) => `- ${a}`).join('\n')}\nIf an address on the document matches one of these, it is the person's own address (the "invoice to" / "bill to" / "ship to"), so do NOT create a provider or supplier from it. Only a business's own address (usually the letterhead or the top of the page, next to its name, phone and business number) identifies a vendor.`
     : '';
   return `You are filing an uploaded document into ${profileName}'s care record. Today is ${today}.${addressGuard}${medicineList}
 
@@ -176,7 +179,7 @@ The action types you can use here and their fields:
 - {"type": "record_hospital_stay", "hospital" (required), "admitted_on" ("YYYY-MM-DD"), "discharged_on"?, "ward"?, "treating_team"?, "reason"?} for a hospital admission
 - {"type": "record_discharge", "discharged_on" ("YYYY-MM-DD"), "follow_up_days"? (number of days to see the GP, from "see your GP within 7 days"), "follow_up_with"? (who, when it is not their GP), "hospital"? and "admitted_on"? (the hospital and the day they went in, from the letter)} for leaving hospital
 - {"type": "record_result", "test_name" (required), "collected_on"?, "reported_on"?, "summary"? (what it showed, in a sentence), "doctor_view"? (normal | follow_up | not_seen), "ordered_by"? (the doctor who asked for it), "lab"? (the pathology or imaging company), "for_appointment"?, "values"? (array of {"name", "value_number"? or "value_text"?, "unit"?, "range_low"?, "range_high"?, "flag"? (low | high | normal)})} for test results
-- {"type": "set_funding_plan", "scheme" (ndis | support_at_home | home_care_package | other), "starts_on"?, "ends_on"?, "review_on"?, "management"? (agency | plan | self), "plan_manager"?, "support_coordinator"?, "local_area_coordinator"?, "budgets"? (array of {"name", "amount"})} for an NDIS plan or an aged care package
+- {"type": "set_funding_plan", "scheme" (${schemeList(country)}), "starts_on"?, "ends_on"?, "review_on"?, "management"? (agency | plan | self), "plan_manager"?, "support_coordinator"?, "local_area_coordinator"?, "budgets"? (array of {"name", "amount"})} for ${schemeWords(country)}
 - {"type": "record_move_into_care", "care_home" (required), "entry_on"?, "agreement_signed_on"?, "payment_choice"? (lump_sum | daily | mix), "notice_given_on"?, "room"?} for a residential care agreement or an offer of a place
 - {"type": "add_provider", "kind"?: "organisation" for a clinic, hospital, pharmacy, government department, agency or other body, "person" for a professional such as a doctor or caseworker, "provider_type": for a professional gp | specialist | psychologist | allied_health | legal | financial | social_worker or plain words such as "Neurologist"; for an organisation practice | clinic | pharmacy | care_facility or plain words such as "Hospital" or "Government department", "name" (required), "organisation"? (the organisation they are based at), "phone"?, "email"?, "after_hours_phone"?, "fax"?, "opening_hours"? ([{"day": "mon".."sun", "opens": "HH:MM", "closes": "HH:MM"}])}
 - {"type": "add_medication", "medication_name" (required), "dose"?, "route"?, "frequency"?, "instructions"?, "prescriber"? (the doctor who wrote it, by name), "prescriber_type"?, "started_at_appointment"? (the title of the visit it came from), "course_ends_on"? ("YYYY-MM-DD", the last day of a course such as antibiotics), "repeats_left"? (number of repeats on the script), "as_needed"? (true when only taken when needed, "PRN"), "as_needed_for"? (what an as-needed medicine is for, e.g. "breakthrough pain"), "min_hours_between_doses"? (number, from "at least 4 hours apart"), "max_doses_per_day"? (number, from "no more than 8 in 24 hours"), "reason"? (why it was started)}
@@ -185,7 +188,7 @@ The action types you can use here and their fields:
 - {"type": "book_appointment", "title": what it is for, "appointment_type": consultation | test | procedure | therapy | review | vaccination | other, "provider_name"? (who it is with), "with_type"?, "with_phone"?, "location"?, "starts_at": ISO time from the letter, "preparation"? (how to get ready, such as fasting), "documents_to_bring"? (leave out; this letter is brought automatically)} for a letter that gives a booked date and time
 - {"type": "add_condition", "name" (required), "status"? (active | improving | managed | resolved), "started_on"? ("YYYY-MM-DD"), "notes"?, "treated_by"? (who treats it), "treated_by_type"?} for a diagnosis the letter makes
 - {"type": "add_allergy", "substance" (required), "reaction"?, "severity"? (mild | moderate | severe | life_threatening)} for an allergy the letter records
-- {"type": "set_id_numbers", any of "medicare_number" (10 digits), "medicare_irn" (the position on the card, 1 to 9), "medicare_valid_to" (YYYY-MM), "ihi_number" (16 digits), "dva_number", "dva_card_colour" (gold | white | orange), "ndis_number" (9 digits starting 43), "health_fund_name", "health_fund_member_number", "my_aged_care_number" (AC then 8 or 9 digits)} for a photo or scan of a Medicare, DVA, health fund or NDIS card, or a letter that gives an ID number. ID numbers are always set_id_numbers, never a note
+- {"type": "set_id_numbers", any of ${idFieldList(country)}} for a photo or scan of an ID card (${idCardWords(country)}), or a letter that gives an ID number. ID numbers are always set_id_numbers, never a note
 - {"type": "record_cost", "amount" (number), "spent_on"? ("YYYY-MM-DD"), "description"?, "tax_amount"?, "claimable_amount"?} for an amount paid on a receipt or invoice that is not a piece of equipment
 - A phone number for someone already on file goes on their record with update_provider, never in a note.
 - {"type": "add_task", "title" (required), "body"?, "due_at" (ISO time, or YYYY-MM-DD for any time that day), "repeat": once | daily | weekly | fortnightly | monthly | three_monthly | six_monthly | yearly, "with"? (who it is with, e.g. the specialist a letter names), "with_type"? (what they do), "with_phone"? (their phone from the letter)}
@@ -194,11 +197,11 @@ The action types you can use here and their fields:
 
 What goes where:
 - A tax invoice or receipt for a piece of equipment (a CPAP machine, a hoist, a wheelchair, a bed, a monitor) is an asset: add_asset with the unit name, make/model, serial number, the price actually paid, purchase date, the seller as "supplier", and the warranty expiry (compute it from the purchase date if the document gives a warranty length). Put accessories in notes. A GST-free medical device still has a price. The seller of equipment goes in the asset's "supplier" field, NOT as a provider; only use add_provider for a clinician or a clinic, not a retailer.
-- The seller is the business named on the letterhead (with its own phone and ABN); the "invoice to" / "bill to" party is the customer, usually ${profileName}, and that address is the person's own, not a vendor's. A provider's or supplier's name is the business name (e.g. "Sleep Healthcare Australia"), never an address.
+- The seller is the business named on the letterhead (with its own phone and business number); the "invoice to" / "bill to" party is the customer, usually ${profileName}, and that address is the person's own, not a vendor's. A provider's or supplier's name is the business name (e.g. "Sleep Healthcare"), never an address.
 - A prescription or medication list is one add_medication per drug that is not already on their list, with the prescribing doctor as "prescriber". A drug already on the list with a new dose or times is update_medication, and one the letter stops is stop_medication, each with the reason.
 - A discharge summary is record_discharge (with the hospital and the day they went in), plus update_medication or stop_medication for each medicine it changes, each with the reason and "hospital_stay": true, plus add_asset with "ownership": "loaned" and "return_by" for loaned equipment. The GP follow-up comes from follow_up_days. Never record_appointment_outcome for a hospital stay.
 - A pathology or imaging report is record_result with one value per measure.
-- An NDIS plan is set_funding_plan plus set_id_numbers for the NDIS number.
+- A funding plan letter (${schemeWords(country)}) is set_funding_plan, plus set_id_numbers for any ID number it gives.
 - A referral is file_document with "from_name", "to_name" and "issued_on" filled in, with the category "Referral". Never a new task for it: the person usually has a task for it already, and the referral is matched to it. Give "valid_until" only when the letter says how long it lasts; otherwise it is worked out.
 - A letter that gives a booked appointment (a date and a time) is book_appointment.
 - A letter about a visit that has happened (a specialist's letter to the GP, a consult summary) is one record_appointment_outcome: the outcome in a sentence, and one next step for each thing it says should happen next, such as a referral, a blood test, a sample to give, a scan, a follow-up or a prescription to fill. Use these next steps in place of add_task for anything the letter asks for. Name the visit in "visit_title" and its day in "visited_on"; it is filed against an appointment on file only when its title matches, and otherwise as a visit of its own, never against whatever appointment was last.

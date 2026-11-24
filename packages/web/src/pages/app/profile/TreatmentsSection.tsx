@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format, formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
+import { format } from '../../../lib/dateFormat';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { PencilIcon } from '../../../components/ui/icons';

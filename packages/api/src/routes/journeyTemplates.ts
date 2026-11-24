@@ -8,6 +8,8 @@ import { JOURNEY_ACTIONS, JOURNEY_PAGES, NO_ACTION, type ItemAction } from '../l
 import { REPEAT_CHOICE_VALUES, repeatChoice, repeatColumns } from '../lib/repeat';
 import { normaliseProviderType } from '../lib/providerTypes';
 import { journeyItemAction } from '../db/journeys/itemActions';
+import { isServiceKind, localiseCareWords } from '../lib/countries';
+import { accountCountry } from '../services/country';
 
 /**
  * The journey template library. Everyone signed in can browse published
@@ -90,6 +92,15 @@ journeyTemplatesRouter.get('/:templateId', requireAuth, async (req, res) => {
     res.status(404).json({ error: 'Journey not found', code: 'NOT_FOUND' });
     return;
   }
+  // Someone choosing a journey reads the built-in steps in their country's
+  // words; whoever edits the journey sees the words as stored.
+  if (req.query['edit'] !== '1' && template.is_system) {
+    const country = await accountCountry(db, req.account!.id);
+    template.phases = template.phases.map((p: { tasks: Array<Record<string, unknown>> }) => ({
+      ...p,
+      tasks: p.tasks.map((t) => ({ ...t, title: localiseCareWords(t['title'] as string, country), description: localiseCareWords(t['description'] as string | null, country) || t['description'] })),
+    }));
+  }
   res.json({ template });
 });
 
@@ -105,6 +116,8 @@ const taskSchema = z.object({
   action_document_category: z.string().max(100).optional().nullable(),
   action_page: z.enum(JOURNEY_PAGES).optional().nullable(),
   action_url: z.string().max(500).optional().nullable(),
+  // A kind of national service; its name, number and site come from the country.
+  action_service: z.string().max(40).optional().nullable(),
   due_in_days: z.number().int().min(0).max(3650).optional().nullable(),
   repeat: z.enum(REPEAT_CHOICE_VALUES).optional().nullable(),
   // A copied template keeps the stored rule.
@@ -152,11 +165,12 @@ function taskActionColumns(task: z.infer<typeof taskSchema>): ItemAction {
   return {
     action: task.action,
     action_provider_type: clean(task.action_provider_type) ? normaliseProviderType(task.action_provider_type) : null,
-    action_contact_name: clean(task.action_contact_name),
-    action_phone: clean(task.action_phone),
+    action_contact_name: task.action === 'call' && isServiceKind(task.action_service) ? null : clean(task.action_contact_name),
+    action_phone: task.action === 'call' && isServiceKind(task.action_service) ? null : clean(task.action_phone),
     action_document_category: clean(task.action_document_category),
     action_page: task.action === 'open' ? task.action_page ?? null : null,
-    action_url: task.action === 'call' ? websiteOf(task.action_url) : null,
+    action_url: task.action === 'call' && !isServiceKind(task.action_service) ? websiteOf(task.action_url) : null,
+    action_service: isServiceKind(task.action_service) ? task.action_service : null,
     due_in_days: task.due_in_days ?? null,
     repeat_rrule: task.repeat ? repeatColumns(task.repeat).rrule : task.repeat_rrule ?? null,
   };
@@ -324,6 +338,7 @@ journeyTemplatesRouter.post('/:templateId/clone', requireAuth, requireRole('admi
           action_document_category: task['action_document_category'] as string | null,
           action_page: task['action_page'] as z.infer<typeof taskSchema>['action_page'],
           action_url: task['action_url'] as string | null,
+          action_service: task['action_service'] as string | null,
           due_in_days: task['due_in_days'] as number | null,
           repeat_rrule: task['repeat_rrule'] as string | null,
         })),
