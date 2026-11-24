@@ -12,7 +12,7 @@ import { FundingPlanEditor } from '../../../components/FundingPlanEditor';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { useHealthConfig } from '../../../lib/appConfig';
 import { formatDateOnly, todayDateOnly } from '../../../lib/datetime';
-import type { Budget, FundingPlan } from '../../../lib/lifeEvents';
+import { whose, type Budget, type FundingPlan } from '../../../lib/lifeEvents';
 import { useProfile } from './ProfileLayout';
 
 /**
@@ -21,7 +21,7 @@ import { useProfile } from './ProfileLayout';
  * before the review.
  */
 export function FundingPage() {
-  const { profile, careName, isOwner, access } = useProfile();
+  const { profile, careName, isOwner, access, isSelf } = useProfile();
   const canManage = isOwner || access === 'admin';
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ plan: FundingPlan | null } | null>(null);
@@ -38,7 +38,7 @@ export function FundingPage() {
   if (!canManage) {
     return (
       <div className="card text-center py-10 max-w-3xl">
-        <p className="text-sm text-ink">{profile.manager_name ?? 'Whoever manages this profile'} keeps {careName}'s funding plan, because the budgets are the household's money.</p>
+        <p className="text-sm text-ink">{profile.manager_name ?? 'Whoever manages this profile'} keeps {whose(isSelf, careName)} funding plan, because the budgets are the household's money.</p>
       </div>
     );
   }
@@ -59,7 +59,7 @@ export function FundingPage() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-base font-semibold text-ink">Funding</h2>
-          <p className="text-xs text-muted">{careName}'s plan, who manages it, the budgets and the reports due before the review.</p>
+          <p className="text-xs text-muted">{whose(isSelf, careName, true)} plan, who manages it, the budgets and the reports due before the review.</p>
         </div>
         {plans.length > 0 ? <Button size="sm" onClick={() => setEditing({ plan: null })}>Add a plan</Button> : null}
       </div>

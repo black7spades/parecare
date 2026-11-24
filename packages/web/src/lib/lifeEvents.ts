@@ -206,3 +206,9 @@ export function isFacilityProvider(p: { provider_type: string | null; name: stri
   if (FACILITY_SET.has(t)) return true;
   return (!t || t === 'other' || t === 'practice') && FACILITY_WORDS.test(p.name);
 }
+
+/** "Your" on your own profile, else "Mum's" or "Oliver's", with a capital when it starts a sentence. */
+export function whose(isSelf: boolean, careName: string, capital = false): string {
+  const w = isSelf ? 'your' : `${careName}'s`;
+  return capital ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+}

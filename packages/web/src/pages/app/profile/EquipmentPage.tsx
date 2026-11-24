@@ -14,7 +14,7 @@ import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/use
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { useHealthConfig } from '../../../lib/appConfig';
 import { formatDateOnly } from '../../../lib/datetime';
-import { OWNERSHIP, ownershipLabel } from '../../../lib/lifeEvents';
+import { OWNERSHIP, ownershipLabel, whose } from '../../../lib/lifeEvents';
 import type { Asset } from '../../../lib/care';
 import { DirectoryAssetEditor } from '../DirectoryAssetsPage';
 import { useProfile } from './ProfileLayout';
@@ -37,7 +37,7 @@ const SORTS: DataSort<Asset>[] = [
  * same records as the account's equipment register.
  */
 export function EquipmentPage() {
-  const { profile, careName, canEdit } = useProfile();
+  const { profile, careName, canEdit, isSelf } = useProfile();
   const queryClient = useQueryClient();
   const health = useHealthConfig();
   const [params, setParams] = useSearchParams();
@@ -87,7 +87,7 @@ export function EquipmentPage() {
   // Remove takes it off this person only; the register keeps it.
   const removeItem = (a: Asset) =>
     deferDelete({
-      message: `Removed the ${a.name} from ${careName}'s equipment.`,
+      message: `Removed the ${a.name} from ${whose(isSelf, careName)} equipment.`,
       ids: [a.id],
       commit: () => api.delete(`/care-profiles/${profile.id}/equipment/${a.id}`),
       onCommitted: invalidate,
@@ -100,7 +100,7 @@ export function EquipmentPage() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-base font-semibold text-ink">Equipment</h2>
-          <p className="text-xs text-muted">What {careName} uses, who it came from, and when it goes back or is due a service.</p>
+          <p className="text-xs text-muted">{isSelf ? 'What you use' : `What ${careName} uses`}, who it came from, and when it goes back or is due a service.</p>
         </div>
         {canEdit && items.length > 0 ? <Button size="sm" onClick={() => setEditing({ asset: null })}>Add equipment</Button> : null}
       </div>

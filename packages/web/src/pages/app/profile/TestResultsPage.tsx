@@ -15,7 +15,7 @@ import { ResultEditor } from '../../../components/ResultEditor';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { formatDateOnly } from '../../../lib/datetime';
 import { bookingHref } from '../../../lib/booking';
-import { DOCTOR_VIEWS, doctorViewLabel, flagLabel, type ResultValue, type TestResult } from '../../../lib/lifeEvents';
+import { DOCTOR_VIEWS, doctorViewLabel, flagLabel, whose, type ResultValue, type TestResult } from '../../../lib/lifeEvents';
 import { useProfile } from './ProfileLayout';
 
 const byText = (a: string | null | undefined, b: string | null | undefined) => (a ?? '').localeCompare(b ?? '');
@@ -40,7 +40,7 @@ export const visitLine = (a: { title: string; starts_at: string | null; provider
  * measure in its own row, and the visit it is to be talked about at.
  */
 export function TestResultsPage() {
-  const { profile, careName, canEdit } = useProfile();
+  const { profile, careName, canEdit, isSelf } = useProfile();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -95,7 +95,7 @@ export function TestResultsPage() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-base font-semibold text-ink">Test results</h2>
-          <p className="text-xs text-muted">What {careName}'s tests showed, each measure on its own line, ready for the next visit.</p>
+          <p className="text-xs text-muted">What {whose(isSelf, careName)} tests showed, each measure on its own line, ready for the next visit.</p>
         </div>
         {canEdit && results.length > 0 ? <Button size="sm" onClick={() => setEditing({ result: null })}>Add a result</Button> : null}
       </div>
