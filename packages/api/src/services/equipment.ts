@@ -4,6 +4,8 @@ import { db } from '../config/database';
 import { resolveAssetSupplier, supplierContacts } from './professionals';
 import { keepTask } from './keptTasks';
 import { addDays } from './documentDates';
+import { ownerZone } from './tasks';
+import { dateInZone } from '../lib/timezone';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -168,23 +170,23 @@ export async function syncEquipmentTasks(conn: Conn, assetId: string, actorId: s
   const serviceDue = assetDate(a['service_due_on']);
   const goesBack = returnBy && (a['ownership'] === 'loaned' || a['ownership'] === 'hired');
   for (const profileId of profileIds) {
-    const tasks = (await conn('reminders').where({ care_profile_id: profileId, asset_id: assetId }).select('id', 'title')) as Array<{ id: string; title: string }>;
-    const returnTask = tasks.find((t) => t.title.startsWith('Return the '))?.id ?? null;
-    const serviceTask = tasks.find((t) => t.title.startsWith('Book a service for '))?.id ?? null;
-    await keepTask(conn, {
-      profileId,
-      actorId,
-      taskId: returnTask,
-      want: goesBack
-        ? { title: `Return the ${name}${supplier ? ` to ${supplier}` : ''} by ${friendly(returnBy!)}`, due_on: addDays(returnBy!, -7), links: { asset_id: assetId } }
-        : null,
-    });
-    await keepTask(conn, {
-      profileId,
-      actorId,
-      taskId: serviceTask,
-      want: serviceDue ? { title: `Book a service for the ${name}`, due_on: addDays(serviceDue, -14), links: { asset_id: assetId } } : null,
-    });
+    const tasks = (await conn('reminders').where({ care_profile_id: profileId, asset_id: assetId }).select('id', 'title', 'completed', 'next_due_at')) as Array<{
+      id: string;
+      title: string;
+      completed: boolean;
+      next_due_at: Date;
+    }>;
+    const zone = await ownerZone(conn, profileId);
+    // The open task is kept in step. One already ticked off for the same day
+    // stays done; a new day makes a new task.
+    const keep = async (prefix: string, want: { title: string; due_on: string } | null) => {
+      const mine = tasks.filter((t) => t.title.startsWith(prefix));
+      const open = mine.find((t) => !t.completed);
+      if (!open && want && mine.some((t) => t.completed && dateInZone(new Date(t.next_due_at), zone) === want.due_on)) return;
+      await keepTask(conn, { profileId, actorId, taskId: open?.id ?? null, want: want ? { ...want, links: { asset_id: assetId } } : null });
+    };
+    await keep('Return the ', goesBack ? { title: `Return the ${name}${supplier ? ` to ${supplier}` : ''} by ${friendly(returnBy!)}`, due_on: addDays(returnBy!, -7) } : null);
+    await keep('Book a service for ', serviceDue ? { title: `Book a service for the ${name}`, due_on: addDays(serviceDue, -14) } : null);
   }
 }
 

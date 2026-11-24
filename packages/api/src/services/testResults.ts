@@ -2,7 +2,7 @@ import type { Knex } from 'knex';
 import { z } from 'zod';
 import { contactSummaries, mainContact, resolveContactInput } from './professionals';
 import { ownerZone } from './tasks';
-import { parseZonedTime } from '../lib/timezone';
+import { dateInZone, parseZonedTime } from '../lib/timezone';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -79,11 +79,11 @@ async function belongs(conn: Conn, table: string, id: string | null | undefined,
 export async function reviewVisitFor(
   conn: Conn,
   profileId: string,
-  opts: { orderedBy: string | null; after: string | null }
+  opts: { orderedBy: string | null; after: string | null; timeZone?: string | null }
 ): Promise<string | null> {
   const providerId = opts.orderedBy ?? (await mainContact(conn, profileId, 'gp'))?.id ?? null;
   if (!providerId) return null;
-  const zone = await ownerZone(conn, profileId);
+  const zone = await ownerZone(conn, profileId, opts.timeZone);
   const afterAt = opts.after ? (parseZonedTime(`${opts.after}T23:59:59`, zone) ?? new Date(`${opts.after}T23:59:59Z`)) : new Date();
   const from = afterAt > new Date() ? afterAt : new Date();
   const row = (await conn('appointments')
@@ -107,15 +107,16 @@ async function orderedFromTestVisit(conn: Conn, profileId: string, appointmentId
 }
 
 /** The test appointment's own day, when a result gives no collection day. */
-async function appointmentDay(conn: Conn, profileId: string, appointmentId: string | null): Promise<string | null> {
+async function appointmentDay(conn: Conn, profileId: string, appointmentId: string | null, timeZone?: string | null): Promise<string | null> {
   if (!appointmentId) return null;
   const a = (await conn('appointments').where({ id: appointmentId }).first('starts_at')) as { starts_at: Date | null } | undefined;
-  return a?.starts_at ? new Date(a.starts_at).toISOString().slice(0, 10) : null;
+  // The day where they live: a morning test in Melbourne is still that day.
+  return a?.starts_at ? dateInZone(new Date(a.starts_at), await ownerZone(conn, profileId, timeZone)) : null;
 }
 
 export async function saveResult(
   conn: Conn,
-  opts: { profileId: string; actorId: string | null; resultId?: string | null; input: Partial<ResultInput> }
+  opts: { profileId: string; actorId: string | null; resultId?: string | null; input: Partial<ResultInput>; timeZone?: string | null }
 ): Promise<{ id: string; filed: Array<{ id: string; name: string }>; ticked: number }> {
   const { profileId, input } = opts;
   const before = opts.resultId
@@ -150,8 +151,9 @@ export async function saveResult(
     const guess = await orderedFromTestVisit(conn, profileId, testAppt);
     if (guess) cols['ordered_by_provider_id'] = guess;
   }
-  if (!('collected_on' in cols) && !before?.['collected_on']) {
-    const d = await appointmentDay(conn, profileId, testAppt);
+  // Left empty, it is the day of the test appointment.
+  if (!cols['collected_on'] && !before?.['collected_on']) {
+    const d = await appointmentDay(conn, profileId, testAppt, opts.timeZone);
     if (d) cols['collected_on'] = d;
   }
   // The visit to talk about it at: chosen, else worked out.
@@ -159,6 +161,7 @@ export async function saveResult(
     cols['review_appointment_id'] = await belongs(conn, 'appointments', input.review_appointment_id, profileId);
   } else if (!before?.['review_appointment_id']) {
     cols['review_appointment_id'] = await reviewVisitFor(conn, profileId, {
+      timeZone: opts.timeZone,
       orderedBy: ((cols['ordered_by_provider_id'] ?? before?.['ordered_by_provider_id']) as string | null) ?? null,
       after: ((cols['collected_on'] ?? before?.['collected_on']) as string | null) ?? null,
     });

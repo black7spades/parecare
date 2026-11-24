@@ -104,6 +104,8 @@ export const LIFE_EVENT_TYPES = new Set(['record_hospital_stay', 'record_dischar
 interface Ctx {
   profileId: string;
   account: Account;
+  /** The asker's access to this person: a funding plan is owner and admin only. */
+  accessLevel: string;
   timeZone: string | null | undefined;
   audit: (entityType: string, summary: string, entityId?: string | null) => Promise<void>;
   linkSource: (kind: string, id: string | null | undefined) => Promise<void>;
@@ -171,9 +173,10 @@ export async function executeLifeEvent(action: LifeEventAction, ctx: Ctx): Promi
             stay = created.stay;
             made = ` Recorded the stay at ${action.hospital} from ${friendly(action.admitted_on)}.${filedLine(created.filed)}`;
           } else {
-            const latest = (await db('hospital_stays').where({ care_profile_id: profileId }).orderBy('admitted_on', 'desc').first()) as typeof stay | undefined;
-            if (!latest) return 'There is no hospital stay to discharge. Say which hospital and the day they went in, and I will record both.';
-            stay = latest;
+            // Only the same discharge read again: never move an earlier stay's dates.
+            const same = (await db('hospital_stays').where({ care_profile_id: profileId, discharged_on: action.discharged_on }).orderBy('admitted_on', 'desc').first()) as typeof stay | undefined;
+            if (!same) return 'There is no open hospital stay to discharge. Say which hospital and the day they went in, and I will record the stay and the discharge together.';
+            stay = same;
           }
         }
         let withId: string | null = null;
@@ -212,6 +215,7 @@ export async function executeLifeEvent(action: LifeEventAction, ctx: Ctx): Promi
           saveResult(trx, {
             profileId,
             actorId: account.id,
+            timeZone,
             input: {
               test_name: action.test_name,
               collected_on: action.collected_on ?? undefined,
@@ -236,6 +240,11 @@ export async function executeLifeEvent(action: LifeEventAction, ctx: Ctx): Promi
         return `Recorded the ${action.test_name} result${n ? ` with ${n} ${n === 1 ? 'measure' : 'measures'}` : ''}.${at}${filedLine(saved.filed)}`;
       }
       case 'set_funding_plan': {
+        // Funding plans are the household's money: owner and admin only, the
+        // same rule as the Funding page.
+        if (ctx.accessLevel !== 'owner' && ctx.accessLevel !== 'admin') {
+          return 'No plan was saved: only whoever manages this profile, or an admin, can see and change the funding plan.';
+        }
         const existing = (await db('funding_plans').where({ care_profile_id: profileId, scheme: action.scheme }).orderByRaw('coalesce(starts_on, created_at::date) desc').first('id')) as
           | { id: string }
           | undefined;

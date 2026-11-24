@@ -49,20 +49,6 @@ export class StayProblem extends Error {}
 /** The default days after leaving hospital to see the GP. */
 export const DEFAULT_FOLLOW_UP_DAYS = 7;
 
-/**
- * "See your GP within 7 days", "GP review in 2 weeks", "follow up with GP in
- * one week": the days a discharge letter gives for the GP visit.
- */
-export function followUpDaysFromText(textIn: string | null | undefined): number | null {
-  const t = String(textIn ?? '').toLowerCase();
-  if (!/\b(gp|general practitioner|family doctor|local doctor)\b/.test(t)) return null;
-  const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, ten: 10, fourteen: 14 };
-  const m = /\b(?:within|in|after|over the next)\s+(\d{1,3}|one|two|three|four|five|six|seven|ten|fourteen)\s*(day|days|week|weeks)\b/.exec(t);
-  if (!m) return null;
-  const n = /^\d+$/.test(m[1]!) ? Number(m[1]) : words[m[1]!]!;
-  return m[2]!.startsWith('week') ? n * 7 : n;
-}
-
 export interface StayRow {
   id: string;
   care_profile_id: string;
@@ -210,14 +196,17 @@ export async function updateStay(
     throw new StayProblem('Went in on is after Left hospital on. Check the two dates.');
   }
   if (Object.keys(update).length) await conn('hospital_stays').where({ id: before.id }).update({ ...update, updated_at: conn.fn.now() });
-  if (input.discharged_on !== undefined) {
+  // Only a changed discharge day reworks the discharge, so fixing the ward
+  // never brings back a task someone deleted.
+  const dischargeMoved = input.discharged_on !== undefined && input.discharged_on !== before.discharged_on;
+  if (dischargeMoved || (input.follow_up_days != null && before.discharged_on)) {
     if (input.discharged_on === null) return reopenStay(conn, { profileId, stayId: before.id });
     return dischargeStay(conn, {
       profileId,
       stayId: before.id,
       actorId: opts.actorId,
       timeZone: opts.timeZone,
-      input: { discharged_on: input.discharged_on, follow_up_days: input.follow_up_days ?? null },
+      input: { discharged_on: (input.discharged_on ?? before.discharged_on)!, follow_up_days: input.follow_up_days ?? null },
     });
   }
   return (await conn('hospital_stays').where({ id: before.id }).first()) as StayRow;

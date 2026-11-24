@@ -3107,6 +3107,7 @@ async function executeOne(
       return executeLifeEvent(action, {
         profileId,
         account,
+        accessLevel: access.level,
         timeZone,
         audit: (entityType, summary, entityId) => audit(profileId, account.id, entityType, summary, entityId),
         linkSource,

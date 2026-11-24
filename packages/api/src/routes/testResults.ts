@@ -31,7 +31,7 @@ testResultsRouter.post('/', requireAuth, async (req, res) => {
   }
   const profileId = profileIdOf(req);
   try {
-    const saved = await db.transaction((trx) => saveResult(trx, { profileId, actorId: req.account!.id, input: parsed.data }));
+    const saved = await db.transaction((trx) => saveResult(trx, { profileId, actorId: req.account!.id, input: parsed.data, timeZone: (req.headers['x-time-zone'] as string) || null }));
     res.status(201).json({ result: await oneOut(profileId, saved.id), filed: saved.filed, ticked: saved.ticked });
   } catch (err) {
     if (err instanceof ResultProblem) {
@@ -50,7 +50,7 @@ testResultsRouter.patch('/:resultId', requireAuth, async (req, res) => {
   }
   const profileId = profileIdOf(req);
   try {
-    const saved = await db.transaction((trx) => saveResult(trx, { profileId, actorId: req.account!.id, resultId: String(req.params['resultId']), input: parsed.data }));
+    const saved = await db.transaction((trx) => saveResult(trx, { profileId, actorId: req.account!.id, resultId: String(req.params['resultId']), input: parsed.data, timeZone: (req.headers['x-time-zone'] as string) || null }));
     res.json({ result: await oneOut(profileId, saved.id), filed: saved.filed, ticked: saved.ticked });
   } catch (err) {
     if (err instanceof ResultProblem) {

@@ -38,6 +38,14 @@ const numOrNull = (s: string): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+/** The flag the normal range gives, the same rule the server uses. */
+const workedOutFlag = (v: Pick<ResultValue, 'value_number' | 'range_low' | 'range_high'>): string => {
+  if (v.value_number == null) return '';
+  if (v.range_low != null && v.value_number < v.range_low) return 'low';
+  if (v.range_high != null && v.value_number > v.range_high) return 'high';
+  return v.range_low != null || v.range_high != null ? 'normal' : '';
+};
+
 const draftFrom = (v: ResultValue, key: number): ValueDraft => ({
   key,
   name: v.name,
@@ -45,7 +53,8 @@ const draftFrom = (v: ResultValue, key: number): ValueDraft => ({
   unit: v.unit ?? '',
   low: v.range_low != null ? String(v.range_low) : '',
   high: v.range_high != null ? String(v.range_high) : '',
-  flag: v.flag ?? '',
+  // A flag the range worked out stays worked out, so a corrected number gets the right one.
+  flag: v.flag && v.flag !== workedOutFlag(v) ? v.flag : '',
 });
 
 const when = (a: ApptOption) => (a.starts_at ? format(new Date(a.starts_at), 'd MMM yyyy') : 'Not booked yet');
@@ -111,7 +120,8 @@ export function ResultEditor({
       const rows = values.filter((v) => v.name.trim() || v.result.trim());
       const body = {
         test_name: testName.trim(),
-        collected_on: collected || null,
+        // Left empty, the server uses the day of the test appointment.
+        ...(collected || result?.collected_on ? { collected_on: collected || null } : {}),
         reported_on: reported || null,
         appointment_id: apptId || null,
         summary: summary.trim() || null,

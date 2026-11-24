@@ -350,6 +350,15 @@ const ENTITY_LABELS: Record<string, string> = {
   appointments: 'appointment',
   calendar: 'calendar entry',
   records: 'note',
+  'hospital-stays': 'hospital stay',
+  results: 'test result',
+  'funding-plans': 'funding plan',
+  'care-moves': 'move into care',
+  equipment: 'equipment',
+  assets: 'equipment',
+  recalls: 'suggested reminder',
+  identifiers: 'ID numbers',
+  'emergency-contacts': 'emergency contact',
 };
 
 export const entityLabel = (type: string) => ENTITY_LABELS[type] ?? type;

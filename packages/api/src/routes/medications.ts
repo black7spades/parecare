@@ -1095,6 +1095,12 @@ medicationsRouter.get('/chart', requireAuth, async (req, res) => {
     administrations,
     // In hospital: the chart shows the stay and no doses due.
     paused_by_stay: await openStaySummary(db, String(req.params['id'])),
+    // Every stay that touches the window: those days have nothing due here.
+    stays: await db('hospital_stays')
+      .where('care_profile_id', String(req.params['id']))
+      .where('admitted_on', '<=', to.toISOString().slice(0, 10))
+      .where((w) => w.whereNull('discharged_on').orWhere('discharged_on', '>=', new Date(from.getTime() - 86400000).toISOString().slice(0, 10)))
+      .select('id', 'admitted_on', 'discharged_on'),
   });
 });
 

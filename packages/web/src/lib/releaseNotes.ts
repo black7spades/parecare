@@ -20,6 +20,32 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.52.0',
+    date: '2026-11-24',
+    summary: 'Life events: hospital stays that pause medicine reminders, test results at the next visit, funding plans, equipment on loan, moves into care, suggested reminders and the roster.',
+    groups: [
+      { heading: 'Added', items: [
+        'Where they live. A new page shows the home they live in now, the home they left, their hospital stays and their moves into care. On your own profile it is called Where I live.',
+        'Hospital stays. Record a hospital stay with the hospital, the day they went in, the ward, the treating team and why. While the stay is open, medicine reminders, low supply alerts and the medication record\'s due doses pause, because the hospital gives the medicines. Every page of the person says where they are, with Record the discharge.',
+        'Record the discharge. Say the day they left, pick or upload the discharge letter, and say how many days to see the GP. PareCare adds a task to see their GP within those days and a task to look over the care plan, and files the letter against the stay. After two weeks in hospital PareCare asks whether they are still there, and a dose recorded at home asks whether they are back.',
+        'Test results. Record what a test showed, each measure on its own line with its unit, normal range and whether it is low or high. A result is tied to the test appointment and shown at the next visit with whoever ordered it, under Results to talk about. Recording a result ticks off the Results to chase step.',
+        'Funding. Keep an NDIS plan, Support at Home or a Home Care Package with its dates, how it is managed, the plan manager, support coordinator and Local Area Coordinator, and its budgets. A cost can count against a budget, so each budget shows what is spent and what is left. Before the review, each therapist gets a task to ask for their progress report, due six weeks before. The NDIS progress report opens on the plan period, with the care log, appointments and spend.',
+        'Equipment. Each person has an Equipment page. Equipment can be owned, on loan or hired, with the day it goes back and the day it is due a service, and each makes a task in good time. An Equipment to get step has Add to equipment.',
+        'Move into care. Record the care home, the room, the day they moved in, the agreement and cooling-off, how the room is paid for and by when, and notice dates. The care home becomes where they live, the old home is kept as their previous home, their care journey moves on, and tasks are added for the cooling-off and the payment decision.',
+        'Suggested reminders. Tasks suggests the yearly and six-monthly checks worth not forgetting, by age and conditions: the flu shot, the health check for people 75 and over, a GP management plan review, dental and eye checks, and the driver\'s licence medical. Add makes a repeating task. Dismiss sets one aside, with Undo.',
+        'The roster. Tasks can be shown as a roster: who does which repeating task on each day of the week.',
+      ] },
+      { heading: 'Changed', items: [
+        'Only places in the place pickers. Choosing where someone lives, a hospital or a care home lists only hospitals, care homes and similar places, never the GP or the pharmacy.',
+        'Reminders reach everyone. A task assigned to someone added by name is emailed to them. With no email on file, the reminder goes to whoever manages the profile with their phone number to ring.',
+        'Care journeys move forward the same way everywhere. A phase change from Pare goes through the care journey, the same as on screen.',
+      ] },
+      { heading: 'Fixed', items: [
+        'Save on a cost always answers. With no amount typed, Save says what to write instead of sitting greyed out.',
+      ] },
+    ],
+  },
+  {
     version: '0.51.0',
     date: '2026-11-21',
     summary: 'Emergency and sending information out: ID numbers, a fuller emergency sheet shared by link, reports and appointments sent to someone, and a calendar feed that helps you get there.',

@@ -899,6 +899,10 @@ directoryRouter.delete('/assets/:id', requireAuth, async (req, res) => {
   const account = req.account!;
   let query = db('assets').where({ id: req.params['id'] });
   if (!roleAtLeast(account.role, 'super_admin')) query = query.where({ account_id: account.id });
+  // Its open return and service tasks go with it, so no reminder is left for equipment that is gone.
+  if (await query.clone().first('id')) {
+    await db('reminders').where({ asset_id: req.params['id'], completed: false }).delete();
+  }
   const affected = await query.delete();
   if (!affected) {
     res.status(404).json({ error: 'Asset not found', code: 'NOT_FOUND' });
@@ -957,6 +961,13 @@ directoryRouter.post('/assets/:id/bulk-unlink', requireAuth, async (req, res) =>
     .where({ asset_id: req.params['id'] })
     .whereIn('care_profile_id', parsed.data.profile_ids)
     .delete();
+  // Their open return and service tasks for it go too.
+  if (removed) {
+    await db('reminders')
+      .where({ asset_id: req.params['id'], completed: false })
+      .whereIn('care_profile_id', parsed.data.profile_ids)
+      .delete();
+  }
   res.json({ unlinked: removed });
 });
 

@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { contactSummaries, resolveContactInput } from './professionals';
 import { keepTask } from './keptTasks';
 import { addDays } from './documentDates';
+import { ownerZone } from './tasks';
+import { dateInZone } from '../lib/timezone';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -160,11 +162,13 @@ export async function keepReportTasks(conn: Conn, opts: { profileId: string; pla
   const plan = (await conn('funding_plans').where({ id: opts.planId }).first()) as Record<string, unknown>;
   const due = (plan['reports_due_on'] as string | null) ?? null;
   const scheme = SCHEME_REVIEW[plan['scheme'] as (typeof SCHEMES)[number]] ?? 'funding';
-  const tasks = (await conn('reminders').where({ care_profile_id: opts.profileId, funding_plan_id: opts.planId }).select('id', 'provider_id', 'completed')) as Array<{
+  const tasks = (await conn('reminders').where({ care_profile_id: opts.profileId, funding_plan_id: opts.planId }).select('id', 'provider_id', 'completed', 'next_due_at')) as Array<{
     id: string;
     provider_id: string | null;
     completed: boolean;
+    next_due_at: Date;
   }>;
+  const zone = await ownerZone(conn, opts.profileId);
   const writers = due ? await reportWriters(conn, opts.profileId) : [];
   const wanted = new Set(writers.map((w) => w.id));
   for (const t of tasks) {
@@ -172,11 +176,18 @@ export async function keepReportTasks(conn: Conn, opts: { profileId: string; pla
   }
   let n = 0;
   for (const w of writers) {
-    const mine = tasks.find((t) => t.provider_id === w.id);
+    const theirs = tasks.filter((t) => t.provider_id === w.id);
+    const open = theirs.find((t) => !t.completed);
+    // Their report for this due day is already in: nothing more to ask. A
+    // new review day asks again.
+    if (!open && theirs.some((t) => t.completed && dateInZone(new Date(t.next_due_at), zone) === due)) {
+      n++;
+      continue;
+    }
     await keepTask(conn, {
       profileId: opts.profileId,
       actorId: opts.actorId,
-      taskId: mine?.id ?? null,
+      taskId: open?.id ?? null,
       timeZone: opts.timeZone,
       want: {
         title: `Ask ${w.name} for a progress report for the ${scheme} review`,
