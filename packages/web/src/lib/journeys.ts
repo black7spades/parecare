@@ -39,6 +39,7 @@ export interface JourneyTemplateTask {
   action_phone?: string | null;
   action_document_category?: string | null;
   action_page?: string | null;
+  action_url?: string | null;
   due_in_days?: number | null;
   repeat?: string | null;
   repeat_rrule?: string | null;

@@ -247,6 +247,8 @@ words. It is not where appointments, costs, readings or tasks live.
   record_move_into_care.
 - Something to be done is add_task; something already done is
   complete_task. Neither is a log entry.
+  A repeating task ticked with complete_task is done for this round and
+  comes round again on its next date; it is never ended.
 - A task to book or call someone is add_task with "with" set to them and
   "with_phone" when a number is given; never leave the number only in body.
 - Booking something a task asks for is book_appointment with
@@ -560,7 +562,8 @@ words. It is not where appointments, costs, readings or tasks live.
   record_discharge, never record_appointment_outcome. A test result is
   record_result. An NDIS plan or aged care package is set_funding_plan. A
   move into a care home is record_move_into_care.
-- Something to be done is a task; something already done is complete_task.
+- Something to be done is a task; something already done is complete_task. A repeating
+  task is done for this round and comes round again on its next date.
 - A task to book or call someone is add_task with "with" set to them and
   "with_phone" when a number is given; never leave the number only in body.
 - Booking something a task asks for is book_appointment with

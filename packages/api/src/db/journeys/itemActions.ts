@@ -12,7 +12,26 @@ import { actionForItem, type ActionSpec } from '../../lib/journeyActions';
 const book = (type?: string, more: Partial<ActionSpec> = {}): ActionSpec => ({ action: 'book', type, ...more });
 const upload = (category: string): ActionSpec => ({ action: 'upload', category });
 const open = (page: NonNullable<ActionSpec['page']>): ActionSpec => ({ action: 'open', page });
-const call = (name?: string, phone?: string, type?: string): ActionSpec => ({ action: 'call', name, phone, type });
+const call = (name?: string, phone?: string, type?: string, url?: string): ActionSpec => ({ action: 'call', name, phone, type, url });
+
+/** National services, each number and site as published by the service. */
+export const SERVICES = {
+  myAgedCare: { name: 'My Aged Care', phone: '1800 200 422', url: 'https://www.myagedcare.gov.au' },
+  myAgedCareFinder: { name: 'My Aged Care', phone: '1800 200 422', url: 'https://www.myagedcare.gov.au/find-a-provider' },
+  servicesAustraliaAgedCare: { name: 'Services Australia', phone: '1800 227 475', url: 'https://www.servicesaustralia.gov.au' },
+  carerGateway: { name: 'Carer Gateway', phone: '1800 422 737', url: 'https://www.carergateway.gov.au' },
+  dementiaAustralia: { name: 'Dementia Australia', phone: '1800 100 500', url: 'https://www.dementia.org.au' },
+  quitline: { name: 'Quitline', phone: '13 7848', url: 'https://www.quit.org.au' },
+  lifeline: { name: 'Lifeline', phone: '13 11 14', url: 'https://www.lifeline.org.au' },
+  ndis: { name: 'NDIS', phone: '1800 800 110', url: 'https://www.ndis.gov.au' },
+  beyondBlue: { name: 'Beyond Blue', phone: '1300 22 4636', url: 'https://www.beyondblue.org.au' },
+  kidsHelpline: { name: 'Kids Helpline', phone: '1800 55 1800', url: 'https://kidshelpline.com.au' },
+  panda: { name: 'PANDA', phone: '1300 726 306', url: 'https://panda.org.au' },
+  breastfeeding: { name: 'Australian Breastfeeding Association', phone: '1800 686 268', url: 'https://www.breastfeeding.asn.au' },
+  butterfly: { name: 'Butterfly Foundation', phone: '1800 33 4673', url: 'https://butterfly.org.au' },
+  alcoholDrugHotline: { name: 'National Alcohol and Other Drug Hotline', phone: '1800 250 015' },
+} as const;
+const service = (s: { name: string; phone: string; url?: string }): ActionSpec => ({ action: 'call', name: s.name, phone: s.phone, url: s.url });
 const task = (more: Partial<ActionSpec> = {}): ActionSpec => ({ action: 'task', ...more });
 const record = (action: 'equipment' | 'hospital_stay' | 'care_move' | 'funding' | 'result'): ActionSpec => ({ action });
 
@@ -44,7 +63,8 @@ export const ITEM_ACTION_SWEEP: Record<string, ActionSpec | null> = {
   // Baby and toddler years
   'Book the newborn checks': book('gp'),
   'Register with a general practitioner and child health nurse': open('providers'),
-  'Get feeding support early if it hurts or worries you': book('Lactation consultant'),
+  'Get feeding support early if it hurts or worries you': service(SERVICES.breastfeeding),
+  'Watch how the parents are doing': service(SERVICES.panda),
   'Put the immunisation schedule in the calendar': book('gp'),
   'Keep the health record book up to date': upload('medical_record'),
   'Raise anything that niggles': open('questions'),
@@ -57,7 +77,7 @@ export const ITEM_ACTION_SWEEP: Record<string, ActionSpec | null> = {
   'Write down what you are noticing': open('care-log'),
   'Raise it at the child health check': book('Child health nurse'),
   'Get on every waiting list at once': book('Paediatrician'),
-  'Ask about early support while you wait': record('funding'),
+  'Ask about early support while you wait': service(SERVICES.ndis),
   'Get the report explained in plain language': upload('medical_record'),
   'Tell family in the way you choose': open('messages'),
   'Build the therapy roster': task({ repeat: 'weekly' }),
@@ -87,7 +107,7 @@ export const ITEM_ACTION_SWEEP: Record<string, ActionSpec | null> = {
   'Lodge the action plan with the school': task({ repeat: 'yearly' }),
   'Get the assessment report explained': upload('medical_record'),
   'Learn from the child': open('care-needs'),
-  'Apply for funding support': record('funding'),
+  'Apply for funding support': service(SERVICES.ndis),
   'Agree classroom adjustments in writing': upload('letter'),
   'Review supports each year': task({ repeat: 'yearly' }),
   'Get the diagnosis and plan in writing': upload('letter'),
@@ -123,6 +143,8 @@ export const ITEM_ACTION_SWEEP: Record<string, ActionSpec | null> = {
   'Find the adult general practitioner': open('providers'),
   'Transfer specialist care to adult services': book('gp'),
   'Get a proper assessment': book('gp'),
+  'Say it out loud with someone safe': service(SERVICES.kidsHelpline),
+  'Choose a program built for young people': service(SERVICES.butterfly),
   'Protect the appointments': open('appointments'),
   'Log the wins and the wobbles': open('care-log'),
   'Write the relapse plan together': upload('care_plan'),
@@ -155,6 +177,8 @@ export const ITEM_ACTION_SWEEP: Record<string, ActionSpec | null> = {
   'Get the home assessed and set up': book('Occupational therapist'),
   'Do the program, log the program': open('care-log'),
   'See a doctor before stopping': book('gp'),
+  'Commit to the program': service(SERVICES.alcoholDrugHotline),
+  'Tell one person': service(SERVICES.lifeline),
   'Write the relapse plan without shame': upload('care_plan'),
 
   // Adulthood
@@ -181,9 +205,10 @@ export const ITEM_ACTION_SWEEP: Record<string, ActionSpec | null> = {
   'Protect the sessions like meetings with the board': open('appointments'),
   'Give medication a fair, logged trial': open('medications'),
   'Step down with a plan, not a disappearance': book('psychologist'),
-  'Register with the carer gateway': call('Carer Gateway'),
+  'Register with the carer gateway': service(SERVICES.carerGateway),
   'Build the emergency care plan': open('plan'),
   'Book your own doctor appointment': book('gp'),
+  'Screen your own mood honestly': service(SERVICES.beyondBlue),
   'Hand over two tasks permanently': open('tasks'),
   'Review the load each season': task({ repeat: 'three_monthly' }),
   'Understand the operation and the recovery time': open('questions'),
@@ -204,14 +229,17 @@ export const ITEM_ACTION_SWEEP: Record<string, ActionSpec | null> = {
   'Book the memory focused doctor visit': book('gp'),
   'Complete the assessments': book('Geriatrician'),
   'Do the legal paperwork now': upload('poa'),
-  'Register with dementia support services': call('Dementia Australia'),
+  'Register with dementia support services': service(SERVICES.dementiaAustralia),
   'Review safety honestly each season': task({ repeat: 'three_monthly' }),
   'Build the memory book together': open('memory-book'),
   'Book a GP appointment': book('gp'),
   'Note any changes you\'ve observed': open('care-log'),
   'Check if they have a current Will': upload('will'),
   'Check if Power of Attorney is in place': upload('poa'),
-  'Contact My Aged Care for an assessment': call('My Aged Care'),
+  'Contact My Aged Care for an assessment': service(SERVICES.myAgedCare),
+  'Research residential care options': service(SERVICES.myAgedCareFinder),
+  'Request a financial assessment': service(SERVICES.servicesAustraliaAgedCare),
+  'Bring in help before the crisis': service(SERVICES.myAgedCare),
   'Arrange a home safety assessment': book('Occupational therapist'),
   'Set up medication management': open('medications'),
   'Create a care roster': task({ repeat: 'weekly' }),

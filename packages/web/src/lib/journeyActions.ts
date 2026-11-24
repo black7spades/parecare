@@ -68,6 +68,8 @@ export interface JourneyItemTask {
   assigned_to: string | null;
   assigned_account_id: string | null;
   assigned_name: string | null;
+  /** When a repeating task was last done for a round. */
+  last_done_at?: string | null;
 }
 
 /** The fields a journey step carries about what it does. */
@@ -78,6 +80,8 @@ export interface JourneyItemAction {
   action_phone: string | null;
   action_document_category: string | null;
   action_page: JourneyPage | null;
+  /** The service's website, beside its number. */
+  action_url?: string | null;
   due_in_days: number | null;
   repeat_rrule: string | null;
   /** Worked out from repeat_rrule. */

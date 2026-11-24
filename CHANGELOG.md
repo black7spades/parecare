@@ -6,6 +6,13 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.53.1] - 2026-11-24
+
+### Fixed
+
+- **Repeating tasks come round again.** Ticking a repeating task, such as the yearly flu shot, marks it done for this round and moves it on to its next date, wherever it is ticked: the Tasks page, ticking several at once, the task panel, a journey step or Pare. The screen says when it is next due, with Undo, and the task keeps a list of each time it was done and by whom. Its journey step reads done for this round with the next date. When the next round comes due, the step opens again. Choosing No longer needed stops it repeating.
+- **Steps that need a service give its number.** Journey steps whose next move is to contact a national service show the number to call and the service's website: My Aged Care, with its find a provider page, Services Australia for the financial assessment, the NDIS, Carer Gateway, Dementia Australia, Lifeline, Beyond Blue, Kids Helpline, PANDA, the Australian Breastfeeding Association, the Butterfly Foundation and the National Alcohol and Other Drug Hotline.
+
 ## [0.53.0] - 2026-11-24
 
 ### Added

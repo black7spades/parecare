@@ -26,13 +26,15 @@ export interface ItemAction {
   action_phone: string | null;
   action_document_category: string | null;
   action_page: JourneyPage | null;
+  /** A service's own website, with its finder or form: "Find a provider" on My Aged Care. */
+  action_url: string | null;
   due_in_days: number | null;
   repeat_rrule: string | null;
 }
 
 export const NO_ACTION: ItemAction = {
   action: null, action_provider_type: null, action_contact_name: null, action_phone: null,
-  action_document_category: null, action_page: null, due_in_days: null, repeat_rrule: null,
+  action_document_category: null, action_page: null, action_url: null, due_in_days: null, repeat_rrule: null,
 };
 
 /** The short form the catalogue sweep is written in. */
@@ -45,6 +47,7 @@ export interface ActionSpec {
   /** Document category system key for an upload, e.g. "referral". */
   category?: string;
   page?: JourneyPage;
+  url?: string;
   due?: number;
   repeat?: RepeatChoice;
 }
@@ -57,6 +60,7 @@ export function fromSpec(s: ActionSpec): ItemAction {
     action_phone: s.phone ?? null,
     action_document_category: s.category ?? null,
     action_page: s.page ?? null,
+    action_url: s.url ?? null,
     due_in_days: s.due ?? null,
     repeat_rrule: s.repeat ? repeatColumns(s.repeat).rrule : null,
   };
@@ -161,7 +165,7 @@ export function actionForItem(
 }
 
 export const ITEM_ACTION_COLUMNS = [
-  'action', 'action_provider_type', 'action_contact_name', 'action_phone', 'action_document_category', 'action_page', 'due_in_days', 'repeat_rrule',
+  'action', 'action_provider_type', 'action_contact_name', 'action_phone', 'action_document_category', 'action_page', 'action_url', 'due_in_days', 'repeat_rrule',
 ] as const;
 
 /** Just the action columns of a row, for copying a template task into a journey. */

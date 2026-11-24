@@ -1,3 +1,4 @@
+import { useRoundNotice, type TaskRound } from '../../../lib/taskRounds';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -86,26 +87,35 @@ function TaskCompletionModal({
   const [reason, setReason] = useState('');
   const [customNote, setCustomNote] = useState('');
 
+  const roundNotice = useRoundNotice(profileId);
   const completeMutation = useMutation({
     mutationFn: () =>
-      api.patch(`/care-profiles/${profileId}/reminders/${task.id}`, {
+      api.patch<{ round?: TaskRound | null }>(`/care-profiles/${profileId}/reminders/${task.id}`, {
         completed: true,
         sentiment,
         completion_reason: reason || null,
         completion_note: reason === 'other' && customNote.trim() ? customNote.trim() : null,
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
+      roundNotice(res?.round);
       onCompleted();
       onClose();
     },
   });
 
   return (
-    <Modal open onClose={onClose} title="Close out task">
+    <Modal open onClose={onClose} title={repeatOf(task) !== 'once' ? 'Done for this round' : 'Close out task'}>
       <div className="space-y-4">
         <div>
           <p className="text-sm font-medium text-ink">{task.title}</p>
           {task.body ? <p className="text-xs text-muted mt-1">{task.body}</p> : null}
+          {repeatOf(task) !== 'once' ? (
+            <p className="text-xs text-muted mt-1">
+              {reason === 'no_longer_needed'
+                ? 'No longer needed stops it repeating. It will not come round again.'
+                : `It repeats ${repeatLabel(repeatOf(task)).toLowerCase()}, so it comes round again on its next date.`}
+            </p>
+          ) : null}
         </div>
 
         {needsBooking(task) ? (
@@ -174,7 +184,7 @@ function TaskCompletionModal({
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button loading={completeMutation.isPending} onClick={() => completeMutation.mutate()}>
-            {sentiment ? 'Close task' : 'Close without rating'}
+            {repeatOf(task) !== 'once' ? (sentiment ? 'Done for this round' : 'Done for this round without rating') : sentiment ? 'Close task' : 'Close without rating'}
           </Button>
         </div>
       </div>
@@ -275,10 +285,14 @@ export function TasksPage() {
     onError: (err) => setError(err instanceof Error ? err.message : 'The task did not save. Check your connection and try again.'),
   });
 
+  const roundNotice = useRoundNotice(profile.id);
   const setDone = useMutation({
     mutationFn: ({ id, completed }: { id: string; completed: boolean }) =>
-      api.patch(`/care-profiles/${profile.id}/reminders/${id}`, { completed }),
-    onSuccess: () => invalidate(),
+      api.patch<{ round?: TaskRound | null }>(`/care-profiles/${profile.id}/reminders/${id}`, { completed }),
+    onSuccess: (res) => {
+      roundNotice(res?.round);
+      invalidate();
+    },
   });
 
   const claimMutation = useMutation({
@@ -323,13 +337,14 @@ export function TasksPage() {
 
   const bulk = useMutation({
     mutationFn: (action: 'complete' | 'reopen') =>
-      api.post<{ updated: number; waiting?: Array<{ id: string; title: string; appointment_id: string }> }>(`/care-profiles/${profile.id}/reminders/bulk`, {
+      api.post<{ updated: number; waiting?: Array<{ id: string; title: string; appointment_id: string }>; rounds?: TaskRound[] }>(`/care-profiles/${profile.id}/reminders/bulk`, {
         action,
         ids: dv.selectedRows.map((t) => t.id),
       }),
     onSuccess: (res, action) => {
       dv.clearSelection();
       invalidate();
+      roundNotice(res.rounds);
       const waiting = res.waiting ?? [];
       if (action === 'complete' && waiting.length > 0) {
         const first = waiting[0];
@@ -718,6 +733,26 @@ export function TasksPage() {
                   : t.merged_into_id ? 'Joined with another task' : t.completed ? 'Done' : isOverdue(t) ? 'Overdue' : 'Open',
               },
               { label: 'Done on', value: t.completed && t.completed_at ? format(new Date(t.completed_at), 'd MMM yyyy, HH:mm') : null },
+              {
+                label: 'Done before',
+                value: (t.rounds_done ?? []).length ? (
+                  <ul className="space-y-0.5">
+                    {(t.rounds_done ?? []).map((r) => {
+                      const felt = SENTIMENTS.find((x) => x.value === r.sentiment);
+                      const why = r.completion_reason ? COMPLETION_REASONS.find((x) => x.value === r.completion_reason)?.label ?? r.completion_reason : null;
+                      return (
+                        <li key={r.id}>
+                          <span>{format(new Date(r.done_at), 'd MMM yyyy')}</span>
+                          {r.done_by_name ? <span className="text-muted">, {r.done_by_name}</span> : null}
+                          {felt ? <span className="ml-1" title={felt.label}>{felt.emoji}</span> : null}
+                          {why ? <span className="block text-xs text-muted">{why}</span> : null}
+                          {r.completion_note ? <span className="block text-xs text-muted">{r.completion_note}</span> : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null,
+              },
               { label: 'Done by', value: t.completed ? t.completed_by_name : null },
               { label: 'How it went', value: sentiment ? `${sentiment.emoji} ${sentiment.label}` : null },
               { label: 'Reason', value: t.completion_reason ? COMPLETION_REASONS.find((r) => r.value === t.completion_reason)?.label ?? t.completion_reason : null },

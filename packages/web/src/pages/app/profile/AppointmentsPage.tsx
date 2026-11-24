@@ -1,3 +1,4 @@
+import { useRoundNotice, type TaskRound } from '../../../lib/taskRounds';
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -231,9 +232,11 @@ export function AppointmentsPage() {
     enabled: !!newBooking.fromTask,
   });
 
+  const roundNotice = useRoundNotice(profile.id);
   // The thing a next step asked for is done, so tick the step off.
   const finishStep = useMutation({
-    mutationFn: (stepId: string) => api.patch(`/care-profiles/${profile.id}/reminders/${stepId}`, { completed: true }),
+    mutationFn: (stepId: string) => api.patch<{ round?: TaskRound | null }>(`/care-profiles/${profile.id}/reminders/${stepId}`, { completed: true }),
+    onSuccess: (res) => roundNotice(res?.round),
     onSettled: () => invalidate(),
   });
   const [bulkEditQueue, setBulkEditQueue] = useState<Appointment[]>([]);

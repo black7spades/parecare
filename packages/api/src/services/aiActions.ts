@@ -29,7 +29,7 @@ import { resolveNeurotypeAttributeCatalogueId, ATTRIBUTE_KINDS } from '../routes
 import { linkAddressToProfile, syncProfileResidence, RESIDENCE_KIND } from './addresses';
 import { addNextSteps } from '../routes/appointments';
 import { APPOINTMENT_TYPES, APPOINTMENT_STATUSES, BookingProblem, bookAppointment, updateAppointment, type AppointmentInput } from './booking';
-import { TaskProblem, createTask, updateTask, type TaskInput } from './tasks';
+import { TaskProblem, createTask, markTaskDone, updateTask, type TaskInput } from './tasks';
 import { findPickablePerson } from './people';
 import { REPEAT_CHOICE_VALUES } from '../lib/repeat';
 import { findPhones } from '../lib/phoneText';
@@ -2999,13 +2999,14 @@ async function executeOne(
       if (waitingAppt) {
         return `${CLARIFY_MARK} "${waitingAppt.title}" is waiting for its date. When is it booked for? I will add it and tick this off.`;
       }
-      await db('reminders').where({ id: task.id, care_profile_id: profileId }).update({
-        completed: true,
-        completed_at: db.fn.now(),
-        completed_by_account_id: account.id,
-        completion_note: action.completion_note ?? null,
-      });
+      // The same tick as the checkbox: a repeating task is done for this round and comes round again.
+      const done = await db.transaction((trx) =>
+        markTaskDone(trx, { profileId, taskId: task.id, actorId: account.id, completion_note: action.completion_note ?? null })
+      );
       await audit(profileId, account.id, 'reminders', `completed ${task.title}`);
+      if (done?.round) {
+        return `Done "${task.title}" for this round. It comes round again on ${dateInZone(done.round.next_due_at, timeZone)}.`;
+      }
       return `Ticked off "${task.title}".`;
     }
     case 'reschedule_task': {

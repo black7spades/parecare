@@ -10,6 +10,7 @@ import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { TrashIcon } from '../../../components/ui/icons';
 import { LinkedText } from '../../../components/LinkedText';
 import { StepAction, StepTaskLine, StepTaskModal } from '../../../components/JourneyStep';
+import { useRoundNotice, type TaskRound } from '../../../lib/taskRounds';
 import { firstName } from '../../../lib/lifeEvents';
 import type { ChecklistItem, ChecklistNote, CircleMember } from '../../../lib/care';
 import { UploadDocumentModal } from './DocumentsPage';
@@ -397,11 +398,14 @@ function PhaseChecklist({ profileId, phase, readOnly }: { profileId: string; pha
     void queryClient.invalidateQueries({ queryKey: ['tasks', profileId] });
   };
 
+  const roundNotice = useRoundNotice(profileId);
   const toggleMutation = useMutation({
     mutationFn: ({ id, completed }: { id: string; completed: boolean }) =>
-      api.patch(`/care-profiles/${profileId}/checklists/${id}`, { completed }),
-    onSuccess: (_data, vars) => {
+      api.patch<{ round?: TaskRound | null }>(`/care-profiles/${profileId}/checklists/${id}`, { completed }),
+    onSuccess: (res, vars) => {
       if (vars.completed) setOpenNotesId(vars.id);
+      // A step with a repeating task: done for this round, with the next date and Undo.
+      roundNotice(res?.round);
       invalidate();
     },
   });

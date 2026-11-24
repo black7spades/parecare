@@ -104,6 +104,7 @@ const taskSchema = z.object({
   action_phone: z.string().max(50).optional().nullable(),
   action_document_category: z.string().max(100).optional().nullable(),
   action_page: z.enum(JOURNEY_PAGES).optional().nullable(),
+  action_url: z.string().max(500).optional().nullable(),
   due_in_days: z.number().int().min(0).max(3650).optional().nullable(),
   repeat: z.enum(REPEAT_CHOICE_VALUES).optional().nullable(),
   // A copied template keeps the stored rule.
@@ -111,6 +112,31 @@ const taskSchema = z.object({
 });
 
 const clean = (s: string | null | undefined) => (s?.trim() ? s.trim() : null);
+
+/** "www.quit.org.au" is https://www.quit.org.au. */
+function websiteOf(s: string | null | undefined): string | null {
+  const v = clean(s);
+  if (!v) return null;
+  const withScheme = /^https?:\/\//i.test(v) ? v : `https://${v}`;
+  try {
+    const u = new URL(withScheme);
+    return u.hostname.includes('.') ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A Website box that is not a web address, named in plain words. */
+function badWebsite(phases: Array<{ tasks?: Array<{ title: string; action?: string | null; action_url?: string | null }> }> | undefined): string | null {
+  for (const p of phases ?? []) {
+    for (const t of p.tasks ?? []) {
+      if (t.action === 'call' && clean(t.action_url) && !websiteOf(t.action_url)) {
+        return `The Website for “${t.title}” is not a web address. Check it, or leave it empty, then save.`;
+      }
+    }
+  }
+  return null;
+}
 
 /** The action columns a template step is stored with. */
 function taskActionColumns(task: z.infer<typeof taskSchema>): ItemAction {
@@ -130,6 +156,7 @@ function taskActionColumns(task: z.infer<typeof taskSchema>): ItemAction {
     action_phone: clean(task.action_phone),
     action_document_category: clean(task.action_document_category),
     action_page: task.action === 'open' ? task.action_page ?? null : null,
+    action_url: task.action === 'call' ? websiteOf(task.action_url) : null,
     due_in_days: task.due_in_days ?? null,
     repeat_rrule: task.repeat ? repeatColumns(task.repeat).rrule : task.repeat_rrule ?? null,
   };
@@ -205,6 +232,11 @@ journeyTemplatesRouter.post('/', requireAuth, requireRole('admin'), async (req, 
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
     return;
   }
+  const site = badWebsite(parsed.data.phases);
+  if (site) {
+    res.status(400).json({ error: site, code: 'VALIDATION_ERROR' });
+    return;
+  }
   const template = await db.transaction(async (trx) => {
     const [row] = await trx('journey_templates')
       .insert({
@@ -238,6 +270,11 @@ journeyTemplatesRouter.patch('/:templateId', requireAuth, requireRole('admin'), 
   const parsed = templateSchema.partial().safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.flatten() });
+    return;
+  }
+  const site = badWebsite(parsed.data.phases);
+  if (site) {
+    res.status(400).json({ error: site, code: 'VALIDATION_ERROR' });
     return;
   }
   await db.transaction(async (trx) => {
@@ -286,6 +323,7 @@ journeyTemplatesRouter.post('/:templateId/clone', requireAuth, requireRole('admi
           action_phone: task['action_phone'] as string | null,
           action_document_category: task['action_document_category'] as string | null,
           action_page: task['action_page'] as z.infer<typeof taskSchema>['action_page'],
+          action_url: task['action_url'] as string | null,
           due_in_days: task['due_in_days'] as number | null,
           repeat_rrule: task['repeat_rrule'] as string | null,
         })),

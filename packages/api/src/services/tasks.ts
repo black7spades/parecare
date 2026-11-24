@@ -556,18 +556,106 @@ export async function mergeTasks(conn: Conn, opts: { profileId: string; fromId: 
  * Returns whether the task was ticked off.
  */
 export async function finishTask(conn: Conn, opts: { profileId: string; taskId: string; actorId: string | null }): Promise<boolean> {
-  const t = (await conn('reminders').where({ id: opts.taskId, care_profile_id: opts.profileId, completed: false }).first('id', 'next_due_at', 'rrule', 'reminder_type')) as
-    | { id: string; next_due_at: Date; rrule: string | null; reminder_type: string | null }
+  const done = await markTaskDone(conn, opts);
+  return !!done && !done.round;
+}
+
+export interface TaskRound {
+  id: string;
+  task_id: string;
+  title: string;
+  /** When this round was due, and when the task is due next. */
+  was_due_at: Date;
+  next_due_at: Date;
+}
+
+/**
+ * Tick a task off, the one way every screen and Pare does it. A repeating
+ * task is done for this round: the round is kept as a record of who did it
+ * and when, the task moves on to its next date and stays open, and its
+ * journey step reads done. Any other task is ticked off for good. Returns
+ * the round for a repeating task, so the screen can offer Undo.
+ */
+export async function markTaskDone(
+  conn: Conn,
+  opts: {
+    profileId: string;
+    taskId: string;
+    actorId: string | null;
+    sentiment?: number | null;
+    completion_reason?: string | null;
+    completion_note?: string | null;
+    /** The journey step that was ticked to do this, so unticking it undoes the round. */
+    fromItemId?: string | null;
+  },
+): Promise<{ round: TaskRound | null } | null> {
+  const t = (await conn('reminders')
+    .where({ id: opts.taskId, care_profile_id: opts.profileId, completed: false })
+    .first('id', 'title', 'next_due_at', 'rrule', 'reminder_type', 'checklist_item_id', 'last_notified_at')) as
+    | { id: string; title: string; next_due_at: Date; rrule: string | null; reminder_type: string | null; checklist_item_id: string | null; last_notified_at: Date | null }
     | undefined;
-  if (!t) return false;
-  const rule = ruleFor(t);
-  if (rule) {
-    const zone = await ownerZone(conn, opts.profileId);
-    const next = nextAfter(advance(new Date(t.next_due_at), rule, zone), rule, new Date(), zone);
-    await conn('reminders').where({ id: t.id }).update({ next_due_at: next, last_notified_at: null });
-    return false;
+  if (!t) return null;
+  // "No longer needed" ends a repeating task rather than bringing it round again.
+  const rule = opts.completion_reason === 'no_longer_needed' ? null : ruleFor(t);
+  if (!rule) {
+    await conn('reminders').where({ id: t.id }).update({
+      completed: true,
+      completed_at: conn.fn.now(),
+      completed_by_account_id: opts.actorId,
+      stopped_by_death_at: null,
+      ...(opts.sentiment !== undefined ? { sentiment: opts.sentiment } : {}),
+      ...(opts.completion_reason !== undefined ? { completion_reason: opts.completion_reason } : {}),
+      ...(opts.completion_note !== undefined ? { completion_note: opts.completion_note } : {}),
+    });
+    return { round: null };
   }
-  await conn('reminders').where({ id: t.id }).update({ completed: true, completed_at: conn.fn.now(), completed_by_account_id: opts.actorId });
+  const zone = await ownerZone(conn, opts.profileId);
+  const next = nextAfter(advance(new Date(t.next_due_at), rule, zone), rule, new Date(), zone);
+  // The step this task carries out reads done for this round.
+  let tickedItem: string | null = null;
+  if (t.checklist_item_id) {
+    const member = opts.actorId
+      ? ((await conn('care_circle_members').where({ care_profile_id: opts.profileId, account_id: opts.actorId, invite_accepted: true }).first('id')) as { id: string } | undefined)
+      : undefined;
+    const n = await conn('checklist_items').where({ id: t.checklist_item_id, care_profile_id: opts.profileId, completed: false }).update({
+      completed: true,
+      completed_at: conn.fn.now(),
+      achieved_on: new Date().toISOString().slice(0, 10),
+      completed_by: member?.id ?? null,
+    });
+    if (n) tickedItem = t.checklist_item_id;
+  }
+  if (opts.fromItemId) tickedItem = opts.fromItemId;
+  const [round] = await conn('reminder_rounds')
+    .insert({
+      reminder_id: t.id,
+      care_profile_id: opts.profileId,
+      due_at: t.next_due_at,
+      done_by_account_id: opts.actorId,
+      sentiment: opts.sentiment ?? null,
+      completion_reason: opts.completion_reason ?? null,
+      completion_note: opts.completion_note ?? null,
+      ticked_item_id: tickedItem,
+      last_notified_at: t.last_notified_at,
+    })
+    .returning('id');
+  await conn('reminders').where({ id: t.id }).update({ next_due_at: next, last_notified_at: null });
+  return { round: { id: (round as { id: string }).id, task_id: t.id, title: t.title, was_due_at: t.next_due_at, next_due_at: next } };
+}
+
+/** Undo a round: the task is due when it was, and the step it ticked opens again. */
+export async function undoRound(conn: Conn, opts: { profileId: string; taskId: string; roundId: string }): Promise<boolean> {
+  const newest = (await conn('reminder_rounds').where({ reminder_id: opts.taskId, care_profile_id: opts.profileId }).orderBy('done_at', 'desc').first()) as
+    | { id: string; due_at: Date; ticked_item_id: string | null; last_notified_at: Date | null }
+    | undefined;
+  // Only the latest round can be undone, so the task never winds back past a later one.
+  if (!newest || newest.id !== opts.roundId) return false;
+  const r = newest;
+  await conn('reminders').where({ id: opts.taskId, care_profile_id: opts.profileId }).update({ next_due_at: r.due_at, last_notified_at: r.last_notified_at });
+  if (r.ticked_item_id) {
+    await conn('checklist_items').where({ id: r.ticked_item_id, care_profile_id: opts.profileId }).update({ completed: false, completed_at: null, completed_by: null, achieved_on: null });
+  }
+  await conn('reminder_rounds').where({ id: r.id }).delete();
   return true;
 }
 
@@ -608,6 +696,25 @@ export async function enrichTasks(conn: Conn, profileId: string, rows: TaskListR
   const memberName = new Map((members as Array<{ id: string; display_name: string }>).map((m) => [m.id, m.display_name]));
   const accountName = new Map((accounts as Array<{ id: string; display_name: string }>).map((m) => [m.id, m.display_name]));
   const mergedTitles = new Map(rows.map((r) => [r.id, r['title'] as string]));
+  // Rounds of a repeating task already done, newest first: the record of each time.
+  const roundRows = (await conn('reminder_rounds as rr')
+    .leftJoin('accounts as a', 'rr.done_by_account_id', 'a.id')
+    .where('rr.care_profile_id', profileId)
+    .whereIn('rr.reminder_id', ids)
+    .orderBy('rr.done_at', 'desc')
+    .select('rr.id', 'rr.reminder_id', 'rr.due_at', 'rr.done_at', 'rr.sentiment', 'rr.completion_reason', 'rr.completion_note', 'a.display_name as done_by_name')) as Array<{
+    id: string; reminder_id: string; due_at: Date; done_at: Date; done_by_name: string | null;
+    sentiment: number | null; completion_reason: string | null; completion_note: string | null;
+  }>;
+  type RoundOut = Omit<(typeof roundRows)[number], 'reminder_id'>;
+  const roundsByTask = new Map<string, RoundOut[]>();
+  for (const r of roundRows) {
+    const list = roundsByTask.get(r.reminder_id) ?? [];
+    const { reminder_id: _r, ...rest } = r;
+    void _r;
+    if (list.length < 10) list.push(rest);
+    roundsByTask.set(r.reminder_id, list);
+  }
 
   type Enriched = TaskListRow & { provider: ContactSummary | null; kind: { id: string; name: string; system_key: string | null; books: boolean } | null; books: boolean; possible_duplicate_of: { id: string; title: string } | null };
   const out = rows.map((r): Enriched => {
@@ -630,6 +737,7 @@ export async function enrichTasks(conn: Conn, profileId: string, rows: TaskListR
           : null,
       merged_into_title: r['merged_into_id'] ? (r['merged_into_title'] as string | undefined) ?? mergedTitles.get(r['merged_into_id'] as string) ?? null : null,
       possible_duplicate_of: null as { id: string; title: string } | null,
+      rounds_done: roundsByTask.get(r.id) ?? [],
     };
   });
 
