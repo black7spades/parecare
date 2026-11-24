@@ -10,7 +10,10 @@ import {
   contactProblem,
   createTask,
   enrichTasks,
+  markTaskDone,
   mergeTasks,
+  undoRound,
+  type TaskRound,
   taskInputSchema,
   undoJoin,
   updateTask,
@@ -218,19 +221,23 @@ remindersRouter.patch('/:reminderId', requireAuth, async (req, res) => {
       const edited = Object.values(edits).some((v) => v !== undefined);
       const result = edited ? await updateTask(trx, { profileId, taskId, input: edits, timeZone: tzOf(req) }) : { filed: [] };
       const update: Record<string, unknown> = {};
-      if (sentiment !== undefined) update['sentiment'] = sentiment;
-      if (completion_reason !== undefined) update['completion_reason'] = completion_reason;
-      if (completion_note !== undefined) update['completion_note'] = completion_note;
-      // A person reopening or ticking off a task makes it theirs again: clearing
-      // a date of death later leaves it as they set it.
-      if (completed !== undefined) {
-        update['completed'] = completed;
-        update['stopped_by_death_at'] = null;
+      let round: TaskRound | null = null;
+      // Ticking off goes through the one place every screen and Pare uses: a
+      // repeating task is done for this round and comes round again.
+      const open = completed === true ? await trx('reminders').where({ id: taskId, completed: false }).first('id') : null;
+      if (open) {
+        const done = await markTaskDone(trx, { profileId, taskId, actorId: req.account!.id, sentiment, completion_reason, completion_note });
+        round = done?.round ?? null;
+      } else {
+        if (sentiment !== undefined) update['sentiment'] = sentiment;
+        if (completion_reason !== undefined) update['completion_reason'] = completion_reason;
+        if (completion_note !== undefined) update['completion_note'] = completion_note;
       }
-      if (completed === true) {
-        update['completed_at'] = trx.fn.now();
-        update['completed_by_account_id'] = req.account!.id;
-      } else if (completed === false) {
+      // A person reopening a task makes it theirs again: clearing a date of
+      // death later leaves it as they set it.
+      if (completed === false) {
+        update['completed'] = false;
+        update['stopped_by_death_at'] = null;
         update['completed_at'] = null;
         update['completed_by_account_id'] = null;
         update['sentiment'] = null;
@@ -239,13 +246,13 @@ remindersRouter.patch('/:reminderId', requireAuth, async (req, res) => {
         update['merged_into_id'] = null;
       }
       if (Object.keys(update).length) await trx('reminders').where({ id: taskId }).update(update);
-      return result;
+      return { ...result, round };
     });
     if (!done) {
       res.status(404).json({ error: 'Task not found', code: 'NOT_FOUND' });
       return;
     }
-    res.json({ reminder: await oneTask(profileId, taskId), filed: done.filed });
+    res.json({ reminder: await oneTask(profileId, taskId), filed: done.filed, round: done.round });
   } catch (err) {
     if (!sendProblem(res, err)) throw err;
   }
@@ -446,15 +453,41 @@ remindersRouter.post('/bulk', requireAuth, async (req, res) => {
     : [];
   const skip = new Set(waiting.map((w) => w.id));
   const ids = parsed.data.ids.filter((id) => !skip.has(id));
+  if (completing) {
+    // Each one through the same tick as the checkbox: repeating ones move on a round.
+    const rounds: TaskRound[] = [];
+    let updated = 0;
+    await db.transaction(async (trx) => {
+      for (const id of ids) {
+        const done = await markTaskDone(trx, { profileId, taskId: id, actorId: req.account!.id });
+        if (!done) continue;
+        updated++;
+        if (done.round) rounds.push(done.round);
+      }
+    });
+    res.json({ updated, waiting, rounds });
+    return;
+  }
   const updated = ids.length
     ? await db('reminders').where({ care_profile_id: profileId }).whereIn('id', ids).update({
-        completed: completing,
-        completed_at: completing ? db.fn.now() : null,
-        completed_by_account_id: completing ? req.account!.id : null,
-        ...(completing ? {} : { merged_into_id: null }),
+        completed: false,
+        completed_at: null,
+        completed_by_account_id: null,
+        merged_into_id: null,
       })
     : 0;
   res.json({ updated, waiting });
+});
+
+/** Undo "done for this round": the task is due when it was, and its step opens again. */
+remindersRouter.post('/:reminderId/rounds/:roundId/undo', requireAuth, async (req, res) => {
+  const profileId = String(req.params['id']);
+  const ok = await db.transaction((trx) => undoRound(trx, { profileId, taskId: String(req.params['reminderId']), roundId: String(req.params['roundId']) }));
+  if (!ok) {
+    res.status(404).json({ error: 'That was already undone, or the task has gone. Refresh to see where it is now.', code: 'NOT_FOUND' });
+    return;
+  }
+  res.json({ reminder: await oneTask(profileId, String(req.params['reminderId'])) });
 });
 
 /**

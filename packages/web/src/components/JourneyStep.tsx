@@ -159,6 +159,11 @@ export function StepAction({
         <a href={telHref(phone)} className={`text-sm ${CONTACT_LINK}`} aria-label={`Call ${name ?? ''} on ${phone}`.replace('  ', ' ')}>
           {name ? `${name} ${phone}` : phone}
         </a>
+        {item.action_url ? (
+          <a href={item.action_url} target="_blank" rel="noopener noreferrer" className={`text-sm ${CONTACT_LINK}`}>
+            {name ? `${name} website` : 'Their website'}
+          </a>
+        ) : null}
         {done}
       </span>
     );
@@ -207,11 +212,19 @@ export function StepTaskLine({ profileId, item, canAct, onSetTask }: { profileId
       </Button>
     );
   }
+  // A repeating task ticked for this round stays open with its next date.
+  const roundDone = item.completed && !t.completed && t.repeat !== 'once';
   return (
     <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-      <span>
-        Due <span className="text-ink">{dueLabel(t)}</span>
-      </span>
+      {roundDone ? (
+        <span>
+          Done for this round. Next due <span className="text-ink">{dueLabel(t)}</span>
+        </span>
+      ) : (
+        <span>
+          Due <span className="text-ink">{dueLabel(t)}</span>
+        </span>
+      )}
       <span>
         Who is doing it <span className="text-ink">{t.assigned_name ?? 'Anyone'}</span>
       </span>

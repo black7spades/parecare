@@ -824,6 +824,7 @@ function stepActionFields(task: JourneyTemplateTask): Partial<JourneyTemplateTas
     action_phone: task.action_phone ?? null,
     action_document_category: task.action_document_category ?? null,
     action_page: task.action_page ?? null,
+    action_url: task.action_url?.trim() ? task.action_url.trim() : null,
     due_in_days: task.due_in_days ?? null,
     repeat: task.repeat ?? null,
     repeat_rrule: task.repeat ? null : task.repeat_rrule ?? null,
@@ -896,6 +897,10 @@ function StepActionEditor({
           <div>
             <label htmlFor={`${idPrefix}-phone`} className="block text-xs text-muted mb-1">Phone</label>
             <Input id={`${idPrefix}-phone`} placeholder="e.g. 13 7848" value={task.action_phone ?? ''} disabled={readOnly} onChange={(e) => onChange({ action_phone: e.target.value })} />
+          </div>
+          <div>
+            <label htmlFor={`${idPrefix}-url`} className="block text-xs text-muted mb-1">Website</label>
+            <Input id={`${idPrefix}-url`} placeholder="e.g. https://www.quit.org.au" value={task.action_url ?? ''} disabled={readOnly} onChange={(e) => onChange({ action_url: e.target.value })} />
           </div>
         </>
       ) : null}

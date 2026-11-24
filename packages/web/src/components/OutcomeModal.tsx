@@ -1,3 +1,4 @@
+import { useRoundNotice, type TaskRound } from '../lib/taskRounds';
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -270,9 +271,13 @@ export function OutcomeModal({
     onError: (err) => setError(err instanceof Error ? err.message : 'The outcome did not save. Check your connection and try again.'),
   });
 
+  const roundNotice = useRoundNotice(profileId);
   const markDone = useMutation({
-    mutationFn: (step: NextStep) => api.patch(`/care-profiles/${profileId}/reminders/${step.id}`, { completed: true }),
-    onSuccess: refresh,
+    mutationFn: (step: NextStep) => api.patch<{ round?: TaskRound | null }>(`/care-profiles/${profileId}/reminders/${step.id}`, { completed: true }),
+    onSuccess: (res) => {
+      roundNotice(res?.round);
+      refresh();
+    },
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not mark it done.'),
   });
 

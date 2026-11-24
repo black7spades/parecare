@@ -1,3 +1,4 @@
+import { useRoundNotices, type TaskRound } from '../../lib/taskRounds';
 import { useEffect, useRef, useState } from 'react';
 import { useMatch, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -267,9 +268,11 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
   // Completing a task Pare proposed happens only when the person clicks the
   // confirm button; Pare itself never marks anything done.
   const [confirmedTasks, setConfirmedTasks] = useState<Set<string>>(new Set());
+  const showRound = useRoundNotices();
   const completeTask = useMutation({
-    mutationFn: (c: TaskConfirmation) => api.patch(`/care-profiles/${c.profile_id}/reminders/${c.reminder_id}`, { completed: true }),
-    onSuccess: (_data, c) => {
+    mutationFn: (c: TaskConfirmation) => api.patch<{ round?: TaskRound | null }>(`/care-profiles/${c.profile_id}/reminders/${c.reminder_id}`, { completed: true }),
+    onSuccess: (data, c) => {
+      showRound(c.profile_id, data?.round);
       setConfirmedTasks((prev) => new Set(prev).add(c.reminder_id));
       void queryClient.invalidateQueries({ queryKey: ['tasks', c.profile_id] });
       void queryClient.invalidateQueries({ queryKey: ['pare-attention'] });

@@ -1,5 +1,12 @@
 import type { Knex } from 'knex';
-import { journeyItemAction } from '../journeys/itemActions';
+import { journeyItemAction as currentAction } from '../journeys/itemActions';
+
+// The columns this migration made; the website column comes in 121.
+const journeyItemAction = (...args: Parameters<typeof currentAction>) => {
+  const { action_url: _url, ...cols } = currentAction(...args);
+  void _url;
+  return cols;
+};
 
 /**
  * Journeys that act. Each journey item knows what doing it means: book it,

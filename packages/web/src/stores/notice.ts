@@ -13,6 +13,8 @@ export interface Notice {
   key: number;
   message: string;
   link?: { label: string; to: string };
+  /** One thing to do about it, such as Undo. */
+  action?: { label: string; run: () => unknown };
 }
 
 interface NoticeState {

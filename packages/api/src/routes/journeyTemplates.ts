@@ -104,6 +104,7 @@ const taskSchema = z.object({
   action_phone: z.string().max(50).optional().nullable(),
   action_document_category: z.string().max(100).optional().nullable(),
   action_page: z.enum(JOURNEY_PAGES).optional().nullable(),
+  action_url: z.string().url().max(500).regex(/^https?:\/\//).optional().nullable().or(z.literal('')),
   due_in_days: z.number().int().min(0).max(3650).optional().nullable(),
   repeat: z.enum(REPEAT_CHOICE_VALUES).optional().nullable(),
   // A copied template keeps the stored rule.
@@ -130,6 +131,7 @@ function taskActionColumns(task: z.infer<typeof taskSchema>): ItemAction {
     action_phone: clean(task.action_phone),
     action_document_category: clean(task.action_document_category),
     action_page: task.action === 'open' ? task.action_page ?? null : null,
+    action_url: task.action === 'call' ? clean(task.action_url) : null,
     due_in_days: task.due_in_days ?? null,
     repeat_rrule: task.repeat ? repeatColumns(task.repeat).rrule : task.repeat_rrule ?? null,
   };
@@ -286,6 +288,7 @@ journeyTemplatesRouter.post('/:templateId/clone', requireAuth, requireRole('admi
           action_phone: task['action_phone'] as string | null,
           action_document_category: task['action_document_category'] as string | null,
           action_page: task['action_page'] as z.infer<typeof taskSchema>['action_page'],
+          action_url: task['action_url'] as string | null,
           due_in_days: task['due_in_days'] as number | null,
           repeat_rrule: task['repeat_rrule'] as string | null,
         })),

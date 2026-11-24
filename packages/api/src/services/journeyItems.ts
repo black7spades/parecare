@@ -5,7 +5,7 @@ import { actionColumnsOf, type ItemAction } from '../lib/journeyActions';
 import { REPEAT_CHOICE_VALUES, repeatChoice, repeatColumns, type RepeatChoice } from '../lib/repeat';
 import { mainContact, type ContactSummary } from './professionals';
 import { recordLabel, type AttachedTo } from './recordLabels';
-import { createTask, finishTask, updateTask } from './tasks';
+import { createTask, markTaskDone, undoRound, updateTask } from './tasks';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -108,7 +108,11 @@ export async function setItemDone(
     | undefined;
   if (!task) return;
   if (opts.completed && !task.completed && task.id !== opts.taskHandled) {
-    await finishTask(conn, { profileId: opts.profileId, taskId: task.id, actorId: opts.actorId });
+    await markTaskDone(conn, { profileId: opts.profileId, taskId: task.id, actorId: opts.actorId, fromItemId: item.id });
+  } else if (!opts.completed && !task.completed) {
+    // A repeating task this step moved on a round goes back to when it was due.
+    const round = (await conn('reminder_rounds').where({ reminder_id: task.id, ticked_item_id: item.id }).orderBy('done_at', 'desc').first('id')) as { id: string } | undefined;
+    if (round) await undoRound(conn, { profileId: opts.profileId, taskId: task.id, roundId: round.id });
   } else if (!opts.completed && task.completed && !task.merged_into_id) {
     // Unticking reopens a task the step closed, never one joined into another
     // or a booking to-do whose appointment already has its date.
@@ -218,7 +222,11 @@ export async function itemsOut(conn: Conn, profileId: string, items: Array<Recor
       .leftJoin('accounts as a', 'r.assigned_account_id', 'a.id')
       .where('r.care_profile_id', profileId)
       .whereIn('r.checklist_item_id', ids)
-      .select('r.id', 'r.title', 'r.checklist_item_id', 'r.next_due_at', 'r.all_day', 'r.completed', 'r.rrule', 'r.reminder_type', 'r.assigned_to', 'r.assigned_account_id', 'm.display_name as member_name', 'a.display_name as account_name'),
+      .select(
+        'r.id', 'r.title', 'r.checklist_item_id', 'r.next_due_at', 'r.all_day', 'r.completed', 'r.rrule', 'r.reminder_type', 'r.assigned_to', 'r.assigned_account_id',
+        'm.display_name as member_name', 'a.display_name as account_name',
+        conn.raw('(select max(rr.done_at) from reminder_rounds rr where rr.reminder_id = r.id) as last_done_at'),
+      ),
     conn('appointments')
       .where({ care_profile_id: profileId })
       .whereIn('id', items.map((i) => i['appointment_id']).filter(Boolean) as string[])
@@ -270,6 +278,7 @@ export async function itemsOut(conn: Conn, profileId: string, items: Array<Recor
             assigned_to: t['assigned_to'],
             assigned_account_id: t['assigned_account_id'],
             assigned_name: (t['account_name'] as string | null) ?? (t['member_name'] as string | null) ?? null,
+            last_done_at: t['last_done_at'] ?? null,
           }
         : null,
       appointment: a ? { id: a['id'], title: a['title'], starts_at: a['starts_at'], all_day: a['all_day'], status: a['status'] } : null,

@@ -23,6 +23,19 @@ export function NoticeBar() {
             {notice.link.label}
           </Link>
         ) : null}
+        {notice.action ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              const run = notice.action!.run;
+              dismiss();
+              void run();
+            }}
+          >
+            {notice.action.label}
+          </Button>
+        ) : null}
         <Button size="sm" variant="ghost" onClick={dismiss}>Dismiss</Button>
       </div>
     </div>

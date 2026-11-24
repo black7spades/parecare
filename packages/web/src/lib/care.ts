@@ -671,6 +671,8 @@ export interface Task {
   inferred_fields?: string[];
   booked_appointment?: { id: string; title: string; starts_at: string; status: string } | null;
   possible_duplicate_of?: { id: string; title: string } | null;
+  /** Rounds of a repeating task already done, newest first. */
+  rounds_done?: Array<{ id: string; due_at: string; done_at: string; done_by_name: string | null }>;
   merged_into_id?: string | null;
   merged_into_title?: string | null;
   created_at?: string;
