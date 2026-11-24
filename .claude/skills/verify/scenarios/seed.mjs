@@ -259,6 +259,19 @@ async function invite(ownerT, pid, role) {
 await invite(dauT, mum.id, 'carer');
 for (const rid of R.slice(0, 6)) await invite(manT, rid, 'carer');
 
+// Wave 7: journeys that act. Dorothy is ageing well with her yearly checks,
+// and Sam is making a change, at the step with the Quitline number.
+const { templates } = await call('GET', '/journey-templates', dauT);
+const slugId = (s) => templates.find((t) => t.slug === s)?.id;
+await call('POST', `/care-profiles/${mum.id}/journeys`, dauT, { template_id: slugId('ageing-well') });
+const prev = await call('POST', `/care-profiles/${me.id}/journeys`, meT, { template_id: slugId('preventive-health') });
+const prevId = prev.journey?.id;
+if (prevId) {
+  const { journeys } = await call('GET', `/care-profiles/${me.id}/journeys`, meT);
+  const change = journeys.find((j) => j.id === prevId)?.phases.find((p) => p.name === 'Making the change');
+  if (change) await call('POST', `/care-profiles/${me.id}/journeys/${prevId}/set-phase`, meT, { phase_id: change.id });
+}
+
 // 6. Set the home manager to the professional plan, ordinary user role -----
 const { Client } = require('pg');
 const c = new Client({ connectionString: process.env.DATABASE_URL ?? 'postgres://parecare:parecare@127.0.0.1:5433/parecare' });

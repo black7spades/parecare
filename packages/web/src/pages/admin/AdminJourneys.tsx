@@ -6,6 +6,9 @@ import { PencilIcon, TrashIcon } from '../../components/ui/icons';
 import { Input, Textarea } from '../../components/ui/Input';
 import { Modal } from '../../components/ui/Modal';
 import { useAuthStore } from '../../stores/auth';
+import { JOURNEY_ACTIONS, JOURNEY_PAGES } from '../../lib/journeyActions';
+import { REPEAT_CHOICES } from '../../lib/repeat';
+import { providerTypeLabel } from '../../lib/care';
 import { EditableSubheader } from '../../components/ui/EditableSubheader';
 import { useDataView, type DataSort, type DataFilter } from '../../components/data/useDataView';
 import { DataToolbar } from '../../components/data/DataToolbar';
@@ -15,6 +18,7 @@ import {
   stageAgeLabel,
   type JourneyTemplateFull,
   type JourneyTemplatePhase,
+  type JourneyTemplateTask,
   type JourneyTemplateSummary,
   type LifeStage,
 } from '../../lib/journeys';
@@ -446,7 +450,7 @@ function TemplateEditor({
       phases: loaded.phases.map((p) => ({
         name: p.name,
         description: p.description,
-        tasks: p.tasks.map((task) => ({ title: task.title, description: task.description, is_milestone: task.is_milestone })),
+        tasks: p.tasks.map((task) => ({ title: task.title, description: task.description, is_milestone: task.is_milestone, ...stepActionFields(task) })),
       })),
     };
   }, [draft, loaded]);
@@ -472,6 +476,7 @@ function TemplateEditor({
             title: task.title,
             description: task.description || null,
             is_milestone: task.is_milestone,
+            ...stepActionFields(task),
           })),
         })),
       };
@@ -624,6 +629,7 @@ function TemplateEditor({
                               title: task.title,
                               description: task.description,
                               is_milestone: task.is_milestone,
+                              ...stepActionFields(task),
                             })),
                           },
                         ],
@@ -739,25 +745,29 @@ function PhaseEditor({
                       onChange={(e) => setTask(i, { description: e.target.value })}
                       disabled={readOnly}
                     />
+                    <StepActionEditor idPrefix={`step-${index}-${i}`} task={task} readOnly={readOnly} onChange={(patch) => setTask(i, patch)} />
                   </div>
                   {!readOnly ? (
                     <div className="flex flex-col items-center gap-1 pt-1">
-                      <button
-                        type="button"
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        aria-label={task.is_milestone ? 'Unmark milestone' : 'Mark as milestone'}
                         title="A milestone is celebrated in the Memory Book timeline"
-                        className={`text-sm ${task.is_milestone ? '' : 'grayscale opacity-40'}`}
+                        className={task.is_milestone ? '' : 'grayscale opacity-40'}
                         onClick={() => setTask(i, { is_milestone: !task.is_milestone })}
                       >
                         ⭐
-                      </button>
-                      <button
-                        type="button"
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="ghost-danger"
                         aria-label="Remove item"
-                        className="text-muted hover:text-red-600 text-xs"
+                        title="Remove"
                         onClick={() => onChange({ tasks: phase.tasks.filter((_, j) => j !== i) })}
                       >
-                        ✕
-                      </button>
+                        <TrashIcon />
+                      </Button>
                     </div>
                   ) : task.is_milestone ? (
                     <span className="pt-2 text-sm">⭐</span>
@@ -768,7 +778,7 @@ function PhaseEditor({
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => onChange({ tasks: [...phase.tasks, { title: '', description: null, is_milestone: false }] })}
+                  onClick={() => onChange({ tasks: [...phase.tasks, { title: '', description: null, is_milestone: false, action: 'auto' }] })}
                 >
                   Add item
                 </Button>
@@ -803,4 +813,134 @@ function emptyDraft(): DraftTemplate {
     life_stage_ids: [],
     phases: [{ name: '', description: null, tasks: [] }],
   };
+}
+
+/** The action fields of a template step, for copying and saving. */
+function stepActionFields(task: JourneyTemplateTask): Partial<JourneyTemplateTask> {
+  return {
+    action: task.action ?? 'none',
+    action_provider_type: task.action_provider_type ?? null,
+    action_contact_name: task.action_contact_name ?? null,
+    action_phone: task.action_phone ?? null,
+    action_document_category: task.action_document_category ?? null,
+    action_page: task.action_page ?? null,
+    due_in_days: task.due_in_days ?? null,
+    repeat: task.repeat ?? null,
+    repeat_rrule: task.repeat ? null : task.repeat_rrule ?? null,
+  };
+}
+
+const SELECT_CLASS =
+  'block w-full rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-60';
+
+/** Upload categories a step can ask for, by their built-in key. */
+const STEP_CATEGORIES = [
+  { value: 'referral', label: 'Referral' },
+  { value: 'letter', label: 'Letter' },
+  { value: 'results', label: 'Results' },
+  { value: 'medical_record', label: 'Medical record' },
+  { value: 'care_plan', label: 'Care plan' },
+  { value: 'advance_care_directive', label: 'Advance care directive' },
+  { value: 'poa', label: 'Power of attorney' },
+  { value: 'will', label: 'Will' },
+  { value: 'identity', label: 'Identity' },
+  { value: 'insurance', label: 'Insurance' },
+  { value: 'facility_contract', label: 'Facility contract' },
+  { value: 'medical_certificate', label: 'Medical certificate' },
+  { value: 'service_agreement', label: 'Service agreement' },
+  { value: 'other', label: 'Other' },
+];
+
+/**
+ * What a step does when someone taps it: book, add a task, upload, call,
+ * add a record or open a page, with the details each one needs, when it is
+ * due after the phase starts and how it repeats.
+ */
+function StepActionEditor({
+  idPrefix,
+  task,
+  readOnly,
+  onChange,
+}: {
+  idPrefix: string;
+  task: JourneyTemplateTask;
+  readOnly: boolean;
+  onChange: (patch: Partial<JourneyTemplateTask>) => void;
+}) {
+  const action = task.action ?? 'none';
+  const books = action === 'book' || action === 'call';
+  return (
+    <div className="grid gap-2 sm:grid-cols-3 rounded-md border border-border bg-surface p-2">
+      <div>
+        <label htmlFor={`${idPrefix}-action`} className="block text-xs text-muted mb-1">What this step does</label>
+        <select id={`${idPrefix}-action`} className={SELECT_CLASS} value={action} disabled={readOnly} onChange={(e) => onChange({ action: e.target.value })}>
+          <option value="auto">Work it out from the words</option>
+          <option value="none">Nothing to tap</option>
+          {JOURNEY_ACTIONS.map((a) => (
+            <option key={a.value} value={a.value}>{a.label}</option>
+          ))}
+        </select>
+      </div>
+      {books ? (
+        <div>
+          <label htmlFor={`${idPrefix}-type`} className="block text-xs text-muted mb-1">{action === 'book' ? 'Who to book' : 'Who to call'}</label>
+          <Input id={`${idPrefix}-type`} placeholder="e.g. GP, Physiotherapist" value={task.action_provider_type ? providerTypeLabel(task.action_provider_type) : ''} disabled={readOnly} onChange={(e) => onChange({ action_provider_type: e.target.value })} />
+        </div>
+      ) : null}
+      {action === 'call' ? (
+        <>
+          <div>
+            <label htmlFor={`${idPrefix}-contact`} className="block text-xs text-muted mb-1">Contact name</label>
+            <Input id={`${idPrefix}-contact`} placeholder="e.g. Quitline" value={task.action_contact_name ?? ''} disabled={readOnly} onChange={(e) => onChange({ action_contact_name: e.target.value })} />
+          </div>
+          <div>
+            <label htmlFor={`${idPrefix}-phone`} className="block text-xs text-muted mb-1">Phone</label>
+            <Input id={`${idPrefix}-phone`} placeholder="e.g. 13 7848" value={task.action_phone ?? ''} disabled={readOnly} onChange={(e) => onChange({ action_phone: e.target.value })} />
+          </div>
+        </>
+      ) : null}
+      {action === 'upload' ? (
+        <div>
+          <label htmlFor={`${idPrefix}-category`} className="block text-xs text-muted mb-1">Document category</label>
+          <select id={`${idPrefix}-category`} className={SELECT_CLASS} value={task.action_document_category ?? ''} disabled={readOnly} onChange={(e) => onChange({ action_document_category: e.target.value || null })}>
+            <option value="">Choose when uploading</option>
+            {STEP_CATEGORIES.map((c) => (
+              <option key={c.value} value={c.value}>{c.label}</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+      {action === 'open' ? (
+        <div>
+          <label htmlFor={`${idPrefix}-page`} className="block text-xs text-muted mb-1">Page to open</label>
+          <select id={`${idPrefix}-page`} className={SELECT_CLASS} value={task.action_page ?? ''} disabled={readOnly} onChange={(e) => onChange({ action_page: e.target.value || null })}>
+            <option value="">Choose a page</option>
+            {JOURNEY_PAGES.map((p) => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+      <div>
+        <label htmlFor={`${idPrefix}-due`} className="block text-xs text-muted mb-1">Due, days after the phase starts</label>
+        <Input
+          id={`${idPrefix}-due`}
+          type="number"
+          min={0}
+          placeholder="7"
+          value={task.due_in_days ?? ''}
+          disabled={readOnly}
+          onChange={(e) => onChange({ due_in_days: e.target.value === '' ? null : Math.max(0, Math.round(Number(e.target.value))) })}
+        />
+      </div>
+      <div>
+        <label htmlFor={`${idPrefix}-repeat`} className="block text-xs text-muted mb-1">Repeats</label>
+        <select id={`${idPrefix}-repeat`} className={SELECT_CLASS} value={task.repeat ?? 'once'} disabled={readOnly} onChange={(e) => onChange({ repeat: e.target.value, repeat_rrule: null })}>
+          {REPEAT_CHOICES.map((c) => (
+            <option key={c.value} value={c.value}>{c.label}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
 }

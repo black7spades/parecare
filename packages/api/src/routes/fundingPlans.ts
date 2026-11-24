@@ -3,6 +3,9 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { requireProfileOwner } from '../middleware/permissions';
 import { PlanProblem, planInputSchema, plansOut, savePlan } from '../services/fundingPlans';
+import { doneFromItem, journeyItemRef } from '../services/journeyItems';
+
+const fromItemOf = (body: unknown) => journeyItemRef.safeParse((body as Record<string, unknown> | undefined)?.['from_journey_item_id']).data ?? null;
 
 /**
  * Funding plans for one person: an NDIS plan or an aged care package. Like
@@ -35,7 +38,11 @@ fundingPlansRouter.post('/', async (req, res) => {
   }
   const profileId = profileIdOf(req);
   try {
-    const saved = await db.transaction((trx) => savePlan(trx, { profileId, actorId: req.account!.id, input: parsed.data, timeZone: tz(req) }));
+    const saved = await db.transaction(async (trx) => {
+      const s = await savePlan(trx, { profileId, actorId: req.account!.id, input: parsed.data, timeZone: tz(req) });
+      await doneFromItem(trx, { profileId, itemId: fromItemOf(req.body), actorId: req.account!.id, record: { kind: 'funding-plans', id: s.id } });
+      return s;
+    });
     res.status(201).json({ plan: await oneOut(profileId, saved.id, tz(req)), filed: saved.filed, report_tasks: saved.report_tasks });
   } catch (err) {
     if (err instanceof PlanProblem) {

@@ -6,6 +6,8 @@ import { db } from '../config/database';
 import { getStorageConfig } from '../config/settings';
 import { requireAuth } from '../middleware/auth';
 import { uploadFile, getDownloadUrl } from '../services/storage';
+import { TaskProblem } from '../services/tasks';
+import { actionForNewItem, itemTaskSchema, itemsOut, setItemDone, setItemTask } from '../services/journeyItems';
 import type { ChecklistItem } from '../types';
 
 const notePhotoUpload = multer({
@@ -33,8 +35,18 @@ checklistsRouter.get('/', requireAuth, async (req, res) => {
     .count('checklist_item_notes.id as count');
   const countById = new Map(counts.map((c) => [String(c.checklist_item_id), Number(c.count)]));
 
-  res.json({ items: items.map((i) => ({ ...i, note_count: countById.get(i.id) ?? 0 })) });
+  const withNotes = items.map((i) => ({ ...i, note_count: countById.get(i.id) ?? 0 })) as unknown as Array<Record<string, unknown> & { id: string }>;
+  res.json({ items: await itemsOut(db, String(req.params['id']), withNotes) });
 });
+
+/** One item, with everything the list shows for it. */
+async function oneItem(profileId: string, itemId: string) {
+  const row = (await db('checklist_items').where({ id: itemId, care_profile_id: profileId }).first()) as (Record<string, unknown> & { id: string }) | undefined;
+  if (!row) return null;
+  const notes = await db('checklist_item_notes').where({ checklist_item_id: itemId }).count('id as count').first();
+  const [out] = await itemsOut(db, profileId, [{ ...row, note_count: Number(notes?.count ?? 0) }]);
+  return out;
+}
 
 checklistsRouter.post('/', requireAuth, async (req, res) => {
   const schema = z.object({
@@ -77,6 +89,8 @@ checklistsRouter.post('/', requireAuth, async (req, res) => {
       sort_order: parsed.data.sort_order ?? 0,
       care_journey_phase_id: parsed.data.care_journey_phase_id ?? null,
       phase,
+      // "Book the dentist" books, "Call Quitline 13 7848" calls: worked out from the words.
+      ...actionForNewItem({ title: parsed.data.title, description: parsed.data.description, is_milestone: parsed.data.is_milestone }),
     } as Partial<ChecklistItem>)
     .returning('*');
 
@@ -101,25 +115,24 @@ checklistsRouter.patch('/:itemId', requireAuth, async (req, res) => {
   }
 
   const { note, ...fields } = parsed.data;
-  const updates: Partial<ChecklistItem> = { ...fields } as Partial<ChecklistItem>;
-  if (parsed.data.completed === true) {
-    updates.completed_at = new Date();
-    if (!parsed.data.achieved_on) updates.achieved_on = new Date().toISOString().slice(0, 10);
-    // Record who ticked the box, for the achievements record.
-    const member = await db('care_circle_members')
-      .where({ care_profile_id: req.params['id'], account_id: req.account!.id, invite_accepted: true })
-      .first();
-    if (member) updates.completed_by = member.id;
-  } else if (parsed.data.completed === false) {
-    updates.completed_at = null;
-    updates.completed_by = null;
-    updates.achieved_on = null;
+  const profileId = String(req.params['id']);
+  const itemId = String(req.params['itemId']);
+  // Ticking the item ticks its task, and the other way round.
+  if (fields.completed !== undefined) {
+    const exists = await db('checklist_items').where({ id: itemId, care_profile_id: profileId }).first('id');
+    if (!exists) {
+      res.status(404).json({ error: 'Item not found', code: 'NOT_FOUND' });
+      return;
+    }
+    await db.transaction((trx) => setItemDone(trx, { profileId, itemId, actorId: req.account!.id, completed: fields.completed!, achievedOn: fields.achieved_on ?? null }));
   }
+  const updates: Partial<ChecklistItem> = { ...fields } as Partial<ChecklistItem>;
+  delete (updates as Record<string, unknown>)['completed'];
+  if (parsed.data.completed !== undefined) delete (updates as Record<string, unknown>)['achieved_on'];
 
-  const [item] = await db<ChecklistItem>('checklist_items')
-    .where({ id: req.params['itemId'], care_profile_id: req.params['id'] })
-    .update(updates)
-    .returning('*');
+  const item = Object.keys(updates).length
+    ? (await db<ChecklistItem>('checklist_items').where({ id: itemId, care_profile_id: profileId }).update(updates).returning('*'))[0]
+    : await db<ChecklistItem>('checklist_items').where({ id: itemId, care_profile_id: profileId }).first();
 
   if (!item) {
     res.status(404).json({ error: 'Item not found', code: 'NOT_FOUND' });
@@ -133,7 +146,37 @@ checklistsRouter.patch('/:itemId', requireAuth, async (req, res) => {
       body: note.trim(),
     });
   }
-  res.json({ item });
+  res.json({ item: await oneItem(profileId, item.id) });
+});
+
+/**
+ * Give an item its task, or change it: when it is due, who is doing it, and
+ * how it repeats. The task is how the item reminds people.
+ */
+checklistsRouter.post('/:itemId/task', requireAuth, async (req, res) => {
+  const parsed = itemTaskSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Pick the day it is due. The other boxes can wait.', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  const profileId = String(req.params['id']);
+  const itemId = String(req.params['itemId']);
+  try {
+    const done = await db.transaction((trx) =>
+      setItemTask(trx, { profileId, itemId, actorId: req.account!.id, input: parsed.data, timeZone: (req.account as { timezone?: string | null } | undefined)?.timezone ?? null })
+    );
+    if (!done) {
+      res.status(404).json({ error: 'That step is not on this journey any more. Refresh and try again.', code: 'NOT_FOUND' });
+      return;
+    }
+    res.json({ item: await oneItem(profileId, itemId), task_id: done.task_id });
+  } catch (err) {
+    if (err instanceof TaskProblem) {
+      res.status(400).json({ error: err.message, code: err.code });
+      return;
+    }
+    throw err;
+  }
 });
 
 // The note thread that turns a ticked box into a record: when it happened,

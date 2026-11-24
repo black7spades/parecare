@@ -978,6 +978,7 @@ export function UploadDocumentModal({
   initialFile,
   initialLabel = '',
   initialConditionId = '',
+  initialCategoryKey = '',
   link,
   links,
   onClose,
@@ -990,6 +991,8 @@ export function UploadDocumentModal({
   initialLabel?: string;
   /** Prefill the condition it is for, e.g. the one the appointment was for. */
   initialConditionId?: string;
+  /** Prefill the category by its built-in key, e.g. "referral" for a journey step that asks for the referral. */
+  initialCategoryKey?: string;
   /** Attach the new document to a record as it is filed. */
   link?: { kind: string; id: string };
   /** Attach it to several records at once, such as a next step and its appointment. */
@@ -1003,6 +1006,12 @@ export function UploadDocumentModal({
   const [label, setLabel] = useState(initialLabel || (initialFile ? withoutExtension(initialFile.name) : ''));
   // A category name; one not on the list yet is added when the file is saved.
   const [category, setCategory] = useState('');
+  const { data: categoryData } = useDocumentCategories(profileId);
+  const keyedName = initialCategoryKey ? (categoryData?.categories ?? []).find((c) => c.system_key === initialCategoryKey)?.name ?? '' : '';
+  // The category a journey step asked for, once the list has loaded, unless someone already chose one.
+  useEffect(() => {
+    if (keyedName) setCategory((c) => c || keyedName);
+  }, [keyedName]);
   // File this document against a condition, so a scan report joins the
   // tracking thread of the ankle it was taken for.
   const [conditionId, setConditionId] = useState(initialConditionId);

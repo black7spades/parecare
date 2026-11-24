@@ -191,7 +191,7 @@ export function ageFrom(dateOfBirth: string | null | undefined): number | null {
   return age >= 0 ? age : null;
 }
 
-export interface ChecklistItem {
+export interface ChecklistItem extends Partial<import('./journeyActions').JourneyItemAction> {
   id: string;
   /** Legacy phase slug; null for items that live on a journey phase. */
   phase: CarePhase | string | null;

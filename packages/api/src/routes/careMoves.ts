@@ -3,6 +3,9 @@ import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { MoveProblem, deleteMove, moveInputSchema, movesOut, saveMove } from '../services/careMoves';
 import { TaskProblem } from '../services/tasks';
+import { doneFromItem, journeyItemRef } from '../services/journeyItems';
+
+const fromItemOf = (body: unknown) => journeyItemRef.safeParse((body as Record<string, unknown> | undefined)?.['from_journey_item_id']).data ?? null;
 import { ADDRESS_PART_KEYS } from '../services/addresses';
 
 /**
@@ -48,7 +51,11 @@ careMovesRouter.post('/', requireAuth, async (req, res) => {
   }
   const profileId = profileIdOf(req);
   try {
-    const saved = await db.transaction((trx) => saveMove(trx, { profileId, actor: { id: req.account!.id, role: req.account!.role }, input: parsed.data, timeZone: tz(req) }));
+    const saved = await db.transaction(async (trx) => {
+      const s = await saveMove(trx, { profileId, actor: { id: req.account!.id, role: req.account!.role }, input: parsed.data, timeZone: tz(req) });
+      await doneFromItem(trx, { profileId, itemId: fromItemOf(req.body), actorId: req.account!.id, record: { kind: 'care-moves', id: s.id } });
+      return s;
+    });
     res.status(201).json({ move: await oneOut(profileId, saved.id), filed: saved.filed, phase_changed: saved.phase_changed });
   } catch (err) {
     if (problem(res, err)) return;

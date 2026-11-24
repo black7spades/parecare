@@ -42,7 +42,7 @@ export function EquipmentPage() {
   const queryClient = useQueryClient();
   const health = useHealthConfig();
   const [params, setParams] = useSearchParams();
-  const [editing, setEditing] = useState<{ asset: Asset | null; name?: string; fromTaskId?: string | null } | null>(null);
+  const [editing, setEditing] = useState<{ asset: Asset | null; name?: string; fromTaskId?: string | null; fromJourneyItemId?: string | null } | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['equipment', profile.id],
@@ -52,12 +52,13 @@ export function EquipmentPage() {
   // Opened from an "Equipment to get" step: the form starts with its name.
   useEffect(() => {
     if (params.get('new') !== '1') return;
-    if (canEdit) setEditing({ asset: null, name: params.get('name') ?? '', fromTaskId: params.get('from_task') });
+    if (canEdit) setEditing({ asset: null, name: params.get('name') ?? '', fromTaskId: params.get('from_task'), fromJourneyItemId: params.get('from_journey_item') });
     setParams((prev) => {
       const next = new URLSearchParams(prev);
       next.delete('new');
       next.delete('name');
       next.delete('from_task');
+      next.delete('from_journey_item');
       return next;
     }, { replace: true });
   }, [params, setParams, canEdit]);
@@ -225,6 +226,7 @@ export function EquipmentPage() {
           profileId={profile.id}
           initialName={editing.name}
           fromTaskId={editing.fromTaskId}
+          fromJourneyItemId={editing.fromJourneyItemId}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);

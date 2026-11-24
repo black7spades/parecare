@@ -5,6 +5,7 @@ import { resultsToDiscuss } from './testResults';
 import { deliverForwards } from './noteForwards';
 import { appointmentPlaceColumns, contactSummaries, ensureProfessional, fillProfessionalGaps, linkContact, type KnownPlace } from './professionals';
 import { createTask, ownerZone } from './tasks';
+import { doneFromItem, itemFor } from './journeyItems';
 import { withCategory } from './documentCategories';
 import { refreshReferrals } from './documentDates';
 import { REPEAT_CHOICE_VALUES, advance, repeatChoice, repeatColumns } from '../lib/repeat';
@@ -56,6 +57,8 @@ export const appointmentInputSchema = z.object({
   cost_estimate: z.coerce.number().min(0).max(1e9).optional().nullable(),
   cost_actual: z.coerce.number().min(0).max(1e9).optional().nullable(),
   from_reminder_id: z.string().uuid().optional().nullable(),
+  // Booked from a journey step: the step remembers it, and is ticked once it has a date.
+  from_journey_item_id: z.string().uuid().optional().nullable(),
   preparation: z.string().max(4000).optional().nullable(),
   telehealth_link: z.string().max(2000).optional().nullable(),
   interpreter_needed: z.boolean().optional(),
@@ -132,7 +135,7 @@ export async function addBookingTodo(
 }
 
 const PLACE_KEYS = ['location', 'address_line1', 'address_line2', 'address_suburb', 'address_state', 'address_postcode', 'address_country', 'directions_link'] as const;
-const EXTRA_KEYS = ['attendees', 'bring_document_ids', 'repeat', 'repeat_until', 'tz', 'provider_phone', 'cost_estimate', 'cost_actual'] as const;
+const EXTRA_KEYS = ['attendees', 'bring_document_ids', 'repeat', 'repeat_until', 'tz', 'provider_phone', 'cost_estimate', 'cost_actual', 'from_journey_item_id'] as const;
 
 /** The columns an appointment write stores, with a new contact filed and linked. */
 async function appointmentColumns(
@@ -394,16 +397,28 @@ export async function bookAppointment(
   conn: Conn,
   opts: { profileId: string; actorId: string; input: AppointmentInput; timeZone?: string | null }
 ): Promise<BookResult> {
-  const { profileId, actorId, input } = opts;
+  const { profileId, actorId } = opts;
+  let input = opts.input;
   const zone = await ownerZone(conn, profileId, input.tz ?? opts.timeZone);
   const filed: Array<{ id: string; name: string }> = [];
   const cols = await appointmentColumns(conn, profileId, input, filed);
   const dated = !!input.starts_at;
+  // A journey step booked: its own open task is the to-do this booking carries out.
+  const item = await itemFor(conn, profileId, input.from_journey_item_id);
+  if (item && !input.from_reminder_id) {
+    const itemTask = (await conn('reminders').where({ checklist_item_id: item.id, care_profile_id: profileId, completed: false }).first('id')) as { id: string } | undefined;
+    if (itemTask) {
+      input = { ...input, from_reminder_id: itemTask.id };
+      cols['from_reminder_id'] = itemTask.id;
+    }
+  }
   if (!dated) {
     cols['starts_at'] = null;
     cols['status'] = 'to_book';
     if (!input.from_reminder_id) {
       cols['from_reminder_id'] = await addBookingTodo(profileId, input.title, actorId, conn, (cols['provider_id'] as string | null) ?? null);
+      // The to-do keeps the step in view until it has a date.
+      if (item) await conn('reminders').where({ id: cols['from_reminder_id'] as string }).whereNull('checklist_item_id').update({ checklist_item_id: item.id }).catch(() => undefined);
     }
   }
   if (cols['all_day']) cols['ends_at'] = null;
@@ -411,6 +426,10 @@ export async function bookAppointment(
     .insert({ care_profile_id: profileId, ...cols, created_by_account_id: actorId })
     .returning('*');
   const id = (appointment as { id: string }).id;
+  if (item) {
+    await conn('checklist_items').where({ id: item.id }).update({ appointment_id: id });
+    if (dated) await doneFromItem(conn, { profileId, itemId: item.id, actorId });
+  }
   if (input.from_reminder_id) {
     if (dated) {
       await conn('reminders')
@@ -468,6 +487,13 @@ export async function updateAppointment(
     await conn('reminders')
       .where({ id: before.from_reminder_id, care_profile_id: profileId, completed: false })
       .update({ completed: true, completed_at: conn.fn.now(), completed_by_account_id: actorId });
+  }
+  const fromItem = await itemFor(conn, profileId, input.from_journey_item_id);
+  if (fromItem) await conn('checklist_items').where({ id: fromItem.id }).update({ appointment_id: before.id });
+  // A journey step waiting on this booking is done once it has a date.
+  if (nowBooked || (fromItem && before.starts_at)) {
+    const steps = (await conn('checklist_items').where({ care_profile_id: profileId, appointment_id: before.id, completed: false }).pluck('id')) as string[];
+    for (const s of steps) await doneFromItem(conn, { profileId, itemId: s, actorId });
   }
   if (input.starts_at && input.cost_estimate === undefined && input.cost_actual === undefined) {
     await conn('health_spend_entries').where({ appointment_id: before.id }).update({ spent_on: new Date(input.starts_at).toISOString().slice(0, 10), updated_at: conn.fn.now() });

@@ -22,9 +22,13 @@ export function MoveIntoCareModal({
   roomNumber,
   personName,
   onClose,
+  fromJourneyItemId,
 }: {
   profileId: string;
   move?: CareMove | null;
+  /** The journey step this is recorded from; saving ticks it off. */
+  fromJourneyItemId?: string | null;
+
   roomNumber?: string | null;
   /** Their first name; null on your own profile. */
   personName?: string | null;
@@ -62,7 +66,7 @@ export function MoveIntoCareModal({
       };
       return move
         ? api.patch<{ move: CareMove; filed?: Array<{ id: string; name: string }> }>(`/care-profiles/${profileId}/care-moves/${move.id}`, body)
-        : api.post<{ move: CareMove; filed?: Array<{ id: string; name: string }> }>(`/care-profiles/${profileId}/care-moves`, body);
+        : api.post<{ move: CareMove; filed?: Array<{ id: string; name: string }> }>(`/care-profiles/${profileId}/care-moves`, { ...body, ...(fromJourneyItemId ? { from_journey_item_id: fromJourneyItemId } : {}) });
     },
     onSuccess: (res) => {
       noticeFiled(profileId, res.filed);

@@ -2,6 +2,9 @@ import { Router } from 'express';
 import { db } from '../config/database';
 import { requireAuth } from '../middleware/auth';
 import { ResultProblem, resultInputSchema, resultsOut, saveResult } from '../services/testResults';
+import { doneFromItem, journeyItemRef } from '../services/journeyItems';
+
+const fromItemOf = (body: unknown) => journeyItemRef.safeParse((body as Record<string, unknown> | undefined)?.['from_journey_item_id']).data ?? null;
 
 /**
  * Test results for one person, each measure its own row. Saving one ties it
@@ -31,7 +34,11 @@ testResultsRouter.post('/', requireAuth, async (req, res) => {
   }
   const profileId = profileIdOf(req);
   try {
-    const saved = await db.transaction((trx) => saveResult(trx, { profileId, actorId: req.account!.id, input: parsed.data, timeZone: (req.headers['x-time-zone'] as string) || null }));
+    const saved = await db.transaction(async (trx) => {
+      const s = await saveResult(trx, { profileId, actorId: req.account!.id, input: parsed.data, timeZone: (req.headers['x-time-zone'] as string) || null });
+      await doneFromItem(trx, { profileId, itemId: fromItemOf(req.body), actorId: req.account!.id, record: { kind: 'results', id: s.id } });
+      return s;
+    });
     res.status(201).json({ result: await oneOut(profileId, saved.id), filed: saved.filed, ticked: saved.ticked });
   } catch (err) {
     if (err instanceof ResultProblem) {

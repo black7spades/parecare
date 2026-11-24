@@ -71,11 +71,15 @@ export function ResultEditor({
   initialTestName,
   onClose,
   onSaved,
+  fromJourneyItemId,
 }: {
   profileId: string;
   result?: TestResult | null;
   initialAppointmentId?: string | null;
   initialTestName?: string | null;
+  /** The journey step this is recorded from; saving ticks it off. */
+  fromJourneyItemId?: string | null;
+
   onClose: () => void;
   onSaved?: (r: TestResult) => void;
 }) {
@@ -144,7 +148,7 @@ export function ResultEditor({
       };
       return result
         ? api.patch<{ result: TestResult; filed?: Array<{ id: string; name: string }> }>(`/care-profiles/${profileId}/results/${result.id}`, body)
-        : api.post<{ result: TestResult; filed?: Array<{ id: string; name: string }> }>(`/care-profiles/${profileId}/results`, body);
+        : api.post<{ result: TestResult; filed?: Array<{ id: string; name: string }> }>(`/care-profiles/${profileId}/results`, { ...body, ...(fromJourneyItemId ? { from_journey_item_id: fromJourneyItemId } : {}) });
     },
     onSuccess: (res) => {
       noticeFiled(profileId, res.filed);

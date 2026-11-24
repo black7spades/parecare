@@ -20,6 +20,27 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.53.0',
+    date: '2026-11-24',
+    summary: 'Journeys that act: every step books, adds a task, uploads, calls or opens the form it needs, with a date, who is doing it and repeats.',
+    groups: [
+      { heading: 'Added', items: [
+        'Journey steps do the job. Each step on a care journey has the one thing that gets it done. Book it opens the booking form already filled in, with their GP or the right kind of contact. Add a task sets a date. Upload files the paper in the right category. A step with a number shows it to tap and call, with Done. A step about equipment, a hospital stay, a move into care, a funding plan or a test result opens that form, and a step that happens on another page opens it.',
+        'Due, who is doing it and repeats. Any step can have a date, the person doing it and how often it repeats, such as the over 75 health check every year. It becomes a task that reminds them, and ticking either one ticks the other.',
+        'Steps say what was done. Once a step is done from the journey it says so: Booked for the day, Uploaded the document, or Added the record, each a link to open it.',
+        'Numbers in journeys can be tapped. Phone numbers in a step, such as Quitline 13 7848 or the Carer Gateway, are links to call.',
+        'Every journey checked. All 49 journeys were gone through so no step that asks for something is a dead end.',
+        'Your own steps work too. A step added by hand, such as Book the dentist or Call Lifeline 13 11 14, works out what to do from its words.',
+      ] },
+      { heading: 'Changed', items: [
+        'Journeys say the person\'s name. The journey page says Dorothy\'s care journeys, and Your care journeys on your own profile.',
+        'Deleting a step has Undo. Deleting a step from a journey waits a few seconds with Undo.',
+        'Suggested reminders join the journey. Adding a suggested reminder, such as the health check for people 75 and over, puts the repeating task on the matching journey step.',
+        'Journey library editing. Whoever runs the system can set what each step in the library does, who to book or call, the number, the document category, the page to open, how many days after the phase starts it is due and how it repeats.',
+      ] },
+    ],
+  },
+  {
     version: '0.52.1',
     date: '2026-11-24',
     summary: 'Tappable therapist phones, late reports asked for today, names instead of relationship words, and record links that stand out.',

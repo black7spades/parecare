@@ -5,6 +5,7 @@ import type { ContactSummary } from '../lib/care';
 import { findPersonWithPhone, findPhones, phoneDigits, splitLinkedText } from '../lib/phoneText';
 import { refreshContacts, useNoticeStore } from '../stores/notice';
 import { Button } from './ui/Button';
+import { CONTACT_LINK } from './ContactStrip';
 
 const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
 
@@ -90,7 +91,7 @@ export function LinkedText({
           <Fragment key={i}>
             {p.kind === 'phone' ? (
               <>
-                <a href={telHref(p.text)} className="text-primary hover:underline" aria-label={`Call ${p.text}`}>{p.text}</a>
+                <a href={telHref(p.text)} className={CONTACT_LINK} aria-label={`Call ${p.text}`}>{p.text}</a>
                 {offerSave && phoneDigits(p.text) === phoneDigits(onlyPhone!) ? (
                   <Button size="xs" variant="ghost" className="ml-1" loading={savePhone.isPending} onClick={() => savePhone.mutate()}>
                     Save as {contact!.name}'s number
@@ -98,9 +99,9 @@ export function LinkedText({
                 ) : null}
               </>
             ) : p.kind === 'email' ? (
-              <a href={`mailto:${p.text}`} className="text-primary hover:underline">{p.text}</a>
+              <a href={`mailto:${p.text}`} className={CONTACT_LINK}>{p.text}</a>
             ) : p.kind === 'url' ? (
-              <a href={p.text} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{p.text}</a>
+              <a href={p.text} target="_blank" rel="noopener noreferrer" className={`${CONTACT_LINK} break-all`}>{p.text}</a>
             ) : (
               p.text
             )}

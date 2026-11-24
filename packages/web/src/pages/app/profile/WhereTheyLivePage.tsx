@@ -47,9 +47,9 @@ export function WhereTheyLivePage() {
   const name = firstName(profile);
   const queryClient = useQueryClient();
   const [params, setParams] = useSearchParams();
-  const [stayForm, setStayForm] = useState<{ stay: HospitalStay | null } | null>(null);
+  const [stayForm, setStayForm] = useState<{ stay: HospitalStay | null; fromJourneyItemId?: string | null } | null>(null);
   const [discharging, setDischarging] = useState<{ id: string; hospital: string | null } | null>(null);
-  const [moveForm, setMoveForm] = useState<{ move: CareMove | null } | null>(null);
+  const [moveForm, setMoveForm] = useState<{ move: CareMove | null; fromJourneyItemId?: string | null } | null>(null);
   const [editingHome, setEditingHome] = useState(false);
 
   const { data: staysData, isLoading: staysLoading } = useQuery({
@@ -65,13 +65,19 @@ export function WhereTheyLivePage() {
   useEffect(() => {
     const stay = params.get('stay');
     const discharge = params.get('discharge');
-    if (!stay && !discharge) return;
-    if (stay === 'new' && canEdit) setStayForm({ stay: null });
+    const move = params.get('move');
+    // Opened from a journey step: saving ticks the step.
+    const fromJourneyItemId = params.get('from_journey_item');
+    if (!stay && !discharge && !move) return;
+    if (stay === 'new' && canEdit) setStayForm({ stay: null, fromJourneyItemId });
+    if (move === 'new' && canEdit) setMoveForm({ move: null, fromJourneyItemId });
     if (discharge && canEdit) setDischarging({ id: discharge, hospital: openStay?.hospital_name ?? null });
     setParams((prev) => {
       const next = new URLSearchParams(prev);
       next.delete('stay');
       next.delete('discharge');
+      next.delete('move');
+      next.delete('from_journey_item');
       return next;
     }, { replace: true });
   }, [params, setParams, canEdit, openStay]);
@@ -360,9 +366,9 @@ export function WhereTheyLivePage() {
         );
       })() : null}
 
-      {stayForm ? <HospitalStayModal profileId={profile.id} stay={stayForm.stay} onClose={() => setStayForm(null)} /> : null}
+      {stayForm ? <HospitalStayModal profileId={profile.id} stay={stayForm.stay} fromJourneyItemId={stayForm.fromJourneyItemId} onClose={() => setStayForm(null)} /> : null}
       {discharging ? <DischargeModal profileId={profile.id} stayId={discharging.id} hospitalName={discharging.hospital} onClose={() => setDischarging(null)} /> : null}
-      {moveForm ? <MoveIntoCareModal personName={isSelf ? null : name} profileId={profile.id} move={moveForm.move} roomNumber={profile.room_number} onClose={() => setMoveForm(null)} /> : null}
+      {moveForm ? <MoveIntoCareModal personName={isSelf ? null : name} profileId={profile.id} move={moveForm.move} fromJourneyItemId={moveForm.fromJourneyItemId} roomNumber={profile.room_number} onClose={() => setMoveForm(null)} /> : null}
       {canEditProfile ? <EditProfileModal profile={profile} open={editingHome} onClose={() => setEditingHome(false)} /> : null}
     </div>
   );

@@ -44,7 +44,7 @@ export function TestResultsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const [editing, setEditing] = useState<{ result: TestResult | null; appointmentId?: string | null; testName?: string | null } | null>(null);
+  const [editing, setEditing] = useState<{ result: TestResult | null; appointmentId?: string | null; testName?: string | null; fromJourneyItemId?: string | null } | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['test-results', profile.id],
@@ -54,12 +54,13 @@ export function TestResultsPage() {
   // Opened from an appointment: "Add a result" for that test.
   useEffect(() => {
     if (params.get('new') !== '1') return;
-    if (canEdit) setEditing({ result: null, appointmentId: params.get('appointment'), testName: params.get('test') });
+    if (canEdit) setEditing({ result: null, appointmentId: params.get('appointment'), testName: params.get('test'), fromJourneyItemId: params.get('from_journey_item') });
     setParams((prev) => {
       const next = new URLSearchParams(prev);
       next.delete('new');
       next.delete('appointment');
       next.delete('test');
+      next.delete('from_journey_item');
       return next;
     }, { replace: true });
   }, [params, setParams, canEdit]);
@@ -237,6 +238,7 @@ export function TestResultsPage() {
           result={editing.result}
           initialAppointmentId={editing.appointmentId}
           initialTestName={editing.testName}
+          fromJourneyItemId={editing.fromJourneyItemId}
           onClose={() => setEditing(null)}
           onSaved={(saved) => panel.open(saved.id)}
         />
