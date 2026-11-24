@@ -4,7 +4,7 @@ import { db } from '../config/database';
 import { resultsToDiscuss } from './testResults';
 import { deliverForwards } from './noteForwards';
 import { appointmentPlaceColumns, contactSummaries, ensureProfessional, fillProfessionalGaps, linkContact, type KnownPlace } from './professionals';
-import { createTask, ownerZone } from './tasks';
+import { createTask, finishTask, ownerZone } from './tasks';
 import { doneFromItem, itemFor } from './journeyItems';
 import { withCategory } from './documentCategories';
 import { refreshReferrals } from './documentDates';
@@ -417,8 +417,10 @@ export async function bookAppointment(
     cols['status'] = 'to_book';
     if (!input.from_reminder_id) {
       cols['from_reminder_id'] = await addBookingTodo(profileId, input.title, actorId, conn, (cols['provider_id'] as string | null) ?? null);
-      // The to-do keeps the step in view until it has a date.
-      if (item) await conn('reminders').where({ id: cols['from_reminder_id'] as string }).whereNull('checklist_item_id').update({ checklist_item_id: item.id }).catch(() => undefined);
+      // The to-do keeps the step in view until it has a date, when the step has no task of its own.
+      if (item && !(await conn('reminders').where({ checklist_item_id: item.id }).first('id'))) {
+        await conn('reminders').where({ id: cols['from_reminder_id'] as string }).whereNull('checklist_item_id').update({ checklist_item_id: item.id });
+      }
     }
   }
   if (cols['all_day']) cols['ends_at'] = null;
@@ -428,14 +430,12 @@ export async function bookAppointment(
   const id = (appointment as { id: string }).id;
   if (item) {
     await conn('checklist_items').where({ id: item.id }).update({ appointment_id: id });
-    if (dated) await doneFromItem(conn, { profileId, itemId: item.id, actorId });
+    // The booking finishes the task it carries out once, below.
+    if (dated) await doneFromItem(conn, { profileId, itemId: item.id, actorId, taskHandled: input.from_reminder_id ?? null });
   }
   if (input.from_reminder_id) {
-    if (dated) {
-      await conn('reminders')
-        .where({ id: input.from_reminder_id, care_profile_id: profileId, completed: false })
-        .update({ completed: true, completed_at: conn.fn.now(), completed_by_account_id: actorId });
-    }
+    // A repeating task comes round again rather than ending.
+    if (dated) await finishTask(conn, { profileId, taskId: input.from_reminder_id, actorId });
     await deliverForwards(conn, { profileId, reminderId: input.from_reminder_id, appointmentId: id });
   }
   await setAttendees(conn, profileId, id, input.attendees);
@@ -483,17 +483,13 @@ export async function updateAppointment(
   if (!before.starts_at && !input.starts_at && input.status === undefined) cols['status'] = before.status;
   if (cols['all_day']) cols['ends_at'] = null;
   await conn('appointments').where({ id: before.id }).update({ ...cols, updated_at: conn.fn.now() });
-  if (nowBooked && before.from_reminder_id) {
-    await conn('reminders')
-      .where({ id: before.from_reminder_id, care_profile_id: profileId, completed: false })
-      .update({ completed: true, completed_at: conn.fn.now(), completed_by_account_id: actorId });
-  }
+  if (nowBooked && before.from_reminder_id) await finishTask(conn, { profileId, taskId: before.from_reminder_id, actorId });
   const fromItem = await itemFor(conn, profileId, input.from_journey_item_id);
   if (fromItem) await conn('checklist_items').where({ id: fromItem.id }).update({ appointment_id: before.id });
   // A journey step waiting on this booking is done once it has a date.
   if (nowBooked || (fromItem && before.starts_at)) {
     const steps = (await conn('checklist_items').where({ care_profile_id: profileId, appointment_id: before.id, completed: false }).pluck('id')) as string[];
-    for (const s of steps) await doneFromItem(conn, { profileId, itemId: s, actorId });
+    for (const s of steps) await doneFromItem(conn, { profileId, itemId: s, actorId, taskHandled: before.from_reminder_id });
   }
   if (input.starts_at && input.cost_estimate === undefined && input.cost_actual === undefined) {
     await conn('health_spend_entries').where({ appointment_id: before.id }).update({ spent_on: new Date(input.starts_at).toISOString().slice(0, 10), updated_at: conn.fn.now() });

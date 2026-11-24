@@ -42,10 +42,13 @@ export function StepAction({
   onSetTask,
   onDone,
   doneLoading,
+  fundingManager,
 }: {
   profileId: string;
   item: ChecklistItem;
   canAct: boolean;
+  /** Who keeps the funding plan, when the viewer cannot: funding steps say so instead of offering a form they cannot use. */
+  fundingManager?: string | null;
   onUpload: (item: ChecklistItem) => void;
   onSetTask: (item: ChecklistItem) => void;
   /** Tick the step off, for a call made or a page visited. */
@@ -173,6 +176,9 @@ export function StepAction({
     );
   }
 
+  if (action === 'funding' && fundingManager !== undefined && fundingManager !== null) {
+    return <span className="text-xs text-muted">{fundingManager} adds the funding plan, because the budgets are the household's money.</span>;
+  }
   const rec2 = RECORD_ACTIONS[action];
   if (rec2) {
     const q = new URLSearchParams({ ...rec2.params, from_journey_item: item.id });
@@ -256,7 +262,7 @@ export function StepTaskModal({ profileId, item, onClose }: { profileId: string;
       }),
     onSuccess: () => {
       const d = parseDateOnly(due);
-      notice({ message: `Task added for ${d ? format(d, 'EEE d MMM yyyy') : due}.` });
+      notice({ message: `${item.task ? 'Task changed' : 'Task added'} for ${d ? format(d, 'EEE d MMM yyyy') : due}.` });
       void queryClient.invalidateQueries({ queryKey: ['journey-checklist'] });
       void queryClient.invalidateQueries({ queryKey: ['tasks', profileId] });
       void queryClient.invalidateQueries({ queryKey: ['journeys', profileId] });

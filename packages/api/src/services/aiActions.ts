@@ -1619,6 +1619,7 @@ async function taskInputFrom(
   if (docs.missing.length) notes.push(`No document called ${docs.missing.map((m) => `"${m}"`).join(' or ')} is on file.`);
   const itemId = 'journey_item' in a && a.journey_item ? await itemByTitle(db, profileId, a.journey_item) : null;
   if ('journey_item' in a && a.journey_item && !itemId) notes.push(`No open journey step called "${a.journey_item}", so the task is on its own.`);
+  if (itemId && (await db('reminders').where({ checklist_item_id: itemId }).first('id'))) notes.push(`"${a.journey_item}" already has a task, so this one is on its own.`);
   return {
     input: {
       title: a.title,

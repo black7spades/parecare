@@ -5,7 +5,7 @@ import { accountIdForProfile, withCategory } from './documentCategories';
 import { nextStepTypeIdByKey, resolveNextStepTypeByName, stepBooks } from './nextStepTypes';
 import { contactSummaries, ensureProfessional, linkContact, type ContactSummary } from './professionals';
 import { parseZonedTime, isValidTimeZone } from '../lib/timezone';
-import { REPEAT_CHOICE_VALUES, repeatChoice, repeatColumns, withMonthDay } from '../lib/repeat';
+import { REPEAT_CHOICE_VALUES, advance, nextAfter, repeatChoice, repeatColumns, ruleFor, withMonthDay } from '../lib/repeat';
 import { findPhones, phoneDigits, typeWordIn } from '../lib/phoneText';
 import { providerTypeLabel } from '../lib/providerTypes';
 
@@ -547,6 +547,28 @@ export async function mergeTasks(conn: Conn, opts: { profileId: string; fromId: 
     merged_into_id: opts.intoId, completed: true, completed_at: conn.fn.now(), completed_by_account_id: opts.actorId,
   });
   return { into: String(into['id']) };
+}
+
+/**
+ * Done, from something else: a booking with a date, a journey step ticked.
+ * A repeating task is done for this time and comes round again on its rule,
+ * so a yearly check keeps reminding next year; any other task is ticked off.
+ * Returns whether the task was ticked off.
+ */
+export async function finishTask(conn: Conn, opts: { profileId: string; taskId: string; actorId: string | null }): Promise<boolean> {
+  const t = (await conn('reminders').where({ id: opts.taskId, care_profile_id: opts.profileId, completed: false }).first('id', 'next_due_at', 'rrule', 'reminder_type')) as
+    | { id: string; next_due_at: Date; rrule: string | null; reminder_type: string | null }
+    | undefined;
+  if (!t) return false;
+  const rule = ruleFor(t);
+  if (rule) {
+    const zone = await ownerZone(conn, opts.profileId);
+    const next = nextAfter(advance(new Date(t.next_due_at), rule, zone), rule, new Date(), zone);
+    await conn('reminders').where({ id: t.id }).update({ next_due_at: next, last_notified_at: null });
+    return false;
+  }
+  await conn('reminders').where({ id: t.id }).update({ completed: true, completed_at: conn.fn.now(), completed_by_account_id: opts.actorId });
+  return true;
 }
 
 export interface TaskListRow extends Record<string, unknown> {

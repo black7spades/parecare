@@ -128,7 +128,8 @@ checklistsRouter.patch('/:itemId', requireAuth, async (req, res) => {
   }
   const updates: Partial<ChecklistItem> = { ...fields } as Partial<ChecklistItem>;
   delete (updates as Record<string, unknown>)['completed'];
-  if (parsed.data.completed !== undefined) delete (updates as Record<string, unknown>)['achieved_on'];
+  // Ticking set the day already; a day given with a tick on a step already done is kept.
+  if (parsed.data.completed === false || (parsed.data.completed === true && !parsed.data.achieved_on)) delete (updates as Record<string, unknown>)['achieved_on'];
 
   const item = Object.keys(updates).length
     ? (await db<ChecklistItem>('checklist_items').where({ id: itemId, care_profile_id: profileId }).update(updates).returning('*'))[0]
@@ -276,6 +277,15 @@ checklistsRouter.delete('/:itemId', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'Only custom items can be deleted', code: 'FORBIDDEN' });
     return;
   }
-  await db('checklist_items').where({ id: req.params['itemId'] }).delete();
+  await db.transaction(async (trx) => {
+    // The step's own open task goes with it, so nothing reminds about a step that has gone.
+    const open = (await trx('reminders').where({ checklist_item_id: item.id, completed: false }).pluck('id')) as string[];
+    if (open.length) {
+      await trx('record_notes').where({ entity_type: 'reminders' }).whereIn('entity_id', open).delete();
+      await trx('document_links').where({ entity_type: 'reminders' }).whereIn('entity_id', open).delete();
+      await trx('reminders').whereIn('id', open).delete();
+    }
+    await trx('checklist_items').where({ id: item.id }).delete();
+  });
   res.json({ message: 'Item deleted.' });
 });

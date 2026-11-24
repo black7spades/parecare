@@ -366,7 +366,9 @@ function HandoverModal({
  */
 function PhaseChecklist({ profileId, phase, readOnly }: { profileId: string; phase: CareJourneyPhase; readOnly: boolean }) {
   const queryClient = useQueryClient();
-  const { canEdit } = useProfile();
+  const { canEdit, isOwner, access, profile } = useProfile();
+  // Only the owner or an admin keeps the funding plan.
+  const fundingManager = isOwner || access === 'admin' ? null : profile.manager_name ?? 'Whoever manages this profile';
   const deferDelete = useUndoStore((s) => s.deferDelete);
   const hidden = useHiddenIds();
   const [newTitle, setNewTitle] = useState('');
@@ -483,6 +485,7 @@ function PhaseChecklist({ profileId, phase, readOnly }: { profileId: string; pha
                   onSetTask={setTaskFor}
                   onDone={(i) => toggleMutation.mutate({ id: i.id, completed: true })}
                   doneLoading={toggleMutation.isPending && toggleMutation.variables?.id === item.id}
+                  fundingManager={fundingManager}
                 />
                 <StepTaskLine profileId={profileId} item={item} canAct={!disabled} onSetTask={setTaskFor} />
                 <div className="flex items-center gap-1 flex-wrap">

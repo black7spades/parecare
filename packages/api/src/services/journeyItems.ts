@@ -5,7 +5,7 @@ import { actionColumnsOf, type ItemAction } from '../lib/journeyActions';
 import { REPEAT_CHOICE_VALUES, repeatChoice, repeatColumns, type RepeatChoice } from '../lib/repeat';
 import { mainContact, type ContactSummary } from './professionals';
 import { recordLabel, type AttachedTo } from './recordLabels';
-import { createTask, updateTask } from './tasks';
+import { createTask, finishTask, updateTask } from './tasks';
 
 type Conn = Knex | Knex.Transaction;
 
@@ -75,7 +75,16 @@ async function memberIdFor(conn: Conn, profileId: string, accountId: string | nu
  */
 export async function setItemDone(
   conn: Conn,
-  opts: { profileId: string; itemId: string; actorId: string | null; completed: boolean; record?: { kind: string; id: string } | null; achievedOn?: string | null },
+  opts: {
+    profileId: string;
+    itemId: string;
+    actorId: string | null;
+    completed: boolean;
+    record?: { kind: string; id: string } | null;
+    achievedOn?: string | null;
+    /** A task the caller has already finished, so a repeating one is not moved on twice. */
+    taskHandled?: string | null;
+  },
 ): Promise<void> {
   const item = await itemFor(conn, opts.profileId, opts.itemId);
   if (!item) return;
@@ -93,21 +102,30 @@ export async function setItemDone(
     Object.assign(update, { completed: false, completed_at: null, completed_by: null, achieved_on: null });
   }
   if (Object.keys(update).length) await conn('checklist_items').where({ id: item.id }).update(update);
-  // The item's own task follows it.
-  const task = (await conn('reminders').where({ checklist_item_id: item.id, care_profile_id: opts.profileId }).first('id', 'completed')) as { id: string; completed: boolean } | undefined;
-  if (task && task.completed !== opts.completed) {
-    await conn('reminders').where({ id: task.id }).update(
-      opts.completed
-        ? { completed: true, completed_at: conn.fn.now(), completed_by_account_id: opts.actorId, stopped_by_death_at: null }
-        : { completed: false, completed_at: null, completed_by_account_id: null, merged_into_id: null },
-    );
+  // The item's own task follows it. A repeating task comes round again.
+  const task = (await conn('reminders').where({ checklist_item_id: item.id, care_profile_id: opts.profileId }).first('id', 'completed', 'merged_into_id')) as
+    | { id: string; completed: boolean; merged_into_id: string | null }
+    | undefined;
+  if (!task) return;
+  if (opts.completed && !task.completed && task.id !== opts.taskHandled) {
+    await finishTask(conn, { profileId: opts.profileId, taskId: task.id, actorId: opts.actorId });
+  } else if (!opts.completed && task.completed && !task.merged_into_id) {
+    // Unticking reopens a task the step closed, never one joined into another
+    // or a booking to-do whose appointment already has its date.
+    const booked = await conn('appointments').where({ care_profile_id: opts.profileId, from_reminder_id: task.id }).whereNotNull('starts_at').first('id');
+    if (!booked) {
+      await conn('reminders').where({ id: task.id }).update({ completed: false, completed_at: null, completed_by_account_id: null });
+    }
   }
 }
 
 /** Something was done from an item: a booking with a date, an upload, a record. */
-export async function doneFromItem(conn: Conn, opts: { profileId: string; itemId: string | null | undefined; actorId: string | null; record?: { kind: string; id: string } | null }) {
+export async function doneFromItem(
+  conn: Conn,
+  opts: { profileId: string; itemId: string | null | undefined; actorId: string | null; record?: { kind: string; id: string } | null; taskHandled?: string | null },
+) {
   if (!opts.itemId) return;
-  await setItemDone(conn, { profileId: opts.profileId, itemId: opts.itemId, actorId: opts.actorId, completed: true, record: opts.record ?? null });
+  await setItemDone(conn, { profileId: opts.profileId, itemId: opts.itemId, actorId: opts.actorId, completed: true, record: opts.record ?? null, taskHandled: opts.taskHandled });
 }
 
 export const itemTaskSchema = z.object({
@@ -172,6 +190,8 @@ export async function setItemTask(
       tz: opts.input.tz,
       provider_id: contact?.id ?? null,
       checklist_item_id: item.id,
+      // The step's own task, never joined into another step's.
+      no_join: true,
     },
   });
   // Joined into a task already open for the same booking: that task is this item's now.

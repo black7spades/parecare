@@ -114,8 +114,15 @@ const clean = (s: string | null | undefined) => (s?.trim() ? s.trim() : null);
 
 /** The action columns a template step is stored with. */
 function taskActionColumns(task: z.infer<typeof taskSchema>): ItemAction {
-  if (!task.action || task.action === 'auto') return journeyItemAction({ title: task.title, description: task.description, is_milestone: task.is_milestone });
-  if (task.action === 'none') return { ...NO_ACTION, due_in_days: task.due_in_days ?? null };
+  if (!task.action || task.action === 'auto') {
+    const worked = journeyItemAction({ title: task.title, description: task.description, is_milestone: task.is_milestone });
+    return {
+      ...worked,
+      due_in_days: task.due_in_days ?? worked.due_in_days,
+      repeat_rrule: task.repeat ? repeatColumns(task.repeat).rrule : task.repeat_rrule ?? worked.repeat_rrule,
+    };
+  }
+  if (task.action === 'none') return { ...NO_ACTION, due_in_days: task.due_in_days ?? null, repeat_rrule: task.repeat ? repeatColumns(task.repeat).rrule : task.repeat_rrule ?? null };
   return {
     action: task.action,
     action_provider_type: clean(task.action_provider_type) ? normaliseProviderType(task.action_provider_type) : null,
