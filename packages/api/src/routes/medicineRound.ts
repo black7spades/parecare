@@ -16,6 +16,8 @@ export async function roundProfiles(accountId: string): Promise<Array<{ id: stri
     .where('cp.archived', false)
     .whereNull('cp.died_on')
     .where('cp.kind', 'person')
+    // In hospital, the hospital gives the medicines.
+    .whereNotExists(db('hospital_stays as hs').whereRaw('hs.care_profile_id = cp.id').whereNull('hs.discharged_on'))
     .where((w) =>
       w.where('cp.account_id', accountId).orWhereExists(
         db('care_circle_members as m')

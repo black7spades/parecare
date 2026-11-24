@@ -213,3 +213,29 @@ export function providerTypeLabel(type: string | null | undefined): string | nul
   if (!t || t === 'other') return null;
   return BUILT_IN_PROVIDER_TYPES.find((b) => b.value === t)?.label ?? t;
 }
+
+/**
+ * Places a person stays in: a hospital, a care home, a retirement village,
+ * a group home, a hospice, respite. The hospital stay form, the move into
+ * care form and the "Where they live" facility picker list only these.
+ */
+export const FACILITY_TYPES = [
+  'Hospital', 'care_facility', 'Aged care home', 'Nursing home', 'Care home', 'Retirement village', 'Group home', 'Hospice', 'Respite service',
+];
+const FACILITY_SET = new Set(FACILITY_TYPES.map((t) => t.toLowerCase()));
+const FACILITY_WORDS = /\b(hospital|aged care|nursing home|care home|retirement village|hospice|group home|respite)\b/i;
+
+/** Whether a contact is a place someone stays, by its type or, when its type says nothing, its name. */
+export function isFacility(type: string | null | undefined, name?: string | null): boolean {
+  const t = String(type ?? '').trim().toLowerCase();
+  if (FACILITY_SET.has(t)) return true;
+  if (!t || t === 'other' || t === 'practice') return FACILITY_WORDS.test(String(name ?? ''));
+  return false;
+}
+
+/** Hospitals only, for the hospital stay picker. */
+export function isHospital(type: string | null | undefined, name?: string | null): boolean {
+  const t = String(type ?? '').trim().toLowerCase();
+  if (t === 'hospital') return true;
+  return (!t || t === 'other' || t === 'practice') && /\bhospital\b/i.test(String(name ?? ''));
+}

@@ -6,6 +6,7 @@ import { dateInZone, hmInZone, startOfDayInZone } from '../lib/timezone';
 import { coveredTimes, doseAnchor } from '../lib/doseSlots';
 import { DOSE_AUDIT_ENTITY, NOT_IN_STOCK, doseOutcomeWord, isGivenStatus } from '../lib/doseOutcome';
 import type { Account } from '../types';
+import { profilesInHospital } from './hospitalStays';
 
 /**
  * The notification feed: everything new across every care profile an
@@ -139,7 +140,10 @@ export async function gatherNotifications(
   const nameById = new Map(profiles.map((p) => [p.id, p.name]));
   // Medicine alerts are about someone still living. Once a death is recorded
   // they stop: nobody should be told a dose is overdue for a person who died.
-  const livingIds = profiles.filter((p) => !p.died).map((p) => p.id);
+  // In hospital, the hospital gives the medicines: dose, supply and outcome
+  // alerts pause until the discharge is recorded.
+  const inHospital = await profilesInHospital(db, profileIds);
+  const livingIds = profiles.filter((p) => !p.died && !inHospital.has(p.id)).map((p) => p.id);
   const horizon = new Date(Date.now() - HORIZON_DAYS * 24 * 60 * 60 * 1000);
 
   const now = new Date();

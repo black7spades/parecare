@@ -23,6 +23,7 @@ import {
 } from '../services/providerPractices';
 import { addressColumns, ADDRESS_PART_KEYS, RESIDENCE_KIND, syncProfileResidence, syncResidenceForAddress, wifiColumns, withReadableWifi } from '../services/addresses';
 import { decryptSecret } from '../services/secretsCrypto';
+import { assetColumns, assetDepreciation, assetOut, assetSchema, assetSupplierColumns as assetSupplierColumnsWith, ownershipFrom, serializeAsset, syncEquipmentTasks } from '../services/equipment';
 import { exportRecords, importRecords, type PortDescriptor, type PortFormat } from '../services/dataPort';
 import { phaseFrom, phaseLabel } from '../lib/phases';
 import type { AccountRole, CareProfile, Provider, ProfileKind } from '../types';
@@ -791,107 +792,8 @@ directoryRouter.post('/suppliers/:id/bulk-unlink', requireAuth, async (req, res)
 // unit name, its number, price, purchase date, warranty, condition) is its own
 // column.
 
-const assetSchema = z.object({
-  name: z.string().min(1).max(255),
-  category: z.string().max(100).optional().nullable(),
-  serial_number: z.string().max(120).optional().nullable(),
-  make_model: z.string().max(255).optional().nullable(),
-  price: z.coerce.number().min(0).max(1e9).optional().nullable(),
-  purchase_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
-  supplier: z.string().max(255).optional().nullable(),
-  // The supplier on file; a bare name above is found or filed as one.
-  supplier_id: z.string().uuid().optional().nullable(),
-  warranty_expiry: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
-  condition: z.string().max(30).optional().nullable(),
-  location: z.string().max(255).optional().nullable(),
-  notes: z.string().max(5000).optional().nullable(),
-  // Years the equipment is written down over, for straight-line depreciation.
-  useful_life_years: z.coerce.number().int().min(0).max(100).optional().nullable(),
-});
-
-// Straight-line depreciation from the price, purchase date and useful life:
-// the yearly write-down, how much has been written down so far, and the current
-// book value. Each is its own figure, computed, never stored.
-function assetDepreciation(price: number | null, purchaseDate: string | null, usefulLife: number | null): {
-  annual_depreciation: number | null;
-  depreciated_amount: number | null;
-  book_value: number | null;
-} {
-  if (price == null) return { annual_depreciation: null, depreciated_amount: null, book_value: null };
-  if (usefulLife == null || usefulLife <= 0) {
-    return { annual_depreciation: null, depreciated_amount: null, book_value: price };
-  }
-  const annual = price / usefulLife;
-  let elapsedYears = 0;
-  if (purchaseDate) {
-    const ms = Date.now() - new Date(`${purchaseDate}T00:00:00Z`).getTime();
-    elapsedYears = Math.max(0, ms / (365.25 * 24 * 3600 * 1000));
-  }
-  const depreciated = Math.min(price, annual * elapsedYears);
-  const round2n = (n: number) => Math.round(n * 100) / 100;
-  return {
-    annual_depreciation: round2n(annual),
-    depreciated_amount: round2n(depreciated),
-    book_value: round2n(price - depreciated),
-  };
-}
-
-// Postgres returns a decimal as a string and a date as a Date; hand the client
-// a real number and a plain YYYY-MM-DD so the list and form get what they expect.
-const assetDate = (v: unknown): string | null => {
-  if (!v) return null;
-  if (v instanceof Date) return v.toISOString().slice(0, 10);
-  const s = String(v);
-  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
-};
-const serializeAsset = <T extends Record<string, unknown>>(a: T): T => {
-  const price = a['price'] == null || a['price'] === '' ? null : Number(a['price']);
-  const purchaseDate = assetDate(a['purchase_date']);
-  const usefulLife = a['useful_life_years'] == null || a['useful_life_years'] === '' ? null : Number(a['useful_life_years']);
-  return {
-    ...a,
-    price,
-    purchase_date: purchaseDate,
-    warranty_expiry: assetDate(a['warranty_expiry']),
-    useful_life_years: usefulLife,
-    ...assetDepreciation(price, purchaseDate, usefulLife),
-  };
-};
-
-// Turn a validated body into the columns to write, cleaning blank strings to null.
-function assetColumns(data: z.infer<typeof assetSchema> | Partial<z.infer<typeof assetSchema>>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  if ('name' in data) out['name'] = (data.name ?? '').trim();
-  if ('category' in data) out['category'] = cleanField(data.category);
-  if ('serial_number' in data) out['serial_number'] = cleanField(data.serial_number);
-  if ('make_model' in data) out['make_model'] = cleanField(data.make_model);
-  if ('price' in data) out['price'] = data.price ?? null;
-  if ('purchase_date' in data) out['purchase_date'] = data.purchase_date ?? null;
-  if ('warranty_expiry' in data) out['warranty_expiry'] = data.warranty_expiry ?? null;
-  if ('condition' in data) out['condition'] = cleanField(data.condition);
-  if ('location' in data) out['location'] = cleanField(data.location);
-  if ('notes' in data) out['notes'] = cleanField(data.notes);
-  if ('useful_life_years' in data) out['useful_life_years'] = data.useful_life_years ?? null;
-  return out;
-}
-
-/**
- * The supplier columns for an equipment write: the supplier picked, or the
- * name found or filed as a supplier. Nothing when the write does not
- * mention one; null when the picked supplier belongs elsewhere.
- */
-async function assetSupplierColumns(
-  accountId: string,
-  data: Partial<z.infer<typeof assetSchema>>
-): Promise<Record<string, unknown> | null> {
-  if (!('supplier_id' in data) && !('supplier' in data)) return {};
-  return resolveAssetSupplier(db, accountId, { supplier_id: data.supplier_id, supplier: data.supplier });
-}
-
-/** One equipment record with who supplies it, as screens read it. */
-async function assetOut(asset: Record<string, unknown>) {
-  const contacts = await supplierContacts(db, [asset['supplier_id'] as string | null]);
-  return serializeAsset({ ...asset, supplier_contact: (asset['supplier_id'] && contacts.get(asset['supplier_id'] as string)) || null });
+async function assetSupplierColumns(accountId: string, data: Partial<z.infer<typeof assetSchema>>) {
+  return assetSupplierColumnsWith(db, accountId, data);
 }
 
 /**
@@ -959,6 +861,7 @@ directoryRouter.post('/assets', requireAuth, async (req, res) => {
   const [asset] = await db('assets')
     .insert({ account_id: account.id, ...assetColumns(parsed.data), ...supplier })
     .returning('*');
+  await syncEquipmentTasks(db, asset.id, account.id);
   res.status(201).json({ asset: await assetOut(asset) });
 });
 
@@ -987,6 +890,7 @@ directoryRouter.patch('/assets/:id', requireAuth, async (req, res) => {
     res.status(404).json({ error: 'Asset not found', code: 'NOT_FOUND' });
     return;
   }
+  await syncEquipmentTasks(db, asset.id, account.id);
   res.json({ asset: await assetOut(asset) });
 });
 
@@ -1036,6 +940,7 @@ directoryRouter.post('/assets/:id/bulk-link', requireAuth, async (req, res) => {
     await db('care_profile_assets').insert(
       toInsert.map((pid) => ({ care_profile_id: pid, asset_id: asset.id }))
     );
+    await syncEquipmentTasks(db, asset.id, account.id);
   }
   res.json({ linked: toInsert.length, already_linked: existingSet.size, skipped: profile_ids.length - accessibleIds.length });
 });
@@ -1418,6 +1323,9 @@ const assetPort: PortDescriptor<AnyRow, PortRecord> = {
       return d.book_value == null ? '' : d.book_value.toFixed(2);
     } },
     { key: 'location', header: 'Location', aliases: ['kept', 'where'], toCell: (r) => cell(r['location']) },
+    { key: 'ownership', header: 'Ownership', aliases: ['owned or loaned', 'loan'], toCell: (r) => cell(r['ownership'] ? ({ owned: 'Owned', loaned: 'On loan', hired: 'Hired' } as Record<string, string>)[String(r['ownership'])] ?? r['ownership'] : null) },
+    { key: 'return_by', header: 'Return by', aliases: ['return date', 'due back'], toCell: (r) => cellDate(r['return_by']) },
+    { key: 'service_due_on', header: 'Service due', aliases: ['next service', 'service date'], toCell: (r) => cellDate(r['service_due_on']) },
     { key: 'notes', header: 'Notes', toCell: (r) => cell(r['notes']) },
   ],
   coerce: (raw, n) => {
@@ -1440,6 +1348,9 @@ const assetPort: PortDescriptor<AnyRow, PortRecord> = {
         location: portBlank(raw['location']),
         notes: portBlank(raw['notes']),
         useful_life_years: Number.isFinite(lifeNum) ? lifeNum : null,
+        ownership: ownershipFrom(raw['ownership']),
+        return_by: portDate(raw['return_by']),
+        service_due_on: portDate(raw['service_due_on']),
       },
     };
   },

@@ -17,6 +17,8 @@ import { SortableTh } from '../../../components/data/SortableTh';
 import { RecordPanel } from '../../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
+import { askIfHome } from '../../../stores/homeDose';
+import type { OpenStay } from '../../../lib/lifeEvents';
 
 const SELECT = 'rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
 
@@ -147,13 +149,17 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
   }, [period, anchor]);
 
   const chartKey = ['med-chart', profileId, from.toISOString(), to.toISOString()];
-  type ChartData = { medications: MedicationRecord[]; administrations: ChartAdmin[] };
+  type ChartData = { medications: MedicationRecord[]; administrations: ChartAdmin[]; paused_by_stay?: OpenStay | null };
   const { data } = useQuery({
     queryKey: chartKey,
     queryFn: () => api.get<ChartData>(`/care-profiles/${profileId}/medications/chart?from=${from.toISOString()}&to=${to.toISOString()}`),
   });
   const meds = data?.medications ?? [];
   const admins = data?.administrations ?? [];
+  // In hospital: the hospital gives the medicines, so nothing is due here
+  // from the day they went in.
+  const stay = data?.paused_by_stay ?? null;
+  const pausedDay = !!stay && format(anchor, 'yyyy-MM-dd') >= stay.admitted_on;
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['med-chart', profileId] });
@@ -183,6 +189,7 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
       return { prev };
     },
     onError: (_e, _v, ctx) => { if (ctx?.prev !== undefined) queryClient.setQueryData(chartKey, ctx.prev); },
+    onSuccess: (res) => askIfHome(profileId, res),
     onSettled: () => invalidate(),
   });
 
@@ -287,6 +294,11 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
 
       {meds.length === 0 ? (
         <p className="text-sm text-muted py-6 text-center">No active medications to chart.</p>
+      ) : period === 'day' && pausedDay ? (
+        <div className="card text-center py-6 space-y-1">
+          <p className="text-sm text-ink">Nothing is due here while {personName} is in {stay?.hospital_name ?? 'hospital'}. The hospital gives the medicines.</p>
+          <p className="text-xs text-muted">Doses start being due again once the discharge is recorded.</p>
+        </div>
       ) : period === 'day' ? (
         <DayGrid meds={meds} admins={admins} day={anchor} now={now} canAdminister={canAdminister}
           onQuick={quick} onLogAllDue={logAllDue}

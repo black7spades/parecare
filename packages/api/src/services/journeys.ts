@@ -251,3 +251,49 @@ export async function findLegacyJourney(careProfileId: string, trx?: Knex.Transa
     .first();
   return (await q) ?? null;
 }
+
+/**
+ * Move a person's ageing journey to a care phase, the one way every phase
+ * change goes: the Edit profile phase control, Pare's set_care_phase and a
+ * move into care. A person with no ageing journey yet is enrolled at the
+ * phase they were in. Journeys only move forward; only a super admin can
+ * step one back. `forwardOnly` makes a backward move a quiet no-op instead
+ * of an error, for changes worked out rather than asked for.
+ */
+export async function changeCarePhase(
+  trx: Knex.Transaction,
+  opts: { profileId: string; phase: string; actorAccountId: string; actorIsSuperAdmin: boolean; forwardOnly?: boolean }
+): Promise<{ ok: true; changed: boolean } | { ok: false; code: 'NOT_FOUND' | 'PHASE_LOCKED' }> {
+  const profile = (await trx('care_profiles').where({ id: opts.profileId }).first('id', 'current_phase')) as { id: string; current_phase: string | null } | undefined;
+  if (!profile) return { ok: false, code: 'NOT_FOUND' };
+  if (profile.current_phase === opts.phase) return { ok: true, changed: false };
+  let journey = await findLegacyJourney(profile.id, trx);
+  if (!journey) {
+    const ageing = await trx('journey_templates').where({ slug: 'more-help-at-home' }).first();
+    if (!ageing) {
+      // No ageing journey on this server: the phase is still recorded.
+      await trx('care_profiles').where({ id: profile.id }).update({ current_phase: opts.phase, updated_at: trx.fn.now() });
+      return { ok: true, changed: true };
+    }
+    const phases = await trx('journey_template_phases').where({ template_id: ageing.id }).orderBy('sort_order', 'asc');
+    const startAt = phases.findIndex((p: { legacy_phase: string | null }) => p.legacy_phase === profile.current_phase);
+    journey = await enrolProfileInTemplate(trx, {
+      careProfileId: profile.id,
+      templateId: ageing.id,
+      createdByAccountId: opts.actorAccountId,
+      startAtSortOrder: Math.max(0, startAt),
+    });
+  }
+  const journeyPhases: JourneyPhaseRow[] = await trx('care_journey_phases').where({ care_journey_id: journey.id }).orderBy('sort_order', 'asc');
+  const target = journeyPhases.find((p) => p.legacy_phase === opts.phase && phaseState(p) !== 'current');
+  if (!target) return { ok: false, code: 'NOT_FOUND' };
+  const currentIndex = journeyPhases.findIndex((p) => phaseState(p) === 'current');
+  if (opts.forwardOnly && currentIndex >= 0 && journeyPhases.indexOf(target) < currentIndex) return { ok: true, changed: false };
+  const result = await setCurrentJourneyPhase(trx, {
+    journey,
+    targetPhaseId: target.id,
+    actorAccountId: opts.actorAccountId,
+    actorIsSuperAdmin: opts.actorIsSuperAdmin,
+  });
+  return result.ok ? { ok: true, changed: true } : result;
+}

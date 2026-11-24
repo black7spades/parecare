@@ -63,6 +63,31 @@ export interface ChangeSource {
   /** Who said so: a contact, when a carer records a change a doctor or pharmacist asked for. */
   source_provider_id?: string | null;
   changed_on?: string | null;
+  /**
+   * The hospital stay it came from: an id, or true for the open stay, else
+   * the latest. Left out, a change made while a stay is open, or from a
+   * stay's discharge letter, belongs to that stay.
+   */
+  hospital_stay_id?: string | null | true;
+}
+
+/** The stay a change belongs to, by the rule above. */
+async function stayFor(conn: Conn, profileId: string, s: ChangeSource, documentId: string | null): Promise<string | null> {
+  const stays = () => conn('hospital_stays').where({ care_profile_id: profileId });
+  if (s.hospital_stay_id === null) return null;
+  if (typeof s.hospital_stay_id === 'string') {
+    return ((await stays().where({ id: s.hospital_stay_id }).first('id')) as { id: string } | undefined)?.id ?? null;
+  }
+  const open = (await stays().whereNull('discharged_on').first('id')) as { id: string } | undefined;
+  if (open) return open.id;
+  if (documentId) {
+    const byLetter = (await stays().where({ discharge_document_id: documentId }).first('id')) as { id: string } | undefined;
+    if (byLetter) return byLetter.id;
+  }
+  if (s.hospital_stay_id === true) {
+    return ((await stays().orderBy('admitted_on', 'desc').first('id')) as { id: string } | undefined)?.id ?? null;
+  }
+  return null;
 }
 
 /** Today where they live, as YYYY-MM-DD. */
@@ -138,6 +163,7 @@ export async function recordMedicationChange(
       source_appointment_id: appt,
       source_document_id: doc,
       source_provider_id: provider,
+      hospital_stay_id: await stayFor(conn, opts.profileId, opts.source ?? {}, doc),
       changed_by_account_id: opts.actorId,
     })
     .returning('id');

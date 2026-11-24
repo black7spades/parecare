@@ -111,6 +111,8 @@ await med(meT, me.id, { name: 'Sumatriptan', dose_amount: '50', dose_unit: 'mg',
 await med(meT, me.id, { name: 'Propranolol', dose_amount: '40', dose_unit: 'mg', form: 'Tablet', route: 'Oral', schedule_times: ['08:00', '20:00'], supply: 60, supply_remaining: 8, repeats_due: dateOnly(5), prescriber_provider_id: meGp.id });
 await appt(meT, me.id, { title: 'GP review', appointment_type: 'consultation', provider_id: meGp.id, starts_at: at(-30, 10), status: 'completed' });
 await appt(meT, me.id, { title: 'Blood test', appointment_type: 'test', starts_at: at(3, 8) });
+// Wave 6: the visit after the blood test, where the results are talked about.
+await appt(meT, me.id, { title: 'GP follow-up', appointment_type: 'consultation', provider_id: meGp.id, starts_at: at(10, 9, 30) });
 await task(meT, me.id, { title: 'Book neurologist', body: 'Referral from Dr Raman. Phone Dr Chen on 03 9345 6677.', reminder_type: 'once', next_due_at: at(2) });
 await task(meT, me.id, { title: 'Get repeat script for Propranolol', reminder_type: 'once', next_due_at: at(4) });
 // Wave 5: questions to take to the neurologist, for the health summary.
@@ -153,6 +155,9 @@ const pharm = await provider(dauT, mum.id, { provider_type: 'Pharmacy', name: 'T
 const cardio = await provider(dauT, mum.id, { provider_type: 'Cardiologist', name: 'Dr Michael Tran', phone: '03 9854 7700', practice_name: 'Eastern Heart Clinic' });
 const geri = await provider(dauT, mum.id, { provider_type: 'Geriatrician', name: 'Dr Susan Whitfield', phone: '03 9094 2200', practice_name: 'Box Hill Hospital Aged Care' });
 await provider(dauT, mum.id, { provider_type: 'Podiatrist', name: 'Ali Hassan', phone: '0415 555 740' });
+// Wave 6: the hospital she might go into, and the care home she might move to.
+await provider(dauT, mum.id, { provider_type: 'Hospital', kind: 'organisation', name: 'Box Hill Hospital', phone: '03 9895 3333', address_line1: '8 Arnold Street', address_suburb: 'Box Hill', address_state: 'VIC', address_postcode: '3128' });
+await provider(dauT, mum.id, { provider_type: 'Aged care home', kind: 'organisation', name: 'Banksia Gardens Aged Care', phone: '03 9898 1200', address_line1: '40 Whitehorse Road', address_suburb: 'Box Hill', address_state: 'VIC', address_postcode: '3128' });
 await condition(dauT, mum.id, { name: 'Atrial fibrillation', status: 'managed' });
 await condition(dauT, mum.id, { name: 'Type 2 diabetes', status: 'managed' });
 await condition(dauT, mum.id, { name: 'Mild cognitive impairment', status: 'active' });

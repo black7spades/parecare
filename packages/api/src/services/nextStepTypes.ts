@@ -32,6 +32,7 @@ export const BUILT_IN_NEXT_STEPS: ReadonlyArray<{ key: string; name: string; boo
   { key: 'vaccination', name: 'Vaccination', books: true },
   { key: 'therapy', name: 'Therapy to start', books: true },
   { key: 'results', name: 'Results to chase' },
+  { key: 'report', name: 'Report to get' },
   { key: 'readings', name: 'Readings to take at home' },
   { key: 'symptoms', name: 'Symptoms to watch for' },
   { key: 'lifestyle', name: 'Lifestyle advice to follow' },

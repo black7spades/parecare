@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
@@ -33,6 +33,7 @@ import { usePickablePeople, personOption } from '../../../components/PersonPicke
 import { REPEAT_CHOICES, repeatLabel } from '../../../lib/repeat';
 import { bookingTitleFromTask } from '../../../lib/booking';
 import { browserTimeZone } from '../../../lib/datetime';
+import { doctorViewLabel, type TestResult } from '../../../lib/lifeEvents';
 
 const inputClass =
   'w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -84,6 +85,10 @@ export interface Appointment {
   attendees?: Array<{ circle_member_id: string | null; account_id: string | null; is_driver: boolean; name: string }>;
   bring_documents?: Array<{ id: string; label: string; category_name: string | null }>;
   series?: { id: string; repeat: string; repeat_until: string | null } | null;
+  /** Results to talk about at this visit. */
+  results_to_discuss?: TestResult[];
+  /** Results recorded for this test appointment. */
+  test_results?: Array<{ id: string; test_name: string; reported_on: string | null }>;
   from_task?: {
     id: string;
     title: string;
@@ -168,6 +173,7 @@ const noBooking: NewBooking = { providerId: '', conditionId: '', fromTask: '', t
 export function AppointmentsPage() {
   const { profile, careName, canEdit, isOwner, relationship } = useProfile();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const notice = useNoticeStore((s) => s.show);
   const [adding, setAdding] = useState(false);
   const [newBooking, setNewBooking] = useState<NewBooking>(noBooking);
@@ -667,6 +673,10 @@ export function AppointmentsPage() {
                 ]
               : []),
             ...(current.series ? [{ label: 'Stop repeating', onRun: () => stopRepeating.mutate(current), pending: stopRepeating.isPending }] : []),
+            // A test: its results go on the Test results page, tied to this appointment.
+            ...(current.appointment_type === 'test' && current.status !== 'cancelled'
+              ? [{ label: 'Add a result', onRun: () => navigate(`/app/${profile.id}/test-results?${new URLSearchParams({ new: '1', appointment: current.id, test: current.title }).toString()}`) }]
+              : []),
           ]}
           onForwardNote={(noteId) => setForwarding({ sourceId: current.id, noteId })}
           onDelete={() => {
@@ -676,6 +686,39 @@ export function AppointmentsPage() {
           onClose={panel.close}
         >
           {calendarError ? <p className="text-sm text-red-600" role="alert">{calendarError}</p> : null}
+          {(current.results_to_discuss ?? []).length > 0 ? (
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Results to talk about</h3>
+              <ul className="space-y-2">
+                {(current.results_to_discuss ?? []).map((r) => (
+                  <li key={r.id} className="rounded-md border border-border px-3 py-2">
+                    <Link to={`/app/${profile.id}/test-results?record=${r.id}`} className="text-sm font-medium text-primary hover:underline">{r.test_name}</Link>
+                    <p className="text-xs text-muted">
+                      {[r.collected_on ? `Collected ${format(new Date(`${r.collected_on}T00:00`), 'd MMM yyyy')}` : null, r.doctor_view ? doctorViewLabel(r.doctor_view) : null, r.ordered_by ? `Ordered by ${r.ordered_by.name}` : null].filter(Boolean).join(' · ')}
+                    </p>
+                    {r.summary ? <p className="text-sm text-ink">{r.summary}</p> : null}
+                    {r.values.filter((v) => v.flag === 'low' || v.flag === 'high').length > 0 ? (
+                      <p className="text-xs text-red-700 dark:text-red-300">
+                        Outside the normal range: {r.values.filter((v) => v.flag === 'low' || v.flag === 'high').map((v) => v.name).join(', ')}
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+          {(current.test_results ?? []).length > 0 ? (
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Results of this test</h3>
+              <ul className="space-y-1">
+                {(current.test_results ?? []).map((r) => (
+                  <li key={r.id}>
+                    <Link to={`/app/${profile.id}/test-results?record=${r.id}`} className="text-sm text-primary hover:underline">{r.test_name}</Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
           <section>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Who with</h3>
             {current.provider ? (
@@ -750,6 +793,10 @@ export function AppointmentsPage() {
           onUpload={(step) => {
             setUploadingFor({ step, from: outcomeAppointment });
             setOutcomeFor(null);
+          }}
+          onAddEquipment={(step) => {
+            setOutcomeFor(null);
+            navigate(`/app/${profile.id}/equipment?${new URLSearchParams({ new: '1', name: step.title === step.type_name ? '' : step.title, from_task: step.id }).toString()}`);
           }}
           onAddDate={(id) => {
             const appt = appointments.find((a) => a.id === id);

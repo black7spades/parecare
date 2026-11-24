@@ -84,6 +84,7 @@ export function OutcomeModal({
   onAddMedication,
   onUpload,
   onAddDate,
+  onAddEquipment,
 }: {
   profileId: string;
   appointment: OutcomeAppointment;
@@ -98,6 +99,8 @@ export function OutcomeModal({
   onUpload: (step: NextStep) => void;
   /** Give a saved, not-yet-booked appointment its date. */
   onAddDate: (appointmentId: string) => void;
+  /** File the equipment an "Equipment to get" step is for; saving it ticks the step. */
+  onAddEquipment?: (step: NextStep) => void;
 }) {
   const queryClient = useQueryClient();
   const { data } = useNextStepTypes(profileId);
@@ -342,6 +345,9 @@ export function OutcomeModal({
                       ) : null}
                       {s.type_key === 'document' || s.type_key === 'certificate' || s.type_key === 'form' ? (
                         <Button size="xs" variant="secondary" onClick={() => onUpload(s)}>Upload</Button>
+                      ) : null}
+                      {s.type_key === 'equipment' && onAddEquipment ? (
+                        <Button size="xs" variant="secondary" onClick={() => onAddEquipment(s)}>Add to equipment</Button>
                       ) : null}
                       <Button size="xs" variant="ghost" loading={markDone.isPending && markDone.variables?.id === s.id} onClick={() => markDone.mutate(s)}>
                         Done

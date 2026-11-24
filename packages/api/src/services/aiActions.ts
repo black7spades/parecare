@@ -41,6 +41,16 @@ import { addPracticeMember, syncPracticeMembers, whereNamed } from './providerPr
 import { linkContactToSuppliers } from './professionals';
 import type { Knex } from 'knex';
 import { providerWriteColumns } from '../routes/providers';
+import {
+  executeLifeEvent,
+  recordDischargeSchema,
+  recordHospitalStaySchema,
+  recordMoveIntoCareSchema,
+  recordResultSchema,
+  setFundingPlanSchema,
+} from './lifeEventActions';
+import { ownershipFrom, syncEquipmentTasks } from './equipment';
+import { changeCarePhase } from './journeys';
 
 /**
  * Actions the assistant can carry out on the user's behalf: logging a care
@@ -212,6 +222,8 @@ const updateMedicationSchema = z.object({
   changed_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   // The visit the change came from, by title.
   changed_at_appointment: z.string().max(255).optional().nullable(),
+  // true: the change came from a hospital stay, the open one or else the latest.
+  hospital_stay: z.boolean().optional(),
 });
 
 // "Picked up two packs of Perindopril": set what is on hand after a restock.
@@ -231,6 +243,8 @@ const stopMedicationSchema = z.object({
   stopped_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   stop_reason: z.string().max(100).optional().nullable(),
   stop_notes: z.string().max(2000).optional().nullable(),
+  // true: stopped in hospital, so the stop belongs to the open or latest stay.
+  hospital_stay: z.boolean().optional(),
 });
 
 const addAllergySchema = z.object({
@@ -485,6 +499,11 @@ const addAssetSchema = z.object({
   location: z.string().max(255).optional().nullable(),
   notes: z.string().max(5000).optional().nullable(),
   useful_life_years: z.number().int().nonnegative().optional().nullable(),
+  // owned | loaned | hired, or plain words ("on loan from the hospital").
+  ownership: z.string().max(40).optional().nullable(),
+  // When loaned or hired equipment goes back, and when it is due a service.
+  return_by: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  service_due_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
 });
 
 /**
@@ -865,6 +884,11 @@ export const actionSchema = z.discriminatedUnion('type', [
   rescheduleTaskSchema,
   recordCostSchema,
   recordReadingSchema,
+  recordHospitalStaySchema,
+  recordDischargeSchema,
+  recordResultSchema,
+  setFundingPlanSchema,
+  recordMoveIntoCareSchema,
   needClarificationSchema,
 ]);
 export type AssistantAction = z.infer<typeof actionSchema>;
@@ -1872,7 +1896,7 @@ async function executeOne(
         profileId,
         actorId: account.id,
         patch,
-        source: { reason: action.reason ?? null, changed_on: action.changed_on ?? null, source_appointment_id: changedAt, source_document_id: currentSourceDocument() },
+        source: { reason: action.reason ?? null, changed_on: action.changed_on ?? null, source_appointment_id: changedAt, source_document_id: currentSourceDocument(), ...(action.hospital_stay ? { hospital_stay_id: true as const } : {}) },
       });
       await audit(profileId, account.id, 'medications', `updated ${med.name}`, med.id);
       await linkSource('medications', med.id);
@@ -1900,7 +1924,7 @@ async function executeOne(
         stopped_on: action.stopped_on ?? null,
         stop_reason: reason,
         stop_notes: notes,
-        source: { source_document_id: currentSourceDocument() },
+        source: { source_document_id: currentSourceDocument(), ...(action.hospital_stay ? { hospital_stay_id: true as const } : {}) },
       });
       await audit(profileId, account.id, 'medications', `stopped ${med.name}`, med.id);
       await linkSource('medications', med.id);
@@ -2258,7 +2282,15 @@ async function executeOne(
       return `Raised the question "${action.title}" for the care circle.`;
     }
     case 'set_care_phase': {
-      await db('care_profiles').where({ id: profileId }).update({ current_phase: action.phase, updated_at: db.fn.now() });
+      // Through the care journey, the same as the screen: history locks.
+      const moved = await db.transaction((trx) =>
+        changeCarePhase(trx, { profileId, phase: action.phase, actorAccountId: account.id, actorIsSuperAdmin: account.role === 'super_admin' })
+      );
+      if (!moved.ok) {
+        return moved.code === 'PHASE_LOCKED'
+          ? 'Care journeys only move forward, so the phase was not moved back. A super admin can unlock an earlier phase to correct records.'
+          : 'That phase is not part of their care journey, so nothing changed.';
+      }
       await audit(profileId, account.id, 'care_profiles', `phase set to ${action.phase}`);
       return `Set the care phase to ${action.phase.replace(/_/g, ' ')}.`;
     }
@@ -2450,9 +2482,14 @@ async function executeOne(
           location: action.location ?? null,
           notes: action.notes ?? null,
           useful_life_years: action.useful_life_years ?? null,
+          ownership: ownershipFrom(action.ownership),
+          return_by: action.return_by ?? null,
+          service_due_on: action.service_due_on ?? null,
         })
         .returning('id');
       await db('care_profile_assets').insert({ care_profile_id: profileId, asset_id: asset.id });
+      // On loan with a day it goes back, or due a service: the task for it.
+      await syncEquipmentTasks(db, asset.id, account.id);
       await audit(profileId, account.id, 'assets', `added asset ${action.name}`, asset.id);
       await linkSource('assets', asset.id);
       return `Added ${action.name} to the assets and linked it to this profile.`;
@@ -3062,6 +3099,18 @@ async function executeOne(
       const skipped = unmatched.length > 0 ? ` ${treatment.name} has no measure called ${unmatched.join(' or ')}, so that was left out.` : '';
       return `Recorded a ${treatment.name} session at ${formatInZone(observedAt, timeZone)} with ${rows.length} reading${rows.length === 1 ? '' : 's'}.${skipped}`;
     }
+    case 'record_hospital_stay':
+    case 'record_discharge':
+    case 'record_result':
+    case 'set_funding_plan':
+    case 'record_move_into_care':
+      return executeLifeEvent(action, {
+        profileId,
+        account,
+        timeZone,
+        audit: (entityType, summary, entityId) => audit(profileId, account.id, entityType, summary, entityId),
+        linkSource,
+      });
     case 'need_clarification': {
       const options = action.options?.length ? ` ${action.options.join(' or ')}?` : '';
       return `${CLARIFY_MARK} ${action.question}${options}`;

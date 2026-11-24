@@ -17,7 +17,8 @@ import { AvatarMenu } from './AvatarMenu';
 import { PareStatus } from './PareStatus';
 import { Clock } from './Clock';
 import { Avatar } from '../ui/Avatar';
-import { PROFILE_NAV, profileNavItem, type ProfileNavItem, type NavContext } from '../../pages/app/profile/tabs';
+import { PROFILE_NAV, navLabel, profileNavItem, type ProfileNavItem, type NavContext } from '../../pages/app/profile/tabs';
+import { SELF_RELATIONSHIP } from '../../lib/care';
 import { api } from '../../api/client';
 import { browserTimeZone } from '../../lib/datetime';
 import { NavSortControl, type SortOption } from './NavSortControl';
@@ -235,14 +236,16 @@ function ProfileSidebarNav({ profileId }: { profileId: string }) {
   const { data: profileData } = useQuery({
     queryKey: ['care-profile', profileId],
     queryFn: () =>
-      api.get<{ profile: { kind: 'person' | 'pet' }; situation: { life_stage: string | null } | null }>(
+      api.get<{ profile: { kind: 'person' | 'pet' }; situation: { life_stage: string | null } | null; relationship?: string | null }>(
         `/care-profiles/${profileId}`,
       ),
   });
   const navCtx: NavContext = {
     kind: profileData?.profile.kind ?? 'person',
     lifeStage: profileData?.situation?.life_stage ?? null,
+    self: profileData?.relationship?.trim() === SELF_RELATIONSHIP,
   };
+  const labelled = (item: ProfileNavItem): ProfileNavItem => ({ ...item, label: navLabel(item, navCtx) });
   const belongs = (item: ProfileNavItem) => item.shows?.(navCtx) ?? true;
 
   const savePins = useMutation({
@@ -325,7 +328,7 @@ function ProfileSidebarNav({ profileId }: { profileId: string }) {
         <>
           <div className={navHeadingClass}>Pinned</div>
           {pinnedItems.map((item) => (
-            <ProfileNavRow key={`pin-${item.key}`} profileId={profileId} item={item} pinned onTogglePin={togglePin} showPip={pipFor(item.key)} />
+            <ProfileNavRow key={`pin-${item.key}`} profileId={profileId} item={labelled(item)} pinned onTogglePin={togglePin} showPip={pipFor(item.key)} />
           ))}
         </>
       ) : null}
@@ -353,7 +356,7 @@ function ProfileSidebarNav({ profileId }: { profileId: string }) {
                     <ProfileNavRow
                       key={item.key}
                       profileId={profileId}
-                      item={item}
+                      item={labelled(item)}
                       pinned={false}
                       onTogglePin={togglePin}
                       showPip={pipFor(item.key)}

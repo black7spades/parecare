@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { useAuthStore } from '../../stores/auth';
@@ -286,7 +287,9 @@ export function ReportGeneratorPage() {
       sectionMap.set(s.key, s);
     }
     setSelectedSections(sectionMap);
-    setDatePreset((cfg.dateRangePreset as DatePreset) ?? 'all');
+    // "plan" is the person's funding plan period: given by the link from
+    // their Funding page; opened here on its own, the last year.
+    setDatePreset(cfg.dateRangePreset === 'plan' ? '1y' : (cfg.dateRangePreset as DatePreset) ?? 'all');
     setIncludeAi(cfg.includeAiNarrative);
     setAiPrompt(cfg.aiPrompt ?? '');
     setStep('configure');
@@ -306,6 +309,31 @@ export function ReportGeneratorPage() {
   }, [allProfiles, profileDv]);
 
   const selectedProfileIds = useMemo(() => Array.from(profileDv.selected), [profileDv.selected]);
+
+  // Opened from a person's Funding page: the progress report for that one
+  // person, over their plan period.
+  const [linkParams, setLinkParams] = useSearchParams();
+  useEffect(() => {
+    const presetName = linkParams.get('preset');
+    if (!presetName || presets.length === 0 || allProfiles.length === 0) return;
+    const preset = presets.find((p) => p.name === presetName);
+    if (preset) {
+      loadPreset(preset);
+      const only = linkParams.get('profile');
+      if (only && allProfiles.some((p) => p.id === only)) {
+        profileDv.clearSelection();
+        profileDv.toggle(only);
+      }
+      const from = linkParams.get('from');
+      const to = linkParams.get('to');
+      if (from && to) {
+        setDatePreset('custom');
+        setCustomFrom(from);
+        setCustomTo(to);
+      }
+    }
+    setLinkParams({}, { replace: true });
+  }, [linkParams, presets, allProfiles, loadPreset, profileDv, setLinkParams]);
 
   // Generate report
   const generateMutation = useMutation({

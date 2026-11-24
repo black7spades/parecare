@@ -73,6 +73,12 @@ import { medicineRoundRouter } from './routes/medicineRound';
 import { navPinsRouter } from './routes/navPins';
 import { reportsRouter } from './routes/reports';
 import { identifiersRouter } from './routes/identifiers';
+import { hospitalStaysRouter } from './routes/hospitalStays';
+import { testResultsRouter } from './routes/testResults';
+import { fundingPlansRouter } from './routes/fundingPlans';
+import { careMovesRouter } from './routes/careMoves';
+import { equipmentRouter } from './routes/equipment';
+import { recallsRouter } from './routes/recalls';
 import { emergencySheetRouter, shareLinksRouter, sharedRouter } from './routes/sharing';
 import { ensureSuperAdmin, runMigrations } from './services/bootstrap';
 import { loadSettings, seedSettingsFromEnv, subscribeSettingsInvalidation } from './config/settings';
@@ -234,6 +240,14 @@ v1.use('/care-profiles/:id/activity', ...profileAccess, activityRouter);
 v1.use('/care-profiles/:id/health-statuses', ...profileAccess, healthStatusesRouter);
 v1.use('/care-profiles/:id/overview-summaries', ...profileAccess, overviewSummariesRouter);
 v1.use('/care-profiles/:id/appointments', ...profileAccess, appointmentsRouter);
+// Life events: hospital stays, test results, funding plans, moves into
+// care, equipment and the yearly checks suggested as reminders.
+v1.use('/care-profiles/:id/hospital-stays', ...profileAccess, hospitalStaysRouter);
+v1.use('/care-profiles/:id/results', ...profileAccess, testResultsRouter);
+v1.use('/care-profiles/:id/funding-plans', ...profileAccess, fundingPlansRouter);
+v1.use('/care-profiles/:id/care-moves', ...profileAccess, careMovesRouter);
+v1.use('/care-profiles/:id/equipment', ...profileAccess, equipmentRouter);
+v1.use('/care-profiles/:id/recalls', ...profileAccess, recallsRouter);
 // Starting a shift: allergies, who to call, what is due, the last handover.
 v1.use('/care-profiles/:id/shift', ...profileAccess, shiftRouter);
 // The medicine round across everyone this account records doses for.

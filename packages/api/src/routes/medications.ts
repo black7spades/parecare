@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../config/database';
+import { homeDoseQuestion, openStaySummary } from '../services/hospitalStays';
 import { requireAuth } from '../middleware/auth';
 import { requireAccountRight } from '../middleware/accountRights';
 import { requireProfileOwner, type AuditEntry } from '../middleware/permissions';
@@ -1092,6 +1093,8 @@ medicationsRouter.get('/chart', requireAuth, async (req, res) => {
   res.json({
     medications: medications.map((m) => ({ ...serializeMed(m), dose_history: history.get(m.id as string) ?? null })),
     administrations,
+    // In hospital: the chart shows the stay and no doses due.
+    paused_by_stay: await openStaySummary(db, String(req.params['id'])),
   });
 });
 
@@ -1246,7 +1249,8 @@ medicationsRouter.post('/:medId/administrations', requireAuth, async (req, res) 
   const med = result.meds.get(dose.medication_id)!;
   const record = await db('medication_administrations').where({ id: dose.id }).first();
   res.locals['auditEntries'] = [doseAudit('created', dose.id, med.name, dose.status)];
-  res.status(201).json({ administration: record });
+  // A dose recorded at home while a stay is open: the screen asks if they are back.
+  res.status(201).json({ administration: record, in_hospital: await homeDoseQuestion(db, req.params['id']!) });
 });
 
 // Record a whole medication round (or several taps) in one request.
@@ -1268,7 +1272,7 @@ medicationsRouter.post('/administrations/batch', requireAuth, async (req, res) =
     throw err;
   }
   res.locals['auditEntries'] = result.doses.map((r) => doseAudit('created', r.id, result.meds.get(r.medication_id)!.name, r.status));
-  res.status(201).json({ recorded: result.doses.length });
+  res.status(201).json({ recorded: result.doses.length, in_hospital: await homeDoseQuestion(db, req.params['id']!) });
 });
 
 // Delete a recorded dose (e.g. logged twice by mistake). Any non-viewer

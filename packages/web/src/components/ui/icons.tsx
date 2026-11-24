@@ -496,3 +496,49 @@ export function SparkleIcon({ size }: IconSize) {
     </svg>
   );
 }
+
+/** Where they live: a house with a door and a window. */
+export function HouseIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M3 10.5 12 4l9 6.5" />
+      <path d="M5.5 9v11h13V9" />
+      <path d="M10 20v-5h4v5" />
+      <path d="M15.5 11.5h1.5" />
+    </svg>
+  );
+}
+
+/** Test results: a test tube. */
+export function BeakerIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M9 3h6" />
+      <path d="M10 3v13a2 2 0 0 0 4 0V3" />
+      <path d="M10 11h4" />
+    </svg>
+  );
+}
+
+/** Equipment: a wheelchair. */
+export function WheelchairIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <circle cx="10" cy="4" r="1.5" />
+      <path d="M10 7v6h5l2 5" />
+      <path d="M10 10h4" />
+      <path d="M7.5 11a5 5 0 1 0 7 6" />
+    </svg>
+  );
+}
+
+/** Funding: a wallet. */
+export function WalletIcon({ size }: IconSize) {
+  return (
+    <svg {...sized(size)}>
+      <path d="M4 7h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a1 1 0 0 1-1-1V7Z" />
+      <path d="M4 7l11-3v3" />
+      <path d="M16 13.5h1.5" />
+    </svg>
+  );
+}

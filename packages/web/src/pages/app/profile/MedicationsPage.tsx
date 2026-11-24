@@ -40,6 +40,7 @@ import { PharmacyModal } from '../../../components/QuickAddModals';
 import { bookingHref } from '../../../lib/booking';
 import { useNavigate } from 'react-router-dom';
 import type { ContactSummary } from '../../../lib/care';
+import { askIfHome } from '../../../stores/homeDose';
 
 const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
 
@@ -219,7 +220,7 @@ export function MedicationsPage() {
       // Each is the prescribed dose by the prescribed route, so both checks are confirmed.
       entries: dv.selectedRows.map((m) => ({ medication_id: m.id, administered_at: new Date().toISOString(), status: 'given', right_dose: true, right_route: true })),
     }),
-    onSuccess: () => { setActionError(''); setConfirmBulkLog(false); dv.clearSelection(); invalidate(); },
+    onSuccess: (res) => { askIfHome(profile.id, res); setActionError(''); setConfirmBulkLog(false); dv.clearSelection(); invalidate(); },
     onError: (err) => { setConfirmBulkLog(false); failed('The doses were not recorded. Try again.')(err); },
   });
 
