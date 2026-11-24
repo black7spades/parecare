@@ -302,6 +302,8 @@ export function Dashboard() {
         ) : null}
       </div>
 
+      {profiles.length > 0 ? <PareOffNote /> : null}
+
       {preparing ? (
         <div className="rounded-lg border border-border bg-surface-2 px-4 py-3 text-sm text-muted" role="status">
           {AI_WARMING_MESSAGE}
