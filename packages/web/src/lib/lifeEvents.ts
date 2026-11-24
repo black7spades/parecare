@@ -116,13 +116,26 @@ export interface FundingPlan {
   review_on: string | null;
   reports_due_on: string | null;
   reports_due_worked_out: boolean;
+  /** Reports were due before today and some are still to come. */
+  reports_overdue: boolean;
   management: 'agency' | 'plan' | 'self' | null;
   management_label: string | null;
   plan_manager: ContactSummary | null;
   support_coordinator: ContactSummary | null;
   local_area_coordinator: ContactSummary | null;
   budgets: Budget[];
-  report_tasks: Array<{ id: string; title: string; next_due_at: string; all_day: boolean; completed: boolean; provider_name: string | null; provider_phone: string | null }>;
+  report_tasks: Array<{
+    id: string;
+    title: string;
+    next_due_at: string;
+    /** The day it is due, where they live. */
+    due_on: string;
+    overdue: boolean;
+    all_day: boolean;
+    completed: boolean;
+    provider_name: string | null;
+    provider_phone: string | null;
+  }>;
 }
 
 export const SCHEMES = [
@@ -211,4 +224,9 @@ export function isFacilityProvider(p: { provider_type: string | null; name: stri
 export function whose(isSelf: boolean, careName: string, capital = false): string {
   const w = isSelf ? 'your' : `${careName}'s`;
   return capital ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+}
+
+/** What the screen calls the person: the name they go by, else their first name. */
+export function firstName(p: { preferred_name?: string | null; first_name?: string | null; full_name: string }): string {
+  return p.preferred_name?.trim() || p.first_name?.trim() || p.full_name.split(' ')[0] || p.full_name;
 }

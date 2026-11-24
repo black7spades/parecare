@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
-import { ContactStrip } from '../../../components/ContactStrip';
+import { CONTACT_LINK, ContactStrip } from '../../../components/ContactStrip';
+import { PhoneLink } from '../../../components/cards/profile/links';
 import { useDataView, type DataSort } from '../../../components/data/useDataView';
 import { DataToolbar } from '../../../components/data/DataToolbar';
 import { SortableTh } from '../../../components/data/SortableTh';
@@ -12,7 +12,7 @@ import { FundingPlanEditor } from '../../../components/FundingPlanEditor';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { useHealthConfig } from '../../../lib/appConfig';
 import { formatDateOnly, todayDateOnly } from '../../../lib/datetime';
-import { whose, type Budget, type FundingPlan } from '../../../lib/lifeEvents';
+import { firstName, whose, type Budget, type FundingPlan } from '../../../lib/lifeEvents';
 import { useProfile } from './ProfileLayout';
 
 /**
@@ -21,7 +21,8 @@ import { useProfile } from './ProfileLayout';
  * before the review.
  */
 export function FundingPage() {
-  const { profile, careName, isOwner, access, isSelf } = useProfile();
+  const { profile, isOwner, access, isSelf } = useProfile();
+  const name = firstName(profile);
   const canManage = isOwner || access === 'admin';
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ plan: FundingPlan | null } | null>(null);
@@ -38,7 +39,7 @@ export function FundingPage() {
   if (!canManage) {
     return (
       <div className="card text-center py-10 max-w-3xl">
-        <p className="text-sm text-ink">{profile.manager_name ?? 'Whoever manages this profile'} keeps {whose(isSelf, careName)} funding plan, because the budgets are the household's money.</p>
+        <p className="text-sm text-ink">{profile.manager_name ?? 'Whoever manages this profile'} keeps {whose(isSelf, name)} funding plan, because the budgets are the household's money.</p>
       </div>
     );
   }
@@ -59,7 +60,7 @@ export function FundingPage() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-base font-semibold text-ink">Funding</h2>
-          <p className="text-xs text-muted">{whose(isSelf, careName, true)} plan, who manages it, the budgets and the reports due before the review.</p>
+          <p className="text-xs text-muted">{whose(isSelf, name, true)} plan, who manages it, the budgets and the reports due before the review.</p>
         </div>
         {plans.length > 0 ? <Button size="sm" onClick={() => setEditing({ plan: null })}>Add a plan</Button> : null}
       </div>
@@ -172,26 +173,44 @@ function PlanCard({ plan, profileId, onEdit, onDelete }: { plan: FundingPlan; pr
 
       <div className="space-y-2">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted">Reports for the review</h4>
+        {plan.reports_overdue ? (
+          <p className="rounded-md border-l-4 border-l-red-500 bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/10 dark:text-red-300" role="status">
+            Reports are overdue, ask now. They were due by {formatDateOnly(plan.reports_due_on)}, six weeks before the review.
+          </p>
+        ) : null}
         {plan.report_tasks.length === 0 ? (
           <p className="text-sm text-muted">
             {plan.review_on ? 'No therapist in Contacts writes reports yet. Add their occupational therapist, speech pathologist or physiotherapist and a task is made for each.' : 'Add the review meeting and each therapist gets a task to ask for their report.'}
           </p>
         ) : (
           <ul className="divide-y divide-border rounded-md border border-border">
-            {plan.report_tasks.map((t) => (
-              <li key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
-                <Link to={`/app/${profileId}/tasks?record=${t.id}`} className={`text-sm text-primary hover:underline ${t.completed ? 'line-through' : ''}`}>{t.title}</Link>
-                <span className="text-xs text-muted">{t.completed ? 'Done' : `Due ${format(new Date(t.next_due_at), 'd MMM yyyy')}`}</span>
-                {t.provider_phone ? (
-                  <a href={`tel:${t.provider_phone.replace(/[^\d+]/g, '')}`} className="ml-auto text-sm text-primary hover:underline" aria-label={`Call ${t.provider_name ?? 'them'} on ${t.provider_phone}`}>{t.provider_phone}</a>
-                ) : null}
-              </li>
-            ))}
+            {plan.report_tasks.map((t) => {
+              return (
+                <li key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+                  <Link to={`/app/${profileId}/tasks?record=${t.id}`} className={`text-sm ${CONTACT_LINK} ${t.completed ? 'line-through' : ''}`}>{t.title}</Link>
+                  {t.completed ? (
+                    <span className="text-xs text-muted">Done</span>
+                  ) : t.overdue ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">Overdue</span>
+                      <span className="text-xs text-muted">was due {formatDateOnly(t.due_on)}</span>
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted">Due {formatDateOnly(t.due_on)}</span>
+                  )}
+                  {t.provider_phone ? (
+                    <span className="ml-auto text-sm">
+                      <PhoneLink phone={t.provider_phone} />
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         )}
         {plan.scheme === 'ndis' ? (
           <p className="text-sm">
-            <Link to={reportHref} className="text-primary hover:underline">Make the NDIS progress report for the plan period</Link>
+            <Link to={reportHref} className={CONTACT_LINK}>Make the NDIS progress report for the plan period</Link>
           </p>
         ) : null}
       </div>

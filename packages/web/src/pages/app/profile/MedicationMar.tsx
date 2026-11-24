@@ -76,7 +76,18 @@ function Legend({ withPartial }: { withPartial?: boolean }) {
   );
 }
 
-export function MedicationMar({ profileId, personName, canAdminister }: { profileId: string; personName: string; canAdminister: boolean }) {
+export function MedicationMar({
+  profileId,
+  personName,
+  callName,
+  canAdminister,
+}: {
+  profileId: string;
+  personName: string;
+  /** What the screen calls them, such as Peggy; null on your own profile. */
+  callName?: string | null;
+  canAdminister: boolean;
+}) {
   // A link straight to one dose record opens the full record, where it lives.
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState<'chart' | 'log'>(() => (searchParams.get('record') ? 'log' : 'chart'));
@@ -88,7 +99,7 @@ export function MedicationMar({ profileId, personName, canAdminister }: { profil
         <button type="button" onClick={() => setTab('log')} className={`px-3 py-2 text-sm font-medium border-b-2 ${tab === 'log' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-ink'}`}>Full record</button>
       </div>
       {tab === 'chart'
-        ? <MarChart profileId={profileId} personName={personName} canAdminister={canAdminister} />
+        ? <MarChart profileId={profileId} personName={personName} callName={callName ?? null} canAdminister={canAdminister} />
         : <MarLog profileId={profileId} canAdminister={canAdminister} />}
     </div>
   );
@@ -136,7 +147,7 @@ interface Entry {
 // recorded through the full form.
 const AS_PRESCRIBED = { right_dose: true, right_route: true } as const;
 
-function MarChart({ profileId, personName, canAdminister }: { profileId: string; personName: string; canAdminister: boolean }) {
+function MarChart({ profileId, personName, callName, canAdminister }: { profileId: string; personName: string; callName: string | null; canAdminister: boolean }) {
   const queryClient = useQueryClient();
   const [period, setPeriod] = useState<Period>('day');
   const [anchor, setAnchor] = useState(() => new Date());
@@ -311,8 +322,8 @@ function MarChart({ profileId, personName, canAdminister }: { profileId: string;
         <div className="card text-center py-6 space-y-1">
           <p className="text-sm text-ink">
             {stay && format(anchor, 'yyyy-MM-dd') >= stay.admitted_on
-              ? `Nothing is due here while ${personName} is in ${stay.hospital_name ?? 'hospital'}. The hospital gives the medicines.`
-              : `${personName} was in hospital this day, so nothing was due here. The hospital gave the medicines.`}
+              ? `Nothing is due here while ${callName ?? 'you are'}${callName ? ' is' : ''} in ${stay.hospital_name ?? 'hospital'}. The hospital gives the medicines.`
+              : `${callName ? `${callName} was` : 'You were'} in hospital this day, so nothing was due here. The hospital gave the medicines.`}
           </p>
           {stay ? <p className="text-xs text-muted">Doses start being due again once the discharge is recorded.</p> : null}
         </div>

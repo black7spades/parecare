@@ -10,7 +10,7 @@ import { RouteFallback } from '../../../components/layout/RouteFallback';
 import { RelationshipSelect } from '../../../components/RelationshipSelect';
 import { EditProfileModal } from './EditProfileModal';
 import {
-  SELF_RELATIONSHIP,
+  isSelfRelationship,
   ageFrom,
   healthStatusStatusLabel,
   type AccessLevel,
@@ -115,7 +115,7 @@ export function ProfileLayout() {
   const age = ageFrom(profile.date_of_birth);
   const access: AccessLevel = data.access ?? 'owner';
   const relationship = data.relationship?.trim() || null;
-  const isSelf = relationship === SELF_RELATIONSHIP;
+  const isSelf = isSelfRelationship(relationship);
   const careName =
     (isSelf ? null : relationship) ?? profile.preferred_name ?? profile.first_name ?? profile.full_name.split(' ')[0];
   const context: ProfileContext = {

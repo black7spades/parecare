@@ -24,7 +24,7 @@ import { useProfile } from './ProfileLayout';
 import { useHealthConfig } from '../../../lib/appConfig';
 import { noticeFiled, refreshContacts, useNoticeStore } from '../../../stores/notice';
 import { AddressFields, addressFrom, addressPayload, emptyAddress, hasAddress, type AddressValue } from '../../../components/AddressFields';
-import { ContactStrip } from '../../../components/ContactStrip';
+import { CONTACT_LINK, ContactStrip } from '../../../components/ContactStrip';
 import { SendAppointmentModal, downloadAppointmentIcs } from '../../../components/SendAppointmentModal';
 import { ContactPicker } from '../../../components/ContactPicker';
 import { LinkedText } from '../../../components/LinkedText';
@@ -692,7 +692,7 @@ export function AppointmentsPage() {
               <ul className="space-y-2">
                 {(current.results_to_discuss ?? []).map((r) => (
                   <li key={r.id} className="rounded-md border border-border px-3 py-2">
-                    <Link to={`/app/${profile.id}/test-results?record=${r.id}`} className="text-sm font-medium text-primary hover:underline">{r.test_name}</Link>
+                    <Link to={`/app/${profile.id}/test-results?record=${r.id}`} className={`text-sm ${CONTACT_LINK}`}>{r.test_name}</Link>
                     <p className="text-xs text-muted">
                       {[r.collected_on ? `Collected ${format(new Date(`${r.collected_on}T00:00`), 'd MMM yyyy')}` : null, r.doctor_view ? doctorViewLabel(r.doctor_view) : null, r.ordered_by ? `Ordered by ${r.ordered_by.name}` : null].filter(Boolean).join(' · ')}
                     </p>
@@ -713,7 +713,7 @@ export function AppointmentsPage() {
               <ul className="space-y-1">
                 {(current.test_results ?? []).map((r) => (
                   <li key={r.id}>
-                    <Link to={`/app/${profile.id}/test-results?record=${r.id}`} className="text-sm text-primary hover:underline">{r.test_name}</Link>
+                    <Link to={`/app/${profile.id}/test-results?record=${r.id}`} className={`text-sm ${CONTACT_LINK}`}>{r.test_name}</Link>
                   </li>
                 ))}
               </ul>

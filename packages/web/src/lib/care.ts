@@ -246,6 +246,8 @@ export type AccessLevel = 'owner' | 'admin' | 'contributor' | 'viewer';
 
 /** Sentinel relationship for a profile that tracks the owner's own care. */
 export const SELF_RELATIONSHIP = 'Myself';
+/** Their own profile, however it was written down: Myself, self or me. */
+export const isSelfRelationship = (r: string | null | undefined): boolean => ['myself', 'self', 'me'].includes(String(r ?? '').trim().toLowerCase());
 
 export const RELATIONSHIPS = [
   SELF_RELATIONSHIP,
