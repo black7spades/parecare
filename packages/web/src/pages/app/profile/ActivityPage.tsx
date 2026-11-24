@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { api } from '../../../api/client';
-import { DOSE_ENTITY, doseActivityWords, entityLabel, type ActivityEntry } from '../../../lib/care';
+import { ACTIVITY_VERBS, DOSE_ENTITY, activityWords, doseActivityWords, entityLabel, type ActivityEntry } from '../../../lib/care';
 import { useDataView, type DataSort, type DataFilter } from '../../../components/data/useDataView';
 import { DataToolbar } from '../../../components/data/DataToolbar';
 import { EditableSubheader } from '../../../components/ui/EditableSubheader';
@@ -88,15 +88,15 @@ const ACTION_FILTER: DataFilter<ActivityEntry> = {
   key: 'action',
   label: 'Action',
   options: [
-    { value: 'created', label: 'Created' },
-    { value: 'updated', label: 'Updated' },
+    { value: 'created', label: 'Added' },
+    { value: 'updated', label: 'Changed' },
     { value: 'deleted', label: 'Deleted' },
   ],
   match: (e, v) => e.action === v,
 };
 
 export function ActivityPage() {
-  const { profile, careName } = useProfile();
+  const { profile, voice } = useProfile();
 
   const { data, isLoading } = useQuery({
     queryKey: ['activity', profile.id],
@@ -136,7 +136,7 @@ export function ActivityPage() {
   return (
     <div className="card max-w-3xl">
       <h2 className="text-base font-semibold text-ink mb-1">Logs</h2>
-      <EditableSubheader copyKey="profile.activity.subheader" vars={{ name: careName }} className="mb-4" />
+      <EditableSubheader copyKey="profile.activity.subheader" voice={voice} className="mb-4" />
 
       <DataToolbar
         search={dv.search}
@@ -177,7 +177,7 @@ export function ActivityPage() {
               {...panel.rowProps(e.id)}
               className={`flex items-start gap-3 border-b border-border last:border-0 pb-3 last:pb-0 rounded-sm ${RECORD_ROW_CLASS}`}
             >
-              <span className={`badge text-xs capitalize shrink-0 ${ACTION_STYLES[e.action]}`}>{e.action}</span>
+              <span className={`badge text-xs capitalize shrink-0 ${ACTION_STYLES[e.action]}`}>{ACTIVITY_VERBS[e.action] ?? e.action}</span>
               <div className="flex-1">
                 {e.entity_type === DOSE_ENTITY ? (
                   <p className="text-sm text-ink">
@@ -187,8 +187,7 @@ export function ActivityPage() {
                   </p>
                 ) : (
                   <p className="text-sm text-ink">
-                    <span className="font-medium">{e.actor_name ?? 'A former member'}</span> {e.action} a{' '}
-                    {entityLabel(e.entity_type)}
+                    <span className="font-medium">{e.actor_name ?? 'A former member'}</span> {activityWords(e.action, e.entity_type)}
                     {e.source === 'pare' ? <span className="text-muted"> via Pare</span> : null}
                     {e.source === 'assistant' ? <span className="text-muted"> via an assistant</span> : null}
                     {e.summary ? <span className="text-muted">: "{e.summary}"</span> : null}

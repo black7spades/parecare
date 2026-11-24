@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { POA_TYPES, PROVIDER_TYPES, providerTypeLabel, type CircleMember, type Provider } from '../lib/care';
+import { CONTACT_LINK } from './ContactStrip';
 
 /**
  * The one way a power of attorney holder is named, wherever the need
@@ -173,7 +174,7 @@ export function SetPoaForm({
       {members.length === 0 ? (
         <p className="text-xs text-muted">
           To name a person, first{' '}
-          <Link to={`/app/${profileId}/circle`} className="text-primary hover:underline">
+          <Link to={`/app/${profileId}/circle`} className={`${CONTACT_LINK}`}>
             invite them to the care circle
           </Link>
           . Organisations can be added right here.

@@ -5,6 +5,7 @@ import { api } from '../../api/client';
 import { Button } from '../../components/ui/Button';
 import { browserTimeZone } from '../../lib/datetime';
 import { DOSE_ENTITY, doseActivityWords } from '../../lib/care';
+import { CONTACT_LINK } from '../../components/ContactStrip';
 
 /**
  * What's new: everything happening across the care circles this person can
@@ -135,7 +136,7 @@ export function WhatsNewPage() {
           <h1>What's new</h1>
           <p className="text-sm text-muted">
             Everything happening across the people in your care. Choose what reaches you, and where, in{' '}
-            <Link to="/account/notifications" className="text-primary hover:underline">Notifications</Link>.
+            <Link to="/account/notifications" className={`${CONTACT_LINK}`}>Notifications</Link>.
           </p>
         </div>
         {unread > 0 ? (

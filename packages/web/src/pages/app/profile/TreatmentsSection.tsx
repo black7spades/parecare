@@ -8,7 +8,7 @@ import { Input, Textarea } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { RecordPanel } from '../../../components/record/RecordPanel';
 import { ContactStrip } from '../../../components/ContactStrip';
-import { ContactPicker, changedContactFieldsAs, pickedFrom, type PickedContact } from '../../../components/ContactPicker';
+import { ContactPicker, contactProblem, changedContactFieldsAs, pickedFrom, type PickedContact } from '../../../components/ContactPicker';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import {
@@ -556,6 +556,12 @@ function TreatmentForm({ profileId, treatment, onClose, onSaved, onDelete }: {
           // Save always answers: say what is missing.
           if (!name.trim()) {
             setError('Write the treatment name first, then save.');
+            return;
+          }
+          const unpicked = contactProblem(practitioner, 'who provides it');
+          if (unpicked) {
+            setError(unpicked);
+            document.getElementById('treatment-practitioner')?.focus();
             return;
           }
           setError('');

@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 import { RELEASES } from '../../lib/releaseNotes';
 import { APP_VERSION, REPO_URL, commitUrl, versionLabel } from '../../lib/version';
 import { useUpdates } from '../../stores/updates';
+import { CONTACT_LINK } from '../../components/ContactStrip';
 
 /**
  * What's new: the on-site record of updates, drawn from the release notes and
@@ -21,7 +22,7 @@ export function UpdatesPage() {
         <h1 className="text-2xl font-bold text-ink">What's new</h1>
         <p className="mt-1 text-sm text-muted">
           The updates to PareCare, newest first. You are on{' '}
-          <a href={commitUrl()} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-mono">
+          <a href={commitUrl()} target="_blank" rel="noopener noreferrer" className={`${CONTACT_LINK} font-mono`}>
             {versionLabel()}
           </a>
           .
@@ -60,7 +61,7 @@ export function UpdatesPage() {
 
       <p className="text-xs text-muted">
         The full history and the source live in the{' '}
-        <a href={REPO_URL} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+        <a href={REPO_URL} target="_blank" rel="noopener noreferrer" className={`${CONTACT_LINK}`}>
           git repository
         </a>
         .

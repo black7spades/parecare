@@ -12,7 +12,7 @@ import { TimeField } from './TimeField';
 import { SupplierModal } from './SupplierModal';
 import type { CareDocument, MedicationRecord, Supplier } from '../../../../lib/care';
 import type { Appointment } from '../AppointmentsPage';
-import { ContactPicker, changedContactFieldsAs, contactFieldsAs, pickedFrom, type PickedContact } from '../../../../components/ContactPicker';
+import { ContactPicker, contactProblem, changedContactFieldsAs, contactFieldsAs, pickedFrom, type PickedContact } from '../../../../components/ContactPicker';
 import { format } from 'date-fns';
 
 /**
@@ -239,6 +239,12 @@ export function MedicationForm({
           if (!name.trim()) {
             setError('Write the medication name first, then save.');
             document.getElementById('med-name')?.focus();
+            return;
+          }
+          const unpicked = contactProblem(prescriber, 'who prescribed it');
+          if (unpicked) {
+            setError(unpicked);
+            document.getElementById('med-prescriber')?.focus();
             return;
           }
           setError('');

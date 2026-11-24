@@ -5,6 +5,8 @@ import { api } from '../api/client';
 import { Button } from './ui/Button';
 import { Modal } from './ui/Modal';
 import { IngestModal } from './IngestModal';
+import { UploadDocumentModal } from '../pages/app/profile/DocumentsPage';
+import { usePareOn } from '../lib/aiStatus';
 import { submitNote } from '../lib/captureQueue';
 import { announce } from '../lib/announce';
 import { buzz } from '../lib/haptics';
@@ -46,6 +48,7 @@ export function CaptureSheet() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [ingestProfile, setIngestProfile] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pareOn = usePareOn();
 
   const match = useMatch('/app/:profileId/*');
   const routeProfileId = match?.params['profileId'];
@@ -76,7 +79,17 @@ export function CaptureSheet() {
   };
 
   const saveNote = async () => {
-    if (!effectiveId || !body.trim()) return;
+    // Save always answers: say what is missing.
+    if (!effectiveId) {
+      setNotice('Choose who this is about first, then save the note.');
+      document.getElementById('cap-person')?.focus();
+      return;
+    }
+    if (!body.trim()) {
+      setNotice('Write the note first, then save it.');
+      document.getElementById('cap-note')?.focus();
+      return;
+    }
     setSaving(true);
     setNotice('');
     try {
@@ -176,13 +189,13 @@ export function CaptureSheet() {
             <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>Take a photo</Button>
             <span className="ml-auto flex gap-2">
               <Button variant="ghost" onClick={close}>Cancel</Button>
-              <Button loading={saving} disabled={!effectiveId || !body.trim()} onClick={saveNote}>Save note</Button>
+              <Button loading={saving} onClick={saveNote}>Save note</Button>
             </span>
           </div>
         </div>
       </Modal>
 
-      {photoFile && ingestProfile ? (
+      {photoFile && ingestProfile && pareOn ? (
         <IngestModal
           profileId={ingestProfile}
           initialFile={photoFile}
@@ -190,6 +203,24 @@ export function CaptureSheet() {
           onClose={() => {
             setPhotoFile(null);
             setIngestProfile(null);
+          }}
+        />
+      ) : null}
+      {/* With no assistant, the photo is filed the plain way: what it is,
+          the date written, who it is from and to, and what it is for. */}
+      {photoFile && ingestProfile && !pareOn ? (
+        <UploadDocumentModal
+          profileId={ingestProfile}
+          initialFile={photoFile}
+          onClose={() => {
+            setPhotoFile(null);
+            setIngestProfile(null);
+          }}
+          onUploaded={(doc) => {
+            setPhotoFile(null);
+            setIngestProfile(null);
+            announce(`${doc.label} saved in Documents.`);
+            buzz();
           }}
         />
       ) : null}

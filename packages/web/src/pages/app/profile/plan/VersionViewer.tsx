@@ -16,6 +16,7 @@ import { PhoneLink } from '../../../../components/cards/profile/links';
 import type { ContactSummary } from '../../../../lib/care';
 import { Button } from '../../../../components/ui/Button';
 import { Modal } from '../../../../components/ui/Modal';
+import { CONTACT_LINK } from '../../../../components/ContactStrip';
 
 /** One reference behind "supported by", read live: who or what, and how to reach them. */
 interface LiveRef {
@@ -84,7 +85,7 @@ export function ContentSections({ content, profileId }: { content: PlanContent; 
               {synthesized ? (
                 <span className="text-xs text-muted">Synthesized from the recorded facts</span>
               ) : manage ? (
-                <Link to={manage.to} className="text-xs text-primary hover:underline">
+                <Link to={manage.to} className={`${CONTACT_LINK} text-xs`}>
                   Manage on the {manage.label}
                 </Link>
               ) : null}

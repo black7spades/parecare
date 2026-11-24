@@ -5,6 +5,7 @@ import { substanceClassLabel, substanceStatusLabel, type SubstanceUse } from '..
 import { keys } from '../../../lib/queryKeys';
 import { CardShell, CardTrouble, CardWaiting } from '../CardShell';
 import type { CardProps } from '../types';
+import { CONTACT_LINK } from '../../ContactStrip';
 
 /** Drinking, smoking and the rest, when any of it has been recorded. */
 export function SubstanceUseCard({ profileId }: CardProps) {
@@ -41,7 +42,7 @@ function SubstanceUseSummary({ records }: { records: SubstanceUse[] }) {
           );
         })}
       </ul>
-      <Link to="substance-use" className="text-xs text-primary hover:underline">
+      <Link to="substance-use" className={`${CONTACT_LINK} text-xs`}>
         Manage substance use
       </Link>
     </div>

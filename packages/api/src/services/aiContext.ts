@@ -98,7 +98,13 @@ export async function buildProfileContext(
       .select('p.*', 'cpp.poa_type', 'cpp.poa_activated')
       .orderBy('p.name', 'asc')
       .limit(MAX_LIST),
-    db('open_questions').where({ care_profile_id: profileId, status: 'open' }).orderBy('created_at', 'desc').limit(10),
+    db('open_questions as q')
+      .leftJoin('providers as qp', 'qp.id', 'q.provider_id')
+      .leftJoin('appointments as qa', 'qa.id', 'q.appointment_id')
+      .where({ 'q.care_profile_id': profileId, 'q.status': 'open' })
+      .orderBy('q.created_at', 'desc')
+      .limit(10)
+      .select('q.title', 'q.body', 'qp.name as ask_name', 'qa.title as ask_at_title', 'qa.starts_at as ask_at_starts_at'),
     db('care_log_entries')
       .where({ care_profile_id: profileId })
       .where('occurred_at', '>=', logSince)
@@ -445,7 +451,12 @@ export async function buildProfileContext(
   }
 
   if (questions.length) {
-    sections.push(`## Open family questions\n` + questions.map((q) => `- ${q.title}${q.body ? `: ${q.body}` : ''}`).join('\n'));
+    sections.push(
+      `## Open questions to ask\n` +
+        questions
+          .map((q) => `- ${q.title}${q.body ? `: ${q.body}` : ''}${q.ask_name ? ` (ask ${q.ask_name})` : ''}${q.ask_at_title ? ` (at ${q.ask_at_title}${q.ask_at_starts_at ? `, ${new Date(q.ask_at_starts_at).toISOString().slice(0, 10)}` : ''})` : ''}`)
+          .join('\n')
+    );
   }
 
   if (log.length) {

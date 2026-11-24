@@ -1,4 +1,6 @@
+import type React from 'react';
 import { Fragment, useMemo, useState } from 'react';
+import { CONTACT_LINK } from '../../../components/ContactStrip';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addDays, addMonths, addWeeks, eachDayOfInterval, endOfDay, endOfMonth, endOfWeek,
@@ -81,12 +83,15 @@ export function MedicationMar({
   personName,
   callName,
   canAdminister,
+  empty,
 }: {
   profileId: string;
   personName: string;
   /** What the screen calls them, such as Peggy; null on your own profile. */
   callName?: string | null;
   canAdminister: boolean;
+  /** What shows when there is no medicine with times yet: what this is for and the first step. */
+  empty?: React.ReactNode;
 }) {
   // A link straight to one dose record opens the full record, where it lives.
   const [searchParams] = useSearchParams();
@@ -99,7 +104,7 @@ export function MedicationMar({
         <button type="button" onClick={() => setTab('log')} className={`px-3 py-2 text-sm font-medium border-b-2 ${tab === 'log' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-ink'}`}>Full record</button>
       </div>
       {tab === 'chart'
-        ? <MarChart profileId={profileId} personName={personName} callName={callName ?? null} canAdminister={canAdminister} />
+        ? <MarChart profileId={profileId} personName={personName} callName={callName ?? null} canAdminister={canAdminister} empty={empty} />
         : <MarLog profileId={profileId} canAdminister={canAdminister} />}
     </div>
   );
@@ -147,7 +152,7 @@ interface Entry {
 // recorded through the full form.
 const AS_PRESCRIBED = { right_dose: true, right_route: true } as const;
 
-function MarChart({ profileId, personName, callName, canAdminister }: { profileId: string; personName: string; callName: string | null; canAdminister: boolean }) {
+function MarChart({ profileId, personName, callName, canAdminister, empty }: { profileId: string; personName: string; callName: string | null; canAdminister: boolean; empty?: React.ReactNode }) {
   const queryClient = useQueryClient();
   const [period, setPeriod] = useState<Period>('day');
   const [anchor, setAnchor] = useState(() => new Date());
@@ -313,11 +318,11 @@ function MarChart({ profileId, personName, callName, canAdminister }: { profileI
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Legend withPartial={period !== 'day'} />
-        <Link to={`/app/${profileId}/calendar`} className="text-xs text-primary hover:underline">View on calendar →</Link>
+        <Link to={`/app/${profileId}/calendar`} className={`text-xs ${CONTACT_LINK}`}>View on calendar</Link>
       </div>
 
       {meds.length === 0 ? (
-        <p className="text-sm text-muted py-6 text-center">No active medications to chart.</p>
+        empty ?? <p className="text-sm text-muted py-6 text-center">Each dose given is recorded here. Add a medicine with times first, then doses show up when they are due.</p>
       ) : period === 'day' && pausedDay ? (
         <div className="card text-center py-6 space-y-1">
           <p className="text-sm text-ink">

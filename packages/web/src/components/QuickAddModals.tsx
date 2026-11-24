@@ -9,6 +9,7 @@ import { Modal } from './ui/Modal';
 import { CatalogueCombo } from './CatalogueCombo';
 import { CONDITION_CATEGORIES, type MedicalCondition, type Provider } from '../lib/care';
 import { EmergencyContactAdd } from './EmergencyContactsEditor';
+import { CONTACT_LINK } from './ContactStrip';
 
 /**
  * Small dialogs that record a fact right where it is shown missing: the
@@ -364,7 +365,7 @@ export function MedicationModal({
         ) : null}
         <p className="text-xs text-muted">
           Supply tracking and the condition it treats can be added on the{' '}
-          <Link to={`/app/${profileId}/medications`} className="text-primary hover:underline">
+          <Link to={`/app/${profileId}/medications`} className={`${CONTACT_LINK}`}>
             medication record
           </Link>{' '}
           afterwards.

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -8,6 +8,7 @@ import { useAuthStore } from '../../stores/auth';
 import type { CareDocument, CircleMember } from '../../lib/care';
 import { UploadDocumentModal } from '../../pages/app/profile/DocumentsPage';
 import { Button } from '../ui/Button';
+import { anyModalOpen } from '../ui/Modal';
 import { Textarea } from '../ui/Input';
 import { TrashIcon } from '../ui/icons';
 import { ForwardedFromTag, ForwardTags, type ForwardedFrom, type SentForward } from '../ForwardNotes';
@@ -118,6 +119,7 @@ export function RecordPanel({
   children?: ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const headingId = `${useId()}-record-title`;
   const queryClient = useQueryClient();
   const myId = useAuthStore((s) => s.account?.id);
   const askPare = useAssistantStore((s) => s.openWithMessage);
@@ -175,7 +177,8 @@ export function RecordPanel({
   useEffect(() => {
     panelRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !uploading) onClose();
+      // A dialog open over the panel takes Escape for itself.
+      if (e.key === 'Escape' && !uploading && !anyModalOpen()) onClose();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -223,7 +226,7 @@ export function RecordPanel({
   };
 
   return (
-    <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-labelledby="record-panel-title">
+    <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-labelledby={headingId}>
       <div className="absolute inset-0 bg-black/30" onClick={onClose} aria-hidden="true" />
       <div
         ref={panelRef}
@@ -234,7 +237,7 @@ export function RecordPanel({
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1">
               <p className="text-xs text-muted">{kindLabel}</p>
-              <h2 id="record-panel-title" className="text-lg font-semibold text-ink break-words">{title}</h2>
+              <h2 id={headingId} className="text-lg font-semibold text-ink break-words">{title}</h2>
               {subtitle ? <p className="text-sm text-muted break-words">{subtitle}</p> : null}
             </div>
             <Button size="sm" variant="ghost" aria-label="Close" title="Close" onClick={onClose}>✕</Button>
@@ -383,7 +386,7 @@ export function RecordPanel({
                   <ul className="space-y-1">
                     {extras!.documents.map((d) => (
                       <li key={d.id} className="flex items-center gap-2 text-sm">
-                        <Link to={`/app/${profileId}/documents?doc=${d.id}`} className="flex-1 text-primary hover:underline break-words">{d.label}</Link>
+                        <Link to={`/app/${profileId}/documents?doc=${d.id}`} className={`${CONTACT_LINK} flex-1 break-words`}>{d.label}</Link>
                         <span className="text-xs text-muted">{format(new Date(d.created_at), 'd MMM yyyy')}</span>
                         {canEdit ? (
                           <Button size="xs" variant="ghost" aria-label={`Take ${d.label} off this record`} title="Take off this record" onClick={() => detach.mutate(d.id)}>✕</Button>

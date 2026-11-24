@@ -36,7 +36,22 @@ const SELECT = 'block w-full rounded-md border border-border bg-card px-3 py-2 t
  * saved; one that does not look right is kept in its box with what it should
  * look like, and every other number still saves.
  */
-export function IdentifiersForm({ profileId, canEdit, onSaved }: { profileId: string; canEdit: boolean; onSaved?: () => void }) {
+export function IdentifiersForm({
+  profileId,
+  canEdit,
+  onSaved,
+  onDraft,
+}: {
+  profileId: string;
+  canEdit: boolean;
+  onSaved?: () => void;
+  /**
+   * For a form that saves everything together, such as first setup: the
+   * boxes that changed are handed up as they are typed, and this form has no
+   * Save of its own.
+   */
+  onDraft?: (changed: Partial<Record<IdentifierField, string>>) => void;
+}) {
   const queryClient = useQueryClient();
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['identifiers', profileId],
@@ -60,6 +75,14 @@ export function IdentifiersForm({ profileId, canEdit, onSaved }: { profileId: st
     setDraft((d) => ({ ...d, [k]: v }));
     setNote('');
   };
+
+  useEffect(() => {
+    if (!onDraft || !ready) return;
+    const before = data?.identifiers ? fromSaved(data.identifiers) : EMPTY;
+    onDraft(Object.fromEntries((Object.keys(draft) as IdentifierField[]).filter((k) => draft[k] !== before[k]).map((k) => [k, draft[k]])));
+    // onDraft is the caller's setter; only the boxes matter here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, ready]);
 
   const save = useMutation({
     // Only the boxes that changed go, so nothing on file is cleared by accident.
@@ -120,7 +143,7 @@ export function IdentifiersForm({ profileId, canEdit, onSaved }: { profileId: st
       className="space-y-5"
       onSubmit={(e) => {
         e.preventDefault();
-        save.mutate();
+        if (!onDraft) save.mutate();
       }}
     >
       <fieldset className="space-y-3">
@@ -183,7 +206,7 @@ export function IdentifiersForm({ profileId, canEdit, onSaved }: { profileId: st
         {box('my_aged_care_number', 'My Aged Care number', { hint: 'Starts with AC.', placeholder: 'AC12345678' })}
       </fieldset>
       {error ? <p className="text-sm text-red-600" role="alert">{error}</p> : null}
-      {canEdit ? (
+      {canEdit && !onDraft ? (
         <div className="flex items-center justify-end gap-3">
           {note ? <p className="text-sm text-muted" role="status">{note}</p> : null}
           <Button type="submit" loading={save.isPending}>Save ID numbers</Button>

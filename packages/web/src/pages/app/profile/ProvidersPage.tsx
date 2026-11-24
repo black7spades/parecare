@@ -63,7 +63,7 @@ const sortsFor = (kind: ProviderKind): DataSort<Provider>[] => [
  * and caseworkers on one tab, the clinics and departments on the other.
  */
 export function ProvidersPage() {
-  const { profile, careName, canEdit } = useProfile();
+  const { profile, careName, canEdit, voice } = useProfile();
   const [kind, setKind] = useState<ProviderKind>('person');
   const words = KIND_WORDS[kind];
   const SORTS = sortsFor(kind);
@@ -183,7 +183,7 @@ export function ProvidersPage() {
             <h2 className="text-base font-semibold text-ink">Contacts</h2>
             <PagePurpose kind="entry" />
           </div>
-          <EditableSubheader copyKey="profile.providers.subheader" vars={{ name: careName }} />
+          <EditableSubheader copyKey="profile.providers.subheader" voice={voice} />
         </div>
         {canEdit ? (
           <div className="flex gap-2">
@@ -258,8 +258,8 @@ export function ProvidersPage() {
         <div className="card text-center py-10 space-y-3">
           <p className="text-sm text-ink">
             {kind === 'organisation'
-              ? `No organisations recorded for ${careName} yet: their clinic, hospital, pharmacy or any government department they deal with.`
-              : `No professionals recorded for ${careName} yet: their GP, specialists, lawyer or caseworker.`}
+              ? `No organisations recorded for ${voice.object} yet: ${voice.isSelf ? 'your' : 'their'} clinic, hospital, pharmacy or any government department ${voice.isSelf ? 'you deal' : 'they deal'} with.`
+              : `No professionals recorded for ${voice.object} yet: ${voice.isSelf ? 'your' : 'their'} GP, specialists, lawyer or caseworker.`}
           </p>
           {canEdit ? (
             <div>
@@ -322,12 +322,12 @@ export function ProvidersPage() {
                     {p.booking_link || p.directions_link ? (
                       <div className="flex flex-wrap gap-3 mt-1">
                         {p.booking_link ? (
-                          <a href={p.booking_link} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline">
+                          <a href={p.booking_link} target="_blank" rel="noopener noreferrer" className={`${CONTACT_LINK} text-xs`}>
                             Book appointment
                           </a>
                         ) : null}
                         {p.directions_link ? (
-                          <a href={p.directions_link} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline">
+                          <a href={p.directions_link} target="_blank" rel="noopener noreferrer" className={`${CONTACT_LINK} text-xs`}>
                             Get directions
                           </a>
                         ) : null}
@@ -479,7 +479,7 @@ export function ProvidersPage() {
                 <ul className="space-y-1">
                   {theirAppointments.map((a) => (
                     <li key={a.id} className="flex flex-wrap items-baseline gap-x-2 text-sm">
-                      <Link to={`/app/${profile.id}/appointments?record=${a.id}`} className="text-primary hover:underline">{a.title}</Link>
+                      <Link to={`/app/${profile.id}/appointments?record=${a.id}`} className={`${CONTACT_LINK}`}>{a.title}</Link>
                       <span className="text-xs text-muted">{whenText(a)}</span>
                     </li>
                   ))}
@@ -494,7 +494,7 @@ export function ProvidersPage() {
                 <ul className="space-y-1">
                   {theirTasks.map((t) => (
                     <li key={t.id} className="flex flex-wrap items-baseline gap-x-2 text-sm">
-                      <Link to={`/app/${profile.id}/tasks?record=${t.id}`} className="text-primary hover:underline">{t.title}</Link>
+                      <Link to={`/app/${profile.id}/tasks?record=${t.id}`} className={`${CONTACT_LINK}`}>{t.title}</Link>
                       <span className="text-xs text-muted">Due {format(new Date(t.next_due_at), 'd MMM yyyy')}</span>
                     </li>
                   ))}

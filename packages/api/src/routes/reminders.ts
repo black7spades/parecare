@@ -514,38 +514,3 @@ remindersRouter.delete('/:reminderId', requireAuth, async (req, res) => {
   }
   res.json({ message: 'Reminder deleted.' });
 });
-
-// Task notes are the notes every record shares. These two stay for older
-// callers until the next clean-up.
-remindersRouter.get('/:reminderId/notes', requireAuth, async (req, res) => {
-  const notes = await db('record_notes as n')
-    .leftJoin('accounts as a', 'n.author_account_id', 'a.id')
-    .where({ 'n.care_profile_id': req.params['id'], 'n.entity_type': 'reminders', 'n.entity_id': req.params['reminderId'] })
-    .select('n.id', 'n.body as content', 'n.created_at', 'a.display_name as author_name')
-    .orderBy('n.created_at', 'asc');
-  res.json({ notes });
-});
-
-remindersRouter.post('/:reminderId/notes', requireAuth, async (req, res) => {
-  const noteSchema = z.object({ content: z.string().min(1).max(4000) });
-  const parsed = noteSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: 'Write something to add as a note.', code: 'VALIDATION_ERROR' });
-    return;
-  }
-  const task = await db('reminders').where({ id: req.params['reminderId'], care_profile_id: req.params['id'] }).first('id');
-  if (!task) {
-    res.status(404).json({ error: 'Task not found', code: 'NOT_FOUND' });
-    return;
-  }
-  const [note] = await db('record_notes')
-    .insert({
-      care_profile_id: req.params['id'],
-      entity_type: 'reminders',
-      entity_id: req.params['reminderId'],
-      author_account_id: req.account!.id,
-      body: parsed.data.content,
-    })
-    .returning('*');
-  res.status(201).json({ note: { ...note, content: note.body } });
-});

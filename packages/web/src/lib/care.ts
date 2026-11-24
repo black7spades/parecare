@@ -361,9 +361,36 @@ const ENTITY_LABELS: Record<string, string> = {
   recalls: 'suggested reminder',
   identifiers: 'ID numbers',
   'emergency-contacts': 'emergency contact',
+  ingest: 'record filed from a document',
+  shift: 'shift',
+  'emergency-sheet': 'emergency sheet',
+  'share-links': 'shared link',
+  secrets: 'saved login',
+  'document-categories': 'document category',
+  'next-step-types': 'kind of next step',
+  actions: 'change',
+  addresses: 'address',
+  'health-spend': 'cost',
+  'substance-use': 'substance use record',
+  'overview-summaries': 'summary',
+  'nav-pins': 'pinned page',
+  'care_profiles': 'profile',
+  reports: 'report',
+  roster: 'roster shift',
 };
 
-export const entityLabel = (type: string) => ENTITY_LABELS[type] ?? type;
+/** What a record is called in a sentence, never the system's own word for it. */
+export const entityLabel = (type: string) => ENTITY_LABELS[type] ?? type.replace(/[-_]+/g, ' ');
+
+/** "a task", "an appointment". */
+export const withArticle = (noun: string) => `${/^[aeiou]/i.test(noun) && !/^(u[nr]i|use|one)/i.test(noun) ? 'an' : 'a'} ${noun}`;
+
+/** The verb for what happened, in everyday words. */
+export const ACTIVITY_VERBS: Record<string, string> = { created: 'added', updated: 'changed', deleted: 'deleted' };
+
+/** "added an appointment", "changed a task": the words after a person's name in the activity list. */
+export const activityWords = (action: string, entityType: string) =>
+  `${ACTIVITY_VERBS[action] ?? 'changed'} ${withArticle(entityLabel(entityType))}`;
 
 /** What recording or clearing a date of death stopped or put back. */
 export interface DeathChange {
@@ -877,7 +904,20 @@ export interface OpenQuestion {
   status: 'open' | 'resolved' | 'deferred';
   resolution: string | null;
   created_at: string;
+  resolved_at?: string | null;
+  /** Who to ask. */
+  provider_id?: string | null;
+  ask?: ContactSummary | null;
+  /** The visit to ask at. */
+  appointment_id?: string | null;
+  ask_at?: { id: string; title: string; starts_at: string | null; status: string } | null;
+  /** Worked out rather than chosen: "provider_id", "appointment_id". */
+  inferred_fields?: string[];
+  raised_by_name?: string | null;
 }
+
+/** A question as an appointment carries it, to ask at that visit. */
+export type AppointmentQuestion = OpenQuestion;
 
 export interface QuestionResponse {
   id: string;
@@ -1651,9 +1691,9 @@ export function regimenLine(m: Pick<MedicationRecord, 'units_per_dose' | 'dose' 
 export const MED_STATUSES = [
   { value: 'given', label: 'Given', description: 'You gave the dose and it was taken.' },
   { value: 'refused', label: 'Refused', description: 'The person did not want the dose and declined it.' },
-  { value: 'omitted', label: 'Omitted', description: 'The dose was skipped this time, for example the person was asleep, unwell or fasting.' },
-  { value: 'held', label: 'Held', description: 'The dose was deliberately paused, for example on a doctor or pharmacist instruction.' },
-  { value: 'self_administered', label: 'Self-administered', description: 'The person took the dose themselves.' },
+  { value: 'omitted', label: 'Skipped', description: 'The dose was skipped this time, for example the person was asleep, unwell or fasting.' },
+  { value: 'held', label: 'Paused on advice', description: 'The dose was deliberately paused, for example on a doctor or pharmacist instruction.' },
+  { value: 'self_administered', label: 'Took it themselves', description: 'The person took the dose themselves.' },
   { value: 'not_in_stock', label: 'Not in stock', description: 'There was none to give. The alert says who to call.' },
 ] as const;
 

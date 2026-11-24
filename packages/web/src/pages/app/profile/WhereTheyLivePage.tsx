@@ -18,6 +18,7 @@ import { residenceTypeLabel, type CareProfile } from '../../../lib/care';
 import { firstName, type CareMove, type HospitalStay } from '../../../lib/lifeEvents';
 import { EditProfileModal } from './EditProfileModal';
 import { useProfile } from './ProfileLayout';
+import { EmptyState } from '../../../components/EmptyState';
 
 const byText = (a: string | null | undefined, b: string | null | undefined) => (a ?? '').localeCompare(b ?? '');
 const byDay = (a: string | null | undefined, b: string | null | undefined) => (a ?? '9999').localeCompare(b ?? '9999');
@@ -43,7 +44,7 @@ const MOVE_SORTS: DataSort<CareMove>[] = [
  * stays and their moves into care, on one page.
  */
 export function WhereTheyLivePage() {
-  const { profile, canEdit, canEditProfile, isSelf, openStay } = useProfile();
+  const { profile, canEdit, canEditProfile, isSelf, openStay, access, careName } = useProfile();
   const name = firstName(profile);
   const queryClient = useQueryClient();
   const [params, setParams] = useSearchParams();
@@ -143,10 +144,16 @@ export function WhereTheyLivePage() {
       </div>
 
       {nothingYet ? (
-        <div className="card text-center py-10 space-y-3">
-          <p className="text-sm text-ink">Home, hospital stays and moves go here.</p>
-          {canEdit ? <Button onClick={() => setStayForm({ stay: null })}>Record a hospital stay</Button> : null}
-        </div>
+        <EmptyState
+          says="Home, hospital stays and moves go here."
+          actionLabel="Record a hospital stay"
+          onAction={() => setStayForm({ stay: null })}
+          canAdd={canEdit}
+          access={access}
+          name={careName}
+          page={isSelf ? 'Where I live page' : 'Where they live page'}
+          managerName={profile.manager_name}
+        />
       ) : null}
 
       {!nothingYet ? <HomeCard profile={profile} previousHomes={previousHomes} canEdit={canEditProfile} onEdit={() => setEditingHome(true)} name={name} isSelf={isSelf} /> : null}

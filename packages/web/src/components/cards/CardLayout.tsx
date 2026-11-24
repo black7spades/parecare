@@ -77,6 +77,7 @@ export function CardLayout({
               canEdit={ctx.canEdit}
               isOwner={ctx.isOwner}
               careName={ctx.careName}
+              voice={ctx.voice}
             />
           </CardSlotProvider>
         );

@@ -19,6 +19,7 @@ import {
   type PhaseHistoryEntry,
 } from '../../../lib/care';
 import type { Situation } from '../../../lib/situation';
+import { voiceFor, type Voice } from '../../../lib/voice';
 import { useAuthStore } from '../../../stores/auth';
 import { formatDateOnly, todayDateOnly } from '../../../lib/datetime';
 import type { OpenStay } from '../../../lib/lifeEvents';
@@ -34,9 +35,12 @@ export interface ProfileContext {
   canEditProfile: boolean;
   /** Can grant others the edit-profile right: admin or owner. */
   canManageEditors: boolean;
-  /** What THIS viewer calls the person: "Mum", "Oma", else preferred/first name */
+  /** What THIS viewer calls the person: "Mum", "Oma". Shown in the header only. */
   relationship: string | null;
+  /** The person's own name, preferred name first. Never a relationship word. */
   careName: string;
+  /** How pages speak about them: "you" and "your" on your own profile, else their name. */
+  voice: Voice;
   phaseHistory: PhaseHistoryEntry[];
   /** The person's composed situation, when it has loaded. */
   situation: Situation | null;
@@ -116,8 +120,8 @@ export function ProfileLayout() {
   const access: AccessLevel = data.access ?? 'owner';
   const relationship = data.relationship?.trim() || null;
   const isSelf = isSelfRelationship(relationship);
-  const careName =
-    (isSelf ? null : relationship) ?? profile.preferred_name ?? profile.first_name ?? profile.full_name.split(' ')[0];
+  // The person's name, never the relationship word: "Dorothy", not "mother".
+  const careName = profile.preferred_name ?? profile.first_name ?? profile.full_name.split(' ')[0];
   const context: ProfileContext = {
     profile,
     access,
@@ -127,6 +131,7 @@ export function ProfileLayout() {
     canManageEditors: !!data.can_manage_editors,
     relationship,
     careName,
+    voice: voiceFor(careName, isSelf),
     phaseHistory: data.phase_history ?? [],
     situation: data.situation ?? null,
     openStay: data.open_stay ?? null,

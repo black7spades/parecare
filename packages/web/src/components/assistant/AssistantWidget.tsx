@@ -4,7 +4,7 @@ import { useMatch, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, AI_REQUEST_TIMEOUT_MS } from '../../api/client';
 import { describeAiError } from '../../lib/aiErrors';
-import { useAiStatus, AI_WARMING_MESSAGE } from '../../lib/aiStatus';
+import { useAiStatus, usePareOn, AI_WARMING_MESSAGE } from '../../lib/aiStatus';
 import { ASSISTANT_COMMANDS, commandHelpText, expandSlashCommand } from '../../lib/assistantCommands';
 import { browserTimeZone } from '../../lib/datetime';
 import { refreshAfterDoses } from '../../lib/queryClient';
@@ -398,6 +398,7 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
   // Whether a model on this machine is still downloading, so we can say so
   // plainly rather than letting the first message fail with a raw error.
   const { data: aiStatus } = useAiStatus(open);
+  const pareOn = usePareOn();
   const preparing = aiStatus?.state === 'preparing';
 
   // A warm, named opening for an empty conversation, in place of the technical
@@ -524,6 +525,9 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
   const commandMatches = draft.startsWith('/')
     ? ASSISTANT_COMMANDS.filter((c) => `/${c.name}`.startsWith(draft.trim().split(/\s/)[0].toLowerCase()))
     : [];
+
+  // With no assistant attached there is nothing to open: no button at all.
+  if (!pareOn) return null;
 
   if (!open) {
     return (

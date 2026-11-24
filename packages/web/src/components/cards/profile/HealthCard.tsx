@@ -4,12 +4,12 @@ import { CardShell } from '../CardShell';
 import type { CardProps } from '../types';
 
 /** How somebody is right now, with Pare's summary above it. */
-export function HealthCard({ profileId, canEdit, careName }: CardProps) {
+export function HealthCard({ profileId, canEdit, careName, voice }: CardProps) {
   return (
     <CardShell>
       <div className="space-y-3">
         <CardAiSummary profileId={profileId} cardKey="health" canEdit={canEdit} />
-        <CurrentHealthSection profileId={profileId} canEdit={canEdit} careName={careName} />
+        <CurrentHealthSection profileId={profileId} canEdit={canEdit} careName={careName} voice={voice} />
       </div>
     </CardShell>
   );

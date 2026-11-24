@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Modal } from './ui/Modal';
-import { ContactPicker, emptyContact, pickedFrom, type PickedContact } from './ContactPicker';
+import { contactProblem, ContactPicker, emptyContact, pickedFrom, type PickedContact } from './ContactPicker';
 import { noticeFiled, refreshContacts } from '../stores/notice';
 import { MANAGEMENT, SCHEMES, addDays, type FundingPlan } from '../lib/lifeEvents';
 
@@ -114,6 +114,19 @@ export function FundingPlanEditor({
           if (starts && ends && ends < starts) {
             setMissing('Plan ends is before Plan starts. Check the two dates.');
             document.getElementById('plan-ends')?.focus();
+            return;
+          }
+          // A part of a name never files a contact on its own.
+          const unpicked = (
+            [
+              ['plan-manager', contactProblem(planManager, 'Plan manager')],
+              ['plan-coordinator', contactProblem(coordinator, 'Support coordinator')],
+              ['plan-lac', contactProblem(lac, 'Local Area Coordinator')],
+            ] as const
+          ).find(([, p]) => p);
+          if (unpicked) {
+            setMissing(unpicked[1]!);
+            document.getElementById(unpicked[0])?.focus();
             return;
           }
           setMissing('');

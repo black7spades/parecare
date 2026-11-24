@@ -8,6 +8,7 @@ import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
 import { SortableTh } from '../../../components/data/SortableTh';
 import { useDataView, type DataSort } from '../../../components/data/useDataView';
 import { DataToolbar } from '../../../components/data/DataToolbar';
+import { CONTACT_LINK } from '../../../components/ContactStrip';
 
 /**
  * The secrets vault: the logins kept for someone's life admin. It sits with
@@ -178,7 +179,7 @@ export function SecretsSection({ profileId, careName }: { profileId: string; car
                     <td className="px-3 py-2 text-muted">{s.account_number || '-'}</td>
                     <td className="px-3 py-2 text-muted max-w-48 truncate">
                       {s.website_url ? (
-                        <a href={s.website_url} target="_blank" rel="noreferrer noopener" className="text-primary hover:underline">
+                        <a href={s.website_url} target="_blank" rel="noreferrer noopener" className={`${CONTACT_LINK}`}>
                           {s.website_url}
                         </a>
                       ) : '-'}

@@ -327,7 +327,7 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
                             {p.contact_name ? <br /> : null}
                             <a
                               href={`tel:${p.contact_phone}`}
-                              className="text-primary hover:underline"
+                              className={`${CONTACT_LINK}`}
                               onClick={(e) => e.stopPropagation()}
                             >
                               {p.contact_phone}
@@ -339,7 +339,7 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
                             {p.contact_name || p.contact_phone ? <br /> : null}
                             <a
                               href={`mailto:${p.contact_email}`}
-                              className="text-primary hover:underline"
+                              className={`${CONTACT_LINK}`}
                               onClick={(e) => e.stopPropagation()}
                             >
                               {p.contact_email}
@@ -408,11 +408,11 @@ function DirectoryProfilesPage({ kind }: { kind: ProfileKind }) {
             { label: 'Contact name', value: current.contact_name },
             {
               label: 'Contact phone',
-              value: current.contact_phone ? <a href={`tel:${current.contact_phone}`} className="text-primary hover:underline">{current.contact_phone}</a> : null,
+              value: current.contact_phone ? <a href={`tel:${current.contact_phone}`} className={`${CONTACT_LINK}`}>{current.contact_phone}</a> : null,
             },
             {
               label: 'Contact email',
-              value: current.contact_email ? <a href={`mailto:${current.contact_email}`} className="text-primary hover:underline">{current.contact_email}</a> : null,
+              value: current.contact_email ? <a href={`mailto:${current.contact_email}`} className={`${CONTACT_LINK}`}>{current.contact_email}</a> : null,
             },
           ]}
           links={[

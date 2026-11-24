@@ -17,7 +17,7 @@ import { composeEmergencySheet } from '../services/emergencySheet';
 import { CIRCLE_ROLE_VALUES } from '../lib/circleRoles';
 import { uploadFile, deleteFile, getDownloadUrl } from '../services/storage';
 import { resolveAddress, linkAddressToProfile } from '../services/addresses';
-import { changeCarePhase, enrolProfileInTemplate } from '../services/journeys';
+import { changeCarePhase, enrolDefaultJourney, enrolProfileInTemplate } from '../services/journeys';
 import { openStaySummary } from '../services/hospitalStays';
 import type { CareProfile, CarePhase } from '../types';
 
@@ -802,8 +802,8 @@ careProfilesRouter.post(
       .insert({ ...parsed.data, ...parts, full_name: composeDisplayName(parts), account_id: req.account!.id })
       .returning('*');
 
-    // Enrol in the chosen journeys; without a choice, a client that sent
-    // a legacy phase gets the ageing journey opened at that phase.
+    // Enrol in the chosen journeys; without a choice, the one that fits
+    // their age (services/journeys enrolDefaultJourney).
     await db.transaction(async (trx) => {
       const chosen = enrolParsed.data.journey_template_ids;
       if (chosen && chosen.length > 0) {
@@ -817,23 +817,10 @@ careProfilesRouter.post(
             });
           }
         }
-      } else if (chosen === undefined && profile.kind !== 'pet') {
-        // Legacy client that knows nothing of journeys: preserve the old
-        // behaviour by opening the ageing journey at the given phase. Pets
-        // never belong in the human ageing journey.
-        const ageing = await trx('journey_templates').where({ slug: 'more-help-at-home' }).first();
-        if (ageing) {
-          const phases = await trx('journey_template_phases')
-            .where({ template_id: ageing.id })
-            .orderBy('sort_order', 'asc');
-          const startAt = phases.findIndex((p) => p.legacy_phase === profile.current_phase);
-          await enrolProfileInTemplate(trx, {
-            careProfileId: profile.id,
-            templateId: ageing.id,
-            createdByAccountId: req.account!.id,
-            startAtSortOrder: Math.max(0, startAt),
-          });
-        }
+      } else if (chosen === undefined) {
+        // Nothing chosen: the everyday journey for their age, never the
+        // ageing journey for a child or an adult under 65.
+        await enrolDefaultJourney(trx, profile, req.account!.id);
       }
     });
 

@@ -77,6 +77,8 @@ const medWithName = (id: string) => medSelect().where('m.id', id).first();
 
 const medSchema = z.object({
   name: z.string().min(1).max(255),
+  // Set by first setup: a retried save with the same key adds nothing twice.
+  client_key: z.string().min(1).max(64).optional(),
   // Dose amount and measure are two data points; `dose` is composed from
   // them for display. A combined `dose` string is still accepted.
   dose: z.string().max(255).optional().nullable(),
@@ -696,6 +698,15 @@ medicationsRouter.post('/', requireAuth, requireProfileOwner('add a medication')
     res.status(400).json({ error: 'Condition not found', code: 'VALIDATION_ERROR' });
     return;
   }
+  // Tried again with the same key: it is already saved, so say so and add nothing.
+  if (parsed.data.client_key) {
+    const already = (await db('medications').where({ care_profile_id: req.params['id'], client_key: parsed.data.client_key }).first('id')) as { id: string } | undefined;
+    if (already) {
+      res.locals['auditEntries'] = [];
+      res.status(200).json({ medication: await medOut(already.id, req.params['id']!), already_saved: true });
+      return;
+    }
+  }
   const catalogueId = await resolveCatalogueId(parsed.data.name, parsed.data.form ?? null, req.account!.id);
   let fields: Record<string, unknown>;
   try {
@@ -713,6 +724,7 @@ medicationsRouter.post('/', requireAuth, requireProfileOwner('add a medication')
       care_profile_id: req.params['id'],
       medication_catalogue_id: catalogueId,
       ...fields,
+      client_key: parsed.data.client_key ?? null,
       supply: parsed.data.supply ?? null,
       // A pack only becomes "open" once a dose is taken from it, so unopened
       // packs must not silently start a pack open as well (that double-counted

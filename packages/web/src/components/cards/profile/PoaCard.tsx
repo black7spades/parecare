@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import type { Voice } from '../../../lib/voice';
 import { api } from '../../../api/client';
 import { PoaBadge } from '../../../components/PoaBadge';
 import { SetPoaForm } from '../../../components/SetPoaForm';
@@ -14,7 +15,7 @@ import type { CardProps } from '../types';
  * Both lists are already fetched by the form inside this card, so asking for
  * them here costs nothing beyond a cache read.
  */
-export function PoaCardSlot({ profileId, isOwner, careName }: CardProps) {
+export function PoaCardSlot({ profileId, isOwner, careName, voice }: CardProps) {
   const { data: circleData } = useQuery({
     queryKey: keys.circle(profileId),
     queryFn: () => api.get<{ members: CircleMember[] }>(`/care-profiles/${profileId}/circle`),
@@ -53,7 +54,7 @@ export function PoaCardSlot({ profileId, isOwner, careName }: CardProps) {
 
   return (
     <CardShell>
-      <PoaCard profileId={profileId} poaHolders={holders} isOwner={isOwner} careName={careName} />
+      <PoaCard profileId={profileId} poaHolders={holders} isOwner={isOwner} careName={careName} voice={voice} />
     </CardShell>
   );
 }
@@ -73,21 +74,21 @@ function PoaCard({
   profileId,
   poaHolders,
   isOwner,
-  careName,
+  voice,
 }: {
   profileId: string;
   poaHolders: PoaHolder[];
   isOwner: boolean;
   careName: string;
+  voice: Voice;
 }) {
   if (poaHolders.length > 0) {
     return (
       <div className="space-y-3">
         <p className="text-sm text-ink">
-          Power of attorney means someone is legally authorised to make decisions on {careName}'s behalf.
-          The type of authority determines what decisions they can make. A medical POA can make healthcare
-          decisions; a financial POA can manage money and property; an enduring POA continues even if
-          {careName} loses capacity to make their own decisions.
+          A power of attorney is someone allowed by law to make decisions on {voice.possessive} behalf. The kind
+          they hold sets which decisions: a medical one covers health care, a financial one covers money and
+          property, and an enduring one keeps going even if {voice.subject} can no longer make {voice.isSelf ? 'your' : 'their'} own decisions.
         </p>
         <div className="divide-y divide-border">
           {poaHolders.map((h) => (

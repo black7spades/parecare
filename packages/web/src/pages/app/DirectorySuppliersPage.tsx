@@ -15,6 +15,7 @@ import { RecordPanel } from '../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../stores/undo';
 import type { Supplier } from '../../lib/care';
+import { CONTACT_LINK } from '../../components/ContactStrip';
 
 interface LinkedProfile {
   profile_id: string;
@@ -185,7 +186,7 @@ export function DirectorySuppliersPage() {
                   <td className="px-3 py-2 text-muted">{s.address_suburb || '-'}</td>
                   <td className="px-3 py-2">
                     {s.phone ? (
-                      <a href={`tel:${s.phone}`} className="text-primary hover:underline">{s.phone}</a>
+                      <a href={`tel:${s.phone}`} className={`${CONTACT_LINK}`}>{s.phone}</a>
                     ) : <span className="text-muted">-</span>}
                   </td>
                   <td className="px-3 py-2 text-muted max-w-48 truncate">{s.address || '-'}</td>
@@ -256,8 +257,8 @@ export function DirectorySuppliersPage() {
           recordId={current.id}
           canEdit={canEdit}
           fields={[
-            { label: 'Phone', value: current.phone ? <a href={`tel:${current.phone}`} className="text-primary hover:underline">{current.phone}</a> : null },
-            { label: 'Email', value: current.email ? <a href={`mailto:${current.email}`} className="text-primary hover:underline">{current.email}</a> : null },
+            { label: 'Phone', value: current.phone ? <a href={`tel:${current.phone}`} className={`${CONTACT_LINK}`}>{current.phone}</a> : null },
+            { label: 'Email', value: current.email ? <a href={`mailto:${current.email}`} className={`${CONTACT_LINK}`}>{current.email}</a> : null },
             { label: 'Address', value: current.address },
             { label: 'Suburb', value: current.address_suburb },
             { label: 'Medications', value: current.medication_count > 0 ? String(current.medication_count) : null },

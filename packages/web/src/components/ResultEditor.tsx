@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import { Button } from './ui/Button';
 import { Input, Textarea } from './ui/Input';
 import { Modal } from './ui/Modal';
-import { ContactPicker, pickedFrom, type PickedContact } from './ContactPicker';
+import { ContactPicker, contactProblem, pickedFrom, type PickedContact } from './ContactPicker';
 import { noticeFiled, refreshContacts } from '../stores/notice';
 import { DOCTOR_VIEWS, RESULT_FLAGS, type ResultValue, type TestResult } from '../lib/lifeEvents';
 
@@ -179,6 +179,12 @@ export function ResultEditor({
           if (unnamed) {
             setMissing('Each result needs its measure named, such as HbA1c.');
             document.getElementById(`result-measure-${unnamed.key}`)?.focus();
+            return;
+          }
+          const unpicked = contactProblem(orderedBy, 'Ordered by') ?? contactProblem(lab, 'Lab');
+          if (unpicked) {
+            setMissing(unpicked);
+            document.getElementById(contactProblem(orderedBy, 'Ordered by') ? 'result-ordered' : 'result-lab')?.focus();
             return;
           }
           setMissing('');

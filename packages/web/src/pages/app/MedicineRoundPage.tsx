@@ -8,6 +8,7 @@ import { Input } from '../../components/ui/Input';
 import { browserTimeZone } from '../../lib/datetime';
 import { AdministerModal } from './profile/medications/AdministerModal';
 import { ALLERGY_CHIP, reactionWords, type MedicationRecord } from '../../lib/care';
+import { CONTACT_LINK } from '../../components/ContactStrip';
 
 interface RoundDose {
   profile_id: string;
@@ -29,7 +30,7 @@ interface RoundDose {
 
 type Done = { status: string; at: string; adminId: string | null };
 const doseKey = (d: RoundDose) => `${d.medication_id}|${d.scheduled_for}`;
-const DONE_WORDS: Record<string, string> = { given: 'Given', refused: 'Refused', not_in_stock: 'Not in stock', omitted: 'Omitted', held: 'Held', self_administered: 'Self-administered', recorded: 'Recorded' };
+const DONE_WORDS: Record<string, string> = { given: 'Given', refused: 'Refused', not_in_stock: 'Not in stock', omitted: 'Skipped', held: 'Paused on advice', self_administered: 'Took it themselves', recorded: 'Recorded' };
 
 /**
  * The medicine round: every dose due from two hours ago to two hours ahead,
@@ -138,7 +139,7 @@ export function MedicineRoundPage() {
             Doses due from two hours ago to two hours ahead{onlyName ? ` for ${onlyName}` : ', for everyone you give medicines to'}, by room.
           </p>
         </div>
-        {only ? <Link to="/app/round" className="text-sm text-primary hover:underline">Show everyone</Link> : null}
+        {only ? <Link to="/app/round" className={`${CONTACT_LINK} text-sm`}>Show everyone</Link> : null}
       </div>
 
       {isLoading ? (
@@ -149,7 +150,7 @@ export function MedicineRoundPage() {
         <div className="card text-center py-10 space-y-2">
           <p className="text-sm text-ink">No doses due in the next two hours.</p>
           <p className="text-xs text-muted">As-needed doses are recorded from each person&apos;s Medication record.</p>
-          <Link to="/app" className="text-sm text-primary hover:underline">Back to the Homeboard</Link>
+          <Link to="/app" className={`${CONTACT_LINK} text-sm`}>Back to the Homeboard</Link>
         </div>
       ) : (
         groups.map((list) => {
@@ -159,7 +160,7 @@ export function MedicineRoundPage() {
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-3">
                 <h2 className="text-sm font-semibold text-ink">
                   {p.room_number ? `Room ${p.room_number} · ` : ''}
-                  <Link to={`/app/${p.profile_id}/mar`} className="text-primary hover:underline">{p.profile_name}</Link>
+                  <Link to={`/app/${p.profile_id}/mar`} className={`${CONTACT_LINK}`}>{p.profile_name}</Link>
                 </h2>
                 {p.allergies.length ? (
                   <span className="flex flex-wrap items-center gap-1">

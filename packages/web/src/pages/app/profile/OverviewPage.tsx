@@ -74,7 +74,7 @@ function loadCollapsed(storageKey: string): Set<string> {
 }
 
 export function OverviewPage() {
-  const { profile, isOwner, canEdit, access, situation } = useProfile();
+  const { profile, isOwner, canEdit, access, situation, voice } = useProfile();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const accountId = useAuthStore((s) => s.account?.id) ?? 'anon';
@@ -138,7 +138,7 @@ export function OverviewPage() {
     setDeleteError('');
   };
 
-  const cardContext = { profileId: profile.id, profile, access, isOwner, canEdit, careName, situation };
+  const cardContext = { profileId: profile.id, profile, access, isOwner, canEdit, careName, voice, situation };
   // Only the cards this person actually has count towards folding everything
   // away, or the control points the wrong way on a pet and for a visitor.
   const presentKeys = PROFILE_CARDS.filter((c) => c.shows?.(cardContext) ?? true).map((c) => c.key);

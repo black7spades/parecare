@@ -5,10 +5,11 @@ import { api } from '../../api/client';
 import { Input, Textarea } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { PET_SPECIES, petRelationshipFor, type CareProfile, type ProfileKind } from '../../lib/care';
-import { matchingLifeStages, type JourneyTemplateSummary, type LifeStage } from '../../lib/journeys';
+import { ageInYears, matchingLifeStages, type JourneyTemplateSummary, type LifeStage } from '../../lib/journeys';
 import { RelationshipSelect } from '../../components/RelationshipSelect';
 import { ProfileOnboarding } from './ProfileOnboarding';
 import { useAuthStore } from '../../stores/auth';
+import { CONTACT_LINK } from '../../components/ContactStrip';
 
 /** Pet journeys are marked by a `pet-` slug so each side can tell them apart. */
 const isPetJourney = (slug: string | null) => !!slug && slug.startsWith('pet-');
@@ -31,10 +32,10 @@ export function NewCareProfile() {
         <div className="card text-center py-10">
           <p className="text-sm text-ink font-medium mb-2">Your account cannot create care profiles.</p>
           <p className="text-sm text-muted mb-4">
-            You joined PareCare to help with someone else's care. If you also need to manage care profiles of your
-            own, ask an administrator to enable it for your account.
+            You joined PareCare to help with someone else's care, so adding people of your own is not switched on
+            for this account. Whoever invited you can ask for it to be switched on.
           </p>
-          <Link to="/app" className="text-primary text-sm hover:underline">
+          <Link to="/app" className={`${CONTACT_LINK} text-sm`}>
             Back to homeboard
           </Link>
         </div>
@@ -202,14 +203,12 @@ function PersonForm({ onBack }: { onBack: () => void }) {
         <JourneyPicker dateOfBirth={dateOfBirth} dueDate={dueDate} selected={journeyIds} onChange={setJourneyIds} />
         <Input label="Pronouns" value={pronouns} onChange={(e) => setPronouns(e.target.value)} placeholder="e.g. she/her" />
         <Input label="Primary language" value={language} onChange={(e) => setLanguage(e.target.value)} />
-        <p className="text-xs text-muted">Next we will set up who cares for them, plus conditions, allergies and contacts.</p>
+        <p className="text-xs text-muted">Next, a few short steps: who cares for them, conditions, allergies, medicines, their GP and pharmacy, and who to call. Every step can be skipped.</p>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
-          <Link to="/app">
-            <Button type="button" variant="ghost">
-              Cancel
-            </Button>
-          </Link>
+          <Button type="button" variant="ghost" onClick={() => navigate('/app')}>
+            Cancel
+          </Button>
           <Button type="submit" loading={saving}>
             Create profile
           </Button>
@@ -393,11 +392,9 @@ function PetForm({ onBack }: { onBack: () => void }) {
         <p className="text-xs text-muted">Next we will set up who cares for them, plus conditions, allergies and their vet.</p>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         <div className="flex justify-end gap-2">
-          <Link to="/app">
-            <Button type="button" variant="ghost">
-              Cancel
-            </Button>
-          </Link>
+          <Button type="button" variant="ghost" onClick={() => navigate('/app')}>
+            Cancel
+          </Button>
           <Button type="submit" loading={saving}>
             Create profile
           </Button>
@@ -424,6 +421,7 @@ function JourneyPicker({
   onChange: (ids: string[]) => void;
 }) {
   const [showAll, setShowAll] = useState(false);
+  const [search, setSearch] = useState('');
   const { data: stagesData } = useQuery({
     queryKey: ['life-stages'],
     queryFn: () => api.get<{ stages: LifeStage[] }>(`/life-stages`),
@@ -444,8 +442,19 @@ function JourneyPicker({
     [stages, dateOfBirth, dueDate]
   );
   const matchedIds = new Set(matched.map((s) => s.id));
-  const suggested = templates.filter((t) => t.life_stage_ids.some((id) => matchedIds.has(id)));
-  const shown = showAll || suggested.length === 0 ? templates : suggested;
+  // Up to five that fit their age: the everyday journey for their stage of
+  // life first, then the rest that fit. Never the ageing journey under 65.
+  const age = dateOfBirth ? ageInYears(dateOfBirth) : null;
+  const KIND_ORDER: Record<string, number> = { life_stage: 0, event: 1, condition: 2, end_of_life: 3 };
+  const suggested = templates
+    .filter((t) => t.life_stage_ids.some((id) => matchedIds.has(id)))
+    .filter((t) => !(t.slug === 'more-help-at-home' || t.slug === 'life-in-residential-care') || (age !== null && age >= 65))
+    .filter((t) => t.kind !== 'end_of_life')
+    .sort((a, b) => (KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9))
+    .slice(0, 5);
+  const q = search.trim().toLowerCase();
+  const all = q ? templates.filter((t) => `${t.name} ${t.description ?? ''}`.toLowerCase().includes(q)) : templates;
+  const shown = showAll ? all : [...suggested, ...templates.filter((t) => selected.includes(t.id) && !suggested.includes(t))];
 
   const toggle = (id: string) =>
     onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
@@ -454,12 +463,22 @@ function JourneyPicker({
     <div>
       <p className="block text-sm font-medium text-ink mb-1">Care journeys to start with</p>
       <p className="text-xs text-muted mb-2">
-        {matched.length > 0
-          ? `Suggested for ${matched.map((s) => s.name.toLowerCase()).join(' and ')}. `
-          : 'Enter a date of birth or due date to see suggestions. '}
+        {matched.length > 0 && suggested.length > 0
+          ? `A few that fit ${matched.map((s) => s.name.toLowerCase()).join(' and ')}. `
+          : 'Enter a date of birth or a due date to see the few that fit. '}
         Optional, and journeys can be added or changed at any time.
       </p>
-      <div className="max-h-44 overflow-y-auto rounded-md border border-border divide-y divide-border">
+      {showAll ? (
+        <Input
+          aria-label="Search journeys"
+          placeholder="Search journeys, e.g. school, surgery, memory"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="mb-2"
+        />
+      ) : null}
+      {shown.length > 0 ? (
+      <div className="max-h-60 overflow-y-auto rounded-md border border-border divide-y divide-border">
         {shown.map((t) => (
           <label key={t.id} className="flex items-start gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-surface">
             <input
@@ -474,11 +493,13 @@ function JourneyPicker({
             </span>
           </label>
         ))}
-        {shown.length === 0 ? <p className="px-3 py-2 text-sm text-muted">The journey library is empty.</p> : null}
       </div>
-      {suggested.length > 0 && suggested.length < templates.length ? (
-        <Button size="xs" variant="ghost" className="mt-1" onClick={() => setShowAll((v) => !v)}>
-          {showAll ? 'Show suggestions only' : `Show the whole library of ${templates.length}`}
+      ) : showAll ? (
+        <p className="text-sm text-muted">{templates.length === 0 ? 'There are no journeys to choose from yet.' : 'No journeys match that search.'}</p>
+      ) : null}
+      {templates.length > 0 ? (
+        <Button size="xs" variant="ghost" className="mt-1" onClick={() => { setShowAll((v) => !v); setSearch(''); }}>
+          {showAll ? 'Show the few that fit' : 'See all journeys'}
         </Button>
       ) : null}
     </div>

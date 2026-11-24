@@ -6,7 +6,7 @@ import { api } from '../../../api/client';
 import { Button } from '../../ui/Button';
 import { Input, Textarea } from '../../ui/Input';
 import { Modal } from '../../ui/Modal';
-import { ContactStrip } from '../../ContactStrip';
+import { ContactStrip, CONTACT_LINK } from '../../ContactStrip';
 import { LinkedText } from '../../LinkedText';
 import { PhoneLink } from './links';
 import { browserTimeZone } from '../../../lib/datetime';
@@ -129,7 +129,7 @@ export function ShiftCard({ profileId, canEdit, careName }: CardProps) {
             {s.care_needs.diet.length + s.care_needs.mobility.length + s.care_needs.communication.length === 0 ? (
               <p className="text-muted">
                 No care needs written down yet.{' '}
-                <Link to={`/app/${profileId}/care-needs`} className="text-primary hover:underline">Add care needs</Link>
+                <Link to={`/app/${profileId}/care-needs`} className={`${CONTACT_LINK}`}>Add care needs</Link>
               </p>
             ) : (
               <div className="space-y-0.5">
@@ -160,7 +160,7 @@ export function ShiftCard({ profileId, canEdit, careName }: CardProps) {
               </>
             ) : null}
             {s.changes_since > 0 ? (
-              <a href="#card-recent" className="text-sm text-primary hover:underline">
+              <a href="#card-recent" className={`${CONTACT_LINK} text-sm`}>
                 {s.changes_since} {s.changes_since === 1 ? 'change' : 'changes'} since your last visit
               </a>
             ) : (

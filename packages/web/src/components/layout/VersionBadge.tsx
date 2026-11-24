@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { versionLabel } from '../../lib/version';
 import { useUpdates, hasUnseenUpdate } from '../../stores/updates';
 import { useAuthStore } from '../../stores/auth';
+import { CONTACT_LINK } from '../ContactStrip';
 
 /**
  * The sidebar footer version. For whoever runs the system it opens the release
@@ -32,7 +33,7 @@ export function VersionBadge() {
       {unseen ? (
         <Link
           to="/app/updates"
-          className="inline-flex items-center gap-1.5 text-primary hover:underline"
+          className={`${CONTACT_LINK} inline-flex items-center gap-1.5`}
           title="See what has changed"
         >
           <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />

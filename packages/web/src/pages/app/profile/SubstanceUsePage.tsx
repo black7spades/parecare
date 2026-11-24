@@ -59,7 +59,7 @@ const FILTERS: DataFilter<SubstanceUse>[] = [
  * sits in a lifecycle from using now to recovery. One row per substance.
  */
 export function SubstanceUsePage() {
-  const { profile, careName, canEdit } = useProfile();
+  const { profile, canEdit, voice } = useProfile();
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<SubstanceUse | null>(null);
@@ -101,7 +101,7 @@ export function SubstanceUsePage() {
             <h2 className="text-base font-semibold text-ink">Substance use</h2>
             <PagePurpose kind="entry" />
           </div>
-          <EditableSubheader copyKey="profile.substance-use.subheader" vars={{ name: careName }} />
+          <EditableSubheader copyKey="profile.substance-use.subheader" voice={voice} />
         </div>
         {canEdit ? (
           <Button size="sm" onClick={() => setAdding(true)}>
@@ -137,7 +137,7 @@ export function SubstanceUsePage() {
         <div className="card text-center py-10">
           <p className="text-sm text-muted">
             {records.length === 0
-              ? `No substance use recorded for ${careName} yet.`
+              ? `No substance use recorded for ${voice.object} yet.`
               : 'No substances match your search.'}
           </p>
         </div>

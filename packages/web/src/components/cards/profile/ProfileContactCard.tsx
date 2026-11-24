@@ -9,6 +9,7 @@ import { Button } from '../../ui/Button';
 import { EditProfileModal } from '../../../pages/app/profile/EditProfileModal';
 import { CardEmpty, CardShell, CardTrouble, CardWaiting } from '../CardShell';
 import type { CardProps } from '../types';
+import { CONTACT_LINK } from '../../ContactStrip';
 
 /**
  * How to reach somebody, where they live, and for a pet the details a vet
@@ -19,7 +20,7 @@ import type { CardProps } from '../types';
  * card that reaches up into the page for its data is a card that cannot be
  * moved somewhere else later.
  */
-export function ProfileContactCard({ profileId, canEdit, careName }: CardProps) {
+export function ProfileContactCard({ profileId, canEdit, voice }: CardProps) {
   const [editing, setEditing] = useState(false);
   const { data, isPending, isError } = useQuery({
     queryKey: keys.profile(profileId),
@@ -35,7 +36,7 @@ export function ProfileContactCard({ profileId, canEdit, careName }: CardProps) 
   // what it is for and offers the one thing to do about it.
   const nothingYet = (
     <CardEmpty
-      says={`Nothing here yet. This is where a phone number, an email address and where ${careName} lives are kept, so anybody helping knows how to get in touch.`}
+      says={`Nothing here yet. This is where a phone number, an email address and where ${voice.subject} ${voice.isSelf ? 'live' : 'lives'} are kept, so anybody helping knows how to get in touch.`}
     >
       {canEdit ? (
         <Button variant="primary" size="sm" onClick={() => setEditing(true)}>
@@ -138,7 +139,7 @@ function ProfileContact({ profile, whenEmpty }: { profile: CareProfile; whenEmpt
     rows.push({
       label: 'Primary carer',
       value: (
-        <Link to={`/app/${c.id}`} className="text-primary hover:underline">
+        <Link to={`/app/${c.id}`} className={`${CONTACT_LINK}`}>
           {c.preferred_name || c.full_name}
         </Link>
       ),
@@ -187,7 +188,7 @@ function PetDetails({
     rows.push({
       label: 'Owner',
       value: (
-        <Link to={`/app/${owner.id}`} className="text-primary hover:underline">
+        <Link to={`/app/${owner.id}`} className={`${CONTACT_LINK}`}>
           {owner.preferred_name || owner.full_name}
         </Link>
       ),

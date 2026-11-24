@@ -26,6 +26,7 @@ import { decryptSecret } from '../services/secretsCrypto';
 import { assetColumns, assetDepreciation, assetOut, assetSchema, assetSupplierColumns as assetSupplierColumnsWith, ownershipFrom, serializeAsset, syncEquipmentTasks } from '../services/equipment';
 import { exportRecords, importRecords, type PortDescriptor, type PortFormat } from '../services/dataPort';
 import { phaseFrom, phaseLabel } from '../lib/phases';
+import { enrolDefaultJourney } from '../services/journeys';
 import type { AccountRole, CareProfile, Provider, ProfileKind } from '../types';
 
 export const directoryRouter = Router();
@@ -1661,8 +1662,14 @@ mountPort('people', personPort, {
   // Each GP named in the file is found in Contacts or filed there, with
   // their number and practice, and linked to the person.
   afterImport: async (ids, records) => {
+    // Each person starts the everyday journey that fits their age, the same
+    // as one added by hand with no journey chosen.
+    const created = (await db('care_profiles').whereIn('id', ids).select('id', 'kind', 'date_of_birth', 'due_date', 'current_phase', 'account_id')) as Array<{
+      id: string; kind: string; date_of_birth: string | null; due_date: string | null; current_phase: string | null; account_id: string;
+    }>;
+    for (const p of created) await db.transaction((trx) => enrolDefaultJourney(trx, p, p.account_id));
     for (let i = 0; i < ids.length; i++) {
-      const gp = (records?.[i] as { _gp?: { name: string; phone: string | null; practice: string | null } | null } | undefined)?._gp;
+      const gp =(records?.[i] as { _gp?: { name: string; phone: string | null; practice: string | null } | null } | undefined)?._gp;
       if (!gp?.name) continue;
       const filed = await ensureProfessional(db, { profileId: ids[i]!, name: gp.name, providerType: 'gp', phone: gp.phone });
       if (!filed || !gp.practice) continue;

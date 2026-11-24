@@ -16,7 +16,7 @@ import { SENTIMENTS, COMPLETION_REASONS, sentimentEmoji, type CareProfile, type 
 import { RecordPanel, type RecordAction } from '../../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
-import { ContactStrip } from '../../../components/ContactStrip';
+import { ContactStrip, CONTACT_LINK } from '../../../components/ContactStrip';
 import { LinkedText } from '../../../components/LinkedText';
 import { REPEAT_CHOICES, repeatLabel, repeatRank } from '../../../lib/repeat';
 import { bookingHref } from '../../../lib/booking';
@@ -540,7 +540,7 @@ export function TasksPage() {
                     {t.appointment_id ? (
                       <div className="text-xs text-muted mt-0.5">
                         From{' '}
-                        <Link to={`/app/${profile.id}/appointments?record=${t.appointment_id}`} className="text-primary hover:underline">
+                        <Link to={`/app/${profile.id}/appointments?record=${t.appointment_id}`} className={`${CONTACT_LINK}`}>
                           {t.appointment_title ?? 'an appointment'}
                           {t.appointment_starts_at ? ` on ${format(new Date(t.appointment_starts_at), 'd MMM')}` : ''}
                         </Link>
@@ -560,7 +560,7 @@ export function TasksPage() {
                   <td className="px-3 py-3 text-ink min-w-[7rem] hidden lg:table-cell">{t.provider?.name ?? ''}</td>
                   <td className="px-3 py-3 whitespace-nowrap hidden lg:table-cell">
                     {t.provider?.phone ? (
-                      <a href={`tel:${t.provider.phone.replace(/[^\d+]/g, '')}`} className="text-primary hover:underline" aria-label={`Call ${t.provider.name} on ${t.provider.phone}`}>
+                      <a href={`tel:${t.provider.phone.replace(/[^\d+]/g, '')}`} className={`${CONTACT_LINK}`} aria-label={`Call ${t.provider.name} on ${t.provider.phone}`}>
                         {t.provider.phone}
                       </a>
                     ) : null}
@@ -639,6 +639,7 @@ export function TasksPage() {
             setError('');
             if (missing.title) document.getElementById('task-title')?.focus();
             else if (missing.dueDate) document.getElementById('task-date')?.focus();
+            else if (missing.who) document.getElementById('task-who')?.focus();
             else createMutation.mutate();
           }}
         >
@@ -715,13 +716,13 @@ export function TasksPage() {
               },
               {
                 label: 'What it is for',
-                value: t.condition ? <Link to={`/app/${profile.id}/conditions?record=${t.condition.id}`} className="text-primary hover:underline">{t.condition.name}</Link> : null,
+                value: t.condition ? <Link to={`/app/${profile.id}/conditions?record=${t.condition.id}`} className={`${CONTACT_LINK}`}>{t.condition.name}</Link> : null,
               },
               { label: 'Goal', value: t.desired_outcome },
               {
                 label: 'Booked for',
                 value: t.booked_appointment ? (
-                  <Link to={`/app/${profile.id}/appointments?record=${t.booked_appointment.id}`} className="text-primary hover:underline">
+                  <Link to={`/app/${profile.id}/appointments?record=${t.booked_appointment.id}`} className={`${CONTACT_LINK}`}>
                     {format(new Date(t.booked_appointment.starts_at), 'EEE d MMM yyyy, HH:mm')}
                   </Link>
                 ) : null,
