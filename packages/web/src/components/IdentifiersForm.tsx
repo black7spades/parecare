@@ -41,6 +41,7 @@ export function IdentifiersForm({
   canEdit,
   onSaved,
   onDraft,
+  initialDraft,
 }: {
   profileId: string;
   canEdit: boolean;
@@ -51,6 +52,8 @@ export function IdentifiersForm({
    * Save of its own.
    */
   onDraft?: (changed: Partial<Record<IdentifierField, string>>) => void;
+  /** What was typed before this form was last shown, laid over the saved numbers. */
+  initialDraft?: Partial<Record<IdentifierField, string>>;
 }) {
   const queryClient = useQueryClient();
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
@@ -66,7 +69,7 @@ export function IdentifiersForm({
 
   useEffect(() => {
     if (data?.identifiers && !ready) {
-      setDraft(fromSaved(data.identifiers));
+      setDraft({ ...fromSaved(data.identifiers), ...(initialDraft ?? {}) });
       setReady(true);
     }
   }, [data, ready]);

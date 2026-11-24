@@ -180,7 +180,8 @@ careCircleRouter.post('/people', requireAuth, requireProfileOwner('add someone t
     res.status(400).json({ error: 'Give them a name to add them. Check the email looks right if you gave one.', code: 'VALIDATION_ERROR' });
     return;
   }
-  const member = await addCirclePerson(String(req.params['id']), parsed.data);
+  // First setup says so, so a retry adds nobody twice.
+  const member = await addCirclePerson(String(req.params['id']), parsed.data, { sameNameIsSamePerson: req.body?.setup === true });
   res.status(201).json({ member: { ...member, status: 'added' } });
 });
 

@@ -793,7 +793,7 @@ export function AppointmentsPage() {
 
       {outcomeAppointment ? (
         <OutcomeModal
-          key={outcomeAppointment.id}
+          key={`outcome-${outcomeAppointment.id}`}
           profileId={profile.id}
           appointment={outcomeAppointment}
           canEdit={canEdit}

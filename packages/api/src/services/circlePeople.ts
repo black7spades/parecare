@@ -28,10 +28,11 @@ export const isAddedPerson = (m: { account_id: string | null; invitation_id: str
 
 const blankToNull = (v: string | null | undefined) => (v && v.trim() ? v.trim() : null);
 
-export async function addCirclePerson(profileId: string, input: CirclePersonInput) {
-  // The same name added again, by a retried setup or a second tap, is the
-  // same person: fill in what they did not have, and add nobody twice.
-  const same = (await db('care_circle_members')
+export async function addCirclePerson(profileId: string, input: CirclePersonInput, opts: { sameNameIsSamePerson?: boolean } = {}) {
+  // First setup tried again names the same people again: the same name
+  // added by name is then the same person, filled in, never added twice.
+  // Anywhere else two people may share a name, so each is added.
+  const same = !opts.sameNameIsSamePerson ? undefined : (await db('care_circle_members')
     .where({ care_profile_id: profileId })
     .whereNull('account_id')
     .whereNull('invitation_id')

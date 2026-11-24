@@ -416,7 +416,7 @@ function AskLine({ profileId, question }: { profileId: string; question: OpenQue
           {visitLabel(question.ask_at)}
         </Link>
       ) : null}
-      {worked ? '. Worked out from the question.' : ''}
+      {question.inferred_fields?.includes('provider_id') ? '. Worked out from the question.' : worked ? '. Worked out from who to ask.' : ''}
     </p>
   );
 }

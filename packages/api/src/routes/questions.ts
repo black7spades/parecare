@@ -63,6 +63,14 @@ questionsRouter.patch('/:questionId', requireAuth, async (req, res) => {
   const profileId = String(req.params['id']);
   const questionId = String(req.params['questionId']);
   const { status, resolution, resolved_at, ...input } = parsed.data;
+  // New words go through the same tone guard as a new question.
+  if (input.title !== undefined || input.body !== undefined) {
+    const verdict = await guardMessageTone(profileId, [input.title, input.body].filter(Boolean).join('\n'));
+    if (!verdict.ok) {
+      res.status(422).json(toneBlockBody(verdict));
+      return;
+    }
+  }
   try {
     const found = await db.transaction(async (trx) => {
       const exists = await trx('open_questions').where({ id: questionId, care_profile_id: profileId }).first('id');

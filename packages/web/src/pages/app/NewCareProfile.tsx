@@ -474,6 +474,8 @@ function JourneyPicker({
           placeholder="Search journeys, e.g. school, surgery, memory"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          // Enter searches; it never sends the form.
+          onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
           className="mb-2"
         />
       ) : null}
@@ -498,7 +500,7 @@ function JourneyPicker({
         <p className="text-sm text-muted">{templates.length === 0 ? 'There are no journeys to choose from yet.' : 'No journeys match that search.'}</p>
       ) : null}
       {templates.length > 0 ? (
-        <Button size="xs" variant="ghost" className="mt-1" onClick={() => { setShowAll((v) => !v); setSearch(''); }}>
+        <Button type="button" size="xs" variant="ghost" className="mt-1" onClick={() => { setShowAll((v) => !v); setSearch(''); }}>
           {showAll ? 'Show the few that fit' : 'See all journeys'}
         </Button>
       ) : null}

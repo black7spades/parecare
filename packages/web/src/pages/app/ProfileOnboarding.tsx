@@ -145,6 +145,8 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
   const [saving, setSaving] = useState(false);
   // What has saved, so trying again carries on from where it stopped.
   const done = useRef(new Set<string>());
+  // The key for a medicine still in the boxes at Finish, the same on every try.
+  const typedMedKey = useRef(newKey());
 
   // Suggest a residential journey once a facility is chosen.
   const { data: templatesData } = useQuery({
@@ -251,7 +253,7 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
             dose_unit: m.measure || null,
             schedule_times: m.asNeeded ? [] : m.times,
             as_needed: m.asNeeded,
-            client_key: m.key === 'typed-med' ? `setup-${profile.id}-${m.name.toLowerCase()}` : m.key,
+            client_key: m.key === 'typed-med' ? typedMedKey.current : m.key,
           }), pending);
       }
       // Contacts are found by name before anyone is filed.
@@ -295,6 +297,7 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
       // call, each added to the circle once by name and pointed at from there.
       const circlePerson = async (name: string, relationship: string, phone: string, extra: Record<string, unknown> = {}) => {
         const added = await api.post<{ member: { id: string } }>(`/care-profiles/${profile.id}/circle/people`, {
+          setup: true,
           display_name: name,
           role: /daughter|son|mother|father|sister|brother|partner|wife|husband|grand|niece|nephew|aunt|uncle|cousin/i.test(relationship) ? 'family' : 'other',
           relationship: relationship || null,
@@ -501,7 +504,7 @@ export function ProfileOnboarding({ profile, onDone }: { profile: CareProfile; o
             <p className="text-sm text-muted">
               The numbers on {their} cards, each in its own box, so they are on the emergency sheet when someone needs them. Fill in the ones to hand and skip the rest.
             </p>
-            <IdentifiersForm profileId={profile.id} canEdit onDraft={setIds} />
+            <IdentifiersForm profileId={profile.id} canEdit onDraft={setIds} initialDraft={ids} />
           </div>
         ) : null}
 

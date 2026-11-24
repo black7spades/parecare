@@ -200,6 +200,33 @@ export async function questionsOut(conn: Conn, profileId: string, where?: (q: Kn
 }
 
 /**
+ * Questions for a contact go on the next visit with them. Run whenever a
+ * visit is booked, moved or cancelled: each open question for this contact
+ * with no visit, or with a visit that was only worked out, moves to the next
+ * one, so it is tied to that visit and is still there to answer afterwards.
+ */
+export async function placeQuestionsFor(conn: Conn, profileId: string, providerId: string | null | undefined): Promise<void> {
+  if (!providerId) return;
+  const visit = await nextVisitWith(conn, profileId, providerId);
+  const rows = (await conn('open_questions')
+    .where({ care_profile_id: profileId, provider_id: providerId, status: 'open' })
+    .where((w) => void w.whereNull('appointment_id').orWhereRaw("'appointment_id' = ANY(inferred_fields)"))
+    .select('id', 'appointment_id', 'inferred_fields')) as Array<{ id: string; appointment_id: string | null; inferred_fields: string[] | null }>;
+  for (const r of rows) {
+    // A worked-out visit that has happened keeps its questions: they were asked there.
+    if (r.appointment_id && r.appointment_id !== visit?.id) {
+      const was = (await conn('appointments').where({ id: r.appointment_id }).first('status', 'starts_at')) as { status: string; starts_at: Date | null } | undefined;
+      if (was && was.status !== 'cancelled' && was.starts_at && new Date(was.starts_at).getTime() < Date.now()) continue;
+    }
+    const inferred = new Set(r.inferred_fields ?? []);
+    if (visit) inferred.add('appointment_id');
+    else inferred.delete('appointment_id');
+    if ((visit?.id ?? null) === r.appointment_id) continue;
+    await conn('open_questions').where({ id: r.id }).update({ appointment_id: visit?.id ?? null, inferred_fields: [...inferred] });
+  }
+}
+
+/**
  * The questions to ask at each appointment: those asked for that visit, and,
  * at the next visit with a contact, the open ones for that contact with no
  * visit chosen yet.
@@ -212,15 +239,12 @@ export async function questionsForAppointments(
   const out = new Map<string, QuestionOut[]>();
   if (appointments.length === 0) return out;
   const ids = appointments.map((a) => a.id);
-  const now = Date.now() - 2 * 3600 * 1000;
-  // The next visit with each contact, among these.
-  const nextByProvider = new Map<string, { id: string; at: number }>();
-  for (const a of appointments) {
-    if (!a.provider_id || a.status !== 'scheduled' || !a.starts_at) continue;
-    const at = new Date(a.starts_at).getTime();
-    if (at < now) continue;
-    const seen = nextByProvider.get(a.provider_id);
-    if (!seen || at < seen.at) nextByProvider.set(a.provider_id, { id: a.id, at });
+  // The next visit with each contact these are with, across the whole
+  // profile, so one appointment on its own is never taken for the next.
+  const nextByProvider = new Map<string, { id: string }>();
+  for (const providerId of new Set(appointments.map((a) => a.provider_id).filter((p): p is string => !!p))) {
+    const visit = await nextVisitWith(conn, profileId, providerId);
+    if (visit) nextByProvider.set(providerId, { id: visit.id });
   }
   const providerIds = [...nextByProvider.keys()];
   const rows = await questionsOut(conn, profileId, (q) => {

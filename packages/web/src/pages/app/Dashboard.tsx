@@ -15,7 +15,7 @@ import { useAssistantStore } from '../../stores/assistant';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { Avatar } from '../../components/ui/Avatar';
-import { DOSE_ENTITY, POA_TYPES, PET_SPECIES, conditionStatusLabel, doseActivityWords, isSelfRelationship, type DeathChange } from '../../lib/care';
+import { DOSE_ENTITY, POA_TYPES, PET_SPECIES, activityWords, conditionStatusLabel, doseActivityWords, isSelfRelationship, type DeathChange } from '../../lib/care';
 
 /** One sentence for a date of death recorded or cleared on several people at once. */
 function deathsSentence(deaths: DeathChange[]): string {
@@ -913,7 +913,7 @@ function ProfileCard({
             <span className="text-muted">
               {p.last_activity.entity_type === DOSE_ENTITY
                 ? `${p.last_activity.actor_name ?? 'Someone'} ${doseActivityWords(p.last_activity.action, p.last_activity.summary)}`
-                : p.last_activity.summary || `${p.last_activity.action} ${p.last_activity.entity_type}`}
+                : `${p.last_activity.actor_name ?? 'Someone'} ${activityWords(p.last_activity.action, p.last_activity.entity_type)}${p.last_activity.summary ? `: ${p.last_activity.summary}` : ''}`}
               {' · '}
               {formatDistanceToNow(new Date(p.last_activity.created_at), { addSuffix: true })}
             </span>
@@ -1114,7 +1114,7 @@ function ProfileTable({
                   <td data-field="kin_phone" className="px-3 py-2 whitespace-nowrap">{p.next_of_kin?.phone ? tel(p.next_of_kin.phone, p.next_of_kin.name) : ''}</td>
                   <td data-field="updated" className="px-3 py-2 text-muted">
                     {p.last_activity
-                      ? `${p.last_activity.summary || `${p.last_activity.action} ${p.last_activity.entity_type}`} · ${formatDistanceToNow(new Date(p.last_activity.created_at), { addSuffix: true })}`
+                      ? `${p.last_activity.summary || activityWords(p.last_activity.action, p.last_activity.entity_type)} · ${formatDistanceToNow(new Date(p.last_activity.created_at), { addSuffix: true })}`
                       : ''}
                   </td>
                 </tr>

@@ -2310,7 +2310,7 @@ async function executeOne(
       if (action.ask?.trim()) {
         const guess = await inferTaskIntent(db, profileId, (await accountIdForProfile(profileId))!, { title: action.ask.trim() });
         if (guess.providerId) providerId = guess.providerId;
-        else if (/[A-Z]/.test(action.ask) && !/(the|my|her|his|their)/i.test(action.ask)) {
+        else if (/[A-Z]/.test(action.ask) && !/\b(the|my|her|his|their)\b/i.test(action.ask)) {
           const who = await namedContact(profileId, action.ask, null, 'other');
           providerId = who.id;
           askNote = who.note;
@@ -2340,9 +2340,11 @@ async function executeOne(
       return `Raised the question "${action.title}".${where}${askNote}`;
     }
     case 'answer_question': {
+      // The open one first, newest first, so a question raised again is the one answered.
       const q = (await db('open_questions')
         .where({ care_profile_id: profileId })
         .whereRaw('lower(title) = lower(?)', [action.title.trim()])
+        .orderByRaw("(status = 'open') DESC, created_at DESC")
         .first('id', 'title')) ?? (await db('open_questions')
         .where({ care_profile_id: profileId, status: 'open' })
         .whereRaw('title ilike ?', [`%${action.title.trim()}%`])

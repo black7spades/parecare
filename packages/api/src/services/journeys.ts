@@ -255,8 +255,12 @@ export async function changeCarePhase(
   let journey = await findLegacyJourney(profile.id, trx);
   if (!journey) {
     const ageing = await trx('journey_templates').where({ slug: 'more-help-at-home' }).first();
-    if (!ageing) {
-      // No ageing journey on this server: the phase is still recorded.
+    // The ageing journey is only for someone 65 or over, or whose age is not
+    // known; anyone younger has the phase recorded and no ageing journey.
+    const born = (await trx('care_profiles').where({ id: profile.id }).first('date_of_birth', 'kind')) as { date_of_birth: string | Date | null; kind: string } | undefined;
+    const age = ageFromBirth(born?.date_of_birth ?? null);
+    if (!ageing || born?.kind === 'pet' || (age !== null && age < 65)) {
+      // No ageing journey here, or it does not fit them: the phase is still recorded.
       await trx('care_profiles').where({ id: profile.id }).update({ current_phase: opts.phase, updated_at: trx.fn.now() });
       return { ok: true, changed: true };
     }

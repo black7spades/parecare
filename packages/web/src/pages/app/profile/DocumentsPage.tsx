@@ -14,7 +14,7 @@ import { usePareOn } from '../../../lib/aiStatus';
 import { CIRCLE_ROLES, EXPIRING_CATEGORY_KEYS, circleRoleLabel, type CareDocument, type CircleMember } from '../../../lib/care';
 import { categoryNameOf, documentCategoriesKey, useDocumentCategories } from '../../../lib/documentCategories';
 import { SortableTh } from '../../../components/data/SortableTh';
-import { ContactPicker, changedContactFieldsAs, contactFieldsAs, emptyContact, pickedFrom, type PickedContact } from '../../../components/ContactPicker';
+import { ContactPicker, contactProblem, changedContactFieldsAs, contactFieldsAs, emptyContact, pickedFrom, type PickedContact } from '../../../components/ContactPicker';
 import { CONTACT_LINK, ContactStrip } from '../../../components/ContactStrip';
 import { formatDateOnly } from '../../../lib/datetime';
 import { DocumentCategoryField } from '../../../components/DocumentCategoryField';
@@ -1061,7 +1061,9 @@ export function UploadDocumentModal({
     !label.trim() ? 'a name' : null,
     restricted && roles.length === 0 ? 'who can see it' : null,
   ].filter(Boolean) as string[];
-  const canSave = missing.length === 0;
+  // A part of a name never files a contact on its own.
+  const contactIssue = contactProblem(dates.from, 'who it is from') ?? contactProblem(dates.to, 'who it is to');
+  const canSave = missing.length === 0 && !contactIssue;
 
   return (
     <Modal open onClose={onClose} title="Upload a document">
@@ -1072,6 +1074,7 @@ export function UploadDocumentModal({
           setTried(true);
           if (canSave) mutation.mutate();
           else if (!file) document.getElementById('upload-doc-file')?.focus();
+          else if (contactIssue) document.getElementById(contactProblem(dates.from) ? 'upload-doc-from' : 'upload-doc-to')?.focus();
         }}
       >
         <div>
@@ -1124,7 +1127,7 @@ export function UploadDocumentModal({
         </DocumentDetailsFields>
         {uploadError ? <p className="text-sm text-red-600">{uploadError}</p> : null}
         {tried && !canSave ? (
-          <p className="text-sm text-red-600" role="alert">This upload needs {missing.join(' and ')}.</p>
+          <p className="text-sm text-red-600" role="alert">{[missing.length ? `This upload needs ${missing.join(' and ')}.` : '', contactIssue ?? ''].filter(Boolean).join(' ')}</p>
         ) : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
@@ -1158,7 +1161,8 @@ function EditDocumentModal({ profileId, doc, members, onClose, onSaved }: { prof
 
   // Save always answers: what is missing is named beside it.
   const missing = [!editLabel.trim() ? 'a name' : null, restricted && roles.length === 0 ? 'who can see it' : null].filter(Boolean) as string[];
-  const canSave = missing.length === 0;
+  const contactIssue = contactProblem(dates.from, 'who it is from') ?? contactProblem(dates.to, 'who it is to');
+  const canSave = missing.length === 0 && !contactIssue;
 
   return (
     <Modal open onClose={onClose} title="Edit document">
@@ -1179,7 +1183,7 @@ function EditDocumentModal({ profileId, doc, members, onClose, onSaved }: { prof
           <DocumentDatesFields idPrefix="edit-doc" profileId={profileId} category={editCategory} value={dates} onChange={setDates} note={doc.validity_note} />
         </DocumentDetailsFields>
         {editError ? <p className="text-sm text-red-600">{editError}</p> : null}
-        {tried && !canSave ? <p className="text-sm text-red-600" role="alert">This document needs {missing.join(' and ')}.</p> : null}
+        {tried && !canSave ? <p className="text-sm text-red-600" role="alert">{[missing.length ? `This document needs ${missing.join(' and ')}.` : '', contactIssue ?? ''].filter(Boolean).join(' ')}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={mutation.isPending}>Save</Button>
