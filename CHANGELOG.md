@@ -6,6 +6,15 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.52.1] - 2026-11-24
+
+### Fixed
+
+- **Therapist phones can be tapped.** On the Funding page, each therapist's phone in Reports for the review is a link to call, the same deep green as everywhere else. The report tasks and the link to the progress report look like links too.
+- **Late reports are asked for now.** When six weeks before the review has already passed, the report tasks are due today, not on a day already gone, and the Funding page says "Reports are overdue, ask now". A report task left past its day shows as overdue.
+- **Names, not relationship words.** Funding, Equipment, Test results, Where they live and the move into care form say the person's name, such as Oliver's plan or What Dorothy uses, and "your" on your own profile.
+- **Record links stand out.** Links to records, such as a result to talk about at an appointment or a task linked to equipment, use the deeper green link style.
+
 ## [0.52.0] - 2026-11-24
 
 ### Added

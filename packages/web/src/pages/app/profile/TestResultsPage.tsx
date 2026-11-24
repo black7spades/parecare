@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
-import { ContactStrip } from '../../../components/ContactStrip';
+import { CONTACT_LINK, ContactStrip } from '../../../components/ContactStrip';
 import { useDataView, type DataSort } from '../../../components/data/useDataView';
 import { DataToolbar } from '../../../components/data/DataToolbar';
 import { SortableTh } from '../../../components/data/SortableTh';
@@ -15,7 +15,7 @@ import { ResultEditor } from '../../../components/ResultEditor';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { formatDateOnly } from '../../../lib/datetime';
 import { bookingHref } from '../../../lib/booking';
-import { DOCTOR_VIEWS, doctorViewLabel, flagLabel, whose, type ResultValue, type TestResult } from '../../../lib/lifeEvents';
+import { DOCTOR_VIEWS, doctorViewLabel, firstName, flagLabel, whose, type ResultValue, type TestResult } from '../../../lib/lifeEvents';
 import { useProfile } from './ProfileLayout';
 
 const byText = (a: string | null | undefined, b: string | null | undefined) => (a ?? '').localeCompare(b ?? '');
@@ -40,7 +40,7 @@ export const visitLine = (a: { title: string; starts_at: string | null; provider
  * measure in its own row, and the visit it is to be talked about at.
  */
 export function TestResultsPage() {
-  const { profile, careName, canEdit, isSelf } = useProfile();
+  const { profile, canEdit, isSelf } = useProfile();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -95,7 +95,7 @@ export function TestResultsPage() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-base font-semibold text-ink">Test results</h2>
-          <p className="text-xs text-muted">What {whose(isSelf, careName)} tests showed, each measure on its own line, ready for the next visit.</p>
+          <p className="text-xs text-muted">What {whose(isSelf, firstName(profile))} tests showed, each measure on its own line, ready for the next visit.</p>
         </div>
         {canEdit && results.length > 0 ? <Button size="sm" onClick={() => setEditing({ result: null })}>Add a result</Button> : null}
       </div>
@@ -152,7 +152,7 @@ export function TestResultsPage() {
                     <td className="px-3 py-2">{r.ordered_by?.name ?? ''}</td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       {r.review_appointment ? (
-                        <Link to={`/app/${profile.id}/appointments?record=${r.review_appointment.id}`} className="text-primary hover:underline">{visitLine(r.review_appointment)}</Link>
+                        <Link to={`/app/${profile.id}/appointments?record=${r.review_appointment.id}`} className={CONTACT_LINK}>{visitLine(r.review_appointment)}</Link>
                       ) : (
                         <span className="text-muted">No visit yet</span>
                       )}

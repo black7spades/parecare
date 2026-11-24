@@ -1,6 +1,7 @@
 import { EditableSubheader } from '../../../components/ui/EditableSubheader';
 import { useProfile } from './ProfileLayout';
 import { MedicationMar } from './MedicationMar';
+import { firstName } from '../../../lib/lifeEvents';
 
 /**
  * The Medication Administration Record as its own page under Management:
@@ -9,14 +10,14 @@ import { MedicationMar } from './MedicationMar';
  * keep it at the top of their navigation.
  */
 export function MarPage() {
-  const { profile, careName, canEdit } = useProfile();
+  const { profile, careName, canEdit, isSelf } = useProfile();
   return (
     <div className="space-y-4">
       <div>
         <h2 className="text-base font-semibold text-ink">Medication record</h2>
         <EditableSubheader copyKey="profile.mar.subheader" vars={{ name: careName }} />
       </div>
-      <MedicationMar profileId={profile.id} personName={profile.full_name} canAdminister={canEdit} />
+      <MedicationMar profileId={profile.id} personName={profile.full_name} callName={isSelf ? null : firstName(profile)} canAdminister={canEdit} />
     </div>
   );
 }

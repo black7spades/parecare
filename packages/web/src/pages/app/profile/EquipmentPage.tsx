@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
-import { ContactStrip } from '../../../components/ContactStrip';
+import { CONTACT_LINK, ContactStrip } from '../../../components/ContactStrip';
 import { useDataView, type DataSort } from '../../../components/data/useDataView';
 import { DataToolbar } from '../../../components/data/DataToolbar';
 import { SortableTh } from '../../../components/data/SortableTh';
@@ -14,7 +14,7 @@ import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/use
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { useHealthConfig } from '../../../lib/appConfig';
 import { formatDateOnly } from '../../../lib/datetime';
-import { OWNERSHIP, ownershipLabel, whose } from '../../../lib/lifeEvents';
+import { OWNERSHIP, firstName, ownershipLabel, whose } from '../../../lib/lifeEvents';
 import type { Asset } from '../../../lib/care';
 import { DirectoryAssetEditor } from '../DirectoryAssetsPage';
 import { useProfile } from './ProfileLayout';
@@ -37,7 +37,8 @@ const SORTS: DataSort<Asset>[] = [
  * same records as the account's equipment register.
  */
 export function EquipmentPage() {
-  const { profile, careName, canEdit, isSelf } = useProfile();
+  const { profile, canEdit, isSelf } = useProfile();
+  const name = firstName(profile);
   const queryClient = useQueryClient();
   const health = useHealthConfig();
   const [params, setParams] = useSearchParams();
@@ -87,7 +88,7 @@ export function EquipmentPage() {
   // Remove takes it off this person only; the register keeps it.
   const removeItem = (a: Asset) =>
     deferDelete({
-      message: `Removed the ${a.name} from ${whose(isSelf, careName)} equipment.`,
+      message: `Removed the ${a.name} from ${whose(isSelf, name)} equipment.`,
       ids: [a.id],
       commit: () => api.delete(`/care-profiles/${profile.id}/equipment/${a.id}`),
       onCommitted: invalidate,
@@ -100,7 +101,7 @@ export function EquipmentPage() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-base font-semibold text-ink">Equipment</h2>
-          <p className="text-xs text-muted">{isSelf ? 'What you use' : `What ${careName} uses`}, who it came from, and when it goes back or is due a service.</p>
+          <p className="text-xs text-muted">{isSelf ? 'What you use' : `What ${name} uses`}, who it came from, and when it goes back or is due a service.</p>
         </div>
         {canEdit && items.length > 0 ? <Button size="sm" onClick={() => setEditing({ asset: null })}>Add equipment</Button> : null}
       </div>
@@ -209,7 +210,7 @@ export function EquipmentPage() {
                 <p className="text-sm text-muted">Who it came from is not on file yet.</p>
               )}
               <p className="mt-2 text-xs text-muted">
-                Also in the <Link to={`/app/directory/assets?record=${a.id}`} className="text-primary hover:underline">equipment register</Link>.
+                Also in the <Link to={`/app/directory/assets?record=${a.id}`} className={CONTACT_LINK}>equipment register</Link>.
               </p>
             </section>
           </RecordPanel>

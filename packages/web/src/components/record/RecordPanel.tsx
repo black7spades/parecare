@@ -13,6 +13,7 @@ import { TrashIcon } from '../ui/icons';
 import { ForwardedFromTag, ForwardTags, type ForwardedFrom, type SentForward } from '../ForwardNotes';
 import { LinkedText } from '../LinkedText';
 import { usePareOn } from '../../lib/aiStatus';
+import { CONTACT_LINK } from '../ContactStrip';
 
 export interface RecordField {
   label: string;
@@ -295,9 +296,9 @@ export function RecordPanel({
                     <dt className="text-muted">{l.label}</dt>
                     <dd className="break-words">
                       {l.to ? (
-                        <Link to={l.to} className="text-primary hover:underline">{l.value}</Link>
+                        <Link to={l.to} className={CONTACT_LINK}>{l.value}</Link>
                       ) : l.href ? (
-                        <a href={l.href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{l.value}</a>
+                        <a href={l.href} target="_blank" rel="noopener noreferrer" className={CONTACT_LINK}>{l.value}</a>
                       ) : (
                         <span className="text-ink">{l.value}</span>
                       )}

@@ -168,19 +168,31 @@ export async function keepReportTasks(conn: Conn, opts: { profileId: string; pla
     completed: boolean;
     next_due_at: Date;
   }>;
-  const zone = await ownerZone(conn, opts.profileId);
+  const zone = await ownerZone(conn, opts.profileId, opts.timeZone);
+  const today = dateInZone(new Date(), zone);
+  const review = (plan['review_on'] as string | null) ?? null;
+  // The review has been and gone: nothing more to ask for it, and nothing moves.
+  if (review && review < today) return tasks.filter((t) => !t.completed).length;
   const writers = due ? await reportWriters(conn, opts.profileId) : [];
+  // Already past six weeks before the review: a new ask is due today, never in the past.
+  const late = !!due && due < today;
   const wanted = new Set(writers.map((w) => w.id));
   for (const t of tasks) {
     if (!t.completed && (!t.provider_id || !wanted.has(t.provider_id))) await conn('reminders').where({ id: t.id }).delete();
   }
+  const dayOf = (t: { next_due_at: Date }) => dateInZone(new Date(t.next_due_at), zone);
   let n = 0;
   for (const w of writers) {
     const theirs = tasks.filter((t) => t.provider_id === w.id);
     const open = theirs.find((t) => !t.completed);
-    // Their report for this due day is already in: nothing more to ask. A
-    // new review day asks again.
-    if (!open && theirs.some((t) => t.completed && dateInZone(new Date(t.next_due_at), zone) === due)) {
+    // Their report for this review is already in: nothing more to ask.
+    if (!open && theirs.some((t) => t.completed && dayOf(t) >= due!)) {
+      n++;
+      continue;
+    }
+    // Late and already asked: the task keeps its day, so it shows as overdue
+    // until it is done.
+    if (late && open && dayOf(open) >= due!) {
       n++;
       continue;
     }
@@ -191,7 +203,7 @@ export async function keepReportTasks(conn: Conn, opts: { profileId: string; pla
       timeZone: opts.timeZone,
       want: {
         title: `Ask ${w.name} for a progress report for the ${scheme} review`,
-        due_on: due!,
+        due_on: late ? today : due!,
         provider_id: w.id,
         kind_key: 'report',
         links: { funding_plan_id: opts.planId },
@@ -205,8 +217,10 @@ export async function keepReportTasks(conn: Conn, opts: { profileId: string; pla
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 /** Plans with their contacts, budgets with spent and left, and their report tasks. */
-export async function plansOut(conn: Conn, profileId: string, rows: Array<Record<string, unknown> & { id: string }>) {
+export async function plansOut(conn: Conn, profileId: string, rows: Array<Record<string, unknown> & { id: string }>, timeZone?: string | null) {
   if (rows.length === 0) return [];
+  const zone = await ownerZone(conn, profileId, timeZone);
+  const today = dateInZone(new Date(), zone);
   const ids = rows.map((r) => r.id);
   const [budgets, contacts, tasks] = await Promise.all([
     conn('funding_budget_categories').whereIn('funding_plan_id', ids).orderBy('sort_order', 'asc'),
@@ -248,11 +262,20 @@ export async function plansOut(conn: Conn, profileId: string, rows: Array<Record
       scheme_label: SCHEME_LABELS[r['scheme'] as (typeof SCHEMES)[number]] ?? 'Funding',
       management_label: r['management'] ? MANAGEMENT_LABELS[r['management'] as (typeof MANAGEMENT)[number]] ?? null : null,
       reports_due_worked_out: !!(r['review_on'] && r['reports_due_on'] === addDays(r['review_on'] as string, -REPORTS_LEAD_DAYS)),
+      // Past the day reports were due, the review still to come, and some reports still to come.
+      reports_overdue:
+        !!r['reports_due_on'] &&
+        (r['reports_due_on'] as string) < today &&
+        !(r['review_on'] && (r['review_on'] as string) < today) &&
+        (tasks as Array<Record<string, unknown>>).some((t) => t['funding_plan_id'] === r.id && !t['completed']),
       plan_manager: c('plan_manager_provider_id'),
       support_coordinator: c('support_coordinator_provider_id'),
       local_area_coordinator: c('local_area_coordinator_provider_id'),
       budgets: mine,
-      report_tasks: (tasks as Array<Record<string, unknown>>).filter((t) => t['funding_plan_id'] === r.id),
+      // Each task's due day where they live, so "overdue" is judged on their day.
+      report_tasks: (tasks as Array<Record<string, unknown>>)
+        .filter((t) => t['funding_plan_id'] === r.id)
+        .map((t) => ({ ...t, due_on: dateInZone(new Date(t['next_due_at'] as Date), zone), overdue: !t['completed'] && dateInZone(new Date(t['next_due_at'] as Date), zone) < today })),
     };
   });
 }

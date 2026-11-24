@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../api/client';
 import { Button } from '../../../components/ui/Button';
 import { PencilIcon, TrashIcon } from '../../../components/ui/icons';
-import { ContactStrip } from '../../../components/ContactStrip';
+import { CONTACT_LINK, ContactStrip } from '../../../components/ContactStrip';
 import { useDataView, type DataSort } from '../../../components/data/useDataView';
 import { DataToolbar } from '../../../components/data/DataToolbar';
 import { SortableTh } from '../../../components/data/SortableTh';
@@ -15,7 +15,7 @@ import { MoveIntoCareModal } from '../../../components/CareMoveForms';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
 import { formatDateOnly } from '../../../lib/datetime';
 import { residenceTypeLabel, type CareProfile } from '../../../lib/care';
-import type { CareMove, HospitalStay } from '../../../lib/lifeEvents';
+import { firstName, type CareMove, type HospitalStay } from '../../../lib/lifeEvents';
 import { EditProfileModal } from './EditProfileModal';
 import { useProfile } from './ProfileLayout';
 
@@ -43,7 +43,8 @@ const MOVE_SORTS: DataSort<CareMove>[] = [
  * stays and their moves into care, on one page.
  */
 export function WhereTheyLivePage() {
-  const { profile, careName, canEdit, canEditProfile, isSelf, openStay } = useProfile();
+  const { profile, canEdit, canEditProfile, isSelf, openStay } = useProfile();
+  const name = firstName(profile);
   const queryClient = useQueryClient();
   const [params, setParams] = useSearchParams();
   const [stayForm, setStayForm] = useState<{ stay: HospitalStay | null } | null>(null);
@@ -142,7 +143,7 @@ export function WhereTheyLivePage() {
         </div>
       ) : null}
 
-      {!nothingYet ? <HomeCard profile={profile} previousHomes={previousHomes} canEdit={canEditProfile} onEdit={() => setEditingHome(true)} careName={careName} /> : null}
+      {!nothingYet ? <HomeCard profile={profile} previousHomes={previousHomes} canEdit={canEditProfile} onEdit={() => setEditingHome(true)} name={name} isSelf={isSelf} /> : null}
 
       <section className="space-y-2">
         <h3 className="text-sm font-semibold text-ink">Hospital stays</h3>
@@ -278,7 +279,7 @@ export function WhereTheyLivePage() {
               {
                 label: 'Discharge letter',
                 value: s.discharge_document ? (
-                  <Link to={`/app/${profile.id}/documents?record=${s.discharge_document.id}`} className="text-primary hover:underline">{s.discharge_document.label ?? 'Discharge letter'}</Link>
+                  <Link to={`/app/${profile.id}/documents?record=${s.discharge_document.id}`} className={CONTACT_LINK}>{s.discharge_document.label ?? 'Discharge letter'}</Link>
                 ) : null,
               },
             ]}
@@ -361,7 +362,7 @@ export function WhereTheyLivePage() {
 
       {stayForm ? <HospitalStayModal profileId={profile.id} stay={stayForm.stay} onClose={() => setStayForm(null)} /> : null}
       {discharging ? <DischargeModal profileId={profile.id} stayId={discharging.id} hospitalName={discharging.hospital} onClose={() => setDischarging(null)} /> : null}
-      {moveForm ? <MoveIntoCareModal profileId={profile.id} move={moveForm.move} roomNumber={profile.room_number} onClose={() => setMoveForm(null)} /> : null}
+      {moveForm ? <MoveIntoCareModal personName={isSelf ? null : name} profileId={profile.id} move={moveForm.move} roomNumber={profile.room_number} onClose={() => setMoveForm(null)} /> : null}
       {canEditProfile ? <EditProfileModal profile={profile} open={editingHome} onClose={() => setEditingHome(false)} /> : null}
     </div>
   );
@@ -373,13 +374,15 @@ function HomeCard({
   previousHomes,
   canEdit,
   onEdit,
-  careName,
+  name,
+  isSelf,
 }: {
   profile: CareProfile;
   previousHomes: Array<{ id: string; formatted: string | null }>;
   canEdit: boolean;
   onEdit: () => void;
-  careName: string;
+  name: string;
+  isSelf: boolean;
 }) {
   const address = [profile.address_line1, profile.address_line2, profile.address_suburb, profile.address_state, profile.address_postcode].filter(Boolean).join(', ');
   const facility = profile.residence_provider;
@@ -389,7 +392,7 @@ function HomeCard({
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-ink">Home</h3>
-          <p className="text-xs text-muted">{profile.residence_type ? residenceTypeLabel(profile.residence_type) : `Where ${careName} lives is not set yet.`}</p>
+          <p className="text-xs text-muted">{profile.residence_type ? residenceTypeLabel(profile.residence_type) : isSelf ? 'Where you live is not set yet.' : `Where ${name} lives is not set yet.`}</p>
         </div>
         {canEdit ? <Button size="sm" variant="ghost" onClick={onEdit}>Edit</Button> : null}
       </div>
@@ -398,7 +401,7 @@ function HomeCard({
           <p className="text-sm font-medium text-ink">{facility.name}</p>
           {room ? <p className="text-sm text-ink">{room}</p> : null}
           {facility.phone ? (
-            <a href={`tel:${facility.phone.replace(/[^\d+]/g, '')}`} className="text-sm text-primary hover:underline" aria-label={`Call ${facility.name} on ${facility.phone}`}>{facility.phone}</a>
+            <a href={`tel:${facility.phone.replace(/[^\d+]/g, '')}`} className={`text-sm ${CONTACT_LINK}`} aria-label={`Call ${facility.name} on ${facility.phone}`}>{facility.phone}</a>
           ) : null}
           {facility.address ? <p className="text-xs text-muted">{facility.address}</p> : null}
         </div>

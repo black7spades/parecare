@@ -16,15 +16,15 @@ fundingPlansRouter.use(requireAuth, requireProfileOwner('see or change the fundi
 const profileIdOf = (req: { params: unknown }) => String((req.params as Record<string, string>)['id']);
 const tz = (req: { headers: Record<string, unknown> }) => (req.headers['x-time-zone'] as string) || null;
 
-async function oneOut(profileId: string, id: string) {
+async function oneOut(profileId: string, id: string, timeZone?: string | null) {
   const row = await db('funding_plans').where({ id, care_profile_id: profileId }).first();
-  return row ? (await plansOut(db, profileId, [row]))[0]! : null;
+  return row ? (await plansOut(db, profileId, [row], timeZone))[0]! : null;
 }
 
 fundingPlansRouter.get('/', async (req, res) => {
   const profileId = profileIdOf(req);
   const rows = await db('funding_plans').where({ care_profile_id: profileId }).orderByRaw('coalesce(starts_on, created_at::date) desc');
-  res.json({ plans: await plansOut(db, profileId, rows) });
+  res.json({ plans: await plansOut(db, profileId, rows, tz(req)) });
 });
 
 fundingPlansRouter.post('/', async (req, res) => {
@@ -36,7 +36,7 @@ fundingPlansRouter.post('/', async (req, res) => {
   const profileId = profileIdOf(req);
   try {
     const saved = await db.transaction((trx) => savePlan(trx, { profileId, actorId: req.account!.id, input: parsed.data, timeZone: tz(req) }));
-    res.status(201).json({ plan: await oneOut(profileId, saved.id), filed: saved.filed, report_tasks: saved.report_tasks });
+    res.status(201).json({ plan: await oneOut(profileId, saved.id, tz(req)), filed: saved.filed, report_tasks: saved.report_tasks });
   } catch (err) {
     if (err instanceof PlanProblem) {
       res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
@@ -57,7 +57,7 @@ fundingPlansRouter.patch('/:planId', async (req, res) => {
     const saved = await db.transaction((trx) =>
       savePlan(trx, { profileId, actorId: req.account!.id, planId: String(req.params['planId']), input: parsed.data, timeZone: tz(req) })
     );
-    res.json({ plan: await oneOut(profileId, saved.id), filed: saved.filed, report_tasks: saved.report_tasks });
+    res.json({ plan: await oneOut(profileId, saved.id, tz(req)), filed: saved.filed, report_tasks: saved.report_tasks });
   } catch (err) {
     if (err instanceof PlanProblem) {
       res.status(err.message.includes('not found') ? 404 : 400).json({ error: err.message, code: 'VALIDATION_ERROR' });

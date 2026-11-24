@@ -18,7 +18,7 @@ import { PareStatus } from './PareStatus';
 import { Clock } from './Clock';
 import { Avatar } from '../ui/Avatar';
 import { PROFILE_NAV, navLabel, profileNavItem, type ProfileNavItem, type NavContext } from '../../pages/app/profile/tabs';
-import { SELF_RELATIONSHIP } from '../../lib/care';
+import { isSelfRelationship } from '../../lib/care';
 import { api } from '../../api/client';
 import { browserTimeZone } from '../../lib/datetime';
 import { NavSortControl, type SortOption } from './NavSortControl';
@@ -243,7 +243,7 @@ function ProfileSidebarNav({ profileId }: { profileId: string }) {
   const navCtx: NavContext = {
     kind: profileData?.profile.kind ?? 'person',
     lifeStage: profileData?.situation?.life_stage ?? null,
-    self: profileData?.relationship?.trim() === SELF_RELATIONSHIP,
+    self: isSelfRelationship(profileData?.relationship),
   };
   const labelled = (item: ProfileNavItem): ProfileNavItem => ({ ...item, label: navLabel(item, navCtx) });
   const belongs = (item: ProfileNavItem) => item.shows?.(navCtx) ?? true;

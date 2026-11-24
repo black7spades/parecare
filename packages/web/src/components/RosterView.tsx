@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { Button } from './ui/Button';
+import { CONTACT_LINK } from './ContactStrip';
 import { addDays, type Roster } from '../lib/lifeEvents';
 import { formatDateOnly, todayDateOnly } from '../lib/datetime';
 
@@ -53,7 +54,7 @@ export function RosterView({ profileId }: { profileId: string }) {
                       <ul className="space-y-1">
                         {p.items.filter((i) => i.date === d).map((i) => (
                           <li key={`${i.task_id}-${d}`} className="text-xs">
-                            <Link to={`/app/${profileId}/tasks?record=${i.task_id}`} className="text-primary hover:underline">{i.title}</Link>
+                            <Link to={`/app/${profileId}/tasks?record=${i.task_id}`} className={CONTACT_LINK}>{i.title}</Link>
                             {i.time ? <span className="text-muted"> {i.time}</span> : null}
                           </li>
                         ))}

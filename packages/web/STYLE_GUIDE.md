@@ -21,7 +21,11 @@ why, and it settles anything this guide does not cover.
   (`src/components/ui/Button.tsx`). Never hand-roll a `<button>` with
   link or text styling.
 - Anything that takes the user to another page is **navigation** and is
-  rendered as a `Link` or `<a>` styled `text-primary hover:underline`.
+  rendered as a `Link` or `<a>` styled with `CONTACT_LINK` (exported from
+  `components/ContactStrip.tsx`): the deeper green, underlined, so a link
+  never reads as faint text. Phones and emails use `PhoneLink` and
+  `EmailLink`, which share it. Older links styled `text-primary
+  hover:underline` move to it when their screen is touched.
 - One exception: an entity name in a table or list that opens that
   record's viewer may be styled as a link even when implemented as a
   button, because to the user it is navigation.
@@ -135,7 +139,7 @@ Before shipping any UI change, confirm:
 
 1. Every action uses the `Button` component with the correct variant and
    size from the tables above. No hand-rolled `<button>` styling.
-2. Link styling appears only on navigation.
+2. Link styling appears only on navigation, and uses `CONTACT_LINK`.
 3. At most one `primary` button is visible per surface.
 4. Every action label is a verb from the vocabulary table, or a new verb
    that says exactly what happens.

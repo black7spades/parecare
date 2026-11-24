@@ -20,11 +20,14 @@ export function MoveIntoCareModal({
   profileId,
   move,
   roomNumber,
+  personName,
   onClose,
 }: {
   profileId: string;
   move?: CareMove | null;
   roomNumber?: string | null;
+  /** Their first name; null on your own profile. */
+  personName?: string | null;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -88,7 +91,11 @@ export function MoveIntoCareModal({
           save.mutate();
         }}
       >
-        <p className="text-sm text-muted">The care home becomes where they live. The home they are leaving is kept as their previous home.</p>
+        <p className="text-sm text-muted">
+          {personName
+            ? `The care home becomes where ${personName} lives. The home ${personName} is leaving is kept as their previous home.`
+            : 'The care home becomes where you live. The home you are leaving is kept as your previous home.'}
+        </p>
         <div className="grid gap-3 sm:grid-cols-[1fr_8rem]">
           <FacilityPicker id="move-home" only="care" profileId={profileId} label="Care home" addLabel="Add a care home" placeholder="e.g. Banksia Gardens Aged Care" value={home} onChange={setHome} />
           <Input id="move-room" label="Room" value={room} onChange={(e) => setRoom(e.target.value)} placeholder="e.g. 12" />
