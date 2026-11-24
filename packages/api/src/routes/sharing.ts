@@ -105,6 +105,10 @@ shareLinksRouter.post('/:linkId/restore', requireAuth, async (req, res) => {
     res.json({ link: linkOut(row) });
     return;
   }
+  if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) {
+    res.status(409).json({ error: 'That link has run out, so it cannot come back. Send it again for a new one.', code: 'LINK_EXPIRED' });
+    return;
+  }
   if (row.kind === 'emergency_sheet' && (await activeEmergencyLink(profileId))) {
     res.status(409).json({ error: 'A newer link is already on. Turn that one off first to bring this one back.', code: 'NEWER_LINK' });
     return;

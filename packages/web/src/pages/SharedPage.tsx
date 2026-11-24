@@ -31,6 +31,7 @@ interface SharedAppointment {
   going: Array<{ name: string; is_driver: boolean }>;
   interpreter_language: string | null;
   status: string;
+  when_text: string;
 }
 
 type SharedPayload =
@@ -68,6 +69,10 @@ export function SharedPage() {
     // offline_saved_at is set only on the copy kept on this phone, served with no signal.
     queryFn: () => api.get<SharedPayload & { offline_saved_at?: string }>(`/shared/${token}`),
     retry: false,
+    // One open, one count: coming back to the tab does not count again.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    staleTime: Infinity,
   });
   const turnedOff = error instanceof ApiError && (error.status === 410 || error.status === 404);
   useEffect(() => {
@@ -146,11 +151,11 @@ function Line({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function AppointmentCard({ token, profileName, a }: { token: string; profileName: string; a: SharedAppointment }) {
-  const when = a.starts_at
-    ? a.all_day
-      ? `${format(new Date(a.starts_at), 'EEEE d MMMM yyyy')}, any time that day`
-      : `${format(new Date(a.starts_at), 'EEEE d MMMM yyyy, HH:mm')}${a.ends_at ? ` to ${format(new Date(a.ends_at), 'HH:mm')}` : ''}`
-    : 'Not booked yet';
+  // The time where the person lives, as the email gave it.
+  const when = a.when_text;
+  const web = (v: string | null) => (v && /^https?:\/\//i.test(v) ? v : null);
+  const directions = web(a.directions_link);
+  const video = web(a.telehealth_link);
   return (
     <div className="card space-y-4">
       <div>
@@ -165,14 +170,14 @@ function AppointmentCard({ token, profileName, a }: { token: string; profileName
       <div className="space-y-1">
         <Line label="When">{when}</Line>
         {a.place ? <Line label="Where">{a.place}</Line> : null}
-        {a.directions_link ? (
+        {directions ? (
           <Line label="Directions">
-            <a href={a.directions_link} target="_blank" rel="noopener noreferrer" className={CONTACT_LINK}>Open map</a>
+            <a href={directions} target="_blank" rel="noopener noreferrer" className={CONTACT_LINK}>Open map</a>
           </Line>
         ) : null}
-        {a.telehealth_link ? (
+        {video ? (
           <Line label="Video call">
-            <a href={a.telehealth_link} target="_blank" rel="noopener noreferrer" className={CONTACT_LINK}>Join the video call</a>
+            <a href={video} target="_blank" rel="noopener noreferrer" className={CONTACT_LINK}>Join the video call</a>
           </Line>
         ) : null}
         {a.provider ? <Line label="With">{[a.provider.name, a.provider.role_label, a.provider.organisation?.name].filter(Boolean).join(', ')}</Line> : null}

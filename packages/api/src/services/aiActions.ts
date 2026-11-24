@@ -1958,7 +1958,8 @@ async function executeOne(
     case 'set_id_numbers': {
       const { type: _t, ...numbers } = action;
       void _t;
-      const given = Object.fromEntries(Object.entries(numbers).filter(([, v]) => v !== undefined)) as IdentifierInput;
+      // Only numbers actually read: an empty or missing value never clears one on file.
+      const given = Object.fromEntries(Object.entries(numbers).filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== '')) as IdentifierInput;
       if (Object.keys(given).length === 0) return `${CLARIFY_MARK} Which ID number is it, and what is the number?`;
       const result = await saveIdentifiers(profileId, account.id, given);
       if (result.saved.length) await audit(profileId, account.id, 'profile_identifiers', `recorded ${result.saved.map((k) => IDENTIFIER_LABELS[k]).join(', ')}`);

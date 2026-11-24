@@ -36,8 +36,14 @@ export interface ReportResult {
 
 export async function generateReport(req: ReportRequest): Promise<ReportResult> {
   const sectionResults: ReportSectionResult[] = [];
+  // Presets saved before emergency contacts became their own section asked
+  // for them inside the care plan; they now come as their own section.
+  const sections = [...req.sections];
+  if (sections.some((c) => c.key === 'care_plan' && c.fields.includes('emergency_contacts')) && !sections.some((c) => c.key === 'emergency_contacts')) {
+    sections.push({ key: 'emergency_contacts', fields: [], filters: {} });
+  }
 
-  for (const sectionCfg of req.sections) {
+  for (const sectionCfg of sections) {
     const section = getSection(sectionCfg.key);
     if (!section) continue;
 

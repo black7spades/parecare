@@ -115,6 +115,8 @@ export interface SharedAppointment {
   going: Array<{ name: string; is_driver: boolean }>;
   interpreter_language: string | null;
   status: string;
+  /** The time as the person who sent it reads it, where they live. */
+  when_text: string;
 }
 
 export async function appointmentForSending(
@@ -153,14 +155,15 @@ export async function appointmentForSending(
       ends_at: iso(row['ends_at']),
       all_day: ics.all_day,
       place: appointmentPlace(ics),
-      directions_link: (row['directions_link'] as string | null) ?? p?.directions_link ?? null,
-      telehealth_link: ics.telehealth_link,
+      directions_link: webLink(row['directions_link']) ?? webLink(p?.directions_link),
+      telehealth_link: webLink(ics.telehealth_link),
       preparation: ics.preparation,
       provider: p ? { name: p.name, role_label: p.role_label, phone: p.phone, address: p.address, organisation: p.organisation } : null,
       bring: ics.bring,
       going: (a!.attendees ?? []).map((g) => ({ name: g.name, is_driver: !!g.is_driver })),
       interpreter_language: row['interpreter_needed'] ? ((row['interpreter_language'] as string | null) ?? 'Needed') : null,
       status: String(row['status'] ?? 'scheduled'),
+      when_text: whenText(iso(row['starts_at']), ics.all_day, await ownerZone(profileId, conn)),
     },
   };
 }
@@ -191,6 +194,10 @@ export type SendTo =
 
 export class SendProblem extends Error {}
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Only a web address is ever sent out as a link. */
+const webLink = (v: unknown): string | null => (typeof v === 'string' && /^\s*https?:\/\//i.test(v) ? v.trim() : null);
+
 /**
  * Find who to send to and their email. A picked contact or circle person
  * with no email on file takes the one typed for them, saved on their own
@@ -202,6 +209,7 @@ export async function resolveRecipient(
   conn: Conn = db
 ): Promise<{ name: string; email: string; provider_id: string | null; circle_member_id: string | null }> {
   const typed = 'email' in to && to.email ? to.email.trim() : null;
+  if (typed && !EMAIL_RE.test(typed)) throw new SendProblem('That email does not look right. It needs an @ and a full address, such as reception@clinic.com.au.');
   if ('provider_id' in to) {
     const linked = await conn('care_profile_providers').where({ care_profile_id: profileId, provider_id: to.provider_id }).first('id');
     const p = linked ? ((await conn('providers').where({ id: to.provider_id }).first('id', 'name', 'email')) as { id: string; name: string; email: string | null } | undefined) : undefined;
@@ -237,7 +245,7 @@ export async function resolveRecipient(
     return { name: person.name, email: person.email, provider_id: null, circle_member_id: null };
   }
   const email = to.email.trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new SendProblem('That email does not look right. It needs an @ and a full address, such as reception@clinic.com.au.');
+  if (!EMAIL_RE.test(email)) throw new SendProblem('That email does not look right. It needs an @ and a full address, such as reception@clinic.com.au.');
   return { name: to.name?.trim() || email, email, provider_id: null, circle_member_id: null };
 }
 

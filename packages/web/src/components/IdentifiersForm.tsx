@@ -38,7 +38,7 @@ const SELECT = 'block w-full rounded-md border border-border bg-card px-3 py-2 t
  */
 export function IdentifiersForm({ profileId, canEdit, onSaved }: { profileId: string; canEdit: boolean; onSaved?: () => void }) {
   const queryClient = useQueryClient();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['identifiers', profileId],
     queryFn: () => api.get<{ identifiers: Identifiers }>(`/care-profiles/${profileId}/identifiers`),
   });
@@ -62,7 +62,12 @@ export function IdentifiersForm({ profileId, canEdit, onSaved }: { profileId: st
   };
 
   const save = useMutation({
-    mutationFn: () => api.put<{ identifiers: Identifiers; problems: Partial<Record<IdentifierField, string>>; saved: IdentifierField[] }>(`/care-profiles/${profileId}/identifiers`, draft),
+    // Only the boxes that changed go, so nothing on file is cleared by accident.
+    mutationFn: () => {
+      const before = data?.identifiers ? fromSaved(data.identifiers) : EMPTY;
+      const changed = Object.fromEntries((Object.keys(draft) as IdentifierField[]).filter((k) => draft[k] !== before[k]).map((k) => [k, draft[k]]));
+      return api.put<{ identifiers: Identifiers; problems: Partial<Record<IdentifierField, string>>; saved: IdentifierField[] }>(`/care-profiles/${profileId}/identifiers`, changed);
+    },
     onSuccess: (res) => {
       setError('');
       setProblems(res.problems ?? {});
@@ -86,6 +91,15 @@ export function IdentifiersForm({ profileId, canEdit, onSaved }: { profileId: st
   });
 
   if (isLoading || (data && !ready)) return <p className="text-sm text-muted">Loading…</p>;
+  if (isError || !data) {
+    // Never show empty boxes that could be saved over the numbers on file.
+    return (
+      <div className="space-y-2">
+        <p className="text-sm text-red-600" role="alert">The ID numbers on file could not be loaded just now, so they cannot be changed yet. Check the connection and try again.</p>
+        <Button variant="secondary" size="sm" loading={isFetching} onClick={() => void refetch()}>Try again</Button>
+      </div>
+    );
+  }
 
   const box = (k: IdentifierField, label: string, extra: { hint?: string; placeholder?: string; inputMode?: 'numeric' | 'text' } = {}) => (
     <Input

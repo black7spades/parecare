@@ -9,9 +9,10 @@ export function rateLimit(opts: { windowMs: number; max: number }) {
   const hits = new Map<string, { count: number; resetAt: number }>();
   return (req: Request, res: Response, next: NextFunction): void => {
     const now = Date.now();
-    // Behind the web server every request comes from it; the visitor is the
-    // first address it forwards.
-    const forwarded = String(req.headers['x-forwarded-for'] ?? '').split(',')[0]?.trim();
+    // Behind the web server every request comes from it. It adds the
+    // visitor's address last, after anything the visitor sent, so the last
+    // entry cannot be made up.
+    const forwarded = String(req.headers['x-forwarded-for'] ?? '').split(',').pop()?.trim();
     const key = forwarded || req.ip || 'unknown';
     const entry = hits.get(key);
     if (!entry || entry.resetAt <= now) {

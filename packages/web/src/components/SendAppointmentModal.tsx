@@ -57,7 +57,7 @@ export function SendAppointmentModal({
           <>
             <SendDone result={done} what="the appointment" />
             <div className="flex justify-end">
-              <Button onClick={onClose}>Done</Button>
+              <Button variant="secondary" onClick={onClose}>Done</Button>
             </div>
           </>
         ) : (

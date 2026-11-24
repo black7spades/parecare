@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { forgetEverythingOffline } from '../../lib/offline';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth';
 import { Avatar } from '../ui/Avatar';
@@ -87,7 +88,13 @@ export function AvatarMenu() {
               type="button"
               role="menuitem"
               className={`${item} flex items-center gap-2`}
-              onClick={() => { setOpen(false); clearAuth(); navigate('/login'); }}
+              onClick={() => {
+                setOpen(false);
+                // Logging out on a shared device keeps nothing about anyone.
+                forgetEverythingOffline();
+                clearAuth();
+                navigate('/login');
+              }}
             >
               <SignOutIcon size={14} />
               Sign out

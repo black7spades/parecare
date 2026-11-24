@@ -21,18 +21,29 @@ export function icsDate(d: Date): string {
   return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 }
 
-/** Long lines are folded at 75 characters, as calendar apps expect. */
+/**
+ * Long lines are folded at 75 bytes, as calendar apps expect, never inside
+ * a character: an emoji in a title stays whole.
+ */
 export function foldLine(line: string): string {
-  if (line.length <= 75) return line;
+  if (Buffer.byteLength(line, 'utf8') <= 75) return line;
   const parts: string[] = [];
-  let rest = line;
-  parts.push(rest.slice(0, 75));
-  rest = rest.slice(75);
-  while (rest.length > 0) {
-    parts.push(` ${rest.slice(0, 74)}`);
-    rest = rest.slice(74);
+  let current = '';
+  let size = 0;
+  let limit = 75;
+  for (const ch of line) {
+    const n = Buffer.byteLength(ch, 'utf8');
+    if (size + n > limit) {
+      parts.push(current);
+      current = '';
+      size = 0;
+      limit = 74; // the space that starts each folded line counts too
+    }
+    current += ch;
+    size += n;
   }
-  return parts.join(ICS_EOL);
+  parts.push(current);
+  return parts.join(`${ICS_EOL} `);
 }
 
 export function calendarText(name: string, bodyLines: string[]): string {
