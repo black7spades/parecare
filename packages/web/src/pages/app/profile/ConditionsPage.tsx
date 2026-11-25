@@ -270,7 +270,7 @@ export function ConditionsPage() {
           ) : null}
         </div>
       ) : (
-        <div className="card p-0 overflow-x-auto">
+        <div className="card p-0 fit-table">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-muted border-b border-border">

@@ -291,6 +291,20 @@ export async function syncPracticeMembers(practiceId: string, seen: Set<string> 
   await db('providers').where({ practice_id: practiceId, uses_practice_address: true }).update(addressCopy(practice));
   for (const f of SHARED_CONTACT_FIELDS) {
     await db('providers').where({ practice_id: practiceId }).whereRaw('? = ANY(inherited_fields)', [f]).update({ [f]: columnValue(f, practice[f] ?? null) });
+    // Someone with none of their own takes the organisation's, and follows it
+    // from then on, however they were filed.
+    if (text(practice[f])) {
+      const empty = f === 'opening_hours'
+        ? "(opening_hours is null or opening_hours::text in ('null', '[]'))"
+        : `(${f} is null or trim(${f}) = '')`;
+      await db('providers')
+        .where({ practice_id: practiceId })
+        .whereRaw(empty)
+        .update({
+          [f]: columnValue(f, practice[f]),
+          inherited_fields: db.raw("array_append(array_remove(coalesce(inherited_fields, '{}'), ?), ?)", [f, f]),
+        });
+    }
   }
   const children: Array<{ id: string }> = await db('providers').where({ practice_id: practiceId }).select('id');
   for (const child of children) await syncPracticeMembers(child.id, seen);

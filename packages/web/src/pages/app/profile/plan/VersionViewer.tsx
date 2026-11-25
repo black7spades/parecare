@@ -90,7 +90,7 @@ export function ContentSections({ content, profileId }: { content: PlanContent; 
                 </Link>
               ) : null}
             </div>
-            <div className="overflow-x-auto mt-1">
+            <div className="fit-table mt-1">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted">

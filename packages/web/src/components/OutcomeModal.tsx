@@ -491,7 +491,7 @@ export function OutcomeModal({
                         {d.booking ? (
                           <div className="rounded-md border border-border p-3">
                             <div className="flex items-center gap-2 mb-3">
-                              <p className="text-sm font-medium text-ink flex-1">Book it now</p>
+                              <p className="text-sm font-medium text-ink flex-1">The booking</p>
                               <Button size="xs" variant="ghost" onClick={() => updateDraft(d.key, { booking: null })}>Not now</Button>
                             </div>
                             <AppointmentFields
@@ -505,8 +505,8 @@ export function OutcomeModal({
                           </div>
                         ) : (
                           <div className="flex flex-wrap items-center gap-2">
-                            <Button size="xs" variant="secondary" onClick={() => startBooking(d)}>Book it now</Button>
-                            <span className="text-xs text-muted">Add who, where and the rest now. The date can wait: it stays on your to-do list until it is booked.</span>
+                            <Button size="xs" variant="secondary" onClick={() => startBooking(d)}>Add the booking</Button>
+                            <span className="text-xs text-muted">Booked already, or booking now? Add the date and time. Not booked yet? Leave it: it stays on your to-do list until it is booked.</span>
                           </div>
                         )}
                         <div>

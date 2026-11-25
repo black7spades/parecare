@@ -322,7 +322,7 @@ export function DocumentsPage() {
         ) : dv.view.length === 0 ? (
           <p className="text-sm text-muted mt-4">No documents match your search or filters.</p>
         ) : (
-          <div className="card p-0 overflow-x-auto mt-4">
+          <div className="card p-0 fit-table mt-4">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-muted border-b border-border">

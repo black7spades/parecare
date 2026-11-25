@@ -195,7 +195,7 @@ export function AdminUsers() {
 
       {error ? <p className="text-sm text-red-600 mb-4">{error}</p> : null}
 
-      <div className="card overflow-x-auto p-0">
+      <div className="card fit-table p-0">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted border-b border-border">
@@ -1131,7 +1131,7 @@ function InvitationsSection() {
       <h2 className="text-base font-semibold text-ink mb-1">Invitations</h2>
       <EditableSubheader copyKey="system.users.invitations.subheader" className="mb-3" />
       {error ? <p className="text-sm text-red-600 mb-2">{error}</p> : null}
-      <div className="card overflow-x-auto p-0">
+      <div className="card fit-table p-0">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted border-b border-border">
@@ -1362,7 +1362,7 @@ function TemplatesSection({ templates, onChanged }: { templates: RightsTemplate[
         </Button>
       </div>
       {error ? <p className="text-sm text-red-600 mb-2">{error}</p> : null}
-      <div className="card overflow-x-auto p-0">
+      <div className="card fit-table p-0">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted border-b border-border">

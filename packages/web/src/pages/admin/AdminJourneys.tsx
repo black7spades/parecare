@@ -95,7 +95,7 @@ function LifeStagesManager() {
         </Button>
       </div>
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
-      <div className="card overflow-x-auto p-0">
+      <div className="card fit-table p-0">
         <table className="w-full text-sm">
           <thead className="border-b border-border">
             <tr className="text-left text-muted">
@@ -307,7 +307,7 @@ function TemplateLibrary() {
         onPageSizeChange={dv.setPageSize}
       />
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
-      <div className="card overflow-x-auto p-0">
+      <div className="card fit-table p-0">
         <table className="w-full text-sm">
           <thead className="border-b border-border">
             <tr className="text-left text-muted">

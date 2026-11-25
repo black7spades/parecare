@@ -574,7 +574,7 @@ export function ReportGeneratorPage() {
             onPageChange={savedDv.setPage}
             onPageSizeChange={savedDv.setPageSize}
           />
-          <div className="mt-3 overflow-x-auto">
+          <div className="mt-3 fit-table">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-muted border-b border-border">
@@ -725,7 +725,7 @@ export function ReportGeneratorPage() {
           onPageChange={profileDv.setPage}
           onPageSizeChange={profileDv.setPageSize}
         />
-        <div className="mt-3 overflow-x-auto">
+        <div className="mt-3 fit-table">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-muted border-b border-border">

@@ -138,7 +138,7 @@ export function AllergiesPage() {
           )}
         </div>
       ) : (
-        <div className="card p-0 overflow-x-auto border-l-4 border-l-red-500">
+        <div className="card p-0 fit-table border-l-4 border-l-red-500">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-muted border-b border-border">

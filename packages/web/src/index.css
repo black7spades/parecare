@@ -132,3 +132,100 @@
     border: none;
   }
 }
+
+/* Tables never scroll sideways: see lib/fitTables.ts. Every column shows
+   while they all fit; past that, each row becomes a labelled card. */
+.fit-table {
+  overflow-x: hidden;
+  max-width: 100%;
+  min-width: 0;
+}
+.fit-table th.hidden,
+.fit-table td.hidden {
+  display: table-cell;
+}
+.fit-table.fit-tight th,
+.fit-table.fit-tight td {
+  white-space: normal;
+  min-width: 0;
+  padding-left: 0.375rem;
+  padding-right: 0.375rem;
+}
+.fit-table.fit-tight td {
+  overflow-wrap: break-word;
+}
+.fit-table a[href^="tel:"] {
+  white-space: nowrap;
+}
+.fit-table.fit-stacked table,
+.fit-table.fit-stacked tbody,
+.fit-table.fit-stacked tfoot {
+  display: block;
+  width: 100%;
+}
+.fit-table.fit-stacked thead {
+  display: block;
+  border-bottom: 1px solid rgb(var(--c-border));
+}
+.fit-table.fit-stacked thead tr {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+.fit-table.fit-stacked thead th {
+  display: block;
+  padding: 0.125rem 0.25rem;
+  width: auto;
+  min-width: 0;
+  white-space: normal;
+}
+.fit-table.fit-stacked thead th:empty {
+  display: none;
+}
+.fit-table.fit-stacked tbody tr,
+.fit-table.fit-stacked tfoot tr {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.25rem 0.75rem;
+  padding: 0.75rem;
+}
+.fit-table.fit-stacked tbody td,
+.fit-table.fit-stacked tbody th,
+.fit-table.fit-stacked tfoot td {
+  display: flow-root;
+  flex: 1 1 100%;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.125rem 0 0.125rem 8.5rem;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  border: 0;
+}
+/* A cell with no column name (a tick box, the actions) sits on its own, at its own size. */
+.fit-table.fit-stacked tbody td:not([data-label]),
+.fit-table.fit-stacked tfoot td:not([data-label]) {
+  flex: 0 1 auto;
+  width: auto;
+  padding-left: 0;
+}
+.fit-table.fit-stacked tbody td[colspan] {
+  flex-basis: 100%;
+  width: 100%;
+}
+.fit-table.fit-stacked tbody td[data-label]::before {
+  content: attr(data-label);
+  float: left;
+  margin-left: -8.5rem;
+  width: 7.75rem;
+  overflow-wrap: break-word;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  color: rgb(var(--c-muted));
+}
+.fit-table.fit-stacked tbody td:empty {
+  display: none;
+}

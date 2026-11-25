@@ -134,7 +134,7 @@ export function TestResultsPage() {
             onPageChange={dv.setPage}
             onPageSizeChange={dv.setPageSize}
           />
-          <div className="card p-0 overflow-x-auto">
+          <div className="card p-0 fit-table">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-muted border-b border-border">
@@ -282,7 +282,7 @@ function ValuesTable({ values }: { values: ResultValue[] }) {
           <DataToolbar search={dv.search} onSearch={dv.setSearch} searchPlaceholder="Search measures…" sorts={VALUE_SORTS.map((s) => ({ key: s.key, label: s.label }))} sortKey={dv.sortKey} onSort={dv.setSortKey} />
         </div>
       ) : null}
-      <div className="overflow-x-auto rounded-md border border-border">
+      <div className="fit-table rounded-md border border-border">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted border-b border-border">

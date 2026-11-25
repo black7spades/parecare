@@ -501,6 +501,7 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
               : 'No achievements match your search.'}
           </p>
         ) : (
+          <div className="fit-table">
           <table className="w-full text-sm">
             <thead className="border-b border-border">
               <tr>
@@ -516,6 +517,7 @@ function AchievementsView({ profileId, onWriteStory }: { profileId: string; onWr
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
       {panel.current ? (
