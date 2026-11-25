@@ -463,7 +463,7 @@ export function AdminDatabase() {
                 </p>
               ) : null}
 
-              <div className="card overflow-x-auto p-0">
+              <div className="card fit-table p-0">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-xs text-muted border-b border-border">

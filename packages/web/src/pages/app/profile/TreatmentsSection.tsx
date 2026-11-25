@@ -269,7 +269,7 @@ function ObservationHistory({ profileId, treatment, canLog, onChanged }: {
   }
 
   return (
-    <div className="border-t border-border pt-3 overflow-x-auto">
+    <div className="border-t border-border pt-3 fit-table">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-muted border-b border-border">

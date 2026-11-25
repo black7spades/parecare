@@ -164,7 +164,7 @@ export function AdminChats() {
             Showing the {CHAT_PAGE_SIZE.toLocaleString()} most recent conversations of {data!.total.toLocaleString()}.
           </p>
         ) : null}
-        <div className="grid gap-4 lg:grid-cols-[1fr_22rem] items-start">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem] items-start">
           <div className="card p-0 overflow-hidden">
             <div className="p-3 border-b border-border">
               <DataToolbar
@@ -190,7 +190,7 @@ export function AdminChats() {
             ) : dv.view.length === 0 ? (
               <p className="text-sm text-muted p-4">No conversations yet.</p>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="fit-table">
                 <table className="w-full text-sm">
                   <thead className="border-b border-border">
                     <tr className="text-left text-xs text-muted">

@@ -683,7 +683,7 @@ export function AdminBackups() {
             No copies yet. The first one is made within a few minutes, or press Make a copy now.
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-border">
+          <div className="fit-table rounded-lg border border-border">
             <table className="w-full text-left text-sm">
               <thead className="border-b border-border text-muted">
                 <tr>

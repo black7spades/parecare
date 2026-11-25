@@ -160,7 +160,7 @@ export function DirectoryAssetsPage() {
           <p className="text-sm text-muted">No assets match your search.</p>
         </div>
       ) : (
-        <div className="card p-0 overflow-x-auto">
+        <div className="card p-0 fit-table">
           <table className="w-full text-sm">
             <thead className="border-b border-border">
               <tr className="text-left text-xs text-muted">

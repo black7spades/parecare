@@ -168,7 +168,7 @@ function PlanCard({ plan, profileId, onEdit, onDelete }: { plan: FundingPlan; pr
             {plan.budgets.length > 6 ? (
               <DataToolbar search={dv.search} onSearch={dv.setSearch} searchPlaceholder="Search budgets…" sorts={BUDGET_SORTS.map((s) => ({ key: s.key, label: s.label }))} sortKey={dv.sortKey} onSort={dv.setSortKey} />
             ) : null}
-            <div className="overflow-x-auto rounded-md border border-border">
+            <div className="fit-table rounded-md border border-border">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-muted border-b border-border">

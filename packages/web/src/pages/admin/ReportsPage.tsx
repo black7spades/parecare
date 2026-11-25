@@ -129,7 +129,7 @@ export function ReportsPage() {
         {healthSummary.length === 0 ? (
           <p className="text-sm text-muted">No health statuses recorded.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="fit-table">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-muted border-b border-border">

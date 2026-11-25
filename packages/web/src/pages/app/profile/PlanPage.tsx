@@ -586,7 +586,7 @@ function ChangelogCard({ changes }: { changes: PlanChange[] }) {
       {changes.length === 0 ? (
         <p className="text-sm text-muted">No changes recorded yet.</p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="fit-table">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted">
@@ -652,7 +652,7 @@ function VersionsCard({
         </Link>{' '}
         and can be exported to PDF with its version number and integrity hash embedded.
       </p>
-      <div className="overflow-x-auto">
+      <div className="fit-table">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted">

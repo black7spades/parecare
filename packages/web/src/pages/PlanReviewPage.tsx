@@ -159,7 +159,7 @@ export function PlanReviewPage() {
                 <span className="text-xs text-muted">Synthesized from the recorded facts</span>
               ) : null}
             </div>
-            <div className="overflow-x-auto">
+            <div className="fit-table">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted">

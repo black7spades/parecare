@@ -206,6 +206,8 @@ export function TasksPage() {
   const [error, setError] = useState('');
   const [draft, setDraft] = useState<TaskDraft>(() => newTaskDraft());
   const [tried, setTried] = useState(false);
+  // The New task form opens in a window, so the list keeps the full width.
+  const [adding, setAdding] = useState(false);
   const [note, setNote] = useState('');
   const [joined, setJoined] = useState<Joined | null>(null);
   const [inferredNote, setInferredNote] = useState<Task | null>(null);
@@ -272,6 +274,7 @@ export function TasksPage() {
       invalidate([profile.id, ...targets]);
       noticeFiled(profile.id, res.filed);
       refreshContacts(queryClient);
+      setAdding(false);
       if (res.joined_into) setJoined({ info: res.joined_into, create: body });
       else if ((res.reminder?.inferred_fields ?? []).includes('provider_id') && res.reminder.provider) setInferredNote(res.reminder);
       if (res.created) {
@@ -413,7 +416,7 @@ export function TasksPage() {
   };
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_20rem] items-start">
+    <div className="space-y-6">
       <div className="space-y-3 min-w-0">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
@@ -432,8 +435,19 @@ export function TasksPage() {
               ))}
             </div>
           </div>
-          <span className="text-xs text-muted">{openCount} open · {visible.length} in the record</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted">{openCount} open · {visible.length} in the record</span>
+            {canEdit ? <Button size="sm" onClick={() => setAdding(true)}>New task</Button> : null}
+          </div>
         </div>
+
+        <RecallsCard profileId={profile.id} canEdit={canEdit} />
+        {note ? (
+          <div className="card flex flex-wrap items-center gap-3" role="status">
+            <p className="flex-1 text-sm text-ink">{note}</p>
+            <Button size="sm" variant="ghost" onClick={() => setNote('')}>Dismiss</Button>
+          </div>
+        ) : null}
 
         {view === 'roster' ? <RosterView profileId={profile.id} /> : null}
         <div className={view === 'roster' ? 'hidden' : 'space-y-3'}>
@@ -481,7 +495,7 @@ export function TasksPage() {
           onPageSizeChange={dv.setPageSize}
         />
 
-        <div className="card p-0 overflow-x-auto">
+        <div className="card p-0 fit-table">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-muted border-b border-border">
@@ -629,32 +643,32 @@ export function TasksPage() {
         </div>
       </div>
 
-      <div className="space-y-4">
-      <RecallsCard profileId={profile.id} canEdit={canEdit} />
-      {canEdit ? (
-        <form
-          className="card space-y-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setTried(true);
-            setError('');
-            if (missing.title) document.getElementById('task-title')?.focus();
-            else if (missing.dueDate) document.getElementById('task-date')?.focus();
-            else if (missing.who) document.getElementById('task-who')?.focus();
-            else createMutation.mutate();
-          }}
-        >
-          <h2 className="text-sm font-semibold text-ink">New task</h2>
-          <TaskFields profileId={profile.id} value={draft} onChange={setDraft} errors={tried ? missing : {}} otherProfiles={otherProfiles} />
-          {note ? <p className="text-sm text-primary">{note}</p> : null}
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          {tried && missing.sentence ? <p className="text-sm text-red-600" role="alert">{missing.sentence}</p> : null}
-          <Button type="submit" className="w-full" loading={createMutation.isPending}>
-            {draft.alsoIds.length > 0 ? `Add task to ${draft.alsoIds.length + 1} profiles` : 'Add task'}
-          </Button>
-        </form>
+      {adding && canEdit ? (
+        <Modal open onClose={() => { setAdding(false); setTried(false); setError(''); }} title="New task">
+          <form
+            className="space-y-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setTried(true);
+              setError('');
+              if (missing.title) document.getElementById('task-title')?.focus();
+              else if (missing.dueDate) document.getElementById('task-date')?.focus();
+              else if (missing.who) document.getElementById('task-who')?.focus();
+              else createMutation.mutate();
+            }}
+          >
+            <TaskFields profileId={profile.id} value={draft} onChange={setDraft} errors={tried ? missing : {}} otherProfiles={otherProfiles} />
+            {error ? <p className="text-sm text-red-600">{error}</p> : null}
+            {tried && missing.sentence ? <p className="text-sm text-red-600" role="alert">{missing.sentence}</p> : null}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => { setAdding(false); setTried(false); setError(''); }}>Cancel</Button>
+              <Button type="submit" loading={createMutation.isPending}>
+                {draft.alsoIds.length > 0 ? `Add task to ${draft.alsoIds.length + 1} profiles` : 'Add task'}
+              </Button>
+            </div>
+          </form>
+        </Modal>
       ) : null}
-      </div>
 
       {panel.current ? (() => {
         const t = panel.current;

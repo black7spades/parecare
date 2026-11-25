@@ -20,7 +20,7 @@ export function SystemLayout() {
         <h1 className="text-xl font-semibold text-ink">System</h1>
         <EditableSubheader copyKey="system.subheader" />
       </div>
-      <nav className="flex gap-1 border-b border-border">
+      <nav className="flex flex-wrap gap-x-1 border-b border-border">
         <NavLink to="/system/users" className={tabClass}>
           Users
         </NavLink>

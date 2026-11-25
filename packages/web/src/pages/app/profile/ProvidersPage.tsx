@@ -180,7 +180,7 @@ export function ProvidersPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-base font-semibold text-ink">Contacts</h2>
@@ -189,7 +189,7 @@ export function ProvidersPage() {
           <EditableSubheader copyKey="profile.providers.subheader" voice={voice} />
         </div>
         {canEdit ? (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => setPickerOpen(true)}>
               Link existing
             </Button>

@@ -120,6 +120,12 @@ pattern, by default and without being asked:
   `DataToolbar` and `useDataView`, so behaviour is identical everywhere.
 - One column per data point (see the copy rules); each column sorts and
   filters independently.
+- **Nothing scrolls sideways.** Wrap every table in a `div` with the
+  `fit-table` class, never `overflow-x-auto`. While every column fits, it
+  is a table; when they nearly fit, the cells wrap; when they cannot, each
+  row becomes a card with every value named after its column. This is done
+  for you by `lib/fitTables.ts`. Never hide a column at a breakpoint to make
+  a table fit: the cards show everything instead.
 
 If you add or edit a table and it is not sortable this way, the change is not
 finished.
@@ -151,3 +157,5 @@ Before shipping any UI change, confirm:
 8. Every data table has sortable headers (ascending/descending) on all
    columns via `SortableTh` and `useDataView`. No table ships with fixed,
    unsortable headers.
+9. Every table sits in a `fit-table` wrapper, and no page scrolls sideways
+   at any width, from a phone to a wide screen.

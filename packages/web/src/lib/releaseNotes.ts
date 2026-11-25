@@ -20,6 +20,21 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.56.0',
+    date: '2026-11-25',
+    summary: 'Tables fit any screen with no sideways scrolling, New task opens in its own window, and a doctor uses their practice\'s phone.',
+    groups: [
+      { heading: 'Changed', items: [
+        'Tables fit the screen. Every table in PareCare now fits the width it has, on a phone, a tablet or a computer. When all the columns fit, every column shows. When they would not, each row becomes a card with every value named, and the column headings above still sort it. Nothing scrolls sideways.',
+        'New task opens in its own window. The Tasks page gives the whole width to the list. Choose New task above the list to add one.',
+        'Already booked the next visit? Add it as you go. In How did it go, a follow-up or referral now offers Add the booking. Put in the date and time if it is already booked, or leave it and it stays on your to-do list until it is.',
+      ] },
+      { heading: 'Fixed', items: [
+        'A doctor uses their practice\'s phone. Someone based at a clinic or health hub with no phone of their own now uses the practice\'s number, however they were filed, so a follow-up no longer asks for a number PareCare already has. The same goes for their email, booking link, fax and opening hours.',
+      ] },
+    ],
+  },
+  {
     version: '0.55.1',
     date: '2026-11-25',
     summary: 'Fixes from walking every scenario: the emergency sheet opens offline, a dose change asks why and who said so, imports never double medicines, and alerts that need acting on stay at the top.',

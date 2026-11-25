@@ -488,7 +488,7 @@ function MonthGrid({ meds, days, admins, now, onPickDay }: {
   }, [admins]);
 
   return (
-    <div className="card p-0 overflow-x-auto">
+    <div className="card p-0 fit-table">
       <table className="w-full text-sm border-collapse">
         <thead>
           <tr className="text-xs text-muted border-b border-border">
@@ -782,7 +782,7 @@ function MarLog({ profileId, canAdminister }: { profileId: string; canAdminister
         </div>
       ) : null}
 
-      <div className="card p-0 overflow-x-auto">
+      <div className="card p-0 fit-table">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted border-b border-border">

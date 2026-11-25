@@ -156,7 +156,7 @@ export function SecretsSection({ profileId, careName }: { profileId: string; car
             onPageChange={dv.setPage}
             onPageSizeChange={dv.setPageSize}
           />
-          <div className="overflow-x-auto">
+          <div className="fit-table">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left">
