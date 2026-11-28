@@ -6,6 +6,17 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.59.0] - 2026-11-28
+
+### Added
+
+- **The care log has its own page.** Open Care log in the menu, under Communications, for everything written about the person, with search, dates, kinds, grouping and changing several entries at once.
+
+### Changed
+
+- **The overview no longer grows without end.** The care log card on the overview now shows Pare's summary, the box to add an entry and the latest five entries, with a link to the whole care log.
+- **Links to a care log entry open it on the care log page.** That goes for the bell, Logs, recent activity, Pare's answers and the Open the care log step in a care journey. An older saved link to an entry still finds it.
+
 ## [0.58.1] - 2026-11-28
 
 ### Fixed

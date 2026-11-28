@@ -52,11 +52,10 @@ const SOURCE_WORDS: Record<string, string> = {
 
 /**
  * Where each kind of record opens, inside the person's pages, for the ones
- * whose list opens a record from the address. The care log lives on the
- * overview. Anything not listed simply gets no link.
+ * whose list opens a record from the address. Anything not listed simply gets no link.
  */
 const RECORD_PAGES: Record<string, (id: string) => string> = {
-  log: (id) => `?record=${id}`,
+  log: (id) => `/care-log?record=${id}`,
   appointments: (id) => `/appointments?record=${id}`,
   treatments: (id) => `/treatments?record=${id}`,
   allergies: (id) => `/allergies?record=${id}`,

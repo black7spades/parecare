@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from '../../../lib/dateFormat';
 import { api } from '../../../api/client';
@@ -10,6 +11,7 @@ import { LinkedText } from '../../../components/LinkedText';
 import { RecordPanel } from '../../../components/record/RecordPanel';
 import { RECORD_ROW_CLASS, useRecordPanel } from '../../../components/record/useRecordPanel';
 import { useHiddenIds, useUndoStore } from '../../../stores/undo';
+import { CONTACT_LINK } from '../../../components/ContactStrip';
 import { LOG_ENTRY_TYPES, SENTIMENTS, entryTypeLabel, sentimentEmoji, sentimentLabel, type CareLogEntry } from '../../../lib/care';
 
 /**
@@ -18,7 +20,14 @@ import { LOG_ENTRY_TYPES, SENTIMENTS, entryTypeLabel, sentimentEmoji, sentimentL
  * year. Entries can be ticked individually or all at once for bulk edits
  * (moving them to another kind) and bulk deletes, and each entry can be
  * edited or deleted on its own.
+ *
+ * It shows two ways. On its own page it is the whole log with every tool. On
+ * the overview it is the short version: the box to add an entry, the latest
+ * few, and a link to the rest, so the overview never grows without end.
  */
+
+/** How many entries the overview card shows before linking to the rest. */
+const CARD_LATEST = 5;
 
 const selectClass =
   'rounded-md border border-border bg-card px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';
@@ -40,8 +49,21 @@ function groupLabel(key: string, groupBy: GroupBy): string {
   return key;
 }
 
-export function CareLogSection({ profileId, canEdit }: { profileId: string; canEdit: boolean }) {
+export function CareLogSection({
+  profileId,
+  canEdit,
+  variant = 'full',
+  intro,
+}: {
+  profileId: string;
+  canEdit: boolean;
+  /** 'card' is the short overview version; 'full' is the care log page. */
+  variant?: 'full' | 'card';
+  /** A line under the heading on the full page. */
+  intro?: ReactNode;
+}) {
   const queryClient = useQueryClient();
+  const card = variant === 'card';
 
   // Add-entry form
   const [entryType, setEntryType] = useState('observation');
@@ -70,14 +92,17 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
     return () => clearTimeout(t);
   }, [q]);
 
-  const params = new URLSearchParams({ limit: '500', sort });
-  if (typeFilter.length > 0) params.set('types', typeFilter.join(','));
-  if (debouncedQ) params.set('q', debouncedQ);
-  if (from) params.set('from', from);
-  if (to) params.set('to', to);
+  // The card asks only for the latest few; the page for everything it filters to.
+  const params = card ? new URLSearchParams({ limit: String(CARD_LATEST), sort: 'desc' }) : new URLSearchParams({ limit: '500', sort });
+  if (!card) {
+    if (typeFilter.length > 0) params.set('types', typeFilter.join(','));
+    if (debouncedQ) params.set('q', debouncedQ);
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+  }
 
   const { data, isLoading } = useQuery({
-    queryKey: ['care-log', profileId, sort, typeFilter.join(','), debouncedQ, from, to],
+    queryKey: card ? ['care-log', profileId, 'latest'] : ['care-log', profileId, sort, typeFilter.join(','), debouncedQ, from, to],
     queryFn: () => api.get<{ entries: CareLogEntry[]; total: number }>(`/care-profiles/${profileId}/log?${params.toString()}`),
   });
   // Deleting is held back a few seconds with Undo, never a "sure?" box.
@@ -86,6 +111,23 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
   const entries = useMemo(() => allEntries.filter((e) => !hidden.has(e.id)), [allEntries, hidden]);
   const panel = useRecordPanel(entries, (e) => e.id);
   const total = data?.total ?? 0;
+  const pagePath = `/app/${profileId}/care-log`;
+
+  // A link saved from before the care log had its own page opens an entry on
+  // the overview. When that entry is not among the latest few, look it up and,
+  // if it is a care log entry, open it on the care log page instead.
+  const [search] = useSearchParams();
+  const navigate = useNavigate();
+  const askedFor = search.get('record');
+  const olderEntry = useQuery({
+    queryKey: ['care-log-entry', profileId, askedFor],
+    queryFn: () => api.get<{ entry: CareLogEntry }>(`/care-profiles/${profileId}/log/${askedFor}`),
+    enabled: card && !!askedFor && !!data && !entries.some((e) => e.id === askedFor),
+    retry: false,
+  });
+  useEffect(() => {
+    if (olderEntry.data?.entry && askedFor) navigate(`${pagePath}?record=${askedFor}`, { replace: true });
+  }, [olderEntry.data, askedFor, navigate, pagePath]);
 
   const groups = useMemo(() => {
     const map = new Map<string, CareLogEntry[]>();
@@ -188,11 +230,54 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
       return next;
     });
 
+  // One entry as a row. The card leaves out the tick box, since its bulk
+  // actions live on the care log page, and keeps a long entry to four lines;
+  // opening it shows the whole thing.
+  const renderRow = (entry: CareLogEntry) => (
+      <li key={entry.id} {...panel.rowProps(entry.id)} className={`flex gap-3 px-3 py-3 ${RECORD_ROW_CLASS}`}>
+        {canEdit && !card ? (
+          <input
+            type="checkbox"
+            aria-label={`Select entry ${entry.title ?? entryTypeLabel(entry.entry_type)}`}
+            className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+            checked={selected.has(entry.id)}
+            onChange={() => toggleSelected(entry.id)}
+          />
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="badge bg-primary-50 text-primary text-xs">{entryTypeLabel(entry.entry_type)}</span>
+            <span className="text-xs text-muted">
+              {entry.author_name ? `${entry.author_name}, ` : ''}{format(new Date(entry.occurred_at), 'd MMM yyyy, HH:mm')}
+            </span>
+            <SentimentControl
+              entry={entry}
+              canEdit={canEdit}
+              onSet={(sentiment) => setSentiment.mutate({ id: entry.id, sentiment })}
+            />
+          </div>
+          {entry.title ? <p className="text-sm font-medium text-ink">{entry.title}</p> : null}
+          <div className={`text-sm text-ink whitespace-pre-wrap ${card ? 'line-clamp-4' : ''}`}><LinkedText text={entry.body} profileId={profileId} canEdit={canEdit} /></div>
+        </div>
+        {canEdit ? (
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            <Button size="xs" variant="ghost" aria-label="Edit log entry" title="Edit" onClick={() => { setActionError(''); setEditing(entry); }}>
+              <PencilIcon />
+            </Button>
+            <Button size="xs" variant="ghost-danger" aria-label="Delete log entry" title="Delete" onClick={() => deleteEntries([entry])}>
+              <TrashIcon />
+            </Button>
+          </div>
+        ) : null}
+      </li>
+  );
+
   const hasFilters = typeFilter.length > 0 || debouncedQ !== '' || from !== '' || to !== '';
 
   return (
     <div className="card">
-      <h2 className="text-base font-semibold text-ink mb-4">Care log</h2>
+      <h2 className={`text-base font-semibold text-ink ${intro ? 'mb-1' : 'mb-4'}`}>Care log</h2>
+      {intro ? <div className="mb-4">{intro}</div> : null}
 
       {canEdit ? (
         <form
@@ -232,6 +317,7 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
       ) : null}
 
       {/* Filters, sort and grouping */}
+      {!card ? (
       <div className="space-y-2 mb-4">
         <div className="flex flex-wrap items-center gap-2">
           <Input
@@ -289,9 +375,10 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
           })}
         </div>
       </div>
+      ) : null}
 
       {/* Selection and bulk actions */}
-      {canEdit && entries.length > 0 ? (
+      {!card && canEdit && entries.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
           <Button size="xs" variant="ghost" onClick={() => setSelected(new Set(entries.map((e) => e.id)))}>
             Select all
@@ -333,10 +420,19 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
         <p className="text-sm text-muted">Loading…</p>
       ) : entries.length === 0 ? (
         <p className="text-sm text-muted">
-          {hasFilters
+          {!card && hasFilters
             ? 'Nothing matches these filters.'
             : 'No entries yet. Log visits, calls, and decisions so the whole family stays up to date.'}
         </p>
+      ) : card ? (
+        <div className="space-y-2">
+          <ul className="rounded-md border border-border divide-y divide-border">{entries.map((entry) => renderRow(entry))}</ul>
+          <p className="text-sm">
+            <Link to={pagePath} className={CONTACT_LINK}>
+              {total > entries.length ? `See the whole care log, all ${total} entries` : 'Open the care log'}
+            </Link>
+          </p>
+        </div>
       ) : (
         <div className="space-y-3">
           {groups.map(([key, groupEntries]) => {
@@ -359,44 +455,7 @@ export function CareLogSection({ profileId, canEdit }: { profileId: string; canE
                 </button>
                 {!isCollapsed ? (
                   <ul className="border-t border-border divide-y divide-border">
-                    {groupEntries.map((entry) => (
-                      <li key={entry.id} {...panel.rowProps(entry.id)} className={`flex gap-3 px-3 py-3 ${RECORD_ROW_CLASS}`}>
-                        {canEdit ? (
-                          <input
-                            type="checkbox"
-                            aria-label={`Select entry ${entry.title ?? entryTypeLabel(entry.entry_type)}`}
-                            className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                            checked={selected.has(entry.id)}
-                            onChange={() => toggleSelected(entry.id)}
-                          />
-                        ) : null}
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="badge bg-primary-50 text-primary text-xs">{entryTypeLabel(entry.entry_type)}</span>
-                            <span className="text-xs text-muted">
-                              {entry.author_name ? `${entry.author_name}, ` : ''}{format(new Date(entry.occurred_at), 'd MMM yyyy, HH:mm')}
-                            </span>
-                            <SentimentControl
-                              entry={entry}
-                              canEdit={canEdit}
-                              onSet={(sentiment) => setSentiment.mutate({ id: entry.id, sentiment })}
-                            />
-                          </div>
-                          {entry.title ? <p className="text-sm font-medium text-ink">{entry.title}</p> : null}
-                          <div className="text-sm text-ink whitespace-pre-wrap"><LinkedText text={entry.body} profileId={profileId} canEdit={canEdit} /></div>
-                        </div>
-                        {canEdit ? (
-                          <div className="flex flex-col items-end gap-1 shrink-0">
-                            <Button size="xs" variant="ghost" aria-label="Edit log entry" title="Edit" onClick={() => { setActionError(''); setEditing(entry); }}>
-                              <PencilIcon />
-                            </Button>
-                            <Button size="xs" variant="ghost-danger" aria-label="Delete log entry" title="Delete" onClick={() => deleteEntries([entry])}>
-                              <TrashIcon />
-                            </Button>
-                          </div>
-                        ) : null}
-                      </li>
-                    ))}
+                    {groupEntries.map((entry) => renderRow(entry))}
                   </ul>
                 ) : null}
               </div>

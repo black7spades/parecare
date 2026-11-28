@@ -72,7 +72,7 @@ const SECTION: Record<string, string> = {
   reminders: 'tasks',
   appointments: 'appointments',
   calendar: 'calendar',
-  log: 'logs',
+  log: 'care-log',
   circle: 'circle',
   plan: 'plan',
   checklists: 'plan',
