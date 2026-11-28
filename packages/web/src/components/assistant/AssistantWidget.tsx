@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, AI_REQUEST_TIMEOUT_MS } from '../../api/client';
 import { describeAiError } from '../../lib/aiErrors';
 import { useAiStatus, usePareOn, AI_WARMING_MESSAGE } from '../../lib/aiStatus';
+import { usePareButtonAway } from '../../lib/pareButtonAway';
 import { ASSISTANT_COMMANDS, commandHelpText, expandSlashCommand } from '../../lib/assistantCommands';
 import { browserTimeZone } from '../../lib/datetime';
 import { refreshAfterDoses } from '../../lib/queryClient';
@@ -399,6 +400,9 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
   // plainly rather than letting the first message fail with a raw error.
   const { data: aiStatus } = useAiStatus(open);
   const pareOn = usePareOn();
+  // The floating button steps aside while a window is open or someone is
+  // typing on a phone, so it never sits on top of a Save.
+  const buttonAway = usePareButtonAway();
   const preparing = aiStatus?.state === 'preparing';
 
   // A warm, named opening for an empty conversation, in place of the technical
@@ -530,6 +534,7 @@ function AssistantPanel({ profileId }: { profileId: string | null }) {
   if (!pareOn) return null;
 
   if (!open) {
+    if (buttonAway) return null;
     return (
       <button
         type="button"

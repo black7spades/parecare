@@ -675,7 +675,7 @@ export function Shell() {
 
         {/* Mobile slide-in drawer */}
         {drawerOpen ? (
-          <div className="lg:hidden fixed inset-0 z-40">
+          <div className="lg:hidden fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label="Menu">
             <div className="absolute inset-0 bg-black/40" onClick={() => setDrawerOpen(false)} aria-hidden />
             <nav className="absolute inset-y-0 left-0 w-64 max-w-[80%] bg-card border-r border-border flex flex-col py-5 px-4 shadow-xl overflow-y-auto">
               <div className="mb-4 flex items-center justify-between">
@@ -701,7 +701,10 @@ export function Shell() {
         ) : null}
 
         <main className="flex-1 min-w-0 overflow-auto bg-surface">
-          <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+          {/* Room under the last thing on every page, taller than the floating
+              Pare and capture buttons, so a Save at the bottom always scrolls
+              clear of them. */}
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-28">
             {/* In the page, never over it: nothing to tap is ever hidden under it. */}
             <InstallPrompt />
             <Suspense fallback={<RouteFallback />}>
