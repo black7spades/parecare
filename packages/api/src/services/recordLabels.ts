@@ -49,7 +49,7 @@ const KINDS: Record<string, KindSpec> = {
   treatments: { kind_label: 'Treatment', page: 'treatments', names: simple('treatments', 'name') },
   allergies: { kind_label: 'Allergy', page: 'allergies', names: simple('allergies', 'substance') },
   questions: { kind_label: 'Question', page: 'questions', names: simple('open_questions', 'title') },
-  log: { kind_label: 'Care log entry', page: '', names: simple('care_log_entries', 'title') },
+  log: { kind_label: 'Care log entry', page: 'care-log', names: simple('care_log_entries', 'title') },
   providers: {
     kind_label: 'Contact',
     page: 'providers',

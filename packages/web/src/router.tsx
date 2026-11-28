@@ -27,6 +27,7 @@ import { ProvidersPage } from './pages/app/profile/ProvidersPage';
 import { TreatmentsPage } from './pages/app/profile/TreatmentsPage';
 import { SubstanceUsePage } from './pages/app/profile/SubstanceUsePage';
 import { ActivityPage } from './pages/app/profile/ActivityPage';
+import { CareLogPage } from './pages/app/profile/CareLogPage';
 import { DirectoryOrganisationsPage, DirectoryProfessionalsPage } from './pages/app/DirectoryProvidersPage';
 import { DirectorySuppliersPage } from './pages/app/DirectorySuppliersPage';
 import { DirectoryAssetsPage } from './pages/app/DirectoryAssetsPage';
@@ -205,6 +206,7 @@ export const router = createBrowserRouter([
           { path: 'documents', element: <DocumentsPage /> },
           { path: 'questions', element: <QuestionsPage /> },
           { path: 'providers', element: <ProvidersPage /> },
+          { path: 'care-log', element: <CareLogPage /> },
           { path: 'logs', element: <ActivityPage /> },
           // Legacy path from before Logs replaced Activity in the nav
           { path: 'activity', element: <ActivityPage /> },

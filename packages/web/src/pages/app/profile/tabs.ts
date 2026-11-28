@@ -29,6 +29,7 @@ import {
   BookIcon,
   HelpCircleIcon,
   ListIcon,
+  NoteIcon,
   SparkleIcon,
 } from '../../../components/ui/icons';
 import { HouseIcon, BeakerIcon, WheelchairIcon, WalletIcon } from '../../../components/ui/icons';
@@ -132,6 +133,7 @@ export const PROFILE_NAV: ProfileNavGroup[] = [
     label: 'Communications',
     items: [
       { key: 'messages', to: 'messages', label: 'Messages', icon: ChatIcon },
+      { key: 'care-log', to: 'care-log', label: 'Care log', icon: NoteIcon },
       { key: 'memory-book', to: 'memory-book', label: 'Memory book', icon: BookIcon },
       { key: 'questions', to: 'questions', label: 'Questions', icon: HelpCircleIcon },
     ],

@@ -150,7 +150,7 @@ function SuggestAddChip({ s, onSend }: { s: SuggestAdd; onSend: (msg: string) =>
 /** Where each of Pare's navigation sections lives in the app. */
 const SECTION_PATHS: Record<string, string> = {
   overview: '',
-  log: '', // the care log lives on the profile overview
+  log: 'care-log',
   medications: 'medications',
   tasks: 'tasks',
   questions: 'questions',

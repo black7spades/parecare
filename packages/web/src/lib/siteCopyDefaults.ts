@@ -49,6 +49,8 @@ export const SITE_COPY_DEFAULTS: Record<string, string> = {
   'profile.messages.subheader.self': 'A shared space for everyone in your circle.',
   'profile.activity.subheader': "Every change made to {possessive} records: who did what, and when. Nobody can edit or remove this list.",
   'profile.activity.subheader.self': 'Every change made to your records: who did what, and when. Nobody can edit or remove this list.',
+  'profile.care-log.subheader': "What has happened with {name} day to day: visits, calls, decisions and how things went. Search it, narrow it to a kind or a few dates, or tidy several entries at once.",
+  'profile.care-log.subheader.self': 'What has happened with you day to day: visits, calls, decisions and how things went. Search it, narrow it to a kind or a few dates, or tidy several entries at once.',
   'profile.questions.subheader': 'What to ask about {name}, and who to ask. For example: "Is the new tablet why they are so tired?"',
   'profile.questions.subheader.self': 'What you want to ask, and who to ask. For example: "Is the new tablet why I am so tired?"',
   'profile.neurotype.subheader': 'Neurodivergent profiles such as autism, ADHD, dyslexia and others. These are lifelong from birth.',

@@ -31,7 +31,7 @@ export const JOURNEY_PAGES = [
   { value: 'conditions', label: 'Conditions', button: 'Open Conditions', path: 'conditions' },
   { value: 'care-needs', label: 'Care needs', button: 'Open Care needs', path: 'care-needs' },
   { value: 'questions', label: 'Questions', button: 'Open Questions', path: 'questions' },
-  { value: 'care-log', label: 'Care log', button: 'Open the care log', path: '' },
+  { value: 'care-log', label: 'Care log', button: 'Open the care log', path: 'care-log' },
   { value: 'memory-book', label: 'Memory book', button: 'Open the Memory book', path: 'memory-book' },
   { value: 'tasks', label: 'Tasks', button: 'Open Tasks', path: 'tasks' },
   { value: 'appointments', label: 'Appointments', button: 'Open Appointments', path: 'appointments' },

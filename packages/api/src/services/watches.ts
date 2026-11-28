@@ -265,7 +265,7 @@ const ENTITY_PAGE: Record<string, string> = {
   documents: 'documents',
   conditions: '',
   allergies: 'plan',
-  log: '',
+  log: 'care-log',
   circle: 'circle',
   providers: 'providers',
   reminders: 'tasks',

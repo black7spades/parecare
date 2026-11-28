@@ -11,7 +11,7 @@ import { normaliseProviderType } from './providerTypes';
 export const JOURNEY_ACTIONS = ['book', 'task', 'upload', 'call', 'equipment', 'hospital_stay', 'care_move', 'funding', 'result', 'open'] as const;
 export type JourneyAction = (typeof JOURNEY_ACTIONS)[number];
 
-/** The pages an "open" item goes to. "care-log" is the care log on the overview; "reports" is the report maker. */
+/** The pages an "open" item goes to. "care-log" is the care log page; "reports" is the report maker. */
 export const JOURNEY_PAGES = [
   'medications', 'providers', 'circle', 'plan', 'emergency', 'documents', 'conditions', 'care-needs', 'questions',
   'care-log', 'memory-book', 'tasks', 'appointments', 'messages', 'substance-use', 'reports',

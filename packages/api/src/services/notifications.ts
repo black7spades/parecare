@@ -475,7 +475,7 @@ function stillToDeal(item: NotificationItem): boolean {
 /** Where each kind of record lives, for deep links in outbound messages. */
 const ENTITY_PAGES: Record<string, string> = {
   circle: 'circle',
-  log: '',
+  log: 'care-log',
   plan: 'plan',
   checklists: 'journey',
   journeys: 'journey',

@@ -20,6 +20,20 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.59.0',
+    date: '2026-11-28',
+    summary: 'The care log has its own page, and the overview shows only the latest five entries.',
+    groups: [
+      { heading: 'Added', items: [
+        'The care log has its own page. Open Care log in the menu, under Communications, for everything written about the person, with search, dates, kinds, grouping and changing several entries at once.',
+      ] },
+      { heading: 'Changed', items: [
+        'The overview no longer grows without end. The care log card on the overview now shows Pare\'s summary, the box to add an entry and the latest five entries, with a link to the whole care log.',
+        'Links to a care log entry open it on the care log page. That goes for the bell, Logs, recent activity, Pare\'s answers and the Open the care log step in a care journey. An older saved link to an entry still finds it.',
+      ] },
+    ],
+  },
+  {
     version: '0.58.1',
     date: '2026-11-28',
     summary: 'The Pare button steps out of the way, so it never covers a Save button on a phone.',

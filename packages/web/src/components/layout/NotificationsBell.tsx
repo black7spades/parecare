@@ -45,7 +45,7 @@ const whoLine = (item: { contact?: { name: string; phone: string | null } | null
 /** Where each kind of record lives, and what to call it in a sentence. */
 const ENTITY_TARGETS: Record<string, { page: string; noun: string }> = {
   circle: { page: 'circle', noun: 'a care circle member' },
-  log: { page: '', noun: 'a care log entry' },
+  log: { page: 'care-log', noun: 'a care log entry' },
   plan: { page: 'plan', noun: 'the care plan' },
   checklists: { page: 'journey', noun: 'a care journey item' },
   journeys: { page: 'journey', noun: 'a care journey' },
