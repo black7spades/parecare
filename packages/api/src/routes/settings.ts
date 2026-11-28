@@ -4,7 +4,7 @@ import { requireRole } from '../middleware/requireRole';
 import { SETTING_GROUPS } from '../config/settingsCatalog';
 import { describeSettings, updateSettings } from '../config/settings';
 import { getAiConfig } from '../config/settings';
-import { isAiConfigured, isLocalProvider, mainModelState, backupStatus, testServices } from '../services/aiProvider';
+import { isAiConfigured, isLocalProvider, mainModelState, fallbackStatus, testServices } from '../services/aiProvider';
 import { listInstalledModels, matchesModel, startPull, getPullState, normalizeModelRef } from '../services/ollamaModels';
 import { z } from 'zod';
 import { sendTestEmail } from '../services/email';
@@ -61,15 +61,15 @@ settingsRouter.post('/test-ai', async (_req, res) => {
     res.json({ ok: false, error: 'The AI assistant is not configured yet.' });
     return;
   }
-  // The main service and the backup are each tested on their own, so a
+  // The main service and the fallback are each tested on their own, so a
   // broken one never hides behind the other.
-  const { main, backup } = await testServices();
+  const { main, fallback } = await testServices();
   res.json({
     ok: main?.ok ?? false,
     provider: main?.provider ?? getAiConfig().provider,
     sample: main?.sample,
-    error: main ? main.error : 'not set up yet, so only the backup was tested.',
-    backup,
+    error: main ? main.error : 'not set up yet, so only the fallback was tested.',
+    fallback,
   });
 });
 
@@ -97,7 +97,7 @@ settingsRouter.get('/ai/model', async (_req, res) => {
     state,
     installed,
     pull: getPullState(),
-    backup: backupStatus(),
+    fallback: fallbackStatus(),
   });
 });
 

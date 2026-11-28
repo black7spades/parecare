@@ -47,7 +47,7 @@ const envSchema = z.object({
   AI_MEDIATION_MODEL: optionalStr,
   // A second service Pare moves to by itself while the main one is not
   // answering, and back from as soon as it answers again. Off until chosen,
-  // because a cloud backup sends records away while it is in use.
+  // because a cloud fallback sends records away while it is in use.
   AI_FALLBACK_PROVIDER: z
     .enum(['off', 'anthropic', 'openai', 'google', 'ollama', 'lmstudio', 'openai-compatible'])
     .default('off'),

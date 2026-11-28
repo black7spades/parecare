@@ -11,22 +11,26 @@ export interface AiStatus {
   state: 'preparing' | 'ready' | 'unavailable';
   provider: string;
   local: boolean;
-  /** The traffic light: green working well, amber under load, getting ready or on the backup, red offline. */
+  /** The traffic light: green working well, amber under load, getting ready or on the fallback, red offline. */
   health: 'green' | 'amber' | 'red';
-  /** Whether Pare is answering from its backup service because the main one is not answering. */
-  backup: boolean;
+  /** Whether Pare is answering from its fallback service because the main one is not answering. */
+  fallback: boolean;
 }
 
-/** The backup service as the system screens describe it. */
-export interface AiBackupStatus {
-  /** The backup chosen, or null when none is set up. */
+/** The fallback service as the system screens describe it. */
+export interface AiFallbackStatus {
+  /** The fallback chosen, or null when it is off. */
   provider: string | null;
   model: string | null;
-  /** Whether the backup runs on this machine. */
+  /** Whether the chosen fallback has everything it needs to answer. */
+  ready: boolean;
+  /** The settings it still needs, by their names on the settings screen. */
+  missing: string[];
+  /** Whether the fallback runs on this machine. */
   local: boolean;
-  /** Whether Pare is answering from the backup right now. */
+  /** Whether Pare is answering from the fallback right now. */
   in_use: boolean;
-  /** When the main service stopped answering, while the backup is in use. */
+  /** When the main service stopped answering, while the fallback is in use. */
   since: string | null;
 }
 
@@ -35,9 +39,9 @@ const SERVICE_NAMES: Record<string, string> = {
   anthropic: 'Claude, from Anthropic',
   openai: 'OpenAI',
   google: 'Gemini, from Google',
-  ollama: 'the model on this machine',
-  lmstudio: 'LM Studio on this machine',
-  'openai-compatible': 'your own AI server',
+  ollama: 'Ollama',
+  lmstudio: 'LM Studio',
+  'openai-compatible': 'an OpenAI-compatible service',
 };
 
 export function serviceName(provider: string | null | undefined): string {

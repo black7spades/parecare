@@ -6,16 +6,24 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.58.0] - 2026-11-28
+
+### Changed
+
+- **The fallback service walks you through setting it up.** Choose a fallback service in System settings and the steps for that service appear straight away, with a link to the exact page where its key or download lives. Only the boxes that service needs are shown, and a line underneath says what is still missing.
+- **Backup service is now Fallback service.** The AI service Pare moves to when the main one stops answering is now called the fallback service everywhere, so it is never mixed up with Backups, which keep copies of your records.
+- **An unfinished fallback says so.** A fallback chosen but missing its key or model is shown as not finished, naming what to fill in, instead of looking as if none was chosen.
+
 ## [0.57.0] - 2026-11-28
 
 ### Added
 
-- **Pare keeps working when its main service stops.** Choose a backup AI service in System settings, and whenever the main one is switched off, still getting ready, overloaded or not answering, Pare answers from the backup instead. Nobody using PareCare has to notice or do anything, and Pare moves back by itself as soon as the main service answers again.
-- **See when the backup is in use.** The Pare light turns amber and says it is using its backup service, and the Pare monitor and System settings say which service is answering, since when, and where records go while it is in use.
+- **Pare keeps working when its main service stops.** Choose a fallback AI service in System settings, and whenever the main one is switched off, still getting ready, overloaded or not answering, Pare answers from the fallback instead. Nobody using PareCare has to notice or do anything, and Pare moves back by itself as soon as the main service answers again.
+- **See when the fallback is in use.** The Pare light turns amber and says it is using its fallback service, and the Pare monitor and System settings say which service is answering, since when, and where records go while it is in use.
 
 ### Changed
 
-- **Test AI connection checks both services.** It now tests the main service and the backup separately, so a broken one never hides behind the other.
+- **Test AI connection checks both services.** It now tests the main service and the fallback separately, so a broken one never hides behind the other.
 
 ## [0.56.0] - 2026-11-25
 

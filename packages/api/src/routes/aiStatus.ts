@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { getAiConfig } from '../config/settings';
-import { localModelState, isLocalProvider, onBackup } from '../services/aiProvider';
+import { localModelState, isLocalProvider, onFallback } from '../services/aiProvider';
 import { health, type Health } from '../services/aiMetrics';
 
 export const aiStatusRouter = Router();
@@ -17,10 +17,10 @@ interface AiStatusBody {
   state: 'preparing' | 'ready' | 'unavailable';
   provider: string;
   local: boolean;
-  /** The traffic light: green working well, amber under load, getting ready or on the backup, red offline. */
+  /** The traffic light: green working well, amber under load, getting ready or on the fallback, red offline. */
   health: Health;
-  /** Whether Pare is answering from its backup service because the main one is not answering. */
-  backup: boolean;
+  /** Whether Pare is answering from its fallback service because the main one is not answering. */
+  fallback: boolean;
 }
 
 // The reachability half is cached; the health half is recomputed each time from
@@ -33,16 +33,16 @@ aiStatusRouter.get('/status', requireAuth, async (_req, res) => {
     const cfg = getAiConfig();
     cache = { at: Date.now(), state: await localModelState(), provider: cfg.provider, local: isLocalProvider() };
   }
-  // On the backup, Pare still works, so the light is amber rather than red:
+  // On the fallback, Pare still works, so the light is amber rather than red:
   // online, with something for whoever runs it to look at.
-  const backup = onBackup();
+  const fallback = onFallback();
   const light = health(cache.state);
   const body: AiStatusBody = {
     state: cache.state,
     provider: cache.provider,
     local: cache.local,
-    health: backup && light === 'green' ? 'amber' : light,
-    backup,
+    health: fallback && light === 'green' ? 'amber' : light,
+    fallback,
   };
   res.json(body);
 });
