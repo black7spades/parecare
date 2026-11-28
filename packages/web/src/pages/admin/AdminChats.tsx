@@ -4,6 +4,7 @@ import { format } from '../../lib/dateFormat';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/auth';
 import { adminApi, type AdminChatDetail, type AdminChatSummary } from '../../api/admin';
+import { serviceName } from '../../lib/aiStatus';
 import { SortableTh } from '../../components/data/SortableTh';
 import { useDataView, type DataSort } from '../../components/data/useDataView';
 import { DataToolbar } from '../../components/data/DataToolbar';
@@ -63,17 +64,31 @@ function PareMonitor() {
   const c = m.connectivity;
   const p = m.performance;
   const u = m.usage;
-  const providerName = c.local ? 'On this machine' : c.provider;
+  const providerName = c.local ? 'On this machine' : serviceName(c.provider);
+  const b = c.backup;
 
   return (
     <div className="card space-y-4">
       <div className="flex items-center gap-2">
         <span className={`h-3 w-3 rounded-full ${HEALTH_DOT[c.health]}`} aria-hidden />
-        <h3 className="text-base font-semibold text-ink">{HEALTH_WORD[c.health]}</h3>
+        <h3 className="text-base font-semibold text-ink">{b.in_use ? 'Online, on the backup service' : HEALTH_WORD[c.health]}</h3>
       </div>
+      {b.in_use ? (
+        <p className="text-sm text-ink">
+          {b.since
+            ? `The main service stopped answering ${formatDistanceToNow(new Date(b.since), { addSuffix: true })}, so Pare is answering from ${serviceName(b.provider)}.`
+            : `The main service is not set up, so Pare is answering from ${serviceName(b.provider)}.`}{' '}
+          Nobody has to do anything: Pare moves back by itself as soon as the main service answers again.
+        </p>
+      ) : null}
 
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
         <Tile label="Assistant" value={providerName} sub={c.model ?? (c.state === 'preparing' ? 'getting ready' : 'provider default')} />
+        <Tile
+          label="Backup service"
+          value={b.provider ? (b.in_use ? 'In use' : 'Standing by') : 'None'}
+          sub={b.provider ? serviceName(b.provider) : 'set one in System settings'}
+        />
         <Tile label="Response time" value={fmtMs(p.avg_ms)} sub={p.p95_ms != null ? `95th percentile ${fmtMs(p.p95_ms)}` : 'no calls yet'} />
         <Tile label="Working now" value={p.in_flight} sub={p.in_flight === 1 ? 'request in flight' : 'requests in flight'} />
         <Tile

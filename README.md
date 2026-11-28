@@ -117,7 +117,15 @@ or a model running on your own hardware. Set `AI_PROVIDER` in `.env`:
 | `openai-compatible` | `AI_BASE_URL` (ending in `/v1`) + `AI_MODEL`, for anything else |
 
 `AI_MEDIATION_MODEL` optionally uses a stronger model for dispute
-mediation than for everyday chat. Then restart:
+mediation than for everyday chat.
+
+`AI_FALLBACK_PROVIDER` sets a backup service, taking the same names as
+`AI_PROVIDER`, with `AI_FALLBACK_API_KEY`, `AI_FALLBACK_BASE_URL` and
+`AI_FALLBACK_MODEL` beside it. While the main service is not answering,
+Pare uses the backup for each request, checks the main one every 30
+seconds, and moves back as soon as it answers. An `anthropic` backup
+reuses `ANTHROPIC_API_KEY` when no backup key is set. All four can also be
+set in System settings. Then restart:
 ```
 docker compose restart api
 ```

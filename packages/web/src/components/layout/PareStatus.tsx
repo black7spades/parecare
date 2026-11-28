@@ -29,9 +29,11 @@ export function PareStatus() {
     health === 'green'
       ? 'Pare is online and working well.'
       : health === 'amber'
-        ? data.state === 'preparing'
-          ? 'Pare is getting ready.'
-          : 'Pare is online, under load.'
+        ? data.backup
+          ? 'Pare is online, using its backup service.'
+          : data.state === 'preparing'
+            ? 'Pare is getting ready.'
+            : 'Pare is online, under load.'
         : 'Pare is offline and may need attention.';
 
   const dot = (

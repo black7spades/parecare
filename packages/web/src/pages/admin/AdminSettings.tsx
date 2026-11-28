@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { EditableSubheader } from '../../components/ui/EditableSubheader';
-import { settingsApi, type SettingField, type SettingGroup, type SettingsResponse, type AiModelInfo, type InstalledModel } from '../../api/settings';
+import { settingsApi, type SettingField, type SettingGroup, type SettingsResponse, type AiModelInfo, type InstalledModel, type AiServiceTest } from '../../api/settings';
+import { serviceName, type AiBackupStatus } from '../../lib/aiStatus';
 
 const GROUP_TITLES: Record<string, { title: string; blurb: string }> = {
   ai: { title: 'Pare, your AI assistant', blurb: 'The provider, model and keys behind Pare, the assistant throughout PareCare, and the message mediation it runs.' },
@@ -414,8 +415,10 @@ function AiModelManager() {
             <p className="text-sm font-medium text-ink">Running on this machine</p>
             <p className="text-sm text-muted">
               {info.active}
-              {modelDetail(info.activeDetails) ? ` — ${modelDetail(info.activeDetails)}` : ''}, {stateWord}. Nothing
-              leaves this machine.
+              {modelDetail(info.activeDetails) ? `, ${modelDetail(info.activeDetails)}` : ''}, {stateWord}.{' '}
+              {info.backup.provider && !info.backup.local
+                ? 'Nothing leaves this machine while it is answering.'
+                : 'Nothing leaves this machine.'}
             </p>
           </div>
 
@@ -496,14 +499,45 @@ function AiModelManager() {
         <div>
           <p className="text-sm font-medium text-ink">Running in the cloud</p>
           <p className="text-sm text-muted">
-            PareCare is using {info.provider}
+            PareCare is using {serviceName(info.provider)}
             {info.active ? ` with the model ${info.active}` : ' with the provider default'}, {stateWord}. Records are
             sent to the provider to be read. Change the provider, model or key in the fields below, or set the provider
             to run Pare on this machine instead.
           </p>
         </div>
       )}
+      <BackupLine backup={info.backup} />
       {note ? <p className="text-sm text-red-600">{note}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * One plain line on the backup service: whether one is set, whether it is in
+ * use right now, and what that means for where records go.
+ */
+function BackupLine({ backup }: { backup: AiBackupStatus }) {
+  if (!backup.provider) {
+    return (
+      <p className="text-sm text-muted border-t border-border pt-3">
+        No backup service is set. Choose one under Backup service below, and Pare keeps answering when the main
+        service stops.
+      </p>
+    );
+  }
+  const name = serviceName(backup.provider);
+  const where = backup.local ? 'It runs on this machine.' : `While it is in use, records are sent to ${name} to be read.`;
+  return (
+    <div className="border-t border-border pt-3">
+      <p className="text-sm font-medium text-ink">
+        {backup.in_use ? `Answering from the backup: ${name}` : `Backup: ${name}, standing by`}
+      </p>
+      <p className="text-sm text-muted">
+        {backup.in_use
+          ? 'The main service is not answering. Pare moves back by itself as soon as it does.'
+          : 'Used only while the main service is not answering. Pare moves to it and back by itself.'}{' '}
+        {where}
+      </p>
     </div>
   );
 }
@@ -525,19 +559,37 @@ function TestEmailButton() {
   );
 }
 
+function testLine(label: string, t: AiServiceTest): string {
+  return t.ok ? `${label} works: ${t.sample ?? ''}` : `${label}: ${t.error ?? 'it did not reply.'}`;
+}
+
 function TestAiButton() {
-  const [result, setResult] = useState<string>('');
+  const [results, setResults] = useState<string[]>([]);
   const mutation = useMutation({
     mutationFn: settingsApi.testAi,
-    onSuccess: (r) => setResult(r.ok ? `OK (${r.provider}): ${r.sample}` : r.error ?? 'Failed'),
-    onError: (e) => setResult(e instanceof Error ? e.message : 'Failed'),
+    onSuccess: (r) => {
+      const lines = [
+        r.ok
+          ? `Main service works: ${r.sample ?? ''}`
+          : `Main service: ${r.error ?? 'it did not reply.'}`,
+      ];
+      if (r.backup) lines.push(testLine('Backup service', r.backup));
+      setResults(lines);
+    },
+    onError: (e) => setResults([e instanceof Error ? e.message : 'The test could not run. Try again in a moment.']),
   });
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 flex-wrap">
       <Button variant="secondary" onClick={() => mutation.mutate()} loading={mutation.isPending}>
         Test AI connection
       </Button>
-      {result ? <span className="text-xs text-muted truncate max-w-xs">{result}</span> : null}
+      {results.length > 0 ? (
+        <div className="space-y-0.5">
+          {results.map((line) => (
+            <p key={line} className="text-xs text-muted truncate max-w-md">{line}</p>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

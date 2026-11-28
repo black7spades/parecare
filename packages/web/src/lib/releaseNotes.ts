@@ -20,6 +20,20 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.57.0',
+    date: '2026-11-28',
+    summary: 'Pare keeps working when its main AI service stops, by moving to a backup and back again by itself.',
+    groups: [
+      { heading: 'Added', items: [
+        'Pare keeps working when its main service stops. Choose a backup AI service in System settings, and whenever the main one is switched off, still getting ready, overloaded or not answering, Pare answers from the backup instead. Nobody using PareCare has to notice or do anything, and Pare moves back by itself as soon as the main service answers again.',
+        'See when the backup is in use. The Pare light turns amber and says it is using its backup service, and the Pare monitor and System settings say which service is answering, since when, and where records go while it is in use.',
+      ] },
+      { heading: 'Changed', items: [
+        'Test AI connection checks both services. It now tests the main service and the backup separately, so a broken one never hides behind the other.',
+      ] },
+    ],
+  },
+  {
     version: '0.56.0',
     date: '2026-11-25',
     summary: 'Tables fit any screen with no sideways scrolling, New task opens in its own window, and a doctor uses their practice\'s phone.',

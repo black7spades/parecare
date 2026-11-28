@@ -11,8 +11,38 @@ export interface AiStatus {
   state: 'preparing' | 'ready' | 'unavailable';
   provider: string;
   local: boolean;
-  /** The traffic light: green working well, amber under load or getting ready, red offline. */
+  /** The traffic light: green working well, amber under load, getting ready or on the backup, red offline. */
   health: 'green' | 'amber' | 'red';
+  /** Whether Pare is answering from its backup service because the main one is not answering. */
+  backup: boolean;
+}
+
+/** The backup service as the system screens describe it. */
+export interface AiBackupStatus {
+  /** The backup chosen, or null when none is set up. */
+  provider: string | null;
+  model: string | null;
+  /** Whether the backup runs on this machine. */
+  local: boolean;
+  /** Whether Pare is answering from the backup right now. */
+  in_use: boolean;
+  /** When the main service stopped answering, while the backup is in use. */
+  since: string | null;
+}
+
+/** Each AI service by the name a person would know it by. */
+const SERVICE_NAMES: Record<string, string> = {
+  anthropic: 'Claude, from Anthropic',
+  openai: 'OpenAI',
+  google: 'Gemini, from Google',
+  ollama: 'the model on this machine',
+  lmstudio: 'LM Studio on this machine',
+  'openai-compatible': 'your own AI server',
+};
+
+export function serviceName(provider: string | null | undefined): string {
+  if (!provider) return 'none';
+  return SERVICE_NAMES[provider] ?? provider;
 }
 
 export function useAiStatus(enabled = true) {
