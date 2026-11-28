@@ -45,6 +45,15 @@ const envSchema = z.object({
   AI_BASE_URL: optionalStr,
   AI_MODEL: optionalStr,
   AI_MEDIATION_MODEL: optionalStr,
+  // A second service Pare moves to by itself while the main one is not
+  // answering, and back from as soon as it answers again. Off until chosen,
+  // because a cloud backup sends records away while it is in use.
+  AI_FALLBACK_PROVIDER: z
+    .enum(['off', 'anthropic', 'openai', 'google', 'ollama', 'lmstudio', 'openai-compatible'])
+    .default('off'),
+  AI_FALLBACK_API_KEY: optionalStr,
+  AI_FALLBACK_BASE_URL: optionalStr,
+  AI_FALLBACK_MODEL: optionalStr,
   STORAGE_PROVIDER: z.enum(['local', 's3']).default('local'),
   STORAGE_LOCAL_PATH: z.string().default('/app/uploads'),
   // Backups are on with working defaults; these only exist so an install can

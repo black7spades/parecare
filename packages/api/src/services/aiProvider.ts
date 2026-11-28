@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { getAiConfig } from '../config/settings';
+import { getAiConfig, type AiProvider } from '../config/settings';
 import { beginCall } from './aiMetrics';
 
 /**
@@ -9,6 +9,11 @@ import { beginCall } from './aiMetrics';
  *  - openai-compatible: OpenAI itself plus any server speaking its API,
  *    including Ollama and LM Studio running on your own hardware
  *  - google: the Gemini API
+ *
+ * A second service can stand behind the main one as a backup. While the main
+ * service is not answering, every request goes to the backup instead, and
+ * Pare moves back by itself as soon as the main one answers again. Nobody
+ * using PareCare has to notice or do anything.
  */
 
 /**
@@ -82,6 +87,14 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
   lmstudio: 'http://host.docker.internal:1234/v1',
 };
 
+/**
+ * How long the main service is given to answer when a backup stands behind
+ * it. A model on this machine can take a couple of minutes to reply; the app
+ * gives up after five, so this leaves the backup room to answer in time.
+ */
+const MAIN_DEADLINE_LOCAL_MS = 150_000;
+const MAIN_DEADLINE_CLOUD_MS = 90_000;
+
 function notConfigured(detail: string): Error {
   return Object.assign(new Error(`AI assistant is not configured: ${detail}`), {
     status: 503,
@@ -89,63 +102,245 @@ function notConfigured(detail: string): Error {
   });
 }
 
-function pickModel(tier: Tier): string {
+/**
+ * One AI service Pare can talk to: the main one from the settings, or the
+ * backup it moves to while the main one is not answering. Every wire call
+ * takes one of these, so the same code serves both.
+ */
+interface AiTarget {
+  role: 'main' | 'backup';
+  provider: AiProvider;
+  model?: string;
+  mediationModel?: string;
+  baseUrl?: string;
+  apiKey?: string;
+}
+
+function mainTarget(): AiTarget {
   const cfg = getAiConfig();
-  const defaults = DEFAULT_MODELS[cfg.provider];
+  return {
+    role: 'main',
+    provider: cfg.provider,
+    model: cfg.model,
+    mediationModel: cfg.mediationModel,
+    baseUrl: cfg.baseUrl,
+    apiKey: cfg.provider === 'anthropic' ? cfg.anthropicApiKey ?? cfg.apiKey : cfg.apiKey,
+  };
+}
+
+/** The backup service, or null when none is chosen or it is missing what it needs. */
+function backupTarget(): AiTarget | null {
+  const cfg = getAiConfig();
+  const provider = cfg.fallbackProvider;
+  if (!provider || provider === 'off') return null;
+  const target: AiTarget = {
+    role: 'backup',
+    provider,
+    model: cfg.fallbackModel,
+    baseUrl: cfg.fallbackBaseUrl,
+    // A Claude backup reuses the Anthropic key already entered for the main
+    // service, so choosing it needs nothing more.
+    apiKey: cfg.fallbackApiKey ?? (provider === 'anthropic' ? cfg.anthropicApiKey : undefined),
+  };
+  return targetConfigured(target) ? target : null;
+}
+
+const isLocal = (p: AiProvider): boolean => p === 'ollama' || p === 'lmstudio' || p === 'openai-compatible';
+
+function targetConfigured(t: AiTarget): boolean {
+  switch (t.provider) {
+    case 'anthropic':
+    case 'openai':
+    case 'google':
+      return !!t.apiKey;
+    default:
+      // Local/self-hosted servers need a model name; a key is optional
+      return !!t.model;
+  }
+}
+
+function pickModel(t: AiTarget, tier: Tier): string {
+  const defaults = DEFAULT_MODELS[t.provider];
   if (tier === 'mediation') {
     // The heavy tier prefers an explicit mediation model, then the provider's
     // best default, and only then the single configured model. Without this
     // order a configured chat model won over the mediation default, so setting
     // one model silently collapsed both tiers onto it and the hard jobs quietly
     // ran on the quick model.
-    if (cfg.mediationModel) return cfg.mediationModel;
+    if (t.mediationModel) return t.mediationModel;
     if (defaults) return defaults.mediation;
-    if (cfg.model) return cfg.model;
+    if (t.model) return t.model;
   } else {
     // The quick tier is the configured model, else the provider's chat default.
-    if (cfg.model) return cfg.model;
+    if (t.model) return t.model;
     if (defaults) return defaults.chat;
   }
-  throw notConfigured(`set a model for the '${cfg.provider}' provider (e.g. the model name loaded in Ollama or LM Studio).`);
+  throw notConfigured(`set a model for the '${t.provider}' provider (e.g. the model name loaded in Ollama or LM Studio).`);
 }
 
-export function isAiConfigured(): boolean {
-  const cfg = getAiConfig();
-  switch (cfg.provider) {
-    case 'anthropic':
-      return !!(cfg.anthropicApiKey ?? cfg.apiKey);
-    case 'openai':
-    case 'google':
-      return !!cfg.apiKey;
-    default:
-      // Local/self-hosted servers need a model name; a key is optional
-      return !!cfg.model;
+// --- Moving to the backup and back -----------------------------------------
+//
+// When the main service fails a request, the same request is answered by the
+// backup, and the main service is marked as not answering. From then on new
+// requests go straight to the backup, so nobody waits on a service that is
+// down, while a quiet check in the background asks the main service every
+// 30 seconds whether it is back. The first good answer moves Pare home.
+
+const PROBE_EVERY_MS = 30_000;
+let mainDownSince: number | null = null;
+let probeTimer: ReturnType<typeof setInterval> | null = null;
+let probing = false;
+
+function markMainDown(err: unknown): void {
+  if (mainDownSince !== null) return;
+  mainDownSince = Date.now();
+  const why = err instanceof Error ? err.message : String(err);
+  console.warn(`[ai] main service is not answering, using the backup until it does: ${why.slice(0, 200)}`);
+  if (!probeTimer) {
+    probeTimer = setInterval(() => void probeMain(), PROBE_EVERY_MS);
+    probeTimer.unref?.();
+  }
+}
+
+function markMainUp(): void {
+  if (mainDownSince !== null) console.info('[ai] main service is answering again; moved back from the backup');
+  mainDownSince = null;
+  if (probeTimer) {
+    clearInterval(probeTimer);
+    probeTimer = null;
   }
 }
 
 /**
- * Whether the current provider can be handed a schema and made to obey it.
- * Anthropic does it through a forced tool; the OpenAI-compatible servers
+ * Whether a service is answering, asked as cheaply as it allows. A server on
+ * this machine is asked for its model list, which costs nothing; a cloud
+ * service is asked for a one-word reply.
+ */
+async function targetAnswers(t: AiTarget): Promise<boolean> {
+  if (!targetConfigured(t)) return false;
+  try {
+    if (t.provider === 'ollama') {
+      const res = await fetch(`${ollamaRootOf(t)}/api/tags`, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) return false;
+      const data = (await res.json()) as { models?: Array<{ name?: string }> };
+      const want = t.model ?? 'parecare';
+      return (data.models ?? []).some((m) => modelNameMatches(m.name ?? '', want));
+    }
+    if (isLocal(t.provider)) {
+      const base = (t.baseUrl ?? DEFAULT_BASE_URLS[t.provider] ?? '').replace(/\/$/, '');
+      const res = await fetch(`${base}/models`, {
+        headers: t.apiKey ? { Authorization: `Bearer ${t.apiKey}` } : {},
+        signal: AbortSignal.timeout(5000),
+      });
+      return res.ok;
+    }
+    await completeWith(t, 'Reply with the single word ok.', [{ role: 'user', content: 'ok?' }], 4, 'chat', undefined, 20_000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function probeMain(): Promise<void> {
+  if (probing || mainDownSince === null) return;
+  probing = true;
+  try {
+    // With no backup any more, there is nothing to move back from.
+    if (!backupTarget() || (await targetAnswers(mainTarget()))) markMainUp();
+  } finally {
+    probing = false;
+  }
+}
+
+/**
+ * Whether a failure means the service is not answering at all, rather than
+ * that this one request was unsuitable. A refused connection, a timeout, an
+ * overloaded or failing server, a rejected key or a model still downloading
+ * all mean the service is down for now. A request it could not accept (too
+ * long, malformed) is still tried on the backup, but does not move Pare.
+ */
+function isOutage(err: unknown): boolean {
+  const e = err as { code?: string; providerStatus?: number; status?: number } | null;
+  if (e?.code === 'AI_MODEL_PREPARING') return true;
+  // Our own provider errors carry the provider's status; the Claude library's
+  // errors carry it as status.
+  const status = e?.providerStatus ?? (e?.code === undefined ? e?.status : undefined);
+  return !(status === 400 || status === 413 || status === 422);
+}
+
+/** Whether a request carries a whole PDF, which only Claude reads. */
+const carriesDocument = (turns: ChatTurn[]): boolean =>
+  turns.some((t) => typeof t.content !== 'string' && t.content.some((p) => p.type === 'document'));
+
+/** Whether Pare is answering from the backup right now. */
+export function onBackup(): boolean {
+  if (!backupTarget()) return false;
+  return mainDownSince !== null || !targetConfigured(mainTarget());
+}
+
+/** The service answering right now: the backup while it is in use, otherwise the main one. */
+function activeTarget(): AiTarget {
+  const b = backupTarget();
+  return b && onBackup() ? b : mainTarget();
+}
+
+export interface BackupStatus {
+  /** The backup service chosen, or null when there is none ready to use. */
+  provider: string | null;
+  model: string | null;
+  /** Whether the backup runs on this machine. */
+  local: boolean;
+  /** Whether Pare is answering from the backup right now. */
+  in_use: boolean;
+  /** When the main service stopped answering, while the backup is in use. */
+  since: string | null;
+}
+
+/** The backup as the screens describe it, and whether it is in use. */
+export function backupStatus(): BackupStatus {
+  const b = backupTarget();
+  const inUse = onBackup();
+  return {
+    provider: b?.provider ?? null,
+    model: b?.model ?? null,
+    local: b ? isLocal(b.provider) : false,
+    in_use: inUse,
+    since: inUse && mainDownSince !== null ? new Date(mainDownSince).toISOString() : null,
+  };
+}
+
+export function isAiConfigured(): boolean {
+  return targetConfigured(mainTarget()) || !!backupTarget();
+}
+
+/**
+ * Whether the service answering now can be handed a schema and made to obey
+ * it. Anthropic does it through a forced tool; the OpenAI-compatible servers
  * (including Ollama and LM Studio) do it through the response format. Google's
  * path is left on today's tolerant text parsing, so it never regresses.
  */
 export function supportsStructuredOutput(): boolean {
-  return getAiConfig().provider !== 'google';
+  return activeTarget().provider !== 'google';
 }
 
 /**
- * Whether the AI service set up here can read a scanned PDF itself. Claude
+ * Whether the AI service answering now can read a scanned PDF itself. Claude
  * reads every page of a PDF, scanned or not; the other services need the
  * pages as photos.
  */
 export function readsScannedDocuments(): boolean {
-  return getAiConfig().provider === 'anthropic';
+  return activeTarget().provider === 'anthropic';
 }
 
-/** Whether Pare runs on this machine (a local server) rather than in the cloud. */
+/** Whether the main service runs on this machine (a local server) rather than in the cloud. */
 export function isLocalProvider(): boolean {
-  const p = getAiConfig().provider;
-  return p === 'ollama' || p === 'lmstudio' || p === 'openai-compatible';
+  return isLocal(getAiConfig().provider);
+}
+
+/** The native Ollama root for a target: its base URL with the trailing /v1 dropped. */
+function ollamaRootOf(t: AiTarget): string {
+  const base = (t.baseUrl ?? DEFAULT_BASE_URLS['ollama'] ?? '').replace(/\/$/, '');
+  return base.replace(/\/v1$/, '');
 }
 
 /**
@@ -154,32 +349,30 @@ export function isLocalProvider(): boolean {
  * listing and downloading models live under here, not under /v1.
  */
 export function ollamaRoot(): string {
-  const cfg = getAiConfig();
-  const base = (cfg.baseUrl ?? DEFAULT_BASE_URLS['ollama'] ?? '').replace(/\/$/, '');
-  return base.replace(/\/v1$/, '');
+  return ollamaRootOf(mainTarget());
+}
+
+function modelNameMatches(name: string, want: string): boolean {
+  return name === want || name === `${want}:latest` || name.split(':')[0] === want.split(':')[0];
 }
 
 /**
- * Whether the assistant is ready to answer, for the warming state. A cloud
+ * Whether the main service is ready to answer, for the warming state. A cloud
  * provider is ready as soon as it is configured. The bundled on-machine
  * assistant is asked directly whether its model has finished downloading:
  * present means ready, absent or still starting means preparing.
  */
-export async function localModelState(): Promise<'ready' | 'preparing' | 'unavailable'> {
-  const cfg = getAiConfig();
-  if (cfg.provider !== 'ollama') {
-    return isAiConfigured() ? 'ready' : 'unavailable';
+export async function mainModelState(): Promise<'ready' | 'preparing' | 'unavailable'> {
+  const t = mainTarget();
+  if (t.provider !== 'ollama') {
+    return targetConfigured(t) ? 'ready' : 'unavailable';
   }
-  const root = ollamaRoot();
-  const want = cfg.model ?? 'parecare';
+  const want = t.model ?? 'parecare';
   try {
-    const res = await fetch(`${root}/api/tags`, { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(`${ollamaRootOf(t)}/api/tags`, { signal: AbortSignal.timeout(3000) });
     if (!res.ok) return 'preparing';
     const data = (await res.json()) as { models?: Array<{ name?: string }> };
-    const names = (data.models ?? []).map((m) => m.name ?? '');
-    const present = names.some(
-      (n) => n === want || n === `${want}:latest` || n.split(':')[0] === want.split(':')[0],
-    );
+    const present = (data.models ?? []).some((m) => modelNameMatches(m.name ?? '', want));
     return present ? 'ready' : 'preparing';
   } catch {
     // Unreachable usually means the service is still starting on first run.
@@ -187,17 +380,45 @@ export async function localModelState(): Promise<'ready' | 'preparing' | 'unavai
   }
 }
 
+/**
+ * Whether Pare can answer at all. While the main service is still getting
+ * ready or is not answering, a backup answers instead, so Pare is ready.
+ */
+export async function localModelState(): Promise<'ready' | 'preparing' | 'unavailable'> {
+  const state = await mainModelState();
+  if (state !== 'ready' && backupTarget()) {
+    // The model on this machine is still downloading or not answering: the
+    // backup covers it, and the background check moves Pare home once ready.
+    if (targetConfigured(mainTarget())) markMainDown(new Error(`main service is ${state}`));
+    return 'ready';
+  }
+  return state;
+}
+
+/** A deadline signal for a fetch, or nothing when there is no deadline. */
+const deadline = (ms?: number): { signal?: AbortSignal } => (ms ? { signal: AbortSignal.timeout(ms) } : {});
+
+function providerError(status: number, body: string): Error {
+  return Object.assign(new Error(`AI provider returned ${status}: ${body.slice(0, 200)}`), {
+    status: 502,
+    code: 'AI_PROVIDER_ERROR',
+    providerStatus: status,
+  });
+}
+
 async function completeAnthropic(
+  t: AiTarget,
   system: string,
   turns: ChatTurn[],
   maxTokens: number,
   tier: Tier,
   opts?: CompleteOptions,
+  timeoutMs?: number,
 ): Promise<CompletionResult> {
-  const cfg = getAiConfig();
-  const apiKey = cfg.anthropicApiKey ?? cfg.apiKey;
-  if (!apiKey) throw notConfigured('set the Anthropic API key in the settings screen.');
-  const client = new Anthropic({ apiKey });
+  if (!t.apiKey) throw notConfigured('set the Anthropic API key in the settings screen.');
+  // With a backup standing by, a struggling Claude is given less time and
+  // fewer retries, so the backup still answers before the app gives up.
+  const client = new Anthropic({ apiKey: t.apiKey, ...(timeoutMs ? { timeout: timeoutMs, maxRetries: 1 } : {}) });
   const toAnthropicBlock = (p: ChatPart): unknown => {
     if (p.type === 'image') return { type: 'image', source: { type: 'base64', media_type: p.media_type, data: p.data } };
     if (p.type === 'document') return { type: 'document', source: { type: 'base64', media_type: p.media_type, data: p.data } };
@@ -205,16 +426,16 @@ async function completeAnthropic(
     if (p.type === 'audio') return { type: 'text', text: '[a voice note was attached]' };
     return { type: 'text', text: p.text };
   };
-  const messages: Anthropic.MessageParam[] = turns.map((t) => ({
-    role: t.role,
-    content: (typeof t.content === 'string' ? t.content : t.content.map(toAnthropicBlock)) as Anthropic.MessageParam['content'],
+  const messages: Anthropic.MessageParam[] = turns.map((turn) => ({
+    role: turn.role,
+    content: (typeof turn.content === 'string' ? turn.content : turn.content.map(toAnthropicBlock)) as Anthropic.MessageParam['content'],
   }));
 
   // Constrained output on Claude is a forced tool: the schema becomes the
   // tool's input, and requiring that tool guarantees the reply fits it.
   if (opts?.schema) {
     const response = await client.messages.create({
-      model: pickModel(tier),
+      model: pickModel(t, tier),
       max_tokens: maxTokens,
       system,
       messages,
@@ -237,7 +458,7 @@ async function completeAnthropic(
   }
 
   const response = await client.messages.create({
-    model: pickModel(tier),
+    model: pickModel(t, tier),
     max_tokens: maxTokens,
     system,
     messages,
@@ -249,37 +470,39 @@ async function completeAnthropic(
 }
 
 async function completeOpenAiCompatible(
+  t: AiTarget,
   system: string,
   turns: ChatTurn[],
   maxTokens: number,
   tier: Tier,
   opts?: CompleteOptions,
+  timeoutMs?: number,
 ): Promise<CompletionResult> {
-  const cfg = getAiConfig();
-  if (cfg.provider === 'openai' && !cfg.apiKey) {
+  if (t.provider === 'openai' && !t.apiKey) {
     throw notConfigured('set the OpenAI API key in the settings screen.');
   }
-  const baseUrl = (cfg.baseUrl ?? DEFAULT_BASE_URLS[cfg.provider] ?? '').replace(/\/$/, '');
+  const baseUrl = (t.baseUrl ?? DEFAULT_BASE_URLS[t.provider] ?? '').replace(/\/$/, '');
   if (!baseUrl) throw notConfigured("set the base URL to your server's OpenAI-compatible endpoint (ending in /v1).");
-  const model = pickModel(tier);
+  const model = pickModel(t, tier);
 
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}),
+      ...(t.apiKey ? { Authorization: `Bearer ${t.apiKey}` } : {}),
     },
+    ...deadline(timeoutMs),
     body: JSON.stringify({
       model,
       max_tokens: maxTokens,
       messages: [
         { role: 'system', content: system },
-        ...turns.map((t) => ({
-          role: t.role,
+        ...turns.map((turn) => ({
+          role: turn.role,
           content:
-            typeof t.content === 'string'
-              ? t.content
-              : t.content.map((p) => {
+            typeof turn.content === 'string'
+              ? turn.content
+              : turn.content.map((p) => {
                   if (p.type === 'image') return { type: 'image_url', image_url: { url: dataUri(p) } };
                   // Not read here; the document reader never sends one to this service.
                   if (p.type === 'document') return { type: 'text', text: '[a PDF document was attached]' };
@@ -303,16 +526,13 @@ async function completeOpenAiCompatible(
     // On a local server, a missing model is the download not being finished
     // yet, not a real fault. Give it a code the app can turn into "Pare is
     // still getting ready" instead of a raw provider error.
-    if (isLocalProvider() && (res.status === 404 || /not found|no such model|try pulling|do not have/i.test(body))) {
+    if (isLocal(t.provider) && (res.status === 404 || /not found|no such model|try pulling|do not have/i.test(body))) {
       throw Object.assign(new Error('The assistant on this machine is still getting ready.'), {
         status: 503,
         code: 'AI_MODEL_PREPARING',
       });
     }
-    throw Object.assign(new Error(`AI provider returned ${res.status}: ${body.slice(0, 200)}`), {
-      status: 502,
-      code: 'AI_PROVIDER_ERROR',
-    });
+    throw providerError(res.status, body);
   }
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
@@ -334,30 +554,32 @@ async function completeOpenAiCompatible(
     data.usage?.total_tokens ?? (data.usage?.prompt_tokens ?? 0) + (data.usage?.completion_tokens ?? 0);
   // Some local servers omit usage; estimate so metering stays sane
   const tokensUsed =
-    reported || Math.ceil((system.length + turns.reduce((n, t) => n + textLength(t.content), 0) + text.length) / 4);
+    reported || Math.ceil((system.length + turns.reduce((n, turn) => n + textLength(turn.content), 0) + text.length) / 4);
   return { text, tokensUsed, structured };
 }
 
 async function completeGoogle(
+  t: AiTarget,
   system: string,
   turns: ChatTurn[],
   maxTokens: number,
   tier: Tier,
-  _opts?: CompleteOptions,
+  opts?: CompleteOptions,
+  timeoutMs?: number,
 ): Promise<CompletionResult> {
-  const cfg = getAiConfig();
-  if (!cfg.apiKey) throw notConfigured('set the Google AI Studio API key in the settings screen.');
-  const model = pickModel(tier);
-  const baseUrl = (cfg.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/, '');
+  if (!t.apiKey) throw notConfigured('set the Google AI Studio API key in the settings screen.');
+  const model = pickModel(t, tier);
+  const baseUrl = (t.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/, '');
 
-  const res = await fetch(`${baseUrl}/models/${model}:generateContent?key=${encodeURIComponent(cfg.apiKey)}`, {
+  const res = await fetch(`${baseUrl}/models/${model}:generateContent?key=${encodeURIComponent(t.apiKey)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    ...deadline(timeoutMs),
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
-      contents: turns.map((t) => ({
-        role: t.role === 'assistant' ? 'model' : 'user',
-        parts: asParts(t.content).map((p) =>
+      contents: turns.map((turn) => ({
+        role: turn.role === 'assistant' ? 'model' : 'user',
+        parts: asParts(turn.content).map((p) =>
           p.type === 'text'
             ? { text: p.text }
             : p.type === 'document'
@@ -365,22 +587,102 @@ async function completeGoogle(
               : { inlineData: { mimeType: p.media_type, data: p.data } }
         ),
       })),
-      generationConfig: { maxOutputTokens: maxTokens },
+      // A schema only arrives here when Gemini is standing in as the backup
+      // for a service that honours one. Asking for JSON keeps that reply in
+      // the shape the caller is waiting for.
+      generationConfig: { maxOutputTokens: maxTokens, ...(opts?.schema ? { responseMimeType: 'application/json' } : {}) },
     }),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw Object.assign(new Error(`AI provider returned ${res.status}: ${body.slice(0, 200)}`), {
-      status: 502,
-      code: 'AI_PROVIDER_ERROR',
-    });
+    throw providerError(res.status, body);
   }
   const data = (await res.json()) as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
     usageMetadata?: { totalTokenCount?: number };
   };
   const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
-  return { text, tokensUsed: data.usageMetadata?.totalTokenCount ?? Math.ceil(text.length / 4) };
+  let structured: unknown;
+  if (opts?.schema && text) {
+    try {
+      structured = JSON.parse(text);
+    } catch {
+      structured = undefined;
+    }
+  }
+  return { text, tokensUsed: data.usageMetadata?.totalTokenCount ?? Math.ceil(text.length / 4), structured };
+}
+
+/** One request to one service, with no moving to the backup. */
+function completeWith(
+  t: AiTarget,
+  system: string,
+  turns: ChatTurn[],
+  maxTokens: number,
+  tier: Tier,
+  opts?: CompleteOptions,
+  timeoutMs?: number,
+): Promise<CompletionResult> {
+  switch (t.provider) {
+    case 'anthropic':
+      return completeAnthropic(t, system, turns, maxTokens, tier, opts, timeoutMs);
+    case 'google':
+      return completeGoogle(t, system, turns, maxTokens, tier, opts, timeoutMs);
+    default:
+      return completeOpenAiCompatible(t, system, turns, maxTokens, tier, opts, timeoutMs);
+  }
+}
+
+const mainDeadline = (t: AiTarget): number => (isLocal(t.provider) ? MAIN_DEADLINE_LOCAL_MS : MAIN_DEADLINE_CLOUD_MS);
+
+/**
+ * One request, answered by the main service when it is answering and by the
+ * backup when it is not. A request the main service fails is answered by the
+ * backup straight away, so the person asking only ever sees the answer.
+ */
+async function completeWithBackup(
+  system: string,
+  turns: ChatTurn[],
+  maxTokens: number,
+  tier: Tier,
+  opts?: CompleteOptions,
+): Promise<CompletionResult> {
+  const main = mainTarget();
+  const b = backupTarget();
+  // A whole PDF can only go to Claude; any other backup is no help for it.
+  const backup = b && (!carriesDocument(turns) || b.provider === 'anthropic') ? b : null;
+
+  if (!backup) return completeWith(main, system, turns, maxTokens, tier, opts);
+  if (!targetConfigured(main)) return completeWith(backup, system, turns, maxTokens, tier, opts);
+
+  if (mainDownSince !== null) {
+    // Known to be down: go straight to the backup. If the backup fails too,
+    // give the main service one more chance before saying it did not work.
+    try {
+      return await completeWith(backup, system, turns, maxTokens, tier, opts);
+    } catch (backupErr) {
+      try {
+        const result = await completeWith(main, system, turns, maxTokens, tier, opts, mainDeadline(main));
+        markMainUp();
+        return result;
+      } catch (mainErr) {
+        console.warn('[ai] the backup service failed too:', backupErr instanceof Error ? backupErr.message : backupErr);
+        throw mainErr;
+      }
+    }
+  }
+
+  try {
+    return await completeWith(main, system, turns, maxTokens, tier, opts, mainDeadline(main));
+  } catch (mainErr) {
+    if (isOutage(mainErr)) markMainDown(mainErr);
+    try {
+      return await completeWith(backup, system, turns, maxTokens, tier, opts);
+    } catch (backupErr) {
+      console.warn('[ai] the backup service failed too:', backupErr instanceof Error ? backupErr.message : backupErr);
+      throw mainErr;
+    }
+  }
 }
 
 export async function complete(
@@ -394,21 +696,68 @@ export async function complete(
   // monitoring panel see all of Pare's work.
   const done = beginCall();
   try {
-    let result: CompletionResult;
-    switch (getAiConfig().provider) {
-      case 'anthropic':
-        result = await completeAnthropic(system, turns, maxTokens, tier, opts);
-        break;
-      case 'google':
-        result = await completeGoogle(system, turns, maxTokens, tier, opts);
-        break;
-      default:
-        result = await completeOpenAiCompatible(system, turns, maxTokens, tier, opts);
-    }
+    const result = await completeWithBackup(system, turns, maxTokens, tier, opts);
     done(true);
     return result;
   } catch (err) {
     done(false);
     throw err;
   }
+}
+
+/**
+ * A failed test in words whoever runs PareCare can act on. Nothing listening
+ * and no reply in time are the common ones, and the raw network message for
+ * them means nothing to most people.
+ */
+function plainFailure(err: unknown): string {
+  const e = err as { name?: string; message?: string; code?: string; cause?: { code?: string } } | null;
+  const msg = e?.message ?? '';
+  if (e?.code === 'AI_MODEL_PREPARING') return 'its model is still downloading.';
+  if (e?.name === 'TimeoutError' || e?.name === 'AbortError' || /timed? ?out/i.test(msg)) {
+    return 'it did not reply in time. Check it is switched on and not overloaded.';
+  }
+  if (msg === 'fetch failed' || /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|connect/i.test(msg + (e?.cause?.code ?? ''))) {
+    return 'nothing answered at its address. Check it is switched on and the address is right.';
+  }
+  return msg || 'it did not reply.';
+}
+
+export interface ServiceTest {
+  ok: boolean;
+  provider: string;
+  sample?: string;
+  error?: string;
+}
+
+/**
+ * Ask the main service and the backup each for a short reply, separately, so
+ * the settings screen shows whether both work rather than hiding a broken one
+ * behind the other. A main service that answers here moves Pare back to it.
+ */
+export async function testServices(): Promise<{ main: ServiceTest | null; backup: ServiceTest | null }> {
+  const ask = async (t: AiTarget): Promise<ServiceTest> => {
+    try {
+      const { text } = await completeWith(
+        t,
+        'You are a connection test. Reply with a single short sentence.',
+        [{ role: 'user', content: 'Say hello so I know the connection works.' }],
+        64,
+        'chat',
+        undefined,
+        60_000,
+      );
+      return { ok: true, provider: t.provider, sample: text.slice(0, 200) };
+    } catch (err) {
+      return { ok: false, provider: t.provider, error: plainFailure(err) };
+    }
+  };
+  const main = mainTarget();
+  const backup = backupTarget();
+  const [mainResult, backupResult] = await Promise.all([
+    targetConfigured(main) ? ask(main) : Promise.resolve(null),
+    backup ? ask(backup) : Promise.resolve(null),
+  ]);
+  if (mainResult?.ok) markMainUp();
+  return { main: mainResult, backup: backupResult };
 }

@@ -4,7 +4,7 @@ import { requireRole } from '../middleware/requireRole';
 import { SETTING_GROUPS } from '../config/settingsCatalog';
 import { describeSettings, updateSettings } from '../config/settings';
 import { getAiConfig } from '../config/settings';
-import { complete, isAiConfigured, isLocalProvider, localModelState } from '../services/aiProvider';
+import { isAiConfigured, isLocalProvider, mainModelState, backupStatus, testServices } from '../services/aiProvider';
 import { listInstalledModels, matchesModel, startPull, getPullState, normalizeModelRef } from '../services/ollamaModels';
 import { z } from 'zod';
 import { sendTestEmail } from '../services/email';
@@ -61,17 +61,16 @@ settingsRouter.post('/test-ai', async (_req, res) => {
     res.json({ ok: false, error: 'The AI assistant is not configured yet.' });
     return;
   }
-  try {
-    const { text } = await complete(
-      'You are a connection test. Reply with a single short sentence.',
-      [{ role: 'user', content: 'Say hello so I know the connection works.' }],
-      64,
-      'chat'
-    );
-    res.json({ ok: true, provider: getAiConfig().provider, sample: text.slice(0, 200) });
-  } catch (err) {
-    res.json({ ok: false, error: err instanceof Error ? err.message : 'AI request failed' });
-  }
+  // The main service and the backup are each tested on their own, so a
+  // broken one never hides behind the other.
+  const { main, backup } = await testServices();
+  res.json({
+    ok: main?.ok ?? false,
+    provider: main?.provider ?? getAiConfig().provider,
+    sample: main?.sample,
+    error: main ? main.error : 'not set up yet, so only the backup was tested.',
+    backup,
+  });
 });
 
 /**
@@ -88,7 +87,7 @@ settingsRouter.get('/ai/model', async (_req, res) => {
   // whether it is ready from the installed list, rather than asking three times.
   const installed = local ? await listInstalledModels() : [];
   const activeDetails = local ? installed.find((m) => matchesModel(m.name, active)) ?? null : null;
-  const state = local ? (activeDetails ? 'ready' : 'preparing') : await localModelState();
+  const state = local ? (activeDetails ? 'ready' : 'preparing') : await mainModelState();
   res.json({
     provider: cfg.provider,
     local,
@@ -98,6 +97,7 @@ settingsRouter.get('/ai/model', async (_req, res) => {
     state,
     installed,
     pull: getPullState(),
+    backup: backupStatus(),
   });
 });
 

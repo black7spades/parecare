@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { AiBackupStatus } from '../lib/aiStatus';
 import type { AccountRole } from '../stores/auth';
 
 export interface AdminAccount {
@@ -117,6 +118,7 @@ export interface AiMetrics {
     local: boolean;
     state: 'preparing' | 'ready' | 'unavailable';
     health: 'green' | 'amber' | 'red';
+    backup: AiBackupStatus;
   };
   performance: {
     calls: number;

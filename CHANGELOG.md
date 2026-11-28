@@ -6,6 +6,17 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.57.0] - 2026-11-28
+
+### Added
+
+- **Pare keeps working when its main service stops.** Choose a backup AI service in System settings, and whenever the main one is switched off, still getting ready, overloaded or not answering, Pare answers from the backup instead. Nobody using PareCare has to notice or do anything, and Pare moves back by itself as soon as the main service answers again.
+- **See when the backup is in use.** The Pare light turns amber and says it is using its backup service, and the Pare monitor and System settings say which service is answering, since when, and where records go while it is in use.
+
+### Changed
+
+- **Test AI connection checks both services.** It now tests the main service and the backup separately, so a broken one never hides behind the other.
+
 ## [0.56.0] - 2026-11-25
 
 ### Changed
