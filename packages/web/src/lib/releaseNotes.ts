@@ -20,6 +20,16 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.58.1',
+    date: '2026-11-28',
+    summary: 'The Pare button steps out of the way, so it never covers a Save button on a phone.',
+    groups: [
+      { heading: 'Fixed', items: [
+        'The Pare button no longer covers Save. On a phone, the Pare button used to sit on top of the Save button in a window or at the bottom of a page. It now steps aside while a window, the record panel or the menu is open, and while you are typing, and comes back as soon as you finish. Every page also leaves room at the bottom, so its last button always scrolls clear.',
+      ] },
+    ],
+  },
+  {
     version: '0.58.0',
     date: '2026-11-28',
     summary: 'The fallback AI service shows the steps and links to set it up, and has its new name.',

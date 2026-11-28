@@ -6,6 +6,12 @@ in the sidebar, which links on to the exact commit each build came from, so the
 record of updates stays traceable to source. Versions follow
 [semantic versioning](https://semver.org).
 
+## [0.58.1] - 2026-11-28
+
+### Fixed
+
+- **The Pare button no longer covers Save.** On a phone, the Pare button used to sit on top of the Save button in a window or at the bottom of a page. It now steps aside while a window, the record panel or the menu is open, and while you are typing, and comes back as soon as you finish. Every page also leaves room at the bottom, so its last button always scrolls clear.
+
 ## [0.58.0] - 2026-11-28
 
 ### Changed
