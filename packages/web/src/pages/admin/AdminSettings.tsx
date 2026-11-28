@@ -4,7 +4,9 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { EditableSubheader } from '../../components/ui/EditableSubheader';
 import { settingsApi, type SettingField, type SettingGroup, type SettingsResponse, type AiModelInfo, type InstalledModel, type AiServiceTest } from '../../api/settings';
-import { serviceName, type AiBackupStatus } from '../../lib/aiStatus';
+import { serviceName, type AiFallbackStatus } from '../../lib/aiStatus';
+import { CONTACT_LINK } from '../../components/ContactStrip';
+import { FallbackGuide, FALLBACK_OPTION_LABELS, fallbackFieldShown, type FallbackFormState } from './FallbackGuide';
 
 const GROUP_TITLES: Record<string, { title: string; blurb: string }> = {
   ai: { title: 'Pare, your AI assistant', blurb: 'The provider, model and keys behind Pare, the assistant throughout PareCare, and the message mediation it runs.' },
@@ -36,7 +38,7 @@ function HelpText({ field }: { field: SettingField }) {
     <p className="mt-1 text-xs text-muted">
       {field.help}{' '}
       {field.helpLink ? (
-        <a href={field.helpLink.url} target="_blank" rel="noreferrer" className="text-primary hover:underline whitespace-nowrap">
+        <a href={field.helpLink.url} target="_blank" rel="noreferrer" className={`${CONTACT_LINK} whitespace-nowrap`}>
           {field.helpLink.label} ↗
         </a>
       ) : null}
@@ -106,7 +108,7 @@ function SmtpPresets({ onApply }: { onApply: (host: string, port: number) => voi
       {preset ? (
         <p className="text-xs text-muted">
           Host and port filled in below. {preset.note}{' '}
-          <a href={preset.link.url} target="_blank" rel="noreferrer" className="text-primary hover:underline whitespace-nowrap">
+          <a href={preset.link.url} target="_blank" rel="noreferrer" className={`${CONTACT_LINK} whitespace-nowrap`}>
             {preset.link.label} ↗
           </a>
         </p>
@@ -154,6 +156,27 @@ export function AdminSettings() {
   });
 
   const setField = (key: string, value: string) => setPending((p) => ({ ...p, [key]: value }));
+
+  // A setting's value as the form stands, saved or still being typed.
+  const allFields = data?.groups.flatMap((g) => g.fields) ?? [];
+  const currentValue = (key: string): string => {
+    if (key in pending) return pending[key] ?? '';
+    const f = allFields.find((x) => x.key === key);
+    return f?.value != null ? String(f.value) : '';
+  };
+  const secretSet = (key: string): boolean => {
+    if (key in pending) return pending[key] !== '';
+    return !!allFields.find((x) => x.key === key)?.isSet;
+  };
+  const fallbackChoice = currentValue('ai.fallback_provider') || 'off';
+  const fallbackState: FallbackFormState = {
+    choice: fallbackChoice,
+    mainProvider: currentValue('ai.provider') || 'anthropic',
+    keySet: secretSet('ai.fallback_api_key'),
+    anthropicKeySet: secretSet('ai.anthropic_api_key'),
+    model: currentValue('ai.fallback_model'),
+    baseUrl: currentValue('ai.fallback_base_url'),
+  };
 
   function saveGroup(group: SettingGroup) {
     const body: Record<string, string> = {};
@@ -225,20 +248,33 @@ export function AdminSettings() {
             {group.group === 'ai' ? <AiModelManager /> : null}
 
             <div className="grid gap-4 sm:grid-cols-2">
-              {group.fields.map((field) => (
-                <FieldRow
-                  key={field.key}
-                  field={field}
-                  pending={field.key in pending ? pending[field.key] : undefined}
-                  revealed={!!revealed[field.key]}
-                  onReveal={() => setRevealed((r) => ({ ...r, [field.key]: true }))}
-                  onChange={(v) => setField(field.key, v)}
-                  onClear={() => {
-                    setField(field.key, '');
-                    setRevealed((r) => ({ ...r, [field.key]: false }));
-                  }}
-                />
-              ))}
+              {group.fields
+                .filter((field) => fallbackFieldShown(field.key, fallbackChoice))
+                .map((field) => {
+                  const row = (
+                    <FieldRow
+                      key={field.key}
+                      field={field}
+                      pending={field.key in pending ? pending[field.key] : undefined}
+                      revealed={!!revealed[field.key]}
+                      onReveal={() => setRevealed((r) => ({ ...r, [field.key]: true }))}
+                      onChange={(v) => setField(field.key, v)}
+                      onClear={() => {
+                        setField(field.key, '');
+                        setRevealed((r) => ({ ...r, [field.key]: false }));
+                      }}
+                    />
+                  );
+                  if (field.key !== 'ai.fallback_provider') return row;
+                  // The steps for the chosen fallback sit right under the choice,
+                  // across the full width, and change the moment it changes.
+                  return [
+                    row,
+                    <div key="fallback-guide" className="sm:col-span-2">
+                      <FallbackGuide state={fallbackState} />
+                    </div>,
+                  ];
+                })}
             </div>
 
             <div className="flex items-center gap-3 flex-wrap">
@@ -323,7 +359,7 @@ function FieldRow({
         <select id={`set-${field.key}`} className={SELECT_CLASS} value={value} onChange={(e) => onChange(e.target.value)}>
           {(field.enumValues ?? []).map((opt) => (
             <option key={opt} value={opt}>
-              {opt}
+              {field.key === 'ai.fallback_provider' ? FALLBACK_OPTION_LABELS[opt] ?? opt : opt}
             </option>
           ))}
         </select>
@@ -416,7 +452,7 @@ function AiModelManager() {
             <p className="text-sm text-muted">
               {info.active}
               {modelDetail(info.activeDetails) ? `, ${modelDetail(info.activeDetails)}` : ''}, {stateWord}.{' '}
-              {info.backup.provider && !info.backup.local
+              {info.fallback.provider && !info.fallback.local
                 ? 'Nothing leaves this machine while it is answering.'
                 : 'Nothing leaves this machine.'}
             </p>
@@ -472,7 +508,7 @@ function AiModelManager() {
             </div>
             <p className="text-xs text-muted">
               Paste a model name, or a link from{' '}
-              <a href="https://huggingface.co/models?library=gguf" target="_blank" rel="noreferrer" className="text-primary hover:underline whitespace-nowrap">
+              <a href="https://huggingface.co/models?library=gguf" target="_blank" rel="noreferrer" className={`${CONTACT_LINK} whitespace-nowrap`}>
                 Hugging Face ↗
               </a>
               . The larger the model, the slower it runs.
@@ -506,34 +542,48 @@ function AiModelManager() {
           </p>
         </div>
       )}
-      <BackupLine backup={info.backup} />
+      <FallbackLine fallback={info.fallback} />
       {note ? <p className="text-sm text-red-600">{note}</p> : null}
     </div>
   );
 }
 
 /**
- * One plain line on the backup service: whether one is set, whether it is in
+ * One plain line on the fallback service: whether one is set, whether it is in
  * use right now, and what that means for where records go.
  */
-function BackupLine({ backup }: { backup: AiBackupStatus }) {
-  if (!backup.provider) {
+function FallbackLine({ fallback }: { fallback: AiFallbackStatus }) {
+  if (!fallback.provider) {
     return (
       <p className="text-sm text-muted border-t border-border pt-3">
-        No backup service is set. Choose one under Backup service below, and Pare keeps answering when the main
+        No fallback service is set. Choose one under Fallback service below, and Pare keeps answering when the main
         service stops.
       </p>
     );
   }
-  const name = serviceName(backup.provider);
-  const where = backup.local ? 'It runs on this machine.' : `While it is in use, records are sent to ${name} to be read.`;
+  const name = serviceName(fallback.provider);
+  if (!fallback.ready) {
+    return (
+      <div className="border-t border-border pt-3">
+        <p className="text-sm font-medium text-ink">Fallback: {name}, not finished</p>
+        <p className="text-sm text-muted">
+          It is not used until {fallback.missing.join(' and ') || 'its settings'} {fallback.missing.length > 1 ? 'are' : 'is'}{' '}
+          filled in below. The steps are under Fallback service.
+        </p>
+      </div>
+    );
+  }
+  const where =
+    fallback.provider === 'ollama' || fallback.provider === 'lmstudio'
+      ? 'It runs on your own hardware, so records stay with you.'
+      : `While it is in use, records are sent to ${name} to be read.`;
   return (
     <div className="border-t border-border pt-3">
       <p className="text-sm font-medium text-ink">
-        {backup.in_use ? `Answering from the backup: ${name}` : `Backup: ${name}, standing by`}
+        {fallback.in_use ? `Answering from the fallback: ${name}` : `Fallback: ${name}, standing by`}
       </p>
       <p className="text-sm text-muted">
-        {backup.in_use
+        {fallback.in_use
           ? 'The main service is not answering. Pare moves back by itself as soon as it does.'
           : 'Used only while the main service is not answering. Pare moves to it and back by itself.'}{' '}
         {where}
@@ -573,7 +623,7 @@ function TestAiButton() {
           ? `Main service works: ${r.sample ?? ''}`
           : `Main service: ${r.error ?? 'it did not reply.'}`,
       ];
-      if (r.backup) lines.push(testLine('Backup service', r.backup));
+      if (r.fallback) lines.push(testLine('Fallback service', r.fallback));
       setResults(lines);
     },
     onError: (e) => setResults([e instanceof Error ? e.message : 'The test could not run. Try again in a moment.']),

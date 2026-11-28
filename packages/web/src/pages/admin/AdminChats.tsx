@@ -65,13 +65,13 @@ function PareMonitor() {
   const p = m.performance;
   const u = m.usage;
   const providerName = c.local ? 'On this machine' : serviceName(c.provider);
-  const b = c.backup;
+  const b = c.fallback;
 
   return (
     <div className="card space-y-4">
       <div className="flex items-center gap-2">
         <span className={`h-3 w-3 rounded-full ${HEALTH_DOT[c.health]}`} aria-hidden />
-        <h3 className="text-base font-semibold text-ink">{b.in_use ? 'Online, on the backup service' : HEALTH_WORD[c.health]}</h3>
+        <h3 className="text-base font-semibold text-ink">{b.in_use ? 'Online, on the fallback service' : HEALTH_WORD[c.health]}</h3>
       </div>
       {b.in_use ? (
         <p className="text-sm text-ink">
@@ -85,8 +85,8 @@ function PareMonitor() {
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
         <Tile label="Assistant" value={providerName} sub={c.model ?? (c.state === 'preparing' ? 'getting ready' : 'provider default')} />
         <Tile
-          label="Backup service"
-          value={b.provider ? (b.in_use ? 'In use' : 'Standing by') : 'None'}
+          label="Fallback service"
+          value={b.provider ? (b.in_use ? 'In use' : b.ready ? 'Standing by' : 'Not finished') : 'None'}
           sub={b.provider ? serviceName(b.provider) : 'set one in System settings'}
         />
         <Tile label="Response time" value={fmtMs(p.avg_ms)} sub={p.p95_ms != null ? `95th percentile ${fmtMs(p.p95_ms)}` : 'no calls yet'} />

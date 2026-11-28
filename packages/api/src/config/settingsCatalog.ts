@@ -33,7 +33,7 @@ const num = () => z.coerce.number();
 const enom = (values: readonly [string, ...string[]]) => z.enum(values);
 
 const AI_PROVIDERS = ['anthropic', 'openai', 'google', 'ollama', 'lmstudio', 'openai-compatible'] as const;
-const AI_BACKUP_PROVIDERS = ['off', ...AI_PROVIDERS] as const;
+const AI_FALLBACK_PROVIDERS = ['off', ...AI_PROVIDERS] as const;
 const ON_OFF = ['on', 'off'] as const;
 const EMAIL_PROVIDERS = ['smtp', 'sendgrid', 'resend'] as const;
 const STORAGE_PROVIDERS = ['local', 's3'] as const;
@@ -56,10 +56,10 @@ export const SETTINGS_CATALOG: readonly SettingEntry[] = [
   { key: 'ai.base_url', group: 'ai', label: 'Base URL', type: 'string', secret: false, envKey: 'AI_BASE_URL', help: 'For self-hosted / compatible endpoints, ending in /v1.', zod: str() },
   { key: 'ai.model', group: 'ai', label: 'Model', type: 'string', secret: false, envKey: 'AI_MODEL', help: 'Leave blank to use the provider default.', zod: str() },
   { key: 'ai.mediation_model', group: 'ai', label: 'Mediation model', type: 'string', secret: false, envKey: 'AI_MEDIATION_MODEL', help: 'Optional stronger model for dispute mediation.', zod: str() },
-  { key: 'ai.fallback_provider', group: 'ai', label: 'Backup service', type: 'enum', enumValues: AI_BACKUP_PROVIDERS, secret: false, envKey: 'AI_FALLBACK_PROVIDER', help: 'Used only while the service above is not answering. Pare moves to it by itself and back again as soon as the main one answers. A cloud backup sends records to that provider while it is in use.', zod: enom(AI_BACKUP_PROVIDERS) },
-  { key: 'ai.fallback_api_key', group: 'ai', label: 'Backup service key', type: 'string', secret: true, envKey: 'AI_FALLBACK_API_KEY', help: 'Leave empty when the backup is Anthropic and the Anthropic key above is set. Not needed for a backup on this machine.', zod: str() },
-  { key: 'ai.fallback_base_url', group: 'ai', label: 'Backup service base URL', type: 'string', secret: false, envKey: 'AI_FALLBACK_BASE_URL', help: 'Only for a self-hosted or compatible backup, ending in /v1.', zod: str() },
-  { key: 'ai.fallback_model', group: 'ai', label: 'Backup service model', type: 'string', secret: false, envKey: 'AI_FALLBACK_MODEL', help: 'Leave blank to use the provider default.', zod: str() },
+  { key: 'ai.fallback_provider', group: 'ai', label: 'Fallback service', type: 'enum', enumValues: AI_FALLBACK_PROVIDERS, secret: false, envKey: 'AI_FALLBACK_PROVIDER', help: 'Used only while the service above is not answering. Pare moves to it by itself and back again as soon as the main one answers. A cloud fallback sends records to that provider while it is in use.', zod: enom(AI_FALLBACK_PROVIDERS) },
+  { key: 'ai.fallback_api_key', group: 'ai', label: 'Fallback service key', type: 'string', secret: true, envKey: 'AI_FALLBACK_API_KEY', help: 'Leave empty when the fallback is Anthropic and the Anthropic key above is set. Not needed for a fallback on this machine.', zod: str() },
+  { key: 'ai.fallback_base_url', group: 'ai', label: 'Fallback service base URL', type: 'string', secret: false, envKey: 'AI_FALLBACK_BASE_URL', help: 'Only for a self-hosted or compatible fallback, ending in /v1.', zod: str() },
+  { key: 'ai.fallback_model', group: 'ai', label: 'Fallback service model', type: 'string', secret: false, envKey: 'AI_FALLBACK_MODEL', help: 'Leave blank to use the provider default.', zod: str() },
   { key: 'ai.tokens_free', group: 'ai', label: 'Token limit: Free plan', type: 'number', secret: false, envKey: 'AI_TOKENS_FREE', zod: num() },
   { key: 'ai.tokens_family', group: 'ai', label: 'Token limit: Family plan', type: 'number', secret: false, envKey: 'AI_TOKENS_FAMILY', zod: num() },
   { key: 'ai.tokens_professional', group: 'ai', label: 'Token limit: Professional plan', type: 'number', secret: false, envKey: 'AI_TOKENS_PROFESSIONAL', help: '-1 means unlimited.', zod: num() },

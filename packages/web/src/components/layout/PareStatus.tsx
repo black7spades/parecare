@@ -29,8 +29,8 @@ export function PareStatus() {
     health === 'green'
       ? 'Pare is online and working well.'
       : health === 'amber'
-        ? data.backup
-          ? 'Pare is online, using its backup service.'
+        ? data.fallback
+          ? 'Pare is online, using its fallback service.'
           : data.state === 'preparing'
             ? 'Pare is getting ready.'
             : 'Pare is online, under load.'

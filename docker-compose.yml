@@ -105,7 +105,7 @@ services:
       # chose for this machine, so the app talks to one name either way.
       AI_MODEL: ${AI_MODEL:-parecare}
       AI_MEDIATION_MODEL: ${AI_MEDIATION_MODEL:-}
-      # A backup service Pare moves to while the main one is not answering.
+      # A fallback service Pare moves to while the main one is not answering.
       AI_FALLBACK_PROVIDER: ${AI_FALLBACK_PROVIDER:-off}
       AI_FALLBACK_API_KEY: ${AI_FALLBACK_API_KEY:-}
       AI_FALLBACK_BASE_URL: ${AI_FALLBACK_BASE_URL:-}

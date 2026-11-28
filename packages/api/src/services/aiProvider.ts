@@ -10,8 +10,8 @@ import { beginCall } from './aiMetrics';
  *    including Ollama and LM Studio running on your own hardware
  *  - google: the Gemini API
  *
- * A second service can stand behind the main one as a backup. While the main
- * service is not answering, every request goes to the backup instead, and
+ * A second service can stand behind the main one as a fallback. While the main
+ * service is not answering, every request goes to the fallback instead, and
  * Pare moves back by itself as soon as the main one answers again. Nobody
  * using PareCare has to notice or do anything.
  */
@@ -88,9 +88,9 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
 };
 
 /**
- * How long the main service is given to answer when a backup stands behind
+ * How long the main service is given to answer when a fallback stands behind
  * it. A model on this machine can take a couple of minutes to reply; the app
- * gives up after five, so this leaves the backup room to answer in time.
+ * gives up after five, so this leaves the fallback room to answer in time.
  */
 const MAIN_DEADLINE_LOCAL_MS = 150_000;
 const MAIN_DEADLINE_CLOUD_MS = 90_000;
@@ -104,11 +104,11 @@ function notConfigured(detail: string): Error {
 
 /**
  * One AI service Pare can talk to: the main one from the settings, or the
- * backup it moves to while the main one is not answering. Every wire call
+ * fallback it moves to while the main one is not answering. Every wire call
  * takes one of these, so the same code serves both.
  */
 interface AiTarget {
-  role: 'main' | 'backup';
+  role: 'main' | 'fallback';
   provider: AiProvider;
   model?: string;
   mediationModel?: string;
@@ -128,21 +128,40 @@ function mainTarget(): AiTarget {
   };
 }
 
-/** The backup service, or null when none is chosen or it is missing what it needs. */
-function backupTarget(): AiTarget | null {
+/** The fallback service chosen in the settings, whether or not it is finished. */
+function chosenFallback(): AiTarget | null {
   const cfg = getAiConfig();
   const provider = cfg.fallbackProvider;
   if (!provider || provider === 'off') return null;
-  const target: AiTarget = {
-    role: 'backup',
+  return {
+    role: 'fallback',
     provider,
     model: cfg.fallbackModel,
     baseUrl: cfg.fallbackBaseUrl,
-    // A Claude backup reuses the Anthropic key already entered for the main
+    // A Claude fallback reuses the Anthropic key already entered for the main
     // service, so choosing it needs nothing more.
     apiKey: cfg.fallbackApiKey ?? (provider === 'anthropic' ? cfg.anthropicApiKey : undefined),
   };
-  return targetConfigured(target) ? target : null;
+}
+
+/**
+ * The settings a chosen fallback still needs before it can answer, named as
+ * the settings screen names them, so the screen can say exactly what is left.
+ */
+function fallbackMissing(t: AiTarget): string[] {
+  const missing: string[] = [];
+  const cloud = t.provider === 'anthropic' || t.provider === 'openai' || t.provider === 'google';
+  if (cloud && !t.apiKey) missing.push('Fallback service key');
+  if (!cloud && !t.model) missing.push('Fallback service model');
+  // Ollama and LM Studio have a usual address; any other server needs one.
+  if (t.provider === 'openai-compatible' && !t.baseUrl) missing.push('Fallback service base URL');
+  return missing;
+}
+
+/** The fallback service, or null when none is chosen or it is missing what it needs. */
+function fallbackTarget(): AiTarget | null {
+  const t = chosenFallback();
+  return t && fallbackMissing(t).length === 0 ? t : null;
 }
 
 const isLocal = (p: AiProvider): boolean => p === 'ollama' || p === 'lmstudio' || p === 'openai-compatible';
@@ -178,11 +197,11 @@ function pickModel(t: AiTarget, tier: Tier): string {
   throw notConfigured(`set a model for the '${t.provider}' provider (e.g. the model name loaded in Ollama or LM Studio).`);
 }
 
-// --- Moving to the backup and back -----------------------------------------
+// --- Moving to the fallback and back -----------------------------------------
 //
 // When the main service fails a request, the same request is answered by the
-// backup, and the main service is marked as not answering. From then on new
-// requests go straight to the backup, so nobody waits on a service that is
+// fallback, and the main service is marked as not answering. From then on new
+// requests go straight to the fallback, so nobody waits on a service that is
 // down, while a quiet check in the background asks the main service every
 // 30 seconds whether it is back. The first good answer moves Pare home.
 
@@ -195,7 +214,7 @@ function markMainDown(err: unknown): void {
   if (mainDownSince !== null) return;
   mainDownSince = Date.now();
   const why = err instanceof Error ? err.message : String(err);
-  console.warn(`[ai] main service is not answering, using the backup until it does: ${why.slice(0, 200)}`);
+  console.warn(`[ai] main service is not answering, using the fallback until it does: ${why.slice(0, 200)}`);
   if (!probeTimer) {
     probeTimer = setInterval(() => void probeMain(), PROBE_EVERY_MS);
     probeTimer.unref?.();
@@ -203,7 +222,7 @@ function markMainDown(err: unknown): void {
 }
 
 function markMainUp(): void {
-  if (mainDownSince !== null) console.info('[ai] main service is answering again; moved back from the backup');
+  if (mainDownSince !== null) console.info('[ai] main service is answering again; moved back from the fallback');
   mainDownSince = null;
   if (probeTimer) {
     clearInterval(probeTimer);
@@ -245,8 +264,8 @@ async function probeMain(): Promise<void> {
   if (probing || mainDownSince === null) return;
   probing = true;
   try {
-    // With no backup any more, there is nothing to move back from.
-    if (!backupTarget() || (await targetAnswers(mainTarget()))) markMainUp();
+    // With no fallback any more, there is nothing to move back from.
+    if (!fallbackTarget() || (await targetAnswers(mainTarget()))) markMainUp();
   } finally {
     probing = false;
   }
@@ -257,7 +276,7 @@ async function probeMain(): Promise<void> {
  * that this one request was unsuitable. A refused connection, a timeout, an
  * overloaded or failing server, a rejected key or a model still downloading
  * all mean the service is down for now. A request it could not accept (too
- * long, malformed) is still tried on the backup, but does not move Pare.
+ * long, malformed) is still tried on the fallback, but does not move Pare.
  */
 function isOutage(err: unknown): boolean {
   const e = err as { code?: string; providerStatus?: number; status?: number } | null;
@@ -272,37 +291,44 @@ function isOutage(err: unknown): boolean {
 const carriesDocument = (turns: ChatTurn[]): boolean =>
   turns.some((t) => typeof t.content !== 'string' && t.content.some((p) => p.type === 'document'));
 
-/** Whether Pare is answering from the backup right now. */
-export function onBackup(): boolean {
-  if (!backupTarget()) return false;
+/** Whether Pare is answering from the fallback right now. */
+export function onFallback(): boolean {
+  if (!fallbackTarget()) return false;
   return mainDownSince !== null || !targetConfigured(mainTarget());
 }
 
-/** The service answering right now: the backup while it is in use, otherwise the main one. */
+/** The service answering right now: the fallback while it is in use, otherwise the main one. */
 function activeTarget(): AiTarget {
-  const b = backupTarget();
-  return b && onBackup() ? b : mainTarget();
+  const b = fallbackTarget();
+  return b && onFallback() ? b : mainTarget();
 }
 
-export interface BackupStatus {
-  /** The backup service chosen, or null when there is none ready to use. */
+export interface FallbackStatus {
+  /** The fallback service chosen, or null when it is off. */
   provider: string | null;
   model: string | null;
-  /** Whether the backup runs on this machine. */
+  /** Whether the chosen fallback has everything it needs to answer. */
+  ready: boolean;
+  /** The settings it still needs, by their names on the settings screen. */
+  missing: string[];
+  /** Whether the fallback runs on this machine. */
   local: boolean;
-  /** Whether Pare is answering from the backup right now. */
+  /** Whether Pare is answering from the fallback right now. */
   in_use: boolean;
-  /** When the main service stopped answering, while the backup is in use. */
+  /** When the main service stopped answering, while the fallback is in use. */
   since: string | null;
 }
 
-/** The backup as the screens describe it, and whether it is in use. */
-export function backupStatus(): BackupStatus {
-  const b = backupTarget();
-  const inUse = onBackup();
+/** The fallback as the screens describe it, and whether it is in use. */
+export function fallbackStatus(): FallbackStatus {
+  const b = chosenFallback();
+  const missing = b ? fallbackMissing(b) : [];
+  const inUse = onFallback();
   return {
     provider: b?.provider ?? null,
     model: b?.model ?? null,
+    ready: !!b && missing.length === 0,
+    missing,
     local: b ? isLocal(b.provider) : false,
     in_use: inUse,
     since: inUse && mainDownSince !== null ? new Date(mainDownSince).toISOString() : null,
@@ -310,7 +336,7 @@ export function backupStatus(): BackupStatus {
 }
 
 export function isAiConfigured(): boolean {
-  return targetConfigured(mainTarget()) || !!backupTarget();
+  return targetConfigured(mainTarget()) || !!fallbackTarget();
 }
 
 /**
@@ -382,13 +408,13 @@ export async function mainModelState(): Promise<'ready' | 'preparing' | 'unavail
 
 /**
  * Whether Pare can answer at all. While the main service is still getting
- * ready or is not answering, a backup answers instead, so Pare is ready.
+ * ready or is not answering, a fallback answers instead, so Pare is ready.
  */
 export async function localModelState(): Promise<'ready' | 'preparing' | 'unavailable'> {
   const state = await mainModelState();
-  if (state !== 'ready' && backupTarget()) {
+  if (state !== 'ready' && fallbackTarget()) {
     // The model on this machine is still downloading or not answering: the
-    // backup covers it, and the background check moves Pare home once ready.
+    // fallback covers it, and the background check moves Pare home once ready.
     if (targetConfigured(mainTarget())) markMainDown(new Error(`main service is ${state}`));
     return 'ready';
   }
@@ -416,8 +442,8 @@ async function completeAnthropic(
   timeoutMs?: number,
 ): Promise<CompletionResult> {
   if (!t.apiKey) throw notConfigured('set the Anthropic API key in the settings screen.');
-  // With a backup standing by, a struggling Claude is given less time and
-  // fewer retries, so the backup still answers before the app gives up.
+  // With a fallback standing by, a struggling Claude is given less time and
+  // fewer retries, so the fallback still answers before the app gives up.
   const client = new Anthropic({ apiKey: t.apiKey, ...(timeoutMs ? { timeout: timeoutMs, maxRetries: 1 } : {}) });
   const toAnthropicBlock = (p: ChatPart): unknown => {
     if (p.type === 'image') return { type: 'image', source: { type: 'base64', media_type: p.media_type, data: p.data } };
@@ -587,7 +613,7 @@ async function completeGoogle(
               : { inlineData: { mimeType: p.media_type, data: p.data } }
         ),
       })),
-      // A schema only arrives here when Gemini is standing in as the backup
+      // A schema only arrives here when Gemini is standing in as the fallback
       // for a service that honours one. Asking for JSON keeps that reply in
       // the shape the caller is waiting for.
       generationConfig: { maxOutputTokens: maxTokens, ...(opts?.schema ? { responseMimeType: 'application/json' } : {}) },
@@ -613,7 +639,7 @@ async function completeGoogle(
   return { text, tokensUsed: data.usageMetadata?.totalTokenCount ?? Math.ceil(text.length / 4), structured };
 }
 
-/** One request to one service, with no moving to the backup. */
+/** One request to one service, with no moving to the fallback. */
 function completeWith(
   t: AiTarget,
   system: string,
@@ -637,10 +663,10 @@ const mainDeadline = (t: AiTarget): number => (isLocal(t.provider) ? MAIN_DEADLI
 
 /**
  * One request, answered by the main service when it is answering and by the
- * backup when it is not. A request the main service fails is answered by the
- * backup straight away, so the person asking only ever sees the answer.
+ * fallback when it is not. A request the main service fails is answered by the
+ * fallback straight away, so the person asking only ever sees the answer.
  */
-async function completeWithBackup(
+async function completeWithFallback(
   system: string,
   turns: ChatTurn[],
   maxTokens: number,
@@ -648,25 +674,25 @@ async function completeWithBackup(
   opts?: CompleteOptions,
 ): Promise<CompletionResult> {
   const main = mainTarget();
-  const b = backupTarget();
-  // A whole PDF can only go to Claude; any other backup is no help for it.
-  const backup = b && (!carriesDocument(turns) || b.provider === 'anthropic') ? b : null;
+  const b = fallbackTarget();
+  // A whole PDF can only go to Claude; any other fallback is no help for it.
+  const fallback = b && (!carriesDocument(turns) || b.provider === 'anthropic') ? b : null;
 
-  if (!backup) return completeWith(main, system, turns, maxTokens, tier, opts);
-  if (!targetConfigured(main)) return completeWith(backup, system, turns, maxTokens, tier, opts);
+  if (!fallback) return completeWith(main, system, turns, maxTokens, tier, opts);
+  if (!targetConfigured(main)) return completeWith(fallback, system, turns, maxTokens, tier, opts);
 
   if (mainDownSince !== null) {
-    // Known to be down: go straight to the backup. If the backup fails too,
+    // Known to be down: go straight to the fallback. If the fallback fails too,
     // give the main service one more chance before saying it did not work.
     try {
-      return await completeWith(backup, system, turns, maxTokens, tier, opts);
-    } catch (backupErr) {
+      return await completeWith(fallback, system, turns, maxTokens, tier, opts);
+    } catch (fallbackErr) {
       try {
         const result = await completeWith(main, system, turns, maxTokens, tier, opts, mainDeadline(main));
         markMainUp();
         return result;
       } catch (mainErr) {
-        console.warn('[ai] the backup service failed too:', backupErr instanceof Error ? backupErr.message : backupErr);
+        console.warn('[ai] the fallback service failed too:', fallbackErr instanceof Error ? fallbackErr.message : fallbackErr);
         throw mainErr;
       }
     }
@@ -677,9 +703,9 @@ async function completeWithBackup(
   } catch (mainErr) {
     if (isOutage(mainErr)) markMainDown(mainErr);
     try {
-      return await completeWith(backup, system, turns, maxTokens, tier, opts);
-    } catch (backupErr) {
-      console.warn('[ai] the backup service failed too:', backupErr instanceof Error ? backupErr.message : backupErr);
+      return await completeWith(fallback, system, turns, maxTokens, tier, opts);
+    } catch (fallbackErr) {
+      console.warn('[ai] the fallback service failed too:', fallbackErr instanceof Error ? fallbackErr.message : fallbackErr);
       throw mainErr;
     }
   }
@@ -696,7 +722,7 @@ export async function complete(
   // monitoring panel see all of Pare's work.
   const done = beginCall();
   try {
-    const result = await completeWithBackup(system, turns, maxTokens, tier, opts);
+    const result = await completeWithFallback(system, turns, maxTokens, tier, opts);
     done(true);
     return result;
   } catch (err) {
@@ -731,11 +757,11 @@ export interface ServiceTest {
 }
 
 /**
- * Ask the main service and the backup each for a short reply, separately, so
+ * Ask the main service and the fallback each for a short reply, separately, so
  * the settings screen shows whether both work rather than hiding a broken one
  * behind the other. A main service that answers here moves Pare back to it.
  */
-export async function testServices(): Promise<{ main: ServiceTest | null; backup: ServiceTest | null }> {
+export async function testServices(): Promise<{ main: ServiceTest | null; fallback: ServiceTest | null }> {
   const ask = async (t: AiTarget): Promise<ServiceTest> => {
     try {
       const { text } = await completeWith(
@@ -753,11 +779,11 @@ export async function testServices(): Promise<{ main: ServiceTest | null; backup
     }
   };
   const main = mainTarget();
-  const backup = backupTarget();
-  const [mainResult, backupResult] = await Promise.all([
+  const fallback = fallbackTarget();
+  const [mainResult, fallbackResult] = await Promise.all([
     targetConfigured(main) ? ask(main) : Promise.resolve(null),
-    backup ? ask(backup) : Promise.resolve(null),
+    fallback ? ask(fallback) : Promise.resolve(null),
   ]);
   if (mainResult?.ok) markMainUp();
-  return { main: mainResult, backup: backupResult };
+  return { main: mainResult, fallback: fallbackResult };
 }

@@ -7,7 +7,7 @@ import { requireRole, roleAtLeast } from '../middleware/requireRole';
 import { archiveOldAdministrations } from '../services/marArchive';
 import { canonicalRole } from '../lib/circleRoles';
 import { updateSettings, isMessageToneGuardEnabled, getAiConfig } from '../config/settings';
-import { localModelState, isLocalProvider, backupStatus } from '../services/aiProvider';
+import { localModelState, isLocalProvider, fallbackStatus } from '../services/aiProvider';
 import { snapshot as aiMetricsSnapshot, health as aiHealth } from '../services/aiMetrics';
 import { createAccount, composeDisplayName, AccountError } from '../services/accounts';
 import { createInvitation, revokeInvitation, resendInvitation, inviteUrl, effectiveStatus, InviteError } from '../services/invitations';
@@ -701,7 +701,7 @@ adminRouter.get('/ai/metrics', async (req, res) => {
 
   const cfg = getAiConfig();
   const state = await localModelState();
-  const backup = backupStatus();
+  const fallback = fallbackStatus();
   const light = aiHealth(state);
   res.json({
     connectivity: {
@@ -709,8 +709,8 @@ adminRouter.get('/ai/metrics', async (req, res) => {
       model: cfg.model ?? null,
       local: isLocalProvider(),
       state,
-      health: backup.in_use && light === 'green' ? 'amber' : light,
-      backup,
+      health: fallback.in_use && light === 'green' ? 'amber' : light,
+      fallback,
     },
     performance: aiMetricsSnapshot(),
     usage: {
